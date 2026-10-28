@@ -1,3 +1,4 @@
+import { Provider as TooltipProvider } from "@radix-ui/react-tooltip";
 import {
     render as baseRender,
     type RenderOptions,
@@ -15,7 +16,7 @@ function EnglishLocaleProvider({ children }: PropsWithChildren) {
             locale={defaultLocale}
             messages={messagesForLocale(defaultLocale)}
         >
-            {children}
+            <TooltipProvider>{children}</TooltipProvider>
         </IntlProvider>
     );
 }

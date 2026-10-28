@@ -1,13 +1,6 @@
 "use client";
 
-import {
-    ChevronDown,
-    ChevronUp,
-    ListChecks,
-    Loader2,
-    RefreshCw,
-    Sparkles,
-} from "lucide-react";
+import { ListChecks, Loader2, Pencil, RefreshCw, Sparkles } from "lucide-react";
 import { useExtracted } from "next-intl";
 import {
     type ReactNode,
@@ -39,6 +32,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import { ActionTooltip } from "@/components/ui/tooltip";
 import {
     type SummarySource,
     useTranscriptionSummary,
@@ -129,6 +123,7 @@ export function SummaryWidget({
         profileChannel: kind,
     });
     const [workflowExpanded, setWorkflowExpanded] = useState(false);
+    const [profileEditing, setProfileEditing] = useState(false);
     const previousRefreshKey = useRef(refreshKey);
     useEffect(() => {
         if (previousRefreshKey.current === refreshKey) return;
@@ -291,18 +286,24 @@ export function SummaryWidget({
     useEffect(() => {
         if (wasSummarizing.current && !isSummarizing) {
             setSummariesMade((count) => count + 1);
+            recheckSummary();
         }
         wasSummarizing.current = isSummarizing;
-    }, [isSummarizing]);
+    }, [isSummarizing, recheckSummary]);
     const taskState = useRecordingTasks(itemId, `${source}:${summariesMade}`);
 
     const selectedProfileName = summaryProfileOptions.find(
         (profile) => profile.id === summaryProfileId,
     )?.name;
+    const profileHidden = summaryData?.profileVisibility === "hidden";
+    const displayedProfileName = profileHidden
+        ? null
+        : (summaryData?.profileName ??
+          (canChange ? (selectedProfileName ?? profileName) : null));
     const lineFacts = working
         ? i18n("Generating the summary")
-        : (profileName ??
-          selectedProfileName ??
+        : ((canChange && !profileHidden ? profileName : null) ??
+          displayedProfileName ??
           (source === "plaud" ? "Plaud" : sourceLabel));
     const lineProps = {
         title: i18n("Summary"),
@@ -355,36 +356,49 @@ export function SummaryWidget({
     }
 
     const headerActions = (
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex shrink-0 items-center justify-end gap-1">
             {source === "riffado" && canChange && (
-                <Button
-                    onClick={runSummary}
-                    size="sm"
-                    variant={hasSummary ? "outline" : "default"}
-                    disabled={
-                        working ||
-                        !summaryLoaded ||
-                        summaryProfilesLoading ||
-                        !summaryProfileId ||
-                        !canSummarize
+                <ActionTooltip
+                    label={
+                        working
+                            ? i18n("Generating…")
+                            : hasSummary
+                              ? i18n("Re-summarize")
+                              : i18n("Summarize")
                     }
                 >
-                    {working ? (
-                        <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
-                    ) : hasSummary ? (
-                        <RefreshCw className="size-4" />
-                    ) : (
-                        <Sparkles className="size-4" />
-                    )}
-                    {working
-                        ? i18n("Generating…")
-                        : hasSummary
-                          ? i18n("Re-summarize")
-                          : i18n("Summarize")}
-                </Button>
+                    <Button
+                        aria-label={
+                            working
+                                ? i18n("Generating…")
+                                : hasSummary
+                                  ? i18n("Re-summarize")
+                                  : i18n("Summarize")
+                        }
+                        onClick={runSummary}
+                        size="icon-sm"
+                        variant="ghost"
+                        disabled={
+                            working ||
+                            !summaryLoaded ||
+                            summaryProfilesLoading ||
+                            !summaryProfileId ||
+                            !canSummarize
+                        }
+                    >
+                        {working ? (
+                            <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+                        ) : hasSummary ? (
+                            <RefreshCw className="size-4" />
+                        ) : (
+                            <Sparkles className="size-4" />
+                        )}
+                    </Button>
+                </ActionTooltip>
             )}
             {canSwitchSource && onSourceChange && (
                 <SourceSwitcher
+                    compact
                     ariaLabel={i18n("Summary source")}
                     sources={["plaud", "riffado"]}
                     value={source}
@@ -400,52 +414,6 @@ export function SummaryWidget({
                     source={source}
                     view={view}
                 />
-            )}
-            {source === "riffado" &&
-                canChange &&
-                !working &&
-                summaryProfileOptions.length > 0 && (
-                    <Select
-                        value={summaryProfileId}
-                        onValueChange={setSummaryProfileId}
-                    >
-                        <SelectTrigger
-                            className="h-8 w-[180px] text-xs"
-                            aria-label={i18n("Processing profile")}
-                        >
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {summaryProfileOptions.map((profile) => (
-                                <SelectItem key={profile.id} value={profile.id}>
-                                    {profile.name}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                )}
-            {hasSummary && (
-                <button
-                    type="button"
-                    aria-expanded={summaryOpen}
-                    onClick={() => {
-                        if (workflowVisible) {
-                            setWorkflowExpanded(false);
-                        } else {
-                            setSummaryExpanded(!summaryExpanded);
-                        }
-                    }}
-                    className="flex items-center gap-1 text-sm font-medium transition-colors hover:text-primary"
-                >
-                    {summaryOpen ? (
-                        <ChevronUp className="size-4" />
-                    ) : (
-                        <ChevronDown className="size-4" />
-                    )}
-                    {summaryOpen
-                        ? i18n("Collapse summary")
-                        : i18n("Expand summary")}
-                </button>
             )}
         </div>
     );
@@ -480,9 +448,9 @@ export function SummaryWidget({
             <div className="space-y-4">
                 <section
                     aria-label={i18n("Summary content")}
-                    className="max-h-96 space-y-4 overflow-y-auto pr-2"
+                    className="max-h-96 space-y-4 overflow-y-auto rounded-lg bg-muted p-4 text-sm"
                 >
-                    <div className="rounded-lg bg-muted p-4 text-sm">
+                    <div>
                         <Markdown
                             speakerAttributions={speakerAttributions}
                             speakerNumberOffset={summarySpeakerNumberOffset}
@@ -492,7 +460,7 @@ export function SummaryWidget({
                     </div>
                     {(summaryData.keyPoints?.length ?? 0) > 0 && (
                         <div>
-                            <h4 className="mb-2 text-sm font-medium">
+                            <h4 className="mb-2 font-semibold">
                                 {i18n("Key Points")}
                             </h4>
                             <ul className="space-y-1">
@@ -518,63 +486,6 @@ export function SummaryWidget({
                             </ul>
                         </div>
                     )}
-                    <div className="flex flex-wrap items-center gap-3 border-t pt-2 text-xs text-muted-foreground">
-                        {kind === "audio" && (
-                            <span className="rounded bg-muted px-2 py-0.5 font-medium">
-                                {source === "plaud" ? "Plaud" : i18n("Custom")}
-                            </span>
-                        )}
-                        {summaryData.provider && (
-                            <span className="rounded bg-muted px-2 py-0.5">
-                                {summaryData.provider}
-                            </span>
-                        )}
-                        {summaryData.model && (
-                            <span className="rounded bg-muted px-2 py-0.5 font-mono">
-                                {summaryData.model}
-                            </span>
-                        )}
-                        {multiPassBadge && (
-                            <span
-                                className={
-                                    multiPassBadge.degraded
-                                        ? "rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400"
-                                        : "rounded bg-muted px-2 py-0.5"
-                                }
-                                title={multiPassBadge.title}
-                            >
-                                {multiPassBadge.label}
-                            </span>
-                        )}
-                        {contentNote && source === "riffado" && (
-                            <span className="flex items-center gap-2 rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400">
-                                {contentNote}
-                                {canChange && (
-                                    <button
-                                        type="button"
-                                        className="font-medium underline-offset-2 hover:underline"
-                                        onClick={runSummary}
-                                    >
-                                        {i18n("Regenerate")}
-                                    </button>
-                                )}
-                            </span>
-                        )}
-                        {summaryData.scopeChanged && source === "riffado" && (
-                            <span className="flex items-center gap-1 rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400">
-                                {i18n("Folders changed since this summary:")}
-                                {canChange && (
-                                    <button
-                                        type="button"
-                                        className="font-medium underline-offset-2 hover:underline"
-                                        onClick={runSummary}
-                                    >
-                                        {i18n("Match tasks again")}
-                                    </button>
-                                )}
-                            </span>
-                        )}
-                    </div>
                 </section>
             </div>
         );
@@ -624,6 +535,17 @@ export function SummaryWidget({
             <div className="flex flex-col items-center justify-center py-8 text-center">
                 <ListChecks className="mb-3 size-10 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">{empty}</p>
+                {source === "riffado" && canChange && (
+                    <Button
+                        className="mt-4"
+                        size="sm"
+                        disabled={cannotSummarize}
+                        onClick={runSummary}
+                    >
+                        <Sparkles className="size-4" />
+                        {i18n("Summarize")}
+                    </Button>
+                )}
             </div>
         );
     }
@@ -669,15 +591,178 @@ export function SummaryWidget({
                     if (workflowVisible) setWorkflowExpanded(next);
                     else setSummaryExpanded(next);
                 }}
-                title={
-                    <>
-                        <ListChecks className="size-5" /> {i18n("Summary")}
-                    </>
-                }
+                title={i18n("Summary")}
                 helpLink={
                     <HelpLink topic="summaries" label={i18n("summaries")} />
                 }
+                onCollapse={
+                    hasSummary
+                        ? () => {
+                              if (workflowVisible) setWorkflowExpanded(false);
+                              else setSummaryExpanded(!summaryExpanded);
+                          }
+                        : undefined
+                }
+                collapseLabel={i18n("Collapse summary")}
+                expandLabel={i18n("Expand summary")}
                 headerAction={headerActions}
+                footer={{
+                    status: (
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                            {kind === "audio" && (
+                                <span className="rounded bg-muted px-2 py-0.5 font-medium">
+                                    {source === "plaud"
+                                        ? "Plaud"
+                                        : i18n("Custom")}
+                                </span>
+                            )}
+                            {summaryData?.provider && (
+                                <span className="rounded bg-muted px-2 py-0.5">
+                                    {summaryData?.provider}
+                                </span>
+                            )}
+                            {summaryData?.model && (
+                                <span className="rounded bg-muted px-2 py-0.5 font-mono">
+                                    {summaryData?.model}
+                                </span>
+                            )}
+                            {multiPassBadge && (
+                                <span
+                                    className={
+                                        multiPassBadge.degraded
+                                            ? "rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400"
+                                            : "rounded bg-muted px-2 py-0.5"
+                                    }
+                                    title={multiPassBadge.title}
+                                >
+                                    {multiPassBadge.label}
+                                </span>
+                            )}
+                            {contentNote && source === "riffado" && (
+                                <span className="flex items-center gap-2 rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400">
+                                    {contentNote}
+                                    {canChange && (
+                                        <button
+                                            type="button"
+                                            className="font-medium underline-offset-2 hover:underline"
+                                            onClick={runSummary}
+                                        >
+                                            {i18n("Regenerate")}
+                                        </button>
+                                    )}
+                                </span>
+                            )}
+                            {summaryData?.scopeChanged &&
+                                source === "riffado" && (
+                                    <span className="flex items-center gap-1 rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400">
+                                        {i18n(
+                                            "Folders changed since this summary:",
+                                        )}
+                                        {canChange && (
+                                            <button
+                                                type="button"
+                                                className="font-medium underline-offset-2 hover:underline"
+                                                onClick={runSummary}
+                                            >
+                                                {i18n("Match tasks again")}
+                                            </button>
+                                        )}
+                                    </span>
+                                )}
+
+                            {source === "riffado" && displayedProfileName && (
+                                <span className="inline-flex items-center gap-1">
+                                    {i18n("Profile")}
+                                    {profileEditing && canChange ? (
+                                        <Select
+                                            open
+                                            onOpenChange={(next) => {
+                                                if (!next)
+                                                    setProfileEditing(false);
+                                            }}
+                                            value={
+                                                summaryData?.profileId ??
+                                                summaryProfileId
+                                            }
+                                            onValueChange={(next) => {
+                                                setProfileEditing(false);
+                                                if (
+                                                    next ===
+                                                    (summaryData?.profileId ??
+                                                        summaryProfileId)
+                                                )
+                                                    return;
+                                                setSummaryProfileId(next);
+                                                if (hasSummary)
+                                                    void handleSummarize(next);
+                                            }}
+                                        >
+                                            <SelectTrigger
+                                                className="h-7 w-auto text-xs"
+                                                aria-label={i18n(
+                                                    "Processing profile",
+                                                )}
+                                            >
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {summaryProfileOptions.map(
+                                                    (profile) => (
+                                                        <SelectItem
+                                                            key={profile.id}
+                                                            value={profile.id}
+                                                        >
+                                                            {profile.name}
+                                                        </SelectItem>
+                                                    ),
+                                                )}
+                                            </SelectContent>
+                                        </Select>
+                                    ) : (
+                                        <>
+                                            {displayedProfileName && (
+                                                <span>
+                                                    {displayedProfileName}
+                                                </span>
+                                            )}
+                                            {canChange &&
+                                                summaryProfileOptions.length >
+                                                    0 && (
+                                                    <ActionTooltip
+                                                        label={i18n(
+                                                            "Change summary profile",
+                                                        )}
+                                                    >
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="icon-sm"
+                                                            className="size-6"
+                                                            disabled={
+                                                                working ||
+                                                                summaryProfilesLoading
+                                                            }
+                                                            aria-label={i18n(
+                                                                "Change summary profile",
+                                                            )}
+                                                            onClick={() =>
+                                                                setProfileEditing(
+                                                                    true,
+                                                                )
+                                                            }
+                                                        >
+                                                            <Pencil className="size-3" />
+                                                        </Button>
+                                                    </ActionTooltip>
+                                                )}
+                                        </>
+                                    )}
+                                </span>
+                            )}
+                        </div>
+                    ),
+                    actions: null,
+                }}
             >
                 <div className="space-y-4">
                     {summaryContent}

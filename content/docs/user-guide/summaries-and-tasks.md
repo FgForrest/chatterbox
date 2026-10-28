@@ -9,8 +9,8 @@ Once a recording has a transcript and the workflow reaches **Summarize**, the **
 
 ![A summary with tasks waiting for review](images/summary.png)
 
-1. Pick a processing profile in the drop-down next to the button. It starts on the item's profile. If you choose a different one, Chatterbox remembers that choice in this browser for other items with the same assigned profile.
-2. Click **Summarize**, or **Re-summarize** to replace an existing recording summary. Mail says **Summarize again**. **Collapse summary** is at the right end of the recording summary header; **Expand summary** appears in the same place.
+1. **Profile** followed by its name in the footer below the tasks shows the profile that produced the displayed summary. Its pencil opens the profile list. Choosing a different profile immediately replaces an existing summary; before the first summary, it only selects the next profile. Read-only viewers see no pencil. If the producing profile cannot be resolved, the next run's profile is shown.
+2. For the first summary, use **Summarize** in the body or the sparkles icon in the header. The circular arrow **Re-summarize** replaces an existing summary. The chevron left of the title collapses or expands the card. The right-hand icons are ordered: re-run, download, copy.
 
 The manual picker can use any available profile for that kind of item. Starting a summary yourself keeps the card in place and changes it to its running state. The profile supplies the summary instructions, output language and format, provider, task detection, and multi-pass settings. See [Processing and profiles](processing-and-profiles.md).
 
@@ -18,7 +18,7 @@ The manual picker can use any available profile for that kind of item. Starting 
 
 While it runs, the card shows how long it has taken and, for a multi-pass summary, how far it is: `Summarizing — 1/3 passes`, then `Merging 3 passes…`. You can leave the page; the summary keeps going and is there when you come back.
 
-Summaries are written in Markdown, so headings, lists and tables show as such. **Key Points** follow the text. The two icons copy the summary or download it as a Markdown file.
+Summaries are written in Markdown, so headings, lists and tables show as such. **Key Points** are the last section inside the same summary box. Copied and downloaded Markdown keeps that order: summary text, then key points. Provider, model, multi-pass badge and warnings with their actions are in the footer below the tasks.
 
 If you correct names in the transcript after the summary was written, the summary shows **May contain stale names or terms** with a **Regenerate** link. The workflow strip also marks work made from older inputs as **Outdated**.
 

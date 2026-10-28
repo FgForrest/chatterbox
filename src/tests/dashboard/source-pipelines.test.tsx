@@ -297,9 +297,9 @@ describe("independent transcript and summary pipelines", () => {
                 'No custom summary yet. Click "Summarize" to generate one.',
             ),
         ).toBeTruthy();
-        const button = screen.getByRole<HTMLButtonElement>("button", {
+        const button = screen.getAllByRole<HTMLButtonElement>("button", {
             name: "Summarize",
-        });
+        })[0];
         expect(button.disabled).toBe(false);
         summarize.mockClear();
         fireEvent.click(button);
@@ -347,7 +347,9 @@ describe("independent transcript and summary pipelines", () => {
         const summarySource = screen.getByRole("group", {
             name: "Summary source",
         });
-        expect(transcriptSource.className).toBe(summarySource.className);
+        expect(summarySource.className).toContain(
+            "@min-[560px]/workflow:inline-flex",
+        );
         expect(
             transcriptSource.querySelector<HTMLButtonElement>(
                 'button[aria-pressed="true"]',
@@ -495,7 +497,9 @@ describe("independent transcript and summary pipelines", () => {
                 onTranscribe={vi.fn()}
             />,
         );
-        expect(screen.getByRole("button", { name: /Summarize/ })).toBeTruthy();
+        expect(
+            screen.getAllByRole("button", { name: /Summarize/ }),
+        ).toHaveLength(2);
         expect(
             screen.getByRole("button", { name: /Re-transcribe/ }),
         ).toBeTruthy();

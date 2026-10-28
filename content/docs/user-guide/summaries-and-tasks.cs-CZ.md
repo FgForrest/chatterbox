@@ -9,8 +9,8 @@ Jakmile má nahrávka přepis a pracovní postup dospěje ke kroku **Shrnout**, 
 
 ![Shrnutí s úkoly čekajícími na kontrolu](images/summary.png)
 
-1. Vyberte profil zpracování v rozbalovacím seznamu vedle tlačítka. Začíná na profilu položky. Pokud zvolíte jiný, Klepna si v tomto prohlížeči zapamatuje volbu pro další položky se stejným přiřazeným profilem.
-2. Klikněte na **Shrnout** nebo na **Znovu shrnout** pro nahrazení existujícího shrnutí nahrávky. U pošty se tlačítko jmenuje **Shrnout znovu**. **Sbalit shrnutí** je na pravém konci záhlaví shrnutí nahrávky; na stejném místě se pak zobrazí **Rozbalit shrnutí**.
+1. **Profil** s názvem v zápatí pod úkoly ukazuje profil, kterým vzniklo zobrazené shrnutí. Tužka otevře výběr. U existujícího shrnutí volba jiného profilu rovnou spustí nové shrnutí; před prvním shrnutím jen nastaví profil pro příští spuštění. Čtenář bez práva úprav tužku nevidí. Pokud původní profil nelze dohledat, zobrazí se profil pro příští spuštění.
+2. Před prvním shrnutím použijte tlačítko **Shrnout** v těle karty nebo ikonu jisker v záhlaví. Existující shrnutí nahradí kruhová šipka **Shrnout znovu**. Šipka vlevo od nadpisu kartu sbalí nebo rozbalí. Ikony vpravo jsou v pořadí: znovu shrnout, stáhnout, kopírovat.
 
 Ruční výběr může použít libovolný dostupný profil pro daný druh položky. Když shrnutí spustíte sami, karta zůstane na místě a přepne se do průběhového stavu. Profil dodává instrukce shrnutí, jazyk a formát výstupu, poskytovatele, hledání úkolů a nastavení funkce **Vícenásobné shrnování**. Viz [Zpracování a profily](processing-and-profiles.md).
 
@@ -18,7 +18,7 @@ Ruční výběr může použít libovolný dostupný profil pro daný druh polo�
 
 Během zpracování karta ukazuje, jak dlouho už operace trvá a u funkce **Vícenásobné shrnování** také postup: `Probíhá shrnutí — 1/3 průchodů`, poté `Slučování 3 průchodů…`. Můžete stránku opustit; shrnutí se nezastaví a po návratu bude připravené.
 
-Shrnutí jsou psána ve formátu Markdown, takže nadpisy, seznamy a tabulky se tak i zobrazují. Za textem následují **Klíčové body**. Dvě ikony umožňují shrnutí zkopírovat nebo stáhnout jako Markdown soubor.
+Shrnutí jsou psána ve formátu Markdown, takže nadpisy, seznamy a tabulky se tak i zobrazují. **Klíčové body** jsou poslední částí uvnitř stejného rámečku jako text shrnutí. Stažený i zkopírovaný Markdown zachovává pořadí text, potom klíčové body. Poskytovatel, model, odznak vícenásobného shrnování a upozornění s akcemi jsou v zápatí pod úkoly.
 
 Pokud opravíte jména v přepisu po vytvoření shrnutí, u shrnutí se objeví upozornění **Mohou obsahovat neaktuální jména nebo pojmy** s odkazem na **Znovu vygenerovat**. Pruh pracovního postupu označí práci vytvořenou ze starších vstupů jako **Zastaralé**.
 

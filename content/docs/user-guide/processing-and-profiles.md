@@ -77,7 +77,7 @@ Each step says **Done**, **Next**, **Review needed**, **Running**, **Queued**, *
 
 One sentence below the steps begins **Your turn.**, **Working.**, **Queued.**, **Problem.**, or **Waiting for someone else.** It explains what happens next and shows the one action expected from you, such as **Review Learn**, **Review tasks**, or **Share now**.
 
-Widgets appear in order as the workflow reaches them: transcription, the Learn review, the summary, and Task review. Finished widgets fold to one line while later work continues. When the workflow is done, the strip disappears and the item looks as it did before. A step you start yourself after that, such as **Learn**, **Re-summarize** (or **Summarize again** on mail), **Re-transcribe**, or **Detect topics**, shows its running state in place without opening a window. **Review**, **View results**, and the strip's review actions open a review window only when you ask for it.
+Widgets appear in order as the workflow reaches them: transcription, the Learn review, the summary, and Task review. Completed Learn results move to **Knowledge**, the book icon in the item header; other finished widgets fold while work continues. Running, waiting, failed and stopped Learn states remain in the detail. A manually started step shows progress in place. **Review** and the strip's review actions open the existing review only when you click. The chevron left of the title collapses transcription and summary cards.
 
 For a **Nothing automatic** item, the workflow ends after **Categorize** and the strip disappears. The exception is an intended Organization placement, which keeps the strip visible until you use **Share now** or cancel it.
 

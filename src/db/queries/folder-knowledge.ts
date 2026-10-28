@@ -1,16 +1,35 @@
-import { type SQL, sql } from "drizzle-orm";
+import { and, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { confirmedLearnRecordsInTx } from "@/db/queries/learn-confirmed-records";
+import { learnReviewItems, learnRuns } from "@/db/schema";
+import type { RecordTarget } from "@/lib/learn/new-refs";
 
 export interface FolderKnowledgeScope {
     folderId: string;
+    itemId?: string;
     ownerId: string;
     viewerId: string;
     shared: boolean;
     allOwnedItems: boolean;
     scopes: string[];
+    legacyRecordsByRun?: Record<string, RecordTarget[]>;
 }
 
 function folderItems(input: FolderKnowledgeScope) {
+    if (input.itemId)
+        return sql`
+        with folders as (
+            select folder.id, folder.parent_id, folder.kind from recording_folders folder
+            join recording_folder_assignments assignment on assignment.folder_id = folder.id
+            where assignment.recording_id = ${input.itemId}
+              and assignment.user_id = ${input.ownerId}
+              and folder.user_id = any(${sql.param(input.scopes)}::text[])
+        ), visible_items as (
+            select item.id, item.user_id, item.title, item.occurred_at from chatter_items item
+            where item.id = ${input.itemId} and item.user_id = ${input.ownerId}
+              and item.deleted_at is null and item.kind in ('audio', 'mail')
+        )
+    `;
     const items = input.allOwnedItems
         ? sql`
             select item.id, item.user_id, item.title, item.occurred_at
@@ -82,8 +101,115 @@ export async function folderKnowledgeContext(input: FolderKnowledgeScope) {
     return (await folderResult(input, sql`select null where false`)).context;
 }
 
+function additionRuns(input: FolderKnowledgeScope) {
+    return sql`, addition_runs as (
+        select run.id as run_id, run.inputs, item.id as item_id, item.user_id as owner_id, coalesce(run.finished_at, run.created_at) as at
+        from learn_runs run
+        join visible_items item on item.id = run.recording_id and item.user_id = run.user_id
+        where run.scope_user_id = any(${sql.param(input.scopes)}::text[]) and run.status = 'finished'
+        union all
+        select origin.id, origin.inputs, item.id, item.user_id, coalesce(receipt.finished_at, receipt.created_at)
+        from learn_runs receipt
+        join visible_items item on item.id = receipt.recording_id and item.user_id = receipt.user_id
+        join learn_runs origin on origin.id = receipt.inputs->>'promotedFromRunId'
+          and origin.recording_id = item.id and origin.user_id = item.user_id
+          and origin.scope_user_id = item.user_id and origin.view = 'private' and origin.status = 'finished'
+        where receipt.scope_user_id = any(${sql.param(input.scopes)}::text[])
+          and receipt.view = 'org' and receipt.status = 'finished'
+    )`;
+}
+
+/** Reconstruct legacy additions once per authorized item read, without returning review payloads. */
+export async function itemKnowledgeLegacyRecords(input: FolderKnowledgeScope) {
+    const recordsByRun: Record<string, RecordTarget[]> = {};
+    const itemId = input.itemId;
+    if (!itemId || input.scopes.length === 0) return recordsByRun;
+    const legacy = await db.execute<{ run_id: string }>(sql`
+        ${folderItems(input)} ${additionRuns(input)}
+        select distinct run_id from addition_runs
+        where jsonb_typeof(inputs->'confirmedRecords') is distinct from 'array'
+          and exists (
+              select 1 from learn_review_items review
+              where review.run_id = addition_runs.run_id and review.user_id = addition_runs.owner_id
+                and review.kind = 'new_record' and review.outcome = 'applied'
+          )
+    `);
+    if (legacy.length === 0) return recordsByRun;
+    return db.transaction(async (tx) => {
+        const runIds = legacy.map((run) => run.run_id);
+        const runs = await tx
+            .select()
+            .from(learnRuns)
+            .where(
+                and(
+                    inArray(learnRuns.id, runIds),
+                    eq(learnRuns.userId, input.ownerId),
+                    eq(learnRuns.itemId, itemId),
+                    eq(learnRuns.status, "finished"),
+                ),
+            );
+        const rows = await tx
+            .select()
+            .from(learnReviewItems)
+            .where(
+                and(
+                    inArray(learnReviewItems.runId, runIds),
+                    eq(learnReviewItems.userId, input.ownerId),
+                    eq(learnReviewItems.kind, "new_record"),
+                    eq(learnReviewItems.outcome, "applied"),
+                ),
+            );
+        const scopes = [...new Set([input.ownerId, ...input.scopes])];
+        for (const run of runs) {
+            recordsByRun[run.id] = await confirmedLearnRecordsInTx(
+                tx,
+                run,
+                rows.filter((row) => row.runId === run.id),
+                scopes,
+            );
+        }
+        return recordsByRun;
+    });
+}
+
+function itemAdditions(input: FolderKnowledgeScope) {
+    return sql`${additionRuns(input)}, item_additions as (
+        select person.id as person_id, entity.id as entity_id, run.item_id, run.at
+        from addition_runs run
+        cross join lateral jsonb_array_elements(
+            case when jsonb_typeof(run.inputs->'confirmedRecords') = 'array'
+            then run.inputs->'confirmedRecords'
+            else coalesce(${JSON.stringify(input.legacyRecordsByRun ?? {})}::jsonb->run.run_id, '[]'::jsonb) end
+        ) record(target)
+        left join people original_person on original_person.id = record.target->>'personId'
+          and (original_person.user_id = run.owner_id or original_person.user_id = any(${sql.param(input.scopes)}::text[]))
+        left join people person on person.id = coalesce(original_person.merged_into_id, original_person.id)
+          and person.user_id = any(${sql.param(input.scopes)}::text[]) and person.merged_into_id is null
+        left join knowledge_entities original_entity on original_entity.id = record.target->>'entityId'
+          and (original_entity.user_id = run.owner_id or original_entity.user_id = any(${sql.param(input.scopes)}::text[]))
+        left join knowledge_entities entity on entity.id = coalesce(original_entity.merged_into_id, original_entity.id)
+          and entity.user_id = any(${sql.param(input.scopes)}::text[]) and entity.merged_into_id is null
+        where person.id is not null or entity.id is not null
+    )`;
+}
+
+/** Currently readable additions from finished item runs and their publication receipts. */
+export async function itemKnowledgeNewRecordIds(input: FolderKnowledgeScope) {
+    const rows = await db.execute<{ id: string }>(sql`
+        ${folderItems(input)} ${itemAdditions(input)}
+        select distinct coalesce(person_id, entity_id) as id from item_additions order by id
+    `);
+    return rows.map((row) => row.id);
+}
+
 function folderUses(input: FolderKnowledgeScope) {
-    return sql`, uses as (
+    const additions = input.itemId
+        ? sql`
+        union all
+        select person_id, entity_id, item_id, at from item_additions
+    `
+        : sql``;
+    return sql`${input.itemId ? itemAdditions(input) : sql``}, uses as (
         select speaker.person_id, null::text as entity_id, item.id as item_id, speaker.updated_at as at
         from transcript_speakers speaker
         join transcriptions transcript on transcript.id = speaker.transcription_id
@@ -110,6 +236,7 @@ function folderUses(input: FolderKnowledgeScope) {
         join visible_items item on item.id = evidence.recording_id
         where fact.user_id = any(${sql.param(input.scopes)}::text[])
           and evidence.status = 'supported' and fact.replaced_by_fact_id is null
+        ${additions}
     )`;
 }
 
@@ -209,6 +336,7 @@ export async function folderKnowledgeCorrections(
 export type FolderFactRow = {
     id: string;
     fact_id: string;
+    new_from_item: boolean;
     subject_name: string;
     relation_key: string;
     object_name: string;
@@ -229,6 +357,12 @@ export async function folderKnowledgeFacts(
         input,
         sql`
         select evidence.id, fact.id as fact_id,
+               not exists (
+                   select 1 from knowledge_fact_evidence earlier
+                   where earlier.fact_id = fact.id and earlier.user_id = fact.user_id
+                     and earlier.status = 'supported' and earlier.recording_id <> item.id
+                     and (earlier.confirmed_at, earlier.id) < (evidence.confirmed_at, evidence.id)
+               ) as new_from_item,
                coalesce(subject_person.display_name, subject_entity.name) as subject_name,
                fact.relation_key, coalesce(object_person.display_name, object_entity.name, fact.object_literal) as object_name,
                item.id as item_id, item.title as item_title, item.occurred_at as item_date,

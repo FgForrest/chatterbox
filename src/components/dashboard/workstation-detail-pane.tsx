@@ -3,6 +3,7 @@
 import { ArrowLeft } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { KnowledgePanel } from "@/components/dashboard/folder-knowledge-panel";
 import {
     RecordingPlayer,
     type RecordingPlayerHandle,
@@ -144,6 +145,7 @@ export function WorkstationDetailPane({
     contentRevision = 0,
 }: Props) {
     const i18n = useExtracted();
+    const [knowledgeItem, setKnowledgeItem] = useState<string | null>(null);
     const playerRef = useRef<RecordingPlayerHandle>(null);
     const audioAvailable = hasAudio(currentRecording);
     const playback = useMemo(
@@ -232,6 +234,17 @@ export function WorkstationDetailPane({
                             // organization account renames it on the
                             // Organization view, the owner on their own.
                             titleReadOnly={transcriptReadOnly}
+                            knowledgeOpen={
+                                knowledgeItem === currentRecording.id
+                            }
+                            onKnowledge={() =>
+                                setKnowledgeItem(currentRecording.id)
+                            }
+                            pendingLearnCount={
+                                transcriptReadOnly
+                                    ? 0
+                                    : (processing?.learnFindingsWaiting ?? 0)
+                            }
                             action={
                                 // Erasing and deleting are the owner's, on their
                                 // own view; a shared recording leaves the
@@ -248,153 +261,191 @@ export function WorkstationDetailPane({
                                 )
                             }
                         />
-                        {currentRecording.view === "received" ? (
-                            <>
-                                <ReceivedItemBanner
-                                    recording={currentRecording}
-                                    folders={folders}
-                                    shared={recordingShared}
-                                />
-                                <RecordingFolderTags
-                                    recordingId={currentRecording.id}
-                                    kind="audio"
-                                    folders={folders.filter(
-                                        (folder) =>
-                                            folder.scope === "personal" &&
-                                            !folder.receivedFolder,
-                                    )}
-                                    assignments={folderAssignments}
-                                    isOwn={false}
-                                    canUnfilePersonal
-                                    onSelectFolder={onSelectFolder}
-                                    onAdd={onAddToFolder}
-                                    onRemove={onRemoveFromFolder}
-                                />
-                            </>
-                        ) : (
-                            <ItemWorkflow
-                                itemId={currentRecording.id}
-                                kind="audio"
-                                folders={folders}
-                                folderAssignments={folderAssignments}
-                                onSelectFolder={onSelectFolder}
-                                onAddToFolder={onAddToFolder}
-                                onRemoveFromFolder={onRemoveFromFolder}
-                                isOwn={currentRecording.isOwn !== false}
-                                canWithdraw={
-                                    currentRecording.isOwn !== false ||
-                                    (currentRecording.view === "org" &&
-                                        transcriptReadOnly === false)
-                                }
-                                view={
-                                    currentRecording.view === "org"
-                                        ? "org"
-                                        : "private"
-                                }
-                                onMoveBetweenFolders={onMoveBetweenFolders}
-                                onChanged={onArtifactsChanged}
-                                onFolderCreated={onFolderCreated}
-                                canCurate={canCurate}
-                                onTranscribe={(retranscribe) =>
-                                    onTranscribe(undefined, retranscribe)
-                                }
-                                onLearn={() =>
-                                    openWidget(
-                                        `recording-learn-review-${currentRecording.id}`,
-                                    )
-                                }
-                                onSummary={() =>
-                                    openWidget(
-                                        `recording-summary-${currentRecording.id}`,
-                                    )
-                                }
-                                onReviewLearn={() =>
-                                    openWidget(
-                                        `recording-learn-review-${currentRecording.id}`,
-                                    )
-                                }
-                                onReviewTasks={() =>
-                                    openWidget(
-                                        `recording-task-review-${currentRecording.id}`,
-                                    )
-                                }
-                                onProcessingChange={handleProcessingChange}
-                            />
-                        )}
-                        {audioAvailable && (
-                            <RecordingPlayer
-                                ref={playerRef}
-                                recording={currentRecording}
-                                initialPlaybackSpeed={initialPlaybackSpeed}
-                                initialVolume={initialVolume}
-                                initialAutoPlayNext={initialAutoPlayNext}
-                                scrubberStyle={scrubberStyle}
-                                onEnded={() => {
-                                    const currentIndex =
-                                        visibleRecordings.findIndex(
-                                            (r) => r.id === currentRecording.id,
-                                        );
-                                    if (
-                                        currentIndex >= 0 &&
-                                        currentIndex <
-                                            visibleRecordings.length - 1
-                                    ) {
-                                        onSelectRecording(
-                                            visibleRecordings[currentIndex + 1],
-                                        );
-                                    }
+                        {knowledgeItem === currentRecording.id && (
+                            <KnowledgePanel
+                                key={`${currentRecording.id}:${currentRecording.view}`}
+                                scope={{
+                                    kind: "item",
+                                    itemId: currentRecording.id,
+                                    itemKind: "audio",
+                                    title: currentRecording.filename,
+                                    view: currentRecording.view,
+                                }}
+                                contentRevision={contentRevision}
+                                onBack={() => setKnowledgeItem(null)}
+                                onReview={(source) => {
+                                    setKnowledgeItem(null);
+                                    window.requestAnimationFrame(() =>
+                                        openWidget(
+                                            `recording-learn-review-${currentRecording.id}`,
+                                            source,
+                                        ),
+                                    );
                                 }}
                             />
                         )}
-                        <RecordingAgenda
-                            key={currentRecording.id}
-                            recording={currentRecording}
-                            folders={folders}
-                            folderId={
-                                folderAssignments.find(
-                                    (assignment) =>
-                                        assignment.recordingId ===
-                                        currentRecording.id,
-                                )?.folderId
+                        <div
+                            hidden={knowledgeItem === currentRecording.id}
+                            className={
+                                knowledgeItem === currentRecording.id
+                                    ? "hidden"
+                                    : "contents"
                             }
-                            userId={userId}
-                            onChanged={onArtifactsChanged}
                         >
-                            {({ notice, agenda, nextMeeting }) => (
+                            {currentRecording.view === "received" ? (
                                 <>
-                                    {notice}
-                                    {!currentRecording.audioReaped ||
-                                    hasTranscript ? (
-                                        <TranscriptionPanel
-                                            agenda={agenda}
-                                            nextMeeting={nextMeeting}
-                                            key={`${currentRecording.id}:${currentRecording.view ?? "private"}:${contentRevision}:${currentRecording.audioReaped ? 1 : 0}:${hasTranscript ? 1 : 0}:${currentRecording.hasSummary ? 1 : 0}`}
-                                            recording={currentRecording}
-                                            transcription={currentTranscription}
-                                            transcripts={transcripts}
-                                            isTranscribing={
-                                                isCurrentTranscribing
-                                            }
-                                            onTranscribe={onTranscribe}
-                                            onTranscribeComplete={
-                                                onTranscribeComplete
-                                            }
-                                            onTranscriptStale={
-                                                onTranscriptStale
-                                            }
-                                            readOnly={transcriptReadOnly}
-                                            shared={recordingShared}
-                                            processing={processing}
-                                        />
-                                    ) : (
-                                        <>
-                                            {nextMeeting}
-                                            {agenda}
-                                        </>
-                                    )}
+                                    <ReceivedItemBanner
+                                        recording={currentRecording}
+                                        folders={folders}
+                                        shared={recordingShared}
+                                    />
+                                    <RecordingFolderTags
+                                        recordingId={currentRecording.id}
+                                        kind="audio"
+                                        folders={folders.filter(
+                                            (folder) =>
+                                                folder.scope === "personal" &&
+                                                !folder.receivedFolder,
+                                        )}
+                                        assignments={folderAssignments}
+                                        isOwn={false}
+                                        canUnfilePersonal
+                                        onSelectFolder={onSelectFolder}
+                                        onAdd={onAddToFolder}
+                                        onRemove={onRemoveFromFolder}
+                                    />
                                 </>
+                            ) : (
+                                <ItemWorkflow
+                                    itemId={currentRecording.id}
+                                    kind="audio"
+                                    folders={folders}
+                                    folderAssignments={folderAssignments}
+                                    onSelectFolder={onSelectFolder}
+                                    onAddToFolder={onAddToFolder}
+                                    onRemoveFromFolder={onRemoveFromFolder}
+                                    isOwn={currentRecording.isOwn !== false}
+                                    canWithdraw={
+                                        currentRecording.isOwn !== false ||
+                                        (currentRecording.view === "org" &&
+                                            transcriptReadOnly === false)
+                                    }
+                                    view={
+                                        currentRecording.view === "org"
+                                            ? "org"
+                                            : "private"
+                                    }
+                                    onMoveBetweenFolders={onMoveBetweenFolders}
+                                    onChanged={onArtifactsChanged}
+                                    onFolderCreated={onFolderCreated}
+                                    canCurate={canCurate}
+                                    onTranscribe={(retranscribe) =>
+                                        onTranscribe(undefined, retranscribe)
+                                    }
+                                    onLearn={() =>
+                                        openWidget(
+                                            `recording-learn-review-${currentRecording.id}`,
+                                        )
+                                    }
+                                    onSummary={() =>
+                                        openWidget(
+                                            `recording-summary-${currentRecording.id}`,
+                                        )
+                                    }
+                                    onReviewLearn={() =>
+                                        openWidget(
+                                            `recording-learn-review-${currentRecording.id}`,
+                                        )
+                                    }
+                                    onReviewTasks={() =>
+                                        openWidget(
+                                            `recording-task-review-${currentRecording.id}`,
+                                        )
+                                    }
+                                    onProcessingChange={handleProcessingChange}
+                                />
                             )}
-                        </RecordingAgenda>
+                            {audioAvailable && (
+                                <RecordingPlayer
+                                    ref={playerRef}
+                                    recording={currentRecording}
+                                    initialPlaybackSpeed={initialPlaybackSpeed}
+                                    initialVolume={initialVolume}
+                                    initialAutoPlayNext={initialAutoPlayNext}
+                                    scrubberStyle={scrubberStyle}
+                                    onEnded={() => {
+                                        const currentIndex =
+                                            visibleRecordings.findIndex(
+                                                (r) =>
+                                                    r.id ===
+                                                    currentRecording.id,
+                                            );
+                                        if (
+                                            currentIndex >= 0 &&
+                                            currentIndex <
+                                                visibleRecordings.length - 1
+                                        ) {
+                                            onSelectRecording(
+                                                visibleRecordings[
+                                                    currentIndex + 1
+                                                ],
+                                            );
+                                        }
+                                    }}
+                                />
+                            )}
+                            <RecordingAgenda
+                                key={currentRecording.id}
+                                recording={currentRecording}
+                                folders={folders}
+                                folderId={
+                                    folderAssignments.find(
+                                        (assignment) =>
+                                            assignment.recordingId ===
+                                            currentRecording.id,
+                                    )?.folderId
+                                }
+                                userId={userId}
+                                onChanged={onArtifactsChanged}
+                            >
+                                {({ notice, agenda, nextMeeting }) => (
+                                    <>
+                                        {notice}
+                                        {!currentRecording.audioReaped ||
+                                        hasTranscript ? (
+                                            <TranscriptionPanel
+                                                agenda={agenda}
+                                                nextMeeting={nextMeeting}
+                                                key={`${currentRecording.id}:${currentRecording.view ?? "private"}:${contentRevision}:${currentRecording.audioReaped ? 1 : 0}:${hasTranscript ? 1 : 0}:${currentRecording.hasSummary ? 1 : 0}`}
+                                                recording={currentRecording}
+                                                transcription={
+                                                    currentTranscription
+                                                }
+                                                transcripts={transcripts}
+                                                isTranscribing={
+                                                    isCurrentTranscribing
+                                                }
+                                                onTranscribe={onTranscribe}
+                                                onTranscribeComplete={
+                                                    onTranscribeComplete
+                                                }
+                                                onTranscriptStale={
+                                                    onTranscriptStale
+                                                }
+                                                readOnly={transcriptReadOnly}
+                                                shared={recordingShared}
+                                                processing={processing}
+                                            />
+                                        ) : (
+                                            <>
+                                                {nextMeeting}
+                                                {agenda}
+                                            </>
+                                        )}
+                                    </>
+                                )}
+                            </RecordingAgenda>
+                        </div>
                     </>
                 ) : (
                     <Card>

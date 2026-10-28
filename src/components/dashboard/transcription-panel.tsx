@@ -1,13 +1,6 @@
 "use client";
 
-import {
-    ChevronDown,
-    ChevronUp,
-    FileText,
-    Loader2,
-    RefreshCw,
-    Sparkles,
-} from "lucide-react";
+import { FileText, Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { useExtracted } from "next-intl";
 import {
     type ReactNode,
@@ -63,6 +56,7 @@ import {
     DropdownMenuRadioItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ActionTooltip } from "@/components/ui/tooltip";
 import { useLearnFollowUps } from "@/hooks/use-learn-follow-ups";
 import { useTranscriptTopics } from "@/hooks/use-transcript-topics";
 import type { SummarySource } from "@/hooks/use-transcription-summary";
@@ -245,12 +239,38 @@ export function TranscriptionPanel({
     const [activeSource, setActiveSource] = useState<string | undefined>(
         undefined,
     );
+    const [openingReviewSource, setOpeningReviewSource] = useState<
+        string | null
+    >(null);
     const [transcriptExpanded, setTranscriptExpanded] = useState(true);
     const [workflowTranscriptExpanded, setWorkflowTranscriptExpanded] =
         useState(false);
     const activeTranscript =
         transcriptList.find((t) => t.source === activeSource) ??
         transcriptList[0];
+    useWorkflowWidgetOpen(
+        `recording-learn-review-${recording.id}`,
+        (source) => {
+            if (
+                !source ||
+                !transcriptList.some(
+                    (transcript) => transcript.source === source,
+                )
+            )
+                return;
+            if (activeTranscript?.source !== source) {
+                setActiveSource(source);
+                setOpeningReviewSource(source);
+            }
+        },
+    );
+    useEffect(() => {
+        if (
+            openingReviewSource &&
+            activeTranscript?.source === openingReviewSource
+        )
+            setOpeningReviewSource(null);
+    }, [activeTranscript?.source, openingReviewSource]);
     const transcriptOpen = widgets?.workflowVisible
         ? !widgets.transcript.collapsed || workflowTranscriptExpanded
         : transcriptExpanded;
@@ -837,37 +857,57 @@ export function TranscriptionPanel({
                                 label={i18n("reading a transcript")}
                             />
                         }
+                        onCollapse={
+                            activeTranscript?.text
+                                ? () => {
+                                      if (widgets?.workflowVisible)
+                                          setWorkflowTranscriptExpanded(false);
+                                      else
+                                          setTranscriptExpanded(
+                                              !transcriptExpanded,
+                                          );
+                                  }
+                                : undefined
+                        }
+                        collapseLabel={i18n("Collapse transcript")}
+                        expandLabel={i18n("Expand transcript")}
                         footer={transcriptFooter}
                         headerAction={
-                            <div className="flex flex-wrap items-center justify-end gap-2">
+                            <div className="flex shrink-0 items-center justify-end gap-1">
                                 {activeTranscript?.text && !readOnly && (
                                     <AlertDialog>
-                                        <AlertDialogTrigger asChild>
-                                            <Button
-                                                size="sm"
-                                                variant="outline"
-                                                aria-label={i18n(
-                                                    "Re-transcribe",
-                                                )}
-                                                className="@max-[560px]/transcription:size-8 @max-[560px]/transcription:p-0"
-                                                disabled={
-                                                    transcriptionRunning ||
-                                                    recording.audioReaped
-                                                }
-                                                title={
-                                                    recording.audioReaped
-                                                        ? i18n(
-                                                              "Audio was removed by your retention policy",
-                                                          )
-                                                        : i18n("Re-transcribe")
-                                                }
-                                            >
-                                                <RefreshCw className="size-4 mr-2 @max-[560px]/transcription:mr-0" />
-                                                <span className="@max-[560px]/transcription:hidden">
-                                                    {i18n("Re-transcribe")}
-                                                </span>
-                                            </Button>
-                                        </AlertDialogTrigger>
+                                        <ActionTooltip
+                                            label={i18n("Re-transcribe")}
+                                        >
+                                            <AlertDialogTrigger asChild>
+                                                <Button
+                                                    size="icon-sm"
+                                                    variant="ghost"
+                                                    aria-label={i18n(
+                                                        "Re-transcribe",
+                                                    )}
+                                                    disabled={
+                                                        transcriptionRunning ||
+                                                        recording.audioReaped
+                                                    }
+                                                    title={
+                                                        recording.audioReaped
+                                                            ? i18n(
+                                                                  "Audio was removed by your retention policy",
+                                                              )
+                                                            : i18n(
+                                                                  "Re-transcribe",
+                                                              )
+                                                    }
+                                                >
+                                                    {transcriptionRunning ? (
+                                                        <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+                                                    ) : (
+                                                        <RefreshCw className="size-4" />
+                                                    )}
+                                                </Button>
+                                            </AlertDialogTrigger>
+                                        </ActionTooltip>
                                         <AlertDialogContent>
                                             <AlertDialogHeader>
                                                 <AlertDialogTitle>
@@ -978,88 +1018,52 @@ export function TranscriptionPanel({
                                     <MarkdownActions
                                         recordingId={recording.id}
                                         kind="transcript"
-                                        collapseAtNarrowWidth
                                         source={activeTranscript.source}
                                         view={view}
                                     />
                                 )}
-                                {!activeTranscript?.text &&
-                                    !knownTranscriptExists &&
-                                    !transcriptionRunning &&
-                                    !readOnly && (
-                                        <>
-                                            <Button
-                                                onClick={() =>
-                                                    startTranscription()
-                                                }
-                                                size="sm"
-                                                disabled={
-                                                    transcriptionRunning ||
-                                                    recording.audioReaped
-                                                }
-                                                title={
-                                                    recording.audioReaped
-                                                        ? i18n(
-                                                              "Audio was removed by your retention policy",
-                                                          )
-                                                        : undefined
-                                                }
-                                            >
-                                                <Sparkles className="size-4 mr-2" />{" "}
-                                                {i18n("Transcribe")}
-                                            </Button>
-                                            {recording.isOwn !== false && (
-                                                <TranscribeInBrowserButton
-                                                    recordingId={recording.id}
-                                                    disabled={
-                                                        transcriptionRunning ||
-                                                        recording.audioReaped
-                                                    }
-                                                    onComplete={
-                                                        onTranscribeComplete ??
-                                                        (() => {})
-                                                    }
-                                                />
-                                            )}
-                                        </>
-                                    )}
-                                {activeTranscript?.text && (
-                                    <button
-                                        type="button"
-                                        aria-expanded={transcriptOpen}
-                                        aria-label={
-                                            transcriptOpen
-                                                ? i18n("Collapse transcript")
-                                                : i18n("Expand transcript")
-                                        }
-                                        onClick={() => {
-                                            if (widgets?.workflowVisible) {
-                                                setWorkflowTranscriptExpanded(
-                                                    false,
-                                                );
-                                            } else {
-                                                setTranscriptExpanded(
-                                                    !transcriptExpanded,
-                                                );
-                                            }
-                                        }}
-                                        className="flex min-h-8 items-center justify-center gap-1 rounded-sm text-sm font-medium transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring @max-[560px]/transcription:size-8"
-                                    >
-                                        {transcriptOpen ? (
-                                            <ChevronUp className="size-4" />
-                                        ) : (
-                                            <ChevronDown className="size-4" />
-                                        )}
-                                        <span className="@max-[560px]/transcription:hidden">
-                                            {transcriptOpen
-                                                ? i18n("Collapse transcript")
-                                                : i18n("Expand transcript")}
-                                        </span>
-                                    </button>
-                                )}
                             </div>
                         }
                     >
+                        {!activeTranscript?.text &&
+                            !knownTranscriptExists &&
+                            !transcriptionRunning &&
+                            !readOnly && (
+                                <div className="flex flex-wrap items-center gap-2">
+                                    {" "}
+                                    <Button
+                                        onClick={() => startTranscription()}
+                                        size="sm"
+                                        disabled={
+                                            transcriptionRunning ||
+                                            recording.audioReaped
+                                        }
+                                        title={
+                                            recording.audioReaped
+                                                ? i18n(
+                                                      "Audio was removed by your retention policy",
+                                                  )
+                                                : undefined
+                                        }
+                                    >
+                                        <Sparkles className="size-4 mr-2" />{" "}
+                                        {i18n("Transcribe")}
+                                    </Button>
+                                    {recording.isOwn !== false && (
+                                        <TranscribeInBrowserButton
+                                            recordingId={recording.id}
+                                            disabled={
+                                                transcriptionRunning ||
+                                                recording.audioReaped
+                                            }
+                                            onComplete={
+                                                onTranscribeComplete ??
+                                                (() => {})
+                                            }
+                                        />
+                                    )}
+                                </div>
+                            )}
                         {activeTranscript && speakerTags.length > 0 && (
                             <SpeakerTags
                                 // Another recording, view, source or text is
@@ -1194,6 +1198,9 @@ export function TranscriptionPanel({
                             folderName={folderName}
                             showTrigger={false}
                             collapseReady
+                            initialOpen={
+                                openingReviewSource === activeTranscript.source
+                            }
                         />
                     </SpeakerAccentContext>
                 )}

@@ -76,6 +76,9 @@ vi.mock("@/lib/pipeline/pending", () => ({
 vi.mock("@/lib/profiles/resolve", () => ({
     resolveSelectedProfile: vi.fn(),
 }));
+vi.mock("@/lib/profiles/access", () => ({
+    mayUseProfile: vi.fn().mockResolvedValue(false),
+}));
 
 const { recordingAccess } = vi.hoisted(() => ({
     recordingAccess: { exists: true },

@@ -70,6 +70,9 @@ vi.mock("@/lib/demo/fixtures", () => ({
 vi.mock("@/lib/profiles/resolve", () => ({
     resolveItemProfile: vi.fn(),
 }));
+vi.mock("@/lib/profiles/access", () => ({
+    mayUseProfile: vi.fn().mockResolvedValue(false),
+}));
 
 vi.mock("@/lib/summary/summary-job", async (importOriginal) => {
     const actual = await importOriginal<typeof summaryJob>();

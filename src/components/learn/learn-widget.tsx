@@ -36,7 +36,10 @@ import {
     newRecordAs,
 } from "@/components/learn/new-record-item";
 import { useLearnApiErrorMessage } from "@/components/learn/review-error";
-import { announceLearnReviewsChanged } from "@/components/learn/review-events";
+import {
+    announceLearnReviewsChanged,
+    onRelearnItem,
+} from "@/components/learn/review-events";
 import {
     handleLearnReviewFailure,
     LearnEvidence,
@@ -50,7 +53,10 @@ import {
 import { speakerAccent } from "@/components/people/speaker-accents";
 import { SpeakerPicker } from "@/components/people/speaker-picker";
 import { useSpeakerLabel } from "@/components/people/use-speaker-label";
-import { WorkflowWidget } from "@/components/pipeline/workflow-widget";
+import {
+    useWorkflowWidgetOpen,
+    WorkflowWidget,
+} from "@/components/pipeline/workflow-widget";
 import {
     distinctPlayTimes,
     PlayAtButton,
@@ -191,6 +197,7 @@ export function LearnWidget({
     folderName,
     showTrigger = true,
     collapseReady = false,
+    initialOpen = false,
 }: {
     kind?: "audio" | "mail";
     recordingId: string;
@@ -211,6 +218,7 @@ export function LearnWidget({
     folderName?: string;
     showTrigger?: boolean;
     collapseReady?: boolean;
+    initialOpen?: boolean;
 }) {
     const i18n = useExtracted();
     const locale = useLocale();
@@ -219,7 +227,7 @@ export function LearnWidget({
     const labels = useVocabularyLabels();
     const sectionPrefix = useId();
     const [state, setState] = useState<ReviewState | null>(null);
-    const [open, setOpen] = useState(false);
+    const [open, setOpen] = useState(initialOpen);
     const [highlightedRecord, setHighlightedRecord] = useState<string | null>(
         null,
     );
@@ -847,7 +855,8 @@ export function LearnWidget({
     const ready = status === "ready";
     const finished = status === "finished";
     const sharedReview = finished ? state?.run?.sharedReview : undefined;
-    const failed = status === "failed";
+    const stopped = status === "cancelled" || status === "superseded";
+    const failed = status === "failed" || (stopped && !showTrigger);
     const count = state?.items?.length ?? 0;
     const learned = finished ? learnedCount(state?.items ?? []) : 0;
     const pending = status === "queued" || status === "running";
@@ -1080,6 +1089,19 @@ export function LearnWidget({
         busy: finishing || saving > 0,
         onFinish: () => void finish(),
     });
+    const relearn = useRef(learn);
+    relearn.current = learn;
+    useEffect(
+        () =>
+            onRelearnItem(recordingId, (forget) => {
+                if (state?.available) void relearn.current(forget);
+            }),
+        [recordingId, state?.available],
+    );
+    useWorkflowWidgetOpen(resolvedWidgetId, (targetSource) => {
+        if (targetSource && targetSource !== source) return;
+        setOpen(true);
+    });
     if (!state?.available && !ready && !finished && !failed) return null;
 
     const startLearn = () => {
@@ -1090,9 +1112,11 @@ export function LearnWidget({
     let finishedTriggerLabel = i18n("Learned");
     let finishedIcon: ReactNode = <GraduationCap className="size-4" />;
     if (failed) {
-        finishedTitle = i18n("Learn failed");
-        finishedFacts = failure(state?.run?.errorCode);
-        finishedTriggerLabel = i18n("Learn failed");
+        finishedTitle = stopped ? i18n("Learn stopped") : i18n("Learn failed");
+        finishedFacts = stopped
+            ? i18n("Learn was stopped before it finished. Run it again.")
+            : failure(state?.run?.errorCode);
+        finishedTriggerLabel = finishedTitle;
         finishedIcon = <AlertTriangle className="size-4 text-destructive" />;
     } else if (
         sharedReview?.applied === 0 &&
@@ -1127,7 +1151,9 @@ export function LearnWidget({
     }
 
     let trigger: ReactNode = null;
-    if ((finished || failed) && !running) {
+    if (finished && !running && !showTrigger) {
+        trigger = null;
+    } else if ((finished || failed) && !running) {
         if (showTrigger) {
             trigger = (
                 <Button
@@ -1151,6 +1177,10 @@ export function LearnWidget({
                     failed={failed}
                     actionLabel={i18n("View results")}
                     onAction={() => setResultsOpen(true)}
+                    onOpen={(targetSource) => {
+                        if (!targetSource || targetSource === source)
+                            setResultsOpen(true);
+                    }}
                     onRetry={
                         failed && state?.available ? startLearn : undefined
                     }
@@ -1193,6 +1223,9 @@ export function LearnWidget({
                     tone="next"
                     actionLabel={i18n("Learn")}
                     onAction={startLearn}
+                    onOpen={(targetSource) => {
+                        if (!targetSource) startLearn();
+                    }}
                 />
             );
         }
@@ -1364,6 +1397,13 @@ export function LearnWidget({
                     tone={working ? "working" : "review"}
                     open={open}
                     onOpenChange={setOpen}
+                    onCollapse={
+                        collapseReady && ready
+                            ? () => setOpen(false)
+                            : undefined
+                    }
+                    collapseLabel={i18n("Collapse review")}
+                    expandLabel={i18n("Expand review")}
                     title={
                         working
                             ? i18n("Learn")
