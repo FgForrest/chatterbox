@@ -3,6 +3,7 @@
 import {
     render as baseRender,
     cleanup,
+    fireEvent,
     screen,
     waitFor,
 } from "@testing-library/react";
@@ -25,6 +26,10 @@ vi.mock("next-intl", () => ({
 
 vi.mock("@/components/confirm-dialog", () => ({
     useConfirm: () => vi.fn().mockResolvedValue(true),
+}));
+
+vi.mock("@/components/dashboard/folder-knowledge-panel", () => ({
+    KnowledgePanel: () => <section data-testid="knowledge-panel" />,
 }));
 
 vi.mock("@/components/mail/mail-summary-card", () => ({
@@ -553,5 +558,39 @@ describe("mail detail layout", () => {
         expect(
             screen.queryByRole("link", { name: "Download the message" }),
         ).toBeNull();
+    });
+
+    it("spaces the detail blocks and closes Knowledge on a second click", async () => {
+        render(
+            <MailDetailPane
+                mail={mail}
+                dateTimeFormat="absolute"
+                onBackToList={vi.fn()}
+                hiddenOnMobile={false}
+                onChanged={vi.fn()}
+                folders={[]}
+                folderAssignments={[]}
+                onSelectFolder={vi.fn()}
+                onAddToFolder={vi.fn()}
+                onRemoveFromFolder={vi.fn()}
+                onMoveBetweenFolders={vi.fn()}
+            />,
+        );
+        const strip = await screen.findByTestId("workflow-strip");
+        const blocks = strip.parentElement;
+        expect(blocks?.className).toBe("flex flex-col gap-6");
+        const knowledge = screen.getByRole("button", { name: "Knowledge" });
+        expect(knowledge.classList.contains("shadow-xs")).toBe(false);
+        expect(knowledge.classList.contains("bg-accent")).toBe(false);
+        fireEvent.click(knowledge);
+        expect(knowledge.getAttribute("aria-pressed")).toBe("true");
+        expect(knowledge.classList.contains("bg-accent")).toBe(true);
+        expect(screen.getByTestId("knowledge-panel")).toBeTruthy();
+        expect(blocks?.hidden).toBe(true);
+        fireEvent.click(knowledge);
+        expect(knowledge.getAttribute("aria-pressed")).toBe("false");
+        expect(screen.queryByTestId("knowledge-panel")).toBeNull();
+        expect(blocks?.hidden).toBe(false);
+        expect(blocks?.className).toBe("flex flex-col gap-6");
     });
 });

@@ -49,9 +49,30 @@ vi.mock("@/components/dashboard/recording-player", () => ({
 }));
 
 vi.mock("@/components/dashboard/recording-player-header", () => ({
-    RecordingPlayerHeader: ({ recording }: { recording: Recording }) => (
-        <h1>{recording.filename}</h1>
+    RecordingPlayerHeader: ({
+        recording,
+        onKnowledge,
+        knowledgeOpen,
+    }: {
+        recording: Recording;
+        onKnowledge?: () => void;
+        knowledgeOpen?: boolean;
+    }) => (
+        <>
+            <h1>{recording.filename}</h1>
+            <button
+                type="button"
+                aria-pressed={knowledgeOpen}
+                onClick={onKnowledge}
+            >
+                Knowledge
+            </button>
+        </>
     ),
+}));
+
+vi.mock("@/components/dashboard/folder-knowledge-panel", () => ({
+    KnowledgePanel: () => <section data-testid="knowledge-panel" />,
 }));
 
 vi.mock("@/components/dashboard/transcription-panel", () => ({
@@ -386,5 +407,25 @@ describe("recording detail layout", () => {
             />,
         );
         expect(screen.getByTestId("transcription-panel")).not.toBe(before);
+    });
+
+    it("spaces the detail blocks and closes Knowledge on a second click", () => {
+        render(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={recording}
+            />,
+        );
+        const blocks = screen.getByTestId("recording-player").parentElement;
+        expect(blocks?.className).toBe("flex flex-col gap-6");
+        const knowledge = screen.getByRole("button", { name: "Knowledge" });
+        fireEvent.click(knowledge);
+        expect(knowledge.getAttribute("aria-pressed")).toBe("true");
+        expect(screen.getByTestId("knowledge-panel")).toBeTruthy();
+        expect(blocks?.hidden).toBe(true);
+        fireEvent.click(knowledge);
+        expect(knowledge.getAttribute("aria-pressed")).toBe("false");
+        expect(screen.queryByTestId("knowledge-panel")).toBeNull();
+        expect(blocks?.hidden).toBe(false);
     });
 });
