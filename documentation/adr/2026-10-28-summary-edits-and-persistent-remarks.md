@@ -1,11 +1,11 @@
 ---
 title: Hand-edited summaries survive automatic processing and owner remarks replay on later runs
 date: 2026-10-28
-updated: 2026-10-28 17:06
+updated: 2026-10-28 19:31
 status: proposed
 kind: feature
 issues: [299]
-prs: []
+prs: [303]
 areas: [src/lib/summary, src/lib/transcription/persist.ts, src/lib/pipeline, src/lib/learn/summary-refresh.ts, src/lib/export/build-archive.ts, src/db/schema.ts, src/components/summary]
 supersedes: [2026-10-22-summary-reads-the-preferred-transcript]
 superseded-by: []
@@ -85,10 +85,12 @@ out of another actor's provider request. No remark text enters the system instru
   existing older-input note still describes changed input.
 - Explicit regeneration clears attribution; a remark revision preserves it. Hand editing never
   edits tasks. Model revisions use normal task proposals and usage recording.
-- Speaker links preserve their href and numeric offset. The first edit captures the pre-edit
-  numbering in the existing summary input metadata under the item lock. Display, later edits and
-  exports use that saved offset instead of inferring it from edited prose or key points. The editor
-  projects attributed names; saves restore canonical `Speaker N` labels.
+- Speaker links preserve their href and numeric offset. Every audio summary run records the
+  offset inferred from its fresh model output, and the first edit of an older summary captures its
+  pre-edit numbering, both in the existing summary input metadata. A remark run shows the model the
+  current summary in the transcript's own numbering. Display, later edits and exports use the saved
+  offset instead of inferring it from edited prose or key points. The editor projects attributed
+  names; saves restore canonical `Speaker N` labels.
 - Migration `0150_summary_edits_and_remarks` adds nullable edit attribution, revision and applied-remark count to
   `ai_enhancements`, plus owner-scoped `summary_remarks` with item-cascade deletion. User text is
   encrypted. There are no new environment variables, services or provider defaults.
@@ -98,7 +100,7 @@ out of another actor's provider request. No remark text enters the system instru
 
 ## Verification
 
-`src/tests/regressions/299-summary-edit-remarks.integration.test.ts`: 66 PostgreSQL cases cover
+`src/tests/regressions/299-summary-edit-remarks.integration.test.ts`: 75 PostgreSQL cases cover
 recording/mail authorization, private remark disclosure, identity/revision races, immutable save
 responses, speaker-reference removal and exports, automatic protection, Learn catch-up, usage,
 erasure, retention and backup contents. Shared-owner cases exercise both views, Organization job
@@ -138,6 +140,6 @@ persistence paths ran, and the demo provider configuration was restored afterwar
 
 ## Timeline
 
-- **2026-10-28**: approved issue #299 design implemented in the stacked feature worktree;
-  awaiting review and merge. Owner corrections are available in either own view; replay is limited
-  to runs whose actor is the owner.
+- **2026-10-28**: approved issue #299 design implemented and opened as PR #303, stacked on PR #300,
+  after two cross-review rounds. Owner corrections are available in either own view; replay is
+  limited to runs whose actor is the owner.
