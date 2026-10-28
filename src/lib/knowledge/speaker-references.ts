@@ -93,8 +93,11 @@ export function resolveSpeakerAttribution(
     )?.[1];
 }
 
-/** Convert plain model-authored speaker labels into stable summary links. */
-export function canonicalizeSummarySpeakerReferences(markdown: string): string {
+/** Convert speaker labels into stable links, optionally shifting to transcript numbering. */
+export function canonicalizeSummarySpeakerReferences(
+    markdown: string,
+    numberOffset = 0,
+): string {
     return markdown.replace(
         SUMMARY_SPEAKER_REFERENCE,
         (
@@ -104,7 +107,11 @@ export function canonicalizeSummarySpeakerReferences(markdown: string): string {
         ) => {
             const speakerNumber = linkedNumber ?? plainNumber;
             if (!speakerNumber) return reference;
-            return `[Speaker ${speakerNumber}](#speaker-${speakerNumber})`;
+            const shifted = offsetSpeakerLabel(
+                `speaker_${speakerNumber}`,
+                numberOffset,
+            ).slice("speaker_".length);
+            return `[Speaker ${shifted}](#speaker-${shifted})`;
         },
     );
 }

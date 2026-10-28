@@ -105,9 +105,12 @@ beforeEach(() => {
         if (url.includes("/remarks"))
             return Response.json({
                 remarks: [],
-                profileName: "Organization notes",
-                provider: "Local provider",
-                model: "local-model",
+                preview: {
+                    available: true,
+                    profileName: "Organization notes",
+                    provider: "Local provider",
+                    model: "local-model",
+                },
             });
         if (init?.method === "PUT")
             return Response.json(
@@ -145,6 +148,56 @@ describe.each([
     "audio",
     "mail",
 ] as const)("%s real summary hook and widget", (kind) => {
+    it.each([
+        "profile-unavailable",
+        "provider-unavailable",
+    ])("keeps remark deletion available with %s", async (reason) => {
+        const original = requests.getMockImplementation();
+        requests.mockImplementation(async (input, init) => {
+            if (String(input).includes("/remarks"))
+                return Response.json(
+                    init?.method === "DELETE"
+                        ? { success: true }
+                        : {
+                              remarks: [
+                                  {
+                                      id: "saved-remark",
+                                      text: "Keep the deadline.",
+                                      authorName: "Jitka Dvořáková",
+                                      createdAt: "2026-10-28T10:00:00Z",
+                                  },
+                              ],
+                              preview: { available: false, reason },
+                          },
+                );
+            if (!original) throw new Error("missing fetch fixture");
+            return original(input, init);
+        });
+        render(widget(kind, 0));
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Summary remarks" }),
+        );
+        expect(await screen.findByText("Keep the deadline.")).toBeTruthy();
+        expect(
+            (
+                screen.getByRole("button", {
+                    name: "Correct summary",
+                }) as HTMLButtonElement
+            ).disabled,
+        ).toBe(true);
+        await act(async () =>
+            fireEvent.click(
+                screen.getByRole("button", { name: "Delete remark" }),
+            ),
+        );
+        expect(screen.queryByText("Keep the deadline.")).toBeNull();
+        expect(
+            requests.mock.calls.some(([, init]) => init?.method === "DELETE"),
+        ).toBe(true);
+        expect(
+            requests.mock.calls.some(([, init]) => init?.method === "POST"),
+        ).toBe(false);
+    });
     it("keeps the draft and its initial identity/revision across a background refresh and reports conflict", async () => {
         const view = render(widget(kind, 0));
         fireEvent.click(

@@ -34,9 +34,12 @@ beforeEach(() => {
     fetchMock.mockResolvedValueOnce(
         Response.json({
             remarks: [remark],
-            profileName: "Meeting notes",
-            provider: "Local provider",
-            model: "local-model",
+            preview: {
+                available: true,
+                profileName: "Meeting notes",
+                provider: "Local provider",
+                model: "local-model",
+            },
         }),
     );
 });
@@ -49,6 +52,72 @@ describe.each([
     "private",
     "org",
 ] as const)("summary remarks dialog in %s", (view) => {
+    it.each([
+        [
+            "profile-unavailable",
+            "Choose an available profile to correct this summary.",
+        ],
+        [
+            "provider-unavailable",
+            "Configure a summary provider and model to correct this summary.",
+        ],
+    ])("keeps stored remarks and deletion usable with %s", async (reason, message) => {
+        fetchMock.mockReset();
+        fetchMock.mockResolvedValueOnce(
+            Response.json({
+                remarks: [remark],
+                preview: { available: false, reason },
+            }),
+        );
+        fetchMock.mockResolvedValueOnce(Response.json({ success: true }));
+        render(
+            <SummaryRemarksDialog
+                itemId="item"
+                profileId="profile"
+                view={view}
+                onClose={close}
+                onRun={run}
+            />,
+        );
+        expect(await screen.findByText(remark.text)).toBeTruthy();
+        expect(screen.getByRole("status").textContent).toBe(message);
+        expect(
+            (
+                screen.getByRole("button", {
+                    name: "Correct summary",
+                }) as HTMLButtonElement
+            ).disabled,
+        ).toBe(true);
+        expect(
+            (screen.getByLabelText("New remark") as HTMLTextAreaElement)
+                .disabled,
+        ).toBe(false);
+        expect(
+            (
+                screen.getByRole("button", {
+                    name: "Cancel",
+                }) as HTMLButtonElement
+            ).disabled,
+        ).toBe(false);
+        fireEvent.change(screen.getByLabelText("New remark"), {
+            target: { value: "Keep the deadline." },
+        });
+        fireEvent.click(
+            screen.getByRole("button", { name: "Correct summary" }),
+        );
+        expect(run).not.toHaveBeenCalled();
+        await act(async () =>
+            fireEvent.click(
+                screen.getByRole("button", { name: "Delete remark" }),
+            ),
+        );
+        expect(screen.queryByText(remark.text)).toBeNull();
+        expect(fetchMock.mock.calls[1]).toEqual([
+            `/api/recordings/item/summary/remarks?remarkId=remark-1${view === "org" ? "&view=org" : ""}`,
+            { method: "DELETE" },
+        ]);
+        expect(run).not.toHaveBeenCalled();
+    });
     it("shows the author, time, stored text and actual next-run model", async () => {
         render(
             <SummaryRemarksDialog

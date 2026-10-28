@@ -1,8 +1,15 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { aiEnhancements, summaryRemarks } from "@/db/schema";
+import { aiEnhancements, summaryRemarks, transcriptions } from "@/db/schema";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { speakerLabelsForTranscript } from "@/lib/knowledge/speaker-label-rules";
+import {
+    canonicalizeSummarySpeakerReferences,
+    inferSummarySpeakerNumberOffset,
+    storedSummarySpeakerNumberOffset,
+} from "@/lib/knowledge/speaker-references";
+import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 import { summaryRemarksFingerprint } from "./remarks-fingerprint";
 
 /** Read edit protection without decrypting any content. */
@@ -37,6 +44,7 @@ export async function summaryCorrectionsContext(
     userId: string,
     itemId: string,
     revise: boolean,
+    normalizeSpeakers = false,
 ) {
     const rows = await db
         .select({ id: summaryRemarks.id, text: summaryRemarks.text })
@@ -58,6 +66,9 @@ export async function summaryCorrectionsContext(
             .select({
                 summary: aiEnhancements.summary,
                 keyPoints: aiEnhancements.keyPoints,
+                actionItems: aiEnhancements.actionItems,
+                inputs: aiEnhancements.inputs,
+                transcriptionId: aiEnhancements.transcriptionId,
             })
             .from(aiEnhancements)
             .where(
@@ -78,6 +89,50 @@ export async function summaryCorrectionsContext(
             summary: decryptText(row.summary) ?? null,
             keyPoints: decryptJsonField<string[]>(row.keyPoints) ?? [],
         };
+        if (normalizeSpeakers) {
+            let offset = storedSummarySpeakerNumberOffset(row.inputs);
+            if (offset === null) {
+                const [transcript] = row.transcriptionId
+                    ? await db
+                          .select()
+                          .from(transcriptions)
+                          .where(
+                              and(
+                                  eq(transcriptions.id, row.transcriptionId),
+                                  eq(transcriptions.userId, userId),
+                                  eq(transcriptions.recordingId, itemId),
+                              ),
+                          )
+                          .limit(1)
+                    : [];
+                offset = inferSummarySpeakerNumberOffset(
+                    [
+                        current.summary ?? "",
+                        ...current.keyPoints,
+                        ...(decryptJsonField<string[]>(row.actionItems) ?? []),
+                    ].join("\n"),
+                    transcript
+                        ? speakerLabelsForTranscript({
+                              ...transcript,
+                              text: decryptText(transcript.text),
+                              turns: readTranscriptTurns(transcript),
+                          })
+                        : [],
+                );
+            }
+            current = {
+                summary:
+                    current.summary === null
+                        ? null
+                        : canonicalizeSummarySpeakerReferences(
+                              current.summary,
+                              offset,
+                          ),
+                keyPoints: current.keyPoints.map((point) =>
+                    canonicalizeSummarySpeakerReferences(point, offset),
+                ),
+            };
+        }
     }
     const text =
         remarks.length || revise

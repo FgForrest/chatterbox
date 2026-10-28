@@ -3149,6 +3149,8 @@
   "httOs_": "Delete remark",
   "yvhOi4": "Deleting a remark affects future summaries. It does not change this summary.",
   "06DjV0": "New remark",
+  "VPEGZ7": "Choose an available profile to correct this summary.",
+  "zyO_-N": "Configure a summary provider and model to correct this summary.",
   "_ddskX": "Could not save the remark",
   "3oWlaQ": "Correct summary",
   "IDjFtP": "Generating summary…",

@@ -17,12 +17,11 @@ import { Label } from "@/components/ui/label";
 import { ActionTooltip } from "@/components/ui/tooltip";
 import { type RecordingView, withRecordingView } from "@/lib/sharing/view";
 import type { SummaryRemark } from "@/lib/summary/edits";
+import type { SummaryRemarksPreview } from "@/lib/summary/remarks-preview";
 
 interface RemarksData {
     remarks: SummaryRemark[];
-    profileName: string;
-    model: string;
-    provider: string;
+    preview: SummaryRemarksPreview;
 }
 
 /** Store item corrections and start a single summary revision through the existing queue. */
@@ -205,11 +204,26 @@ export function SummaryRemarksDialog({
                                 }
                                 disabled={busy}
                             />
-                            <p className="text-xs text-muted-foreground">
-                                {i18n("Profile")} {data.profileName} ·{" "}
-                                {data.provider} ·{" "}
-                                <span className="font-mono">{data.model}</span>
-                            </p>
+                            {data.preview.available ? (
+                                <p className="text-xs text-muted-foreground">
+                                    {i18n("Profile")} {data.preview.profileName}{" "}
+                                    · {data.preview.provider} ·{" "}
+                                    <span className="font-mono">
+                                        {data.preview.model}
+                                    </span>
+                                </p>
+                            ) : (
+                                <output className="block text-xs text-muted-foreground">
+                                    {data.preview.reason ===
+                                    "profile-unavailable"
+                                        ? i18n(
+                                              "Choose an available profile to correct this summary.",
+                                          )
+                                        : i18n(
+                                              "Configure a summary provider and model to correct this summary.",
+                                          )}
+                                </output>
+                            )}
                         </div>
                     </>
                 )}
@@ -227,6 +241,7 @@ export function SummaryRemarksDialog({
                         disabled={
                             busy ||
                             !data ||
+                            !data.preview.available ||
                             (!text.trim() && !data.remarks.length)
                         }
                         onClick={async () => {

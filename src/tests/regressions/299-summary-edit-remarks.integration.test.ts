@@ -194,6 +194,7 @@ import {
     encryptJsonField,
     encryptText,
 } from "@/lib/encryption/fields";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { buildAndUploadExportArchive } from "@/lib/export/build-archive";
 import type * as documentSidecars from "@/lib/export/document-sidecars";
 import {
@@ -213,7 +214,7 @@ import { summaryCorrectionsContext } from "@/lib/summary/corrections";
 import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
 import { storedSummaryOf } from "@/lib/summary/read-summary";
 import { summaryJobHandler } from "@/lib/summary/summary-job-handler";
-import type * as summaryModel from "@/lib/summary/summary-model";
+import * as summaryModel from "@/lib/summary/summary-model";
 import {
     upsertEnhancement,
     upsertTranscription,
@@ -470,6 +471,65 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
                 ),
                 context,
             );
+
+        it.each([
+            "provider",
+            "profile",
+            "profile-error",
+        ])("returns stored remarks and allows deletion with an unavailable %s", async (failure) => {
+            await add();
+            const provider = vi.spyOn(summaryModel, "summaryModelFor");
+            const profile = vi.spyOn(profilesModule, "resolveSelectedProfile");
+            if (failure === "provider")
+                provider.mockRejectedValue(
+                    new AppError(
+                        ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
+                        "No AI provider configured",
+                        400,
+                    ),
+                );
+            else if (failure === "profile") profile.mockResolvedValue(null);
+            else
+                profile.mockRejectedValue(
+                    new profilesModule.AssignedProfileUnavailableError(),
+                );
+            try {
+                const response = await getRemarks(
+                    request(undefined, "?profileId=profile", "/remarks"),
+                    context,
+                );
+                expect(response.status).toBe(200);
+                const body = await response.json();
+                expect(body.remarks).toHaveLength(1);
+                expect(body.remarks[0].text).toContain("deadline is Thursday");
+                expect(body.preview).toMatchObject({
+                    available: false,
+                    reason:
+                        failure === "provider"
+                            ? "provider-unavailable"
+                            : "profile-unavailable",
+                });
+                expect(
+                    (
+                        await deleteRemark(
+                            request(
+                                undefined,
+                                `?remarkId=${body.remarks[0].id}`,
+                                "/remarks",
+                            ),
+                            context,
+                        )
+                    ).status,
+                ).toBe(200);
+                expect(await db().select().from(summaryRemarks)).toHaveLength(
+                    0,
+                );
+                expect(mocks.completion).not.toHaveBeenCalled();
+            } finally {
+                profile.mockRestore();
+                provider.mockRestore();
+            }
+        });
 
         it("authorizes only the owner in their own view and encrypts the saved fields", async () => {
             mocks.actor = "reader";
@@ -1161,6 +1221,10 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
             expect(after?.editedAt).toEqual(before?.editedAt);
             expect(after?.editedByUserId).toBe("owner");
             expect(after?.remarksAppliedCount).toBe(1);
+            if (!after) throw new Error("missing revised summary");
+            expect(storedSummaryOf(after).speakerNumberOffset).toBe(
+                kind === "audio" ? 0 : null,
+            );
             expect(after?.multiPassRounds).toBeNull();
             expect(
                 (await db().select().from(aiUsageEvents)).map(
@@ -1522,6 +1586,152 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
 
         if (kind === "audio") {
             it.each([
+                false,
+                true,
+            ])("keeps transcript numbering on ordinary runs, multi-pass: %s", async (multiPass) => {
+                await db()
+                    .update(userSettings)
+                    .set({ summaryMultiPass: multiPass })
+                    .where(eq(userSettings.userId, "owner"));
+                mocks.completion.mockResolvedValue({
+                    choices: [
+                        {
+                            message: {
+                                content: JSON.stringify({
+                                    summary: "[Speaker 1](#speaker-1) agreed.",
+                                    keyPoints: [],
+                                    actionItems: [],
+                                }),
+                            },
+                        },
+                    ],
+                    usage: { prompt_tokens: 10, completion_tokens: 5 },
+                });
+                expect(
+                    (
+                        await generateSummaryForRecording("owner", ITEM, {
+                            trigger: "manual",
+                        })
+                    ).committed,
+                ).toBe(true);
+                const row = await stored();
+                expect(row?.inputs).toMatchObject({
+                    speakerNumberOffset: 0,
+                });
+                expect(decryptText(row?.summary)).toBe(
+                    "[Speaker 1](#speaker-1) agreed.",
+                );
+                expect(mocks.completion).toHaveBeenCalledTimes(
+                    multiPass ? 4 : 1,
+                );
+                for (const [call] of mocks.completion.mock.calls) {
+                    expect(call.messages[0].content).toContain(
+                        "using the same number",
+                    );
+                }
+                expect(row?.multiPassMerged).toBe(multiPass ? true : null);
+            });
+
+            it("records the shift of a model that numbers speakers from one", async () => {
+                await db()
+                    .delete(transcriptions)
+                    .where(eq(transcriptions.id, "preferred-transcript"));
+                await db()
+                    .update(transcriptions)
+                    .set({
+                        text: encryptText(
+                            "speaker_0: I agreed.\nspeaker_1: I listened.",
+                        ),
+                        turns: encryptJsonField([
+                            {
+                                speaker: "speaker_0",
+                                startMs: 0,
+                                endMs: 500,
+                                text: "I agreed.",
+                            },
+                            {
+                                speaker: "speaker_1",
+                                startMs: 500,
+                                endMs: 1000,
+                                text: "I listened.",
+                            },
+                        ]),
+                    })
+                    .where(eq(transcriptions.id, "transcript"));
+                mocks.completion.mockResolvedValue({
+                    choices: [
+                        {
+                            message: {
+                                content: JSON.stringify({
+                                    summary:
+                                        "[Speaker 1](#speaker-1) agreed and [Speaker 2](#speaker-2) listened.",
+                                    keyPoints: [],
+                                    actionItems: [],
+                                }),
+                            },
+                        },
+                    ],
+                    usage: { prompt_tokens: 10, completion_tokens: 5 },
+                });
+                expect(
+                    (
+                        await generateSummaryForRecording("owner", ITEM, {
+                            trigger: "manual",
+                        })
+                    ).committed,
+                ).toBe(true);
+                expect((await stored())?.inputs).toMatchObject({
+                    speakerNumberOffset: -1,
+                });
+                await db()
+                    .insert(people)
+                    .values([
+                        {
+                            id: "person-a",
+                            userId: "owner",
+                            displayName: encryptText("Jitka Dvořáková"),
+                        },
+                        {
+                            id: "person-b",
+                            userId: "owner",
+                            displayName: encryptText("Tomáš Kraus"),
+                        },
+                    ]);
+                await db()
+                    .insert(transcriptSpeakers)
+                    .values([
+                        {
+                            userId: "owner",
+                            transcriptionId: "transcript",
+                            label: "speaker_0",
+                            personId: "person-a",
+                            source: "user",
+                            status: "confirmed",
+                        },
+                        {
+                            userId: "owner",
+                            transcriptionId: "transcript",
+                            label: "speaker_1",
+                            personId: "person-b",
+                            source: "user",
+                            status: "confirmed",
+                        },
+                    ]);
+                const { getRecordingMarkdownDocument } = await vi.importActual<
+                    typeof documentSidecars
+                >("@/lib/export/document-sidecars");
+                const document = await getRecordingMarkdownDocument(
+                    "owner",
+                    ITEM,
+                    "summary",
+                    { source: "riffado" },
+                );
+                expect(document?.content).toContain(
+                    "Jitka Dvořáková agreed and Tomáš Kraus listened.",
+                );
+            });
+
+            it.each([
                 "summary",
                 "keyPoints",
             ] as const)("retains every speaker identity after references are removed from %s", async (field) => {
@@ -1558,6 +1768,12 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
                         actionItems: encryptJsonField([]),
                     })
                     .where(eq(aiEnhancements.id, "original-summary"));
+                expect(
+                    (await summaryCorrectionsContext("owner", ITEM, true, true))
+                        .text,
+                ).toContain(
+                    "[Speaker 0](#speaker-0) met [Speaker 1](#speaker-1).",
+                );
                 const draft = {
                     summaryId: "original-summary",
                     revision: 0,
@@ -1664,6 +1880,138 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
                     storedSummaryOf((await stored()) as typeof row)
                         .speakerNumberOffset,
                 ).toBe(-1);
+                await db()
+                    .delete(transcriptions)
+                    .where(eq(transcriptions.id, "preferred-transcript"));
+                await db()
+                    .update(transcriptions)
+                    .set({
+                        text: encryptText(
+                            "speaker_0: I agreed.\nspeaker_1: I listened.",
+                        ),
+                    })
+                    .where(eq(transcriptions.id, "transcript"));
+                await add();
+                const beforeRevision = await stored();
+                mocks.completion.mockImplementation(
+                    async (call: {
+                        messages: { role: string; content: string }[];
+                    }) => {
+                        const prompt =
+                            call.messages.find(
+                                (message) => message.role === "user",
+                            )?.content ?? "";
+                        expect(prompt).toContain("speaker_0: I agreed.");
+                        expect(prompt).toContain(
+                            "[Speaker 0](#speaker-0) agreed.",
+                        );
+                        expect(prompt).not.toContain(
+                            "[Speaker 1](#speaker-1) agreed.",
+                        );
+                        const contextLine = prompt
+                            .split("\n")
+                            .find((line) =>
+                                line.startsWith('{"currentSummary"'),
+                            );
+                        if (!contextLine)
+                            throw new Error("missing correction context");
+                        const current = JSON.parse(contextLine)
+                            .currentSummary as {
+                            summary: string;
+                            keyPoints: string[];
+                        };
+                        return {
+                            choices: [
+                                {
+                                    message: {
+                                        content: JSON.stringify({
+                                            ...current,
+                                            summary: `${current.summary} The deadline is Thursday.`,
+                                            actionItems: [],
+                                        }),
+                                    },
+                                },
+                            ],
+                            usage: { prompt_tokens: 10, completion_tokens: 5 },
+                        };
+                    },
+                );
+                const revised = await generateSummaryForRecording(
+                    "owner",
+                    ITEM,
+                    {
+                        trigger: "manual",
+                        reviseWithRemarks: true,
+                        expectedSummaryId: "original-summary",
+                        expectedSummaryRevision: 2,
+                    },
+                );
+                expect(revised.committed).toBe(true);
+                expect((await stored())?.inputs).toMatchObject({
+                    speakerNumberOffset: 0,
+                });
+                expect((await stored())?.editedAt).toEqual(
+                    beforeRevision?.editedAt,
+                );
+                expect((await stored())?.remarksAppliedCount).toBe(1);
+                expect(
+                    await (await getSummary(request(), context)).json(),
+                ).toMatchObject({ speakerNumberOffset: 0 });
+                const revisedDocument = await getRecordingMarkdownDocument(
+                    "owner",
+                    ITEM,
+                    "summary",
+                    { source: "riffado" },
+                );
+                expect(revisedDocument?.content).toContain(
+                    "Jitka Dvořáková agreed.",
+                );
+                expect(revisedDocument?.content).not.toContain(
+                    "Tomáš Kraus agreed.",
+                );
+
+                mocks.completion.mockResolvedValue({
+                    choices: [
+                        {
+                            message: {
+                                content: JSON.stringify({
+                                    summary:
+                                        "[Speaker 1](#speaker-1) listened.",
+                                    keyPoints: [
+                                        "[Speaker 0](#speaker-0) agreed.",
+                                    ],
+                                    actionItems: [],
+                                }),
+                            },
+                        },
+                    ],
+                    usage: { prompt_tokens: 10, completion_tokens: 5 },
+                });
+                expect(
+                    (
+                        await generateSummaryForRecording("owner", ITEM, {
+                            trigger: "manual",
+                            reviseWithRemarks: true,
+                            expectedSummaryId: "original-summary",
+                            expectedSummaryRevision: 3,
+                        })
+                    ).committed,
+                ).toBe(true);
+                expect((await stored())?.inputs).toMatchObject({
+                    speakerNumberOffset: 0,
+                });
+                const nextDocument = await getRecordingMarkdownDocument(
+                    "owner",
+                    ITEM,
+                    "summary",
+                    { source: "riffado" },
+                );
+                expect(nextDocument?.content).toContain(
+                    "Tomáš Kraus listened.",
+                );
+                expect(nextDocument?.content).toContain(
+                    "Jitka Dvořáková agreed.",
+                );
             });
 
             it.each([

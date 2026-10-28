@@ -6,9 +6,13 @@ import { requireApiSession } from "@/lib/auth-server";
 import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
 import { encryptText } from "@/lib/encryption/fields";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
-import { resolveSelectedProfile } from "@/lib/profiles/resolve";
+import {
+    type ResolvedItemProfile,
+    resolveSelectedProfile,
+} from "@/lib/profiles/resolve";
 import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
 import {
+    type ReadableRecordingViewContext,
     requestedRecordingView,
     requireRecordingView,
 } from "@/lib/sharing/access";
@@ -18,6 +22,7 @@ import {
     readSummaryRemarks,
     withSummaryOwnerWrite,
 } from "@/lib/summary/edits";
+import type { SummaryRemarksPreview } from "@/lib/summary/remarks-preview";
 import { summaryModelFor } from "@/lib/summary/summary-model";
 
 type Context = { params: Promise<{ id: string }> };
@@ -36,40 +41,61 @@ async function ownerAccess(request: Request, id: string) {
     return { access, userId: session.user.id };
 }
 
+async function runPreview(
+    request: Request,
+    id: string,
+    userId: string,
+    access: ReadableRecordingViewContext,
+): Promise<SummaryRemarksPreview> {
+    const profileId = new URL(request.url).searchParams.get("profileId");
+    let profile: ResolvedItemProfile | null;
+    try {
+        profile = profileId
+            ? await resolveSelectedProfile({
+                  profileId,
+                  actorUserId: userId,
+                  view: access.view,
+              })
+            : await resolveManualItemProfile(
+                  id,
+                  access.view,
+                  access.ownerUserId,
+                  userId,
+              );
+    } catch {
+        return { available: false, reason: "profile-unavailable" };
+    }
+    if (!profile || profile.profile.channel !== access.kind)
+        return { available: false, reason: "profile-unavailable" };
+    try {
+        const model = await summaryModelFor(
+            userId,
+            profile.settings.steps.summary.provider,
+        );
+        return {
+            available: true,
+            profileName: profile.profile.name,
+            model: model.model,
+            provider: model.credentials.provider,
+        };
+    } catch {
+        return {
+            available: false,
+            reason: "provider-unavailable",
+            profileName: profile.profile.name,
+        };
+    }
+}
+
 export const GET = apiHandler<Context>(async (request, context) => {
     const { id } = await (context as Context).params;
     const { access, userId } = await ownerAccess(request, id);
-    const profileId = new URL(request.url).searchParams.get("profileId");
-    const profile = profileId
-        ? await resolveSelectedProfile({
-              profileId,
-              actorUserId: userId,
-              view: access.view,
-          })
-        : await resolveManualItemProfile(
-              id,
-              access.view,
-              access.ownerUserId,
-              userId,
-          );
-    if (!profile || profile.profile.channel !== access.kind)
-        throw new AppError(
-            ErrorCode.INVALID_INPUT,
-            "The selected profile is unavailable",
-            400,
-        );
-    const model = await summaryModelFor(
-        userId,
-        profile.settings.steps.summary.provider,
-    );
     const remarks = await withSummaryOwnerWrite(access, userId, id, (tx) =>
         readSummaryRemarks(userId, id, tx),
     );
     return NextResponse.json({
         remarks,
-        profileName: profile.profile.name,
-        model: model.model,
-        provider: model.credentials.provider,
+        preview: await runPreview(request, id, userId, access),
     });
 });
 

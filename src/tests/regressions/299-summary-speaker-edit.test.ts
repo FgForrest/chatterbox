@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+    canonicalizeSummarySpeakerReferences,
     inferSummarySpeakerNumberOffset,
     projectSummarySpeakerReferencesForExport,
     storeEditedSpeakerReferences,
@@ -7,6 +8,16 @@ import {
 } from "@/lib/knowledge/speaker-references";
 
 describe("#299 summary speaker edit round trip", () => {
+    it("normalizes a saved offset to the transcript numbering before revision", () => {
+        expect(
+            canonicalizeSummarySpeakerReferences(
+                "[Speaker 1](#speaker-1) agreed. Speaker 2 listened.",
+                -1,
+            ),
+        ).toBe(
+            "[Speaker 0](#speaker-0) agreed. [Speaker 1](#speaker-1) listened.",
+        );
+    });
     it("resolves attributed names in the editor while keeping the original href and zero-based offset", () => {
         const stored = "[Speaker 1](#speaker-1) met [Speaker 2](#speaker-2).";
         const labels = ["speaker_0", "speaker_1"];

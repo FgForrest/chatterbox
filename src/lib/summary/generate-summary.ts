@@ -12,9 +12,11 @@ import {
     SUMMARY_SPEAKER_DIRECTIVE,
     SUMMARY_TEMPLATE_KIND,
 } from "@/lib/ai/summary-presets";
-import { decryptJsonField } from "@/lib/encryption/fields";
+import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
+import { speakerLabelsForTranscript } from "@/lib/knowledge/speaker-label-rules";
+import { inferSummarySpeakerNumberOffset } from "@/lib/knowledge/speaker-references";
 import { modelInput } from "@/lib/learn/llm-input";
 import {
     agendaPlanBlock,
@@ -62,6 +64,7 @@ import {
 } from "@/lib/tasks/proposals";
 import { upsertEnhancement } from "@/lib/transcription/persist";
 import { readPreferredTranscript } from "@/lib/transcription/read-source";
+import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 import { summaryCorrectionsContext, summaryEditState } from "./corrections";
 import { generateMailSummary } from "./generate-mail-summary";
 import type { MultiPassProgress } from "./multi-pass";
@@ -466,6 +469,7 @@ export async function generateSummaryForRecording(
                   ctx.ownerUserId,
                   recordingId,
                   opts.reviseWithRemarks === true,
+                  true,
               )
             : { text: "", count: 0, fingerprint: undefined };
     const prompt = [
@@ -536,6 +540,14 @@ export async function generateSummaryForRecording(
     });
 
     const { summary, keyPoints, actionItems } = payload;
+    const speakerNumberOffset = inferSummarySpeakerNumberOffset(
+        [summary, ...keyPoints, ...actionItems].join("\n"),
+        speakerLabelsForTranscript({
+            ...transcription,
+            text: decryptText(transcription.text) ?? "",
+            turns: readTranscriptTurns(transcription),
+        }),
+    );
     const tasks = tasksEnabled
         ? await resolveTaskProposals({
               source: "riffado",
@@ -576,6 +588,7 @@ export async function generateSummaryForRecording(
         outputFormatLocale: profilePrompt?.formatLocale ?? null,
         payerUserId: summaryModel.payerUserId,
         inputs: {
+            speakerNumberOffset,
             contentId: transcription.id,
             contentSourceId: transcription.source,
             contentRevision: transcription.revision,
