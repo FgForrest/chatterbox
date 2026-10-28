@@ -1,11 +1,11 @@
 ---
 title: Agenda filing uses recording transactions and every placement contributes audience and preparation context
 date: 2026-10-28
-updated: 2026-10-28 14:23
+updated: 2026-10-28 17:25
 status: proposed
 kind: feature
 issues: []
-prs: [293]
+prs: [293, 302]
 areas: [src/lib/folders/folders.ts, src/lib/meetings, src/db/queries/agenda-suggestions.ts, src/app/api/recordings, src/components/meetings]
 supersedes: [2026-10-27-meeting-agendas, 2026-10-27-shared-folders-are-two-way]
 superseded-by: []

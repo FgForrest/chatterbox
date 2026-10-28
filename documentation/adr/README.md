@@ -40,7 +40,7 @@ field, a filename date disagrees with `date:`, a value is not one of the allowed
 
 | Date | Record | Kind | Status | Refs |
 |------|--------|------|--------|------|
-| 2026-10-28 | [Agenda filing uses recording transactions and every placement contributes audience and preparation context](2026-10-28-agendas-use-all-folder-placements.md) | feature | proposed | [PR #293](https://github.com/FgForrest/chatterbox/pull/293) |
+| 2026-10-28 | [Agenda filing uses recording transactions and every placement contributes audience and preparation context](2026-10-28-agendas-use-all-folder-placements.md) | feature | proposed | [PR #293](https://github.com/FgForrest/chatterbox/pull/293), [PR #302](https://github.com/FgForrest/chatterbox/pull/302) |
 | 2026-10-28 | [Curators export Organization folder subtrees through their own connections](2026-10-28-curator-organization-folder-exports.md) | feature | accepted |  |
 | 2026-10-27 | [Meeting agendas are co-edited plans absorbed by recordings, with safe attachment and manual Calendar export](2026-10-27-meeting-agendas.md) | feature | superseded by [2026-10-28-agendas-use-all-folder-placements](2026-10-28-agendas-use-all-folder-placements.md) | [PR #293](https://github.com/FgForrest/chatterbox/pull/293) |
 | 2026-10-27 | [Person-shared folders accept every participant's own items while processing and exports follow ownership](2026-10-27-shared-folders-are-two-way.md) | feature | superseded by [2026-10-28-agendas-use-all-folder-placements](2026-10-28-agendas-use-all-folder-placements.md) | [PR #293](https://github.com/FgForrest/chatterbox/pull/293) |
