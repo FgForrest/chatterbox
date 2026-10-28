@@ -8,8 +8,15 @@ import { isRecordingShared } from "@/lib/sharing/shared";
  * re-plan the organization's filesystem exports, which project that view.
  * Best effort, like every notification: it never fails the change itself.
  */
-export async function orgContentChanged(recordingId: string): Promise<void> {
-    await notifyOrgChange({ type: "recording", recordingId });
+export async function orgContentChanged(
+    recordingId: string,
+    origin?: string,
+): Promise<void> {
+    await notifyOrgChange({
+        type: "recording",
+        recordingId,
+        ...(origin ? { origin } : {}),
+    });
     try {
         const orgUserId = await getOrgUserId();
         if (orgUserId) await enqueueExportPlansForUser(orgUserId);
@@ -26,12 +33,15 @@ export async function orgContentChanged(recordingId: string): Promise<void> {
  * private rename or re-run is news to everyone. Best effort, like every
  * notification: it never fails the change that caused it.
  */
-export async function notifyIfShared(recordingId: string): Promise<void> {
+export async function notifyIfShared(
+    recordingId: string,
+    origin?: string,
+): Promise<void> {
     try {
         const orgUserId = await getOrgUserId();
         if (!orgUserId) return;
         if (await isRecordingShared(recordingId, orgUserId)) {
-            await orgContentChanged(recordingId);
+            await orgContentChanged(recordingId, origin);
         }
     } catch (error) {
         console.error("[org-events] could not check sharing:", error);

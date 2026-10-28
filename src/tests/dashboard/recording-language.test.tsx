@@ -36,9 +36,19 @@ function control(readOnly = false, view: "private" | "org" = "private") {
     );
 }
 
+async function chooseLanguage(name: string) {
+    fireEvent.click(
+        await screen.findByRole("button", {
+            name: "Change transcript language",
+        }),
+    );
+    fireEvent.click(await screen.findByRole("option", { name }));
+}
+
 describe("recording language control", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        Element.prototype.scrollIntoView = vi.fn();
         fetchMock.mockImplementation(async (_url: string, init?: RequestInit) =>
             Response.json(
                 init?.method === "PATCH"
@@ -67,13 +77,10 @@ describe("recording language control", () => {
         "org",
     ] as const)("shows detected vs confirmed and offers explicit actions in %s", async (view) => {
         control(false, view);
-        const select = await screen.findByRole("combobox", {
-            name: "Transcript language",
-        });
-        expect(screen.getByText("Detected language")).toBeTruthy();
-        expect((select as HTMLSelectElement).value).toBe("auto");
-        fireEvent.change(select, { target: { value: "cs" } });
-        await screen.findByText("Confirmed language");
+        expect(screen.queryByRole("combobox")).toBeNull();
+        expect(screen.getByText("Hungarian (detected)")).toBeTruthy();
+        await chooseLanguage("Czech");
+        await screen.findByText("Czech");
         fireEvent.click(
             await screen.findByRole("button", { name: "Re-summarize" }),
         );
@@ -180,13 +187,12 @@ describe("recording language control", () => {
             }),
         );
         control();
-        const select = await screen.findByRole("combobox");
-        fireEvent.change(select, { target: { value: "cs" } });
+        await chooseLanguage("Czech");
         expect(
             fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH"),
         ).toHaveLength(0);
-        fireEvent.change(select, { target: { value: "auto" } });
-        await screen.findByText("Detected language");
+        await chooseLanguage("Automatic");
+        await screen.findByText("Hungarian (detected)");
         expect(
             JSON.parse(
                 fetchMock.mock.calls.find(
@@ -194,7 +200,7 @@ describe("recording language control", () => {
                 )?.[1]?.body as string,
             ),
         ).toEqual({ language: null });
-        fireEvent.change(select, { target: { value: "auto" } });
+        await chooseLanguage("Automatic");
         expect(
             fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH"),
         ).toHaveLength(1);
@@ -224,7 +230,13 @@ describe("recording language control", () => {
                 transcriptionDisabled={false}
             />,
         );
-        await screen.findByText("Confirmed language");
+        await screen.findByText(
+            detectedLanguage === "hu" ||
+                detectedLanguage === "hun" ||
+                detectedLanguage === "hu-HU"
+                ? "Hungarian"
+                : "Czech",
+        );
         expect(
             screen.queryByRole("button", { name: /Re-transcribe in/ }),
         ).toBeNull();
@@ -254,7 +266,7 @@ describe("recording language control", () => {
                 transcriptionDisabled={false}
             />,
         );
-        await screen.findByText("Confirmed language");
+        await screen.findByText("Czech");
         expect(
             screen.queryByRole("button", { name: /Re-transcribe in/ }),
         ).toBeNull();
@@ -334,7 +346,7 @@ describe("recording language control", () => {
             }),
         );
         control(readOnly);
-        await screen.findByText("Confirmed language: Czech");
+        await screen.findByText("Czech");
         expect(screen.queryByRole("combobox")).toBeNull();
         expect(screen.queryByRole("button")).toBeNull();
     });
@@ -350,15 +362,25 @@ describe("recording language control", () => {
                       }),
         );
         control();
-        fireEvent.change(await screen.findByRole("combobox"), {
-            target: { value: "cs" },
-        });
-        await waitFor(() =>
-            expect(
-                (screen.getByRole("combobox") as HTMLSelectElement).value,
-            ).toBe("auto"),
-        );
+        await chooseLanguage("Czech");
+        await screen.findByText("Hungarian (detected)");
         expect(reload).not.toHaveBeenCalled();
+    });
+
+    it("opens the language list and returns to text on Escape without a write", async () => {
+        control();
+        fireEvent.click(
+            await screen.findByRole("button", {
+                name: "Change transcript language",
+            }),
+        );
+        expect(screen.getByRole("listbox")).toBeTruthy();
+        fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
+        await waitFor(() => expect(screen.queryByRole("combobox")).toBeNull());
+        expect(screen.getByText("Hungarian (detected)")).toBeTruthy();
+        expect(
+            fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
+        ).toBe(false);
     });
 
     it("preselects Learn's language and offers provider and list choices", () => {

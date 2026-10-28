@@ -1,14 +1,9 @@
 // @vitest-environment jsdom
 
-import {
-    cleanup,
-    fireEvent,
-    render,
-    screen,
-    waitFor,
-} from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LearnWidget } from "@/components/learn/learn-widget";
+import { relearnItem } from "@/components/learn/review-events";
 
 vi.mock("next-intl", () => ({
     useLocale: () => "en",
@@ -67,11 +62,10 @@ it("shows completion without inventing counts for an older review", async () => 
             showTrigger={false}
         />,
     );
-    await screen.findByText("Learned from the owner's review");
+    await act(async () => {});
+    expect(screen.queryByText("Learned from the owner's review")).toBeNull();
     expect(screen.queryByText(/applied, .* skipped/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "View results" }));
-    await screen.findByRole("dialog");
-    expect(screen.queryByText(/Learn found nothing new/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "View results" })).toBeNull();
 });
 
 describe.each([
@@ -116,15 +110,13 @@ describe.each([
             />,
         );
 
-        await screen.findByText("Learned from the owner's review");
-        expect(screen.getByText("7 applied, 2 skipped")).toBeTruthy();
+        await act(async () => {});
+        expect(
+            screen.queryByText("Learned from the owner's review"),
+        ).toBeNull();
         expect(screen.queryByText(/Ready when you are/)).toBeNull();
         expect(screen.queryByRole("button", { name: "Learn" })).toBeNull();
-        fireEvent.click(screen.getByRole("button", { name: "View results" }));
-        await screen.findByRole("dialog");
-        expect(screen.queryByText(/Learn found nothing new/)).toBeNull();
-        expect(screen.getAllByText("7 applied, 2 skipped")).toHaveLength(2);
-        fireEvent.click(screen.getByRole("button", { name: "Re-learn" }));
+        act(() => relearnItem("shared-item", false));
         const path =
             kind === "audio"
                 ? "/api/recordings/shared-item/learn?source=riffado&view=org"
@@ -164,16 +156,9 @@ it.each([
             showTrigger={false}
         />,
     );
-    await screen.findByText("Learn found nothing new");
+    await act(async () => {});
+    expect(screen.queryByText("Learn found nothing new")).toBeNull();
     expect(screen.queryByText("Learned from the owner's review")).toBeNull();
     expect(screen.queryByText("0 applied, 0 skipped")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "View results" }));
-    await screen.findByText(
-        kind === "mail"
-            ? "Learn found nothing new in this message."
-            : "Learn found nothing new in this transcript.",
-    );
-    expect(screen.queryByText("Learned from the owner's review")).toBeNull();
-    expect(screen.queryByText("0 applied, 0 skipped")).toBeNull();
-    expect(screen.getByRole("button", { name: "Re-learn" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "View results" })).toBeNull();
 });

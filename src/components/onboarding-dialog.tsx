@@ -1,7 +1,6 @@
 "use client";
 
 import { ArrowLeft, ArrowRight } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useExtracted } from "next-intl";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -25,6 +24,7 @@ import {
 } from "@/components/onboarding-steps";
 import { useProductName } from "@/components/product-name-provider";
 import { Button } from "@/components/ui/button";
+import { useDashboardRefresh } from "@/hooks/use-dashboard-refresh";
 import type {
     OnboardingCapabilities,
     OnboardingReadiness,
@@ -89,7 +89,7 @@ export function OnboardingDialog({
 }: OnboardingDialogProps) {
     const i18n = useExtracted();
     const name = useProductName();
-    const { refresh } = useRouter();
+    const refresh = useDashboardRefresh();
     const [step, setStep] = useState<OnboardingStepId>(initialStep);
     const [readiness, setReadiness] = useState(initialReadiness ?? null);
     const [failed, setFailed] = useState(false);

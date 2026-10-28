@@ -8,6 +8,7 @@ import {
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { resolveReadableFolder } from "@/lib/folders/folders";
+import { itemScopeFolderIds } from "@/lib/folders/item-scope";
 import { folderCareFor } from "@/lib/knowledge/folder-care";
 import {
     FOLDER_KNOWLEDGE_PAGE_SIZE,
@@ -54,15 +55,37 @@ export async function readFolderKnowledge(
             orgUserId,
         ),
     };
+    return readScopedKnowledge(
+        scope,
+        {
+            folder: {
+                id: folder.id,
+                name: decryptText(folder.name),
+                scope: shared ? ("org" as const) : ("personal" as const),
+                isRoot: folder.parentId === null,
+            },
+        },
+        tab,
+        offset,
+        language,
+    );
+}
+
+/** Read one authorized knowledge scope using the shared folder/item queries. */
+export async function readScopedKnowledge<T extends object>(
+    scope: FolderKnowledgeScope,
+    target: T,
+    tab: FolderKnowledgeTab,
+    offset = 0,
+    language?: string | null,
+    namedRecordIds?: ReadonlySet<string>,
+) {
+    const { viewerId, folderId, shared } = scope;
+    const orgUserId = await getOrgUserId();
     const metadata = (
         context: Awaited<ReturnType<typeof folderKnowledgeContext>>,
     ) => ({
-        folder: {
-            id: folder.id,
-            name: decryptText(folder.name),
-            scope: shared ? ("org" as const) : ("personal" as const),
-            isRoot: folder.parentId === null,
-        },
+        ...target,
         itemCount: context.itemCount,
         subfolderCount: context.subfolderCount,
     });
@@ -169,6 +192,7 @@ export async function readFolderKnowledge(
             facts: rows.slice(0, limit).map((row) => ({
                 id: row.id,
                 factId: row.fact_id,
+                ...(scope.itemId ? { newFromItem: row.new_from_item } : {}),
                 subject: decryptText(row.subject_name),
                 relationKey: row.relation_key,
                 relationLabel:
@@ -184,10 +208,19 @@ export async function readFolderKnowledge(
     const context = await folderKnowledgeContext(scope);
     const preview = await folderModelPreview({
         viewerId,
-        folderId,
+        ownerUserId: scope.itemId ? scope.ownerId : viewerId,
+        folderId: scope.itemId ? undefined : folderId,
         shared,
-        scopeFolderIds: context.rankingFolderIds,
+        scopeFolderIds: scope.itemId
+            ? await itemScopeFolderIds(
+                  scope.itemId,
+                  shared ? "org" : "private",
+                  scope.ownerId,
+              )
+            : context.rankingFolderIds,
+        itemId: scope.itemId,
         language,
+        namedRecordIds,
     });
     return {
         ...metadata(context),
@@ -207,27 +240,37 @@ export async function readFolderKnowledge(
 /** Full pipeline context for a prospective item in one authorized folder. */
 export async function folderModelPreview(input: {
     viewerId: string;
-    folderId: string;
+    ownerUserId?: string;
+    folderId?: string;
     shared: boolean;
     scopeFolderIds: readonly string[];
+    itemId?: string;
     language?: string | null;
+    namedRecordIds?: ReadonlySet<string>;
 }) {
-    const profile = await folderDefaultProfile(input.folderId, "audio");
+    const profile = input.folderId
+        ? await folderDefaultProfile(input.folderId, "audio")
+        : null;
     const language =
         input.language ??
         (profile && "transcribe" in profile.settings.steps
             ? profile.settings.steps.transcribe.language
             : null);
     const rankingInput = await almanacTermRankingInput({
-        ownerUserId: input.viewerId,
+        ownerUserId: input.ownerUserId ?? input.viewerId,
         shared: input.shared,
         language,
         scopeFolderIds: input.scopeFolderIds,
+        itemId: input.itemId,
     });
     const transcription = rankAlmanacTermsWithOverflow(rankingInput);
-    const records = almanacRecordsFor(rankingInput.items, new Set(), {
-        scopeUsage: rankingInput.scopeUsage,
-    });
+    const records = almanacRecordsFor(
+        rankingInput.items,
+        input.namedRecordIds ?? new Set(),
+        {
+            scopeUsage: rankingInput.scopeUsage,
+        },
+    );
     return {
         transcription: { ...transcription, limit: MAX_ALMANAC_TERMS },
         correction: {

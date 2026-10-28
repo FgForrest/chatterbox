@@ -12,6 +12,7 @@ import {
     DialogDescription,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { ActionTooltip } from "@/components/ui/tooltip";
 import type {
     WorkflowWidgetFrame,
     WorkflowWidgetTone,
@@ -50,6 +51,9 @@ export interface WorkflowWidgetProps {
     frame: WorkflowWidgetFrame;
     tone: WorkflowWidgetTone;
     collapsed?: boolean;
+    onCollapse?: () => void;
+    collapseLabel?: string;
+    expandLabel?: string;
     open?: boolean;
     onOpenChange?: (open: boolean) => void;
     title: ReactNode;
@@ -126,10 +130,12 @@ function focusWidgetHeading(id: string): void {
 }
 
 /** Open a workflow widget, then scroll to its rendered frame and focus its heading. */
-export function openWidget(id: string): void {
+export function openWidget(id: string, source?: string): void {
     flushSync(() => {
         window.dispatchEvent(
-            new CustomEvent(OPEN_WORKFLOW_WIDGET_EVENT, { detail: { id } }),
+            new CustomEvent(OPEN_WORKFLOW_WIDGET_EVENT, {
+                detail: { id, ...(source ? { source } : {}) },
+            }),
         );
     });
     const heading = widgetHeading(id);
@@ -150,16 +156,20 @@ export function openWidget(id: string): void {
 /** Listen for the shared workflow-widget open event for one widget id. */
 export function useWorkflowWidgetOpen(
     id: string | undefined,
-    onOpen?: () => void,
+    onOpen?: (source?: string) => void,
 ): void {
     const openRef = useRef(onOpen);
     openRef.current = onOpen;
     useEffect(() => {
         if (!id) return;
         const handleOpen = (event: Event) => {
-            const detail = (event as CustomEvent<{ id?: unknown }>).detail;
+            const detail = (
+                event as CustomEvent<{ id?: unknown; source?: unknown }>
+            ).detail;
             if (detail?.id !== id) return;
-            openRef.current?.();
+            if (typeof detail.source === "string")
+                openRef.current?.(detail.source);
+            else openRef.current?.();
         };
         window.addEventListener(OPEN_WORKFLOW_WIDGET_EVENT, handleOpen);
         return () =>
@@ -174,9 +184,22 @@ function WidgetHeader({
     helpLink,
     description,
     headerAction,
+    collapsed,
+    onCollapse,
+    collapseLabel,
+    expandLabel,
 }: Pick<
     WorkflowWidgetProps,
-    "id" | "frame" | "title" | "helpLink" | "description" | "headerAction"
+    | "id"
+    | "frame"
+    | "title"
+    | "helpLink"
+    | "description"
+    | "headerAction"
+    | "collapsed"
+    | "onCollapse"
+    | "collapseLabel"
+    | "expandLabel"
 >) {
     const heading = (
         <>
@@ -198,7 +221,7 @@ function WidgetHeader({
         titleNode = (
             <h2
                 {...workflowWidgetHeadingProps(id)}
-                className="flex min-w-0 items-center gap-2 font-semibold"
+                className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap font-semibold"
             >
                 {heading}
             </h2>
@@ -214,8 +237,34 @@ function WidgetHeader({
     }
     return (
         <header className="border-b px-4 py-3 sm:px-6">
-            <div className="flex min-w-0 items-center justify-between gap-3">
-                {titleNode}
+            <div className="flex min-w-0 items-center justify-between gap-1 sm:gap-3">
+                <div className="flex min-w-0 items-center gap-1">
+                    {frame === "inline" && onCollapse && (
+                        <ActionTooltip
+                            label={
+                                (collapsed ? expandLabel : collapseLabel) ?? ""
+                            }
+                        >
+                            <Button
+                                type="button"
+                                size="icon-sm"
+                                variant="ghost"
+                                aria-expanded={!collapsed}
+                                aria-label={
+                                    collapsed ? expandLabel : collapseLabel
+                                }
+                                onClick={onCollapse}
+                            >
+                                {collapsed ? (
+                                    <ChevronDown className="size-4" />
+                                ) : (
+                                    <ChevronUp className="size-4" />
+                                )}
+                            </Button>
+                        </ActionTooltip>
+                    )}
+                    {titleNode}
+                </div>
                 {headerAction && <div className="shrink-0">{headerAction}</div>}
             </div>
             {descriptionNode && <div className="mt-1">{descriptionNode}</div>}
@@ -320,7 +369,7 @@ export function WorkflowWidget(props: WorkflowWidgetProps) {
                     id={inlineLine ? undefined : id}
                     hasNoPadding
                     className={cn(
-                        "gap-0 border-l-2 shadow-none",
+                        "@container/workflow gap-0 border-l-2 shadow-none",
                         toneClasses[tone],
                         inlineLine && "hidden",
                     )}
@@ -374,35 +423,26 @@ export function WorkflowWidgetLine({
     onOpen,
 }: WorkflowWidgetLineProps) {
     useWorkflowWidgetOpen(id, onOpen);
-    let control = action;
-    if (onExpand && expandLabel) {
-        const label = expanded && collapseLabel ? collapseLabel : expandLabel;
-        const expandControl = (
-            <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="shrink-0"
-                aria-expanded={expanded ?? false}
-                onClick={onExpand}
-            >
-                {expanded ? (
-                    <ChevronUp className="size-4" />
-                ) : (
-                    <ChevronDown className="size-4" />
-                )}
-                {label}
-            </Button>
-        );
-        control = action ? (
-            <div className="flex shrink-0 items-center gap-2">
-                {expandControl}
-                {action}
-            </div>
-        ) : (
-            expandControl
-        );
-    }
+    const label = expanded && collapseLabel ? collapseLabel : expandLabel;
+    const expandControl =
+        onExpand && label ? (
+            <ActionTooltip label={label}>
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={label}
+                    aria-expanded={expanded ?? false}
+                    onClick={onExpand}
+                >
+                    {expanded ? (
+                        <ChevronUp className="size-4" />
+                    ) : (
+                        <ChevronDown className="size-4" />
+                    )}
+                </Button>
+            </ActionTooltip>
+        ) : null;
     return (
         <Card
             id={id}
@@ -415,6 +455,7 @@ export function WorkflowWidgetLine({
             data-tone={tone}
         >
             <div className="flex min-h-14 min-w-0 items-center gap-3 px-4 py-2">
+                {expandControl}
                 {working ? (
                     <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none" />
                 ) : (
@@ -433,7 +474,7 @@ export function WorkflowWidgetLine({
                         </span>
                     )}
                 </div>
-                {control}
+                {action}
             </div>
         </Card>
     );

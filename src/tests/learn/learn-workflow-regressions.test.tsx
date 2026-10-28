@@ -285,18 +285,27 @@ describe.each(["audio", "mail"] as const)("%s Learn workflow line", (kind) => {
         kind === "audio"
             ? "/api/recordings/recording-1/learn?source=riffado"
             : "/api/recordings/mail-1/learn";
-    it("uses the expand affordance for finished results", async () => {
+    it("removes finished results from the detail page", async () => {
         renderCase("dialog", FINISHED_REVIEW);
-
-        const expand = await screen.findByRole("button", {
-            name: "View results",
-        });
-        const line = expand.closest("[data-workflow-widget-line]");
-        expect(expand.getAttribute("aria-expanded")).toBe("false");
-        expect(expand.querySelector(".lucide-chevron-down")).toBeTruthy();
+        await act(async () => {});
         expect(
-            line?.querySelectorAll("button:not([aria-expanded])"),
-        ).toHaveLength(0);
+            screen.queryByRole("button", { name: "View results" }),
+        ).toBeNull();
+        expect(
+            document.querySelector("[data-workflow-widget-line]"),
+        ).toBeNull();
+    });
+
+    it.each([
+        "cancelled",
+        "superseded",
+    ])("keeps a %s run visible for attention", async (status) => {
+        renderCase("dialog", {
+            ...IDLE_REVIEW,
+            run: { id: "stopped", status },
+        });
+        expect(await screen.findByText("Learn stopped")).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
     });
 
     it("keeps failed results expandable with Try again as the primary action", async () => {

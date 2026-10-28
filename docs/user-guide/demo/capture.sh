@@ -247,6 +247,7 @@ section_summary() {
     tag summary "Summary" ".bg-card"
     scroll_to summary
     tag summary-title "Summary"
+    click_button "Change summary profile" 900
     js "(() => {
         const trigger = document.querySelector('[aria-label=\"Processing profile\"]');
         const actions = trigger?.parentElement;
@@ -254,7 +255,8 @@ section_summary() {
         actions.setAttribute('data-shot', 'summary-actions');
         return 'ok';
     })()" >/dev/null
-    crop summary-profile-picker summary-title summary-actions
+    crop summary-profile-picker summary-actions "css:[role=listbox]"
+    escape
     crop summary summary
     select_recording "Design review: driver onboarding"
     tag summary "Summary" ".bg-card"
@@ -443,9 +445,9 @@ section_learn_finish() {
     })()" >/dev/null
     ab wait 500 >/dev/null
     click_button "Finish review" 3000
-    click_button "View results" 1500
-    dialog learn-results
-    escape
+    click_button "Knowledge" 1500
+    shot "css:section[aria-label='Item knowledge']" learn-results
+    click_button "Back"
 }
 
 sections=(onboarding dashboard recording filing workflow transcript learn summary

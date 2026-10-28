@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import {
+    act,
     cleanup,
     fireEvent,
     render,
@@ -13,6 +14,7 @@ import {
     TranscriptionPanel,
     type TranscriptOption,
 } from "@/components/dashboard/transcription-panel";
+import { openWidget } from "@/components/pipeline/workflow-widget";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import { canChangeItem } from "@/lib/sharing/change-permission";
 import { processingFixture } from "@/tests/pipeline/processing-fixture";
@@ -182,14 +184,14 @@ function panel(
     );
 }
 
-function lastHeaderButton(heading: "Transcription" | "Summary") {
+function firstHeaderButton(heading: "Transcription" | "Summary") {
     const header = screen
         .getByRole("heading", { name: heading })
         .closest('[data-slot="card-header"], header');
     if (!(header instanceof HTMLElement)) {
         throw new Error(`Missing ${heading} header`);
     }
-    return within(header).getAllByRole("button").at(-1);
+    return within(header).getAllByRole("button")[0];
 }
 
 describe("transcription dialog", () => {
@@ -303,14 +305,18 @@ describe("transcription dialog", () => {
             Boolean(screen.queryByRole("button", { name: "Re-transcribe" })),
         ).toBe(isOwn);
         expect(
-            Boolean(screen.queryByRole("button", { name: "Summarize" })),
+            Boolean(
+                screen.queryAllByRole("button", { name: "Summarize" }).length,
+            ),
         ).toBe(isOwn);
     });
 
     it("starts a summary without opening a dialog", async () => {
         const view = render(panel(false, null));
 
-        fireEvent.click(screen.getByRole("button", { name: "Summarize" }));
+        fireEvent.click(
+            screen.getAllByRole("button", { name: "Summarize" })[0],
+        );
 
         expect(mocks.handleSummarize).toHaveBeenCalledOnce();
         expect(screen.queryByRole("dialog")).toBeNull();
@@ -318,6 +324,87 @@ describe("transcription dialog", () => {
         view.rerender(panel(false, null));
         expect(await screen.findByText("Generating summary…")).toBeTruthy();
         expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it.each([
+        "finished",
+        null,
+    ])("opens a ready review on another source without starting Learn on the %s source", async (currentStatus) => {
+        const fetchMock = vi.mocked(fetch).mockImplementation(async (input) => {
+            if (String(input).includes("/review?"))
+                return Response.json({
+                    run:
+                        String(input).includes("source=riffado") ||
+                        currentStatus
+                            ? {
+                                  id: "run",
+                                  status: String(input).includes(
+                                      "source=riffado",
+                                  )
+                                      ? "ready"
+                                      : currentStatus,
+                              }
+                            : null,
+                    available: true,
+                    names: {},
+                    types: {},
+                    relations: {},
+                    items: [],
+                });
+            return Response.json({});
+        });
+        render(
+            panel(false, null, {
+                transcripts: ["plaud", "riffado"].map((source) => ({
+                    source,
+                    text: `Text from ${source}`,
+                    turns: [
+                        {
+                            speaker: "speaker_0",
+                            text: `Text from ${source}`,
+                            startMs: 0,
+                            endMs: 1000,
+                        },
+                    ],
+                })),
+            }),
+        );
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/recordings/rec-1/review?source=plaud",
+            ),
+        );
+        await act(async () => {});
+        act(() => openWidget("recording-learn-review-rec-1", "riffado"));
+        expect(
+            await screen.findByRole("heading", {
+                name: "Review what Learn found",
+            }),
+        ).toBeTruthy();
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/recordings/rec-1/review?source=riffado",
+        );
+        expect(screen.getByText("Text from riffado")).toBeTruthy();
+        expect(
+            fetchMock.mock.calls.filter(([, init]) => init?.method === "POST"),
+        ).toEqual([]);
+        expect(
+            fetchMock.mock.calls.some(([input]) =>
+                String(input).includes("/calendar-events"),
+            ),
+        ).toBe(false);
+        fireEvent.click(
+            screen.getByRole("button", { name: "Collapse review" }),
+        );
+        expect(
+            screen.queryByRole("heading", { name: "Review what Learn found" }),
+        ).toBeNull();
+        act(() => openWidget("recording-learn-review-rec-1", "riffado"));
+        expect(
+            await screen.findByRole("heading", {
+                name: "Review what Learn found",
+            }),
+        ).toBeTruthy();
     });
 
     it("uses the server transcription job as its running state", () => {
@@ -419,7 +506,7 @@ describe("transcription dialog", () => {
         expect(footer?.textContent).toContain("Custom");
         expect(footer?.textContent).toContain("openai");
         expect(footer?.textContent).toContain("whisper-1");
-        expect(footer?.textContent).toContain("Detected language: English");
+        expect(footer?.textContent).toContain("English (detected)");
         expect(footer?.textContent).toContain("2 words");
         expect(footer?.textContent).toContain("12 characters");
 
@@ -432,7 +519,7 @@ describe("transcription dialog", () => {
         expect(widget?.querySelector("footer")).toBeTruthy();
     });
 
-    it("keeps transcript and summary toggles last outside the workflow", () => {
+    it("keeps transcript and summary toggles before the title outside the workflow", () => {
         mocks.summaryData = {
             summary: "Summary text",
             keyPoints: [],
@@ -445,15 +532,15 @@ describe("transcription dialog", () => {
         };
         render(panel(false, null));
 
-        expect(lastHeaderButton("Transcription")).toBe(
+        expect(firstHeaderButton("Transcription")).toBe(
             screen.getByRole("button", { name: "Collapse transcript" }),
         );
-        expect(lastHeaderButton("Summary")).toBe(
+        expect(firstHeaderButton("Summary")).toBe(
             screen.getByRole("button", { name: "Collapse summary" }),
         );
     });
 
-    it("keeps transcript and summary toggles last after workflow expansion", () => {
+    it("keeps transcript and summary toggles before the title after workflow expansion", () => {
         mocks.summaryData = {
             summary: "Summary text",
             keyPoints: [],
@@ -469,14 +556,14 @@ describe("transcription dialog", () => {
         fireEvent.click(
             screen.getByRole("button", { name: "View transcript" }),
         );
-        expect(lastHeaderButton("Transcription")).toBe(
+        expect(firstHeaderButton("Transcription")).toBe(
             screen.getByRole("button", { name: "Collapse transcript" }),
         );
 
         cleanup();
         render(panel(false, workflowProcessing));
         fireEvent.click(screen.getByRole("button", { name: "View summary" }));
-        expect(lastHeaderButton("Summary")).toBe(
+        expect(firstHeaderButton("Summary")).toBe(
             screen.getByRole("button", { name: "Collapse summary" }),
         );
     });

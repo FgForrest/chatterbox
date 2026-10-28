@@ -116,7 +116,8 @@ describe("MarkdownActions", () => {
         ).toContain("/markdown/agenda?");
     });
     it("copies the same summary Markdown returned by the download route", async () => {
-        const markdown = "---\ntitle: Summary\n---\n";
+        const markdown =
+            "---\ntitle: Summary\n---\n\n## Summary\n\nDecisions made\n\n## Key Points\n\n- First decision\n";
         vi.stubGlobal(
             "fetch",
             vi.fn().mockResolvedValue(
@@ -138,6 +139,15 @@ describe("MarkdownActions", () => {
         );
 
         await waitFor(() => expect(writeText).toHaveBeenCalledWith(markdown));
+        const copied = writeText.mock.calls[0][0] as string;
+        expect(copied.indexOf("Decisions made")).toBeLessThan(
+            copied.indexOf("## Key Points"),
+        );
+        expect(
+            screen
+                .getByRole("link", { name: "Download summary Markdown" })
+                .getAttribute("href"),
+        ).toBe("/api/recordings/rec-1/markdown/summary?source=riffado");
         expect(fetch).toHaveBeenCalledWith(
             "/api/recordings/rec-1/markdown/summary?source=riffado",
             { cache: "no-store" },

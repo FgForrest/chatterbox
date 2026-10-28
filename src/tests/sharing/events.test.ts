@@ -111,6 +111,18 @@ describe("event parsing", () => {
             parseClientEvent('{"type":"recording","recordingId":"r"}'),
         ).toEqual({ type: "recording", recordingId: "r" });
     });
+    it("preserves an optional recording origin and still rejects extra content", () => {
+        const event = { type: "recording", recordingId: "r", origin: "tab-a" };
+        expect(parseClientEvent(JSON.stringify(event))).toEqual(event);
+        for (const origin of [null, 1, {}]) {
+            expect(
+                parseClientEvent(JSON.stringify({ ...event, origin })),
+            ).toBeNull();
+        }
+        expect(
+            parseClientEvent(JSON.stringify({ ...event, content: "private" })),
+        ).toBeNull();
+    });
 });
 
 describe("personal subscriptions", () => {
@@ -181,6 +193,14 @@ describe("GET /api/events", () => {
         for (const listener of mocks.orgListeners) listener({ type: "tree" });
         expect(await read(a.reader)).toBe('data: {"type":"tree"}\n\n');
         expect(await read(b.reader)).toBe('data: {"type":"tree"}\n\n');
+        const event = {
+            type: "recording" as const,
+            recordingId: "r",
+            origin: "tab-a",
+        };
+        for (const listener of mocks.orgListeners) listener(event);
+        expect(await read(a.reader)).toBe(`data: ${JSON.stringify(event)}\n\n`);
+        expect(await read(b.reader)).toBe(`data: ${JSON.stringify(event)}\n\n`);
         expect(a.response.headers.get("Content-Type")).toBe(
             "text/event-stream; charset=utf-8",
         );

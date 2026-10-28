@@ -49,7 +49,7 @@ E-mail ukazuje odesílatele, s označením **Ověřeno**, když ho podepsala dom
 
 Vyhledávání v Klepech najde slova i v přeposlaných a citovaných zprávách. Podpisy a doložky o důvěrnosti se neprohledávají.
 
-S postupem zpracování se v tomto pořadí zobrazují vložené prvky kontroly Učení, **Shrnutí** a **Kontrola úkolů**. Hotové prvky se během další práce skládají do jednoho řádku. Krok, který po pracovním postupu spustíte sami, ukazuje svůj průběh na místě; okno kontroly se otevře až po kliknutí na **Zkontrolovat** nebo **Zobrazit výsledky**.
+S postupem zpracování se v tomto pořadí zobrazují vložené prvky kontroly Učení, **Shrnutí** a **Kontrola úkolů**. Probíhající kroky a kontroly zůstávají na místě. Dokončené výsledky Učení najdete ve **Znalostech**, pod ikonou knihy v záhlaví položky. Otevře stejný panel jako u nahrávek a složek, s údaji z pošty a bez záložky Mluvčí. **Zpět** vrátí zprávu. Shrnutí má stejné ikony záhlaví, tužku u profilu v zápatí a klíčové body jako shrnutí nahrávky.
 
 Pošta odeslaná stroji (automatické odpovědi, konference, oznámení) se uchová, ale je označena **Nezpracováno**. Nespustí se pro ni žádný krok AI.
 

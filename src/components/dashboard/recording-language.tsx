@@ -1,8 +1,8 @@
 "use client";
 
-import { Languages } from "lucide-react";
+import { Languages, Pencil } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
     AlertDialog,
@@ -16,7 +16,14 @@ import {
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { NativeSelect } from "@/components/ui/native-select";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { ActionTooltip } from "@/components/ui/tooltip";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import {
     normalizeDetectedLanguage,
@@ -64,7 +71,7 @@ export function RecordingLanguage({
 }) {
     const i18n = useExtracted();
     const locale = useLocale();
-    const selectId = useId();
+    const [editing, setEditing] = useState(false);
     const [metadata, setMetadata] = useState<LanguageMetadata | null>(null);
     const [saving, setSaving] = useState(false);
     const [regeneratingTitle, setRegeneratingTitle] = useState(false);
@@ -91,9 +98,7 @@ export function RecordingLanguage({
     const detected = normalizeDetectedLanguage(detectedLanguage);
     const shown = confirmed ?? detectedLanguage;
     const canChange = !readOnly && metadata?.canChange === true;
-    const label = confirmed
-        ? i18n("Confirmed language")
-        : i18n("Detected language");
+
     const change = async (language: string | null) => {
         if ((metadata?.confirmedLanguage ?? null) === language) return;
         const previous = metadata;
@@ -163,38 +168,64 @@ export function RecordingLanguage({
     return (
         <div className="flex flex-wrap items-center gap-2">
             <Languages className="size-3" />
-            {canChange ? (
-                <label htmlFor={selectId} className="flex items-center gap-1">
-                    <span>{label}</span>
-                    {!confirmed && (
-                        <span>{shown ? name(shown) : i18n("Unknown")}</span>
-                    )}
-                    <NativeSelect
-                        id={selectId}
+            {canChange && editing ? (
+                <Select
+                    open
+                    onOpenChange={(next) => {
+                        if (!next) setEditing(false);
+                    }}
+                    value={confirmed ?? "auto"}
+                    onValueChange={(value) => {
+                        setEditing(false);
+                        void change(value === "auto" ? null : value);
+                    }}
+                >
+                    <SelectTrigger
                         className="h-7 w-auto text-xs"
                         aria-label={i18n("Transcript language")}
-                        disabled={saving}
-                        value={confirmed ?? "auto"}
-                        onChange={(event) =>
-                            void change(
-                                event.target.value === "auto"
-                                    ? null
-                                    : event.target.value,
-                            )
-                        }
                     >
-                        <option value="auto">{i18n("Automatic")}</option>
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="auto">
+                            {i18n("Automatic")}
+                        </SelectItem>
                         {SELECTABLE_RECORDING_LANGUAGES.map((option) => (
-                            <option key={option.code} value={option.code}>
+                            <SelectItem key={option.code} value={option.code}>
                                 {name(option.code)}
-                            </option>
+                            </SelectItem>
                         ))}
-                    </NativeSelect>
-                </label>
+                    </SelectContent>
+                </Select>
             ) : (
-                <span>
-                    {label}: {shown ? name(shown) : i18n("Unknown")}
-                </span>
+                <>
+                    <span>
+                        {confirmed
+                            ? name(confirmed)
+                            : i18n("{language} (detected)", {
+                                  language: shown
+                                      ? name(shown)
+                                      : i18n("Unknown"),
+                              })}
+                    </span>
+                    {canChange && (
+                        <ActionTooltip
+                            label={i18n("Change transcript language")}
+                        >
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                className="size-6"
+                                disabled={saving}
+                                aria-label={i18n("Change transcript language")}
+                                onClick={() => setEditing(true)}
+                            >
+                                <Pencil className="size-3" />
+                            </Button>
+                        </ActionTooltip>
+                    )}
+                </>
             )}
             {canChange && confirmed && (
                 <>

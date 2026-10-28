@@ -22,6 +22,9 @@ interface RecordingPlayerHeaderProps {
      * its ownership alone: Organization curators may rename shared items.
      */
     titleReadOnly?: boolean;
+    onKnowledge?: () => void;
+    knowledgeOpen?: boolean;
+    pendingLearnCount?: number;
 }
 
 interface RecordingWaveformStatusProps {
@@ -40,6 +43,9 @@ export function RecordingPlayerHeader({
     onRenamed,
     shared = false,
     titleReadOnly,
+    onKnowledge,
+    knowledgeOpen,
+    pendingLearnCount,
 }: RecordingPlayerHeaderProps) {
     const locale = useLocale();
     const formatDateTime = useDateTimeFormatter();
@@ -97,6 +103,9 @@ export function RecordingPlayerHeader({
             readOnly={titleReadOnly ?? recording.isOwn === false}
             onRenamed={onRenamed}
             action={action}
+            onKnowledge={onKnowledge}
+            knowledgeOpen={knowledgeOpen}
+            pendingLearnCount={pendingLearnCount}
             retentionNotes={retentionNotes}
         />
     );

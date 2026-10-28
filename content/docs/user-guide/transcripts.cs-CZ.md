@@ -42,13 +42,13 @@ Funguje jakákoli služba, která podporuje OpenAI API, a další tři jsou zabu
 
 ![Přepis s mluvčími, tématy a poznatky z Učení](images/transcript-speakers.png)
 
-Přepis s mluvčími je čten jako rozhovor, každý příspěvek je barevně odlišený blok se jménem mluvčího a časem začátku. **Sbalit přepis** na pravém konci záhlaví přepis skryje; na stejném místě se pak zobrazí **Rozbalit přepis**. V zápatí vidíte, který poskytovatel a model jej vytvořil, v jakém jazyce a jak je dlouhý.
+Přepis s mluvčími se čte jako rozhovor, každý příspěvek je barevně odlišený blok se jménem mluvčího a časem začátku. Šipka vlevo od nadpisu **Přepis** kartu sbalí nebo rozbalí. Vpravo kruhová šipka **Přepsat znovu** požádá o potvrzení, za ní následují ikony stažení a kopírování. Popisek ikony se zobrazí po najetí myší nebo zaměření klávesnicí. V zápatí vidíte poskytovatele, model, jazyk a délku přepisu.
 
 <span id="recording-language" />
 
 ### Jazyk nahrávky
 
-Dokud jazyk nepotvrdíte, zápatí označuje odhad poskytovatele jako **Rozpoznaný jazyk**. Poté ukazuje **Potvrzený jazyk**. Změnit jej může každý, kdo smí upravovat přepis: vlastník nebo kurátor v pohledu Organizace. Volba patří nahrávce a zůstane zachována i po novém přepisu. Volba **Automaticky** potvrzení smaže a vrátí automatické určování jazyka.
+Zápatí ukazuje použitý jazyk, například **čeština (rozpoznaný)**, dokud jej nepotvrdíte, potom jen **čeština**. Tužka vedle jazyka otevře seznam. Výběr uloží změnu; Escape nebo zavření seznamu nic nemění. Jazyk může měnit vlastník nebo kurátor v pohledu Organizace. Ostatní čtenáři vidí jen text. Volba patří nahrávce a zůstane zachována i po novém přepisu. **Automaticky** potvrzení smaže.
 
 Výslovně zvolený jazyk výstupu v profilu nebo nastavení účtu má přednost. Jinak potvrzený jazyk určuje jazyk shrnutí, názvu a témat a poskytuje jazykový kontext Učení, opravám a pravopisu. Bez potvrzení automatický výstup následuje převládající jazyk přepisu.
 
@@ -105,7 +105,7 @@ Pokud Učení opravilo špatně rozpoznané jméno, přepis jej zobrazuje již o
 | --- | --- |
 | ![Opravený přepis](images/transcript-corrected.png) | ![Původní přepis](images/transcript-original.png) |
 
-- Přepínač **Původní znění** na konci lišty kapitol ukáže, co slyšel poskytovatel. Vypnutím se vrátíte k opravenému textu. Zobrazí se jen tehdy, když Učení něco opravilo, i bez témat. V úzké kartě se popisek zkrátí na **Původní** a záhlaví používá ikony. Kopírování a stahování najdete v nabídce akcí přepisu.
+- Přepínač **Původní znění** na konci lišty kapitol ukáže, co slyšel poskytovatel. Vypnutím se vrátíte k opravenému textu. Zobrazí se jen tehdy, když Učení něco opravilo, i bez témat. V úzké kartě se popisek zkrátí na **Původní** a záhlaví používá ikony. Stažení i kopírování zůstávají přímo dostupné jako ikony v záhlaví.
 - Klikněte na opravené slovo a zrušíte tuto jednu opravu.
 - Shrnutí, témata, vyhledávání, exporty i API vždy využívají opravený text.
 
