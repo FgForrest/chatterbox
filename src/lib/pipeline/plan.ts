@@ -220,6 +220,7 @@ function plaudTasksPending(
     if (
         facts.item.kind !== "audio" ||
         !source ||
+        facts.summary.edited ||
         facts.profile?.tasksEnabled === false ||
         !facts.profile?.automatic.summary ||
         stepProviderAvailable(facts, "summary")
@@ -377,6 +378,7 @@ function planMail(
     const actions: PipelineAction[] = [];
     const steps = { ...facts.phases.summary?.steps };
     for (const step of ["summary"] as const) {
+        if (step === "summary" && facts.summary.edited) continue;
         if (
             facts.profile?.automatic[step] &&
             !stepProviderAvailable(facts, step) &&
@@ -394,6 +396,7 @@ function planMail(
         }
     }
     if (
+        !facts.summary.edited &&
         facts.profile?.automatic.summary &&
         stepProviderAvailable(facts, "summary") &&
         !stepRequested(
@@ -534,6 +537,7 @@ function planReleasedAudio(
             true,
         );
     for (const step of ["topics", "summary"] as const) {
+        if (step === "summary" && facts.summary.edited) continue;
         if (
             facts.profile?.automatic[step] &&
             !stepProviderAvailable(facts, step) &&
@@ -577,6 +581,7 @@ function planReleasedAudio(
     if (plaudTasksPending(facts, input, minimumGeneration)) {
         actions.push(plaudTasksAction(facts, input, steps));
     } else if (
+        !facts.summary.edited &&
         facts.profile?.automatic.summary &&
         stepProviderAvailable(facts, "summary") &&
         !facts.summary.jobActive &&
@@ -606,6 +611,7 @@ function planTranscriptAudio(
         ? (["topics", "summary"] as const)
         : (["summary"] as const);
     for (const step of providerSteps) {
+        if (step === "summary" && facts.summary.edited) continue;
         if (
             facts.profile?.automatic[step] &&
             !stepProviderAvailable(facts, step) &&
@@ -674,6 +680,7 @@ function planTranscriptAudio(
     if (plaudTasksPending(facts, input, minimumGeneration)) {
         actions.push(plaudTasksAction(facts, input, steps));
     } else if (
+        !facts.summary.edited &&
         facts.profile?.automatic.summary &&
         stepProviderAvailable(facts, "summary") &&
         !stepRequested(
@@ -1243,6 +1250,25 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
         learn.reason === "review_pending_timeout" &&
         sameInput(learn, input);
     const planSummary = () => {
+        if (
+            facts.summary.edited &&
+            !stepRequested(
+                facts.phases.summary,
+                "summary",
+                input,
+                minimumGeneration,
+            )
+        ) {
+            actions.push(
+                skippedSummaryStepMarker(
+                    facts,
+                    input,
+                    "summary",
+                    { ...facts.phases.summary?.steps },
+                    "hand_edited",
+                ),
+            );
+        }
         if (facts.item.kind === "mail") {
             actions.push(...planMail(facts, input, minimumGeneration));
         } else if (

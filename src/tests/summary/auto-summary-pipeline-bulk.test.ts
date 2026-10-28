@@ -13,6 +13,9 @@ vi.mock("@/db/queries/async-jobs", () => ({
         Math.max(1_000, (backlog + 1) * 1_000),
     ),
 }));
+vi.mock("@/lib/summary/corrections", () => ({
+    summaryEditState: vi.fn().mockResolvedValue(null),
+}));
 vi.mock("@/lib/env", () => ({
     env: { AUTO_SUMMARY_RATE_LIMIT_PER_HOUR: 2 },
 }));

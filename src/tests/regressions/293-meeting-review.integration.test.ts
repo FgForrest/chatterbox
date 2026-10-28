@@ -637,7 +637,13 @@ suite("meeting planning server (PostgreSQL)", () => {
                         : { text: encryptText("Edited topic") },
                 )
                 .where(eq(agendaPoints.id, point.id));
-        expect(await summary(loaded)).toEqual({ committed: true });
+        expect(await summary(loaded)).toMatchObject({
+            committed: true,
+            summaryVersion: {
+                id: expect.any(String),
+                revision: expect.any(Number),
+            },
+        });
         expect(await db.select().from(aiEnhancements)).toHaveLength(1);
         expect(await getMeeting("owner", meeting.id)).toMatchObject({
             outcomeUnplanned: ["Transcript topic"],
@@ -657,7 +663,13 @@ suite("meeting planning server (PostgreSQL)", () => {
         await summary(agenda);
         const before = await getMeeting("owner", meeting.id);
         if (before.unchanged) throw new Error("Missing detail");
-        expect(await summary(agenda, null)).toEqual({ committed: true });
+        expect(await summary(agenda, null)).toMatchObject({
+            committed: true,
+            summaryVersion: {
+                id: expect.any(String),
+                revision: expect.any(Number),
+            },
+        });
         expect(await getMeeting("owner", meeting.id)).toMatchObject({
             outcomeSummaryId: before.outcomeSummaryId,
             outcomeUnplanned: ["Transcript topic"],

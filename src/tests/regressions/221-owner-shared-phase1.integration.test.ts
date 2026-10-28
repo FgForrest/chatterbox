@@ -550,7 +550,13 @@ const content = {
                         ],
                     },
                 }),
-            ).resolves.toEqual({ committed: true });
+            ).resolves.toMatchObject({
+                committed: true,
+                summaryVersion: {
+                    id: expect.any(String),
+                    revision: expect.any(Number),
+                },
+            });
             expect(
                 await completeJob({
                     jobId: "running-summary",
@@ -1877,8 +1883,12 @@ const content = {
                     inputs,
                 });
             if (finished)
-                expect(await write(profileA.revisionId)).toEqual({
+                expect(await write(profileA.revisionId)).toMatchObject({
                     committed: true,
+                    summaryVersion: {
+                        id: expect.any(String),
+                        revision: expect.any(Number),
+                    },
                 });
             const settled = await readProcessing(ITEM, "private", OWNER);
             await moveRecordingBetweenFolders({
@@ -1904,8 +1914,12 @@ const content = {
                         await gatherFacts(ITEM, "private", OWNER),
                     ).actions.some((action) => action.type === "queueSummary"),
                 ).toBe(true);
-                expect(await write(profileB.revisionId)).toEqual({
+                expect(await write(profileB.revisionId)).toMatchObject({
                     committed: true,
+                    summaryVersion: {
+                        id: expect.any(String),
+                        revision: expect.any(Number),
+                    },
                 });
             }
             const facts = await gatherFacts(ITEM, "private", OWNER);

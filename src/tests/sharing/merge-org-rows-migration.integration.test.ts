@@ -11,6 +11,7 @@ import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { eq, sql } from "drizzle-orm";
 import { integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { nanoid } from "nanoid";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
     aiEnhancements,
@@ -55,6 +56,19 @@ const historicalRecordings = pgTable("recordings", {
     storageType: text("storage_type"),
     storagePath: text("storage_path"),
     plaudVersion: text("plaud_version"),
+});
+
+const historicalEnhancements = pgTable("ai_enhancements", {
+    id: text("id")
+        .primaryKey()
+        .$defaultFn(() => nanoid()),
+    itemId: text("recording_id"),
+    userId: text("user_id"),
+    transcriptionId: text("transcription_id"),
+    summary: text("summary"),
+    provider: text("provider"),
+    model: text("model"),
+    source: text("source"),
 });
 
 const OWNER = "user-owner";
@@ -139,7 +153,7 @@ describeWithDatabase("merging the Organization's rows (PostgreSQL)", () => {
         text: string,
     ) {
         const [row] = await db()
-            .insert(aiEnhancements)
+            .insert(historicalEnhancements)
             .values({
                 itemId: recordingId,
                 userId,
@@ -149,7 +163,7 @@ describeWithDatabase("merging the Organization's rows (PostgreSQL)", () => {
                 model: "gpt",
                 source: "riffado",
             })
-            .returning({ id: aiEnhancements.id });
+            .returning({ id: historicalEnhancements.id });
         return row?.id ?? "";
     }
 

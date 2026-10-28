@@ -12,9 +12,11 @@ import {
     SUMMARY_SPEAKER_DIRECTIVE,
     SUMMARY_TEMPLATE_KIND,
 } from "@/lib/ai/summary-presets";
-import { decryptJsonField } from "@/lib/encryption/fields";
+import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
+import { speakerLabelsForTranscript } from "@/lib/knowledge/speaker-label-rules";
+import { inferSummarySpeakerNumberOffset } from "@/lib/knowledge/speaker-references";
 import { modelInput } from "@/lib/learn/llm-input";
 import {
     agendaPlanBlock,
@@ -62,6 +64,8 @@ import {
 } from "@/lib/tasks/proposals";
 import { upsertEnhancement } from "@/lib/transcription/persist";
 import { readPreferredTranscript } from "@/lib/transcription/read-source";
+import { readTranscriptTurns } from "@/lib/transcription/read-turns";
+import { summaryCorrectionsContext, summaryEditState } from "./corrections";
 import { generateMailSummary } from "./generate-mail-summary";
 import type { MultiPassProgress } from "./multi-pass";
 import { resolveMultiPass } from "./multi-pass-resolution";
@@ -69,6 +73,10 @@ import { readPlaudActionItems } from "./read-summary";
 import { runSummary, summaryModelFor } from "./summary-model";
 
 export interface GenerateSummaryOptions {
+    reviseWithRemarks?: boolean;
+    replaceEdited?: boolean;
+    expectedSummaryRevision?: number;
+    expectedSummaryId?: string | null;
     /**
      * Preset id to use for this run. Overrides the user's default
      * `summaryPrompt.selectedPrompt`. When omitted, falls back to the
@@ -109,6 +117,7 @@ export interface GenerateSummaryResult {
     model: string;
     /** False when commit fencing discarded output made from old inputs. */
     committed?: boolean;
+    summaryVersion?: { id: string; revision: number };
     /** Inputs captured before the title model may run after this summary. */
     titleFence?: TitleInputFence;
     /** Prompt id actually used. Can differ from the requested preset. */
@@ -173,6 +182,41 @@ export async function generateSummaryForRecording(
             404,
         );
     }
+    // Before the provider is paid; the write checks again under the lock.
+    const refusal = await contentWriterRefusalNow({
+        recordingId,
+        ownerUserId: ctx.ownerUserId,
+        actorUserId: ctx.actorUserId,
+        actsForOrganization: ctx.actsForOrganization,
+    });
+    if (refusal) throw writerRefusalError(refusal);
+    const editState = await summaryEditState(ctx.ownerUserId, recordingId);
+    if (
+        editState?.editedAt &&
+        (opts.trigger === "auto" ||
+            (!opts.reviseWithRemarks && !opts.replaceEdited))
+    ) {
+        return {
+            ownerUserId: ctx.ownerUserId,
+            summary: "",
+            keyPoints: [],
+            actionItems: [],
+            provider: "",
+            model: "",
+            promptId: "",
+            promptFallback: false,
+            committed: false,
+        };
+    }
+    opts = {
+        ...opts,
+        ...(opts.expectedSummaryId === undefined
+            ? {
+                  expectedSummaryId: editState?.id ?? null,
+                  expectedSummaryRevision: editState?.revision,
+              }
+            : {}),
+    };
     const [item] = await db
         .select({ kind: chatterItems.kind })
         .from(chatterItems)
@@ -191,14 +235,6 @@ export async function generateSummaryForRecording(
         ctx.view === "org" || ctx.settingsUserId !== ctx.ownerUserId;
     // The owner's rows in either view: a shared recording is one recording.
     const userId = ctx.contentUserId;
-    // Before the provider is paid; the write checks again under the lock.
-    const refusal = await contentWriterRefusalNow({
-        recordingId,
-        ownerUserId: ctx.ownerUserId,
-        actorUserId: ctx.actorUserId,
-        actsForOrganization: ctx.actsForOrganization,
-    });
-    if (refusal) throw writerRefusalError(refusal);
 
     const itemProfileRevisionId =
         (
@@ -251,7 +287,7 @@ export async function generateSummaryForRecording(
                 revisionId: opts.profileRevisionId,
                 actorUserId: ctx.actorUserId,
                 channel: "audio",
-                view: orgView ? "org" : ctx.view,
+                view: ctx.view,
             })
           : await ((opts.trigger ?? "manual") === "manual"
                 ? resolveManualItemProfile
@@ -427,7 +463,17 @@ export async function generateSummaryForRecording(
           )
         : [];
     const plaudHints = buildPlaudActionItemHints(plaudActionItems);
+    const corrections =
+        ctx.actorUserId === ctx.ownerUserId
+            ? await summaryCorrectionsContext(
+                  ctx.ownerUserId,
+                  recordingId,
+                  opts.reviseWithRemarks === true,
+                  true,
+              )
+            : { text: "", count: 0, fingerprint: undefined };
     const prompt = [
+        corrections.text,
         localizedTemplate.replaceAll("{transcription}", () => transcriptText),
         tasksEnabled ? tasksContext.text : "",
         plaudHints,
@@ -474,6 +520,7 @@ export async function generateSummaryForRecording(
         },
         systemContent,
         prompt,
+        mergeContext: corrections.text,
         mergeSystem: (mergePrompt) =>
             [
                 mergePrompt,
@@ -486,13 +533,21 @@ export async function generateSummaryForRecording(
             ]
                 .filter(Boolean)
                 .join("\n\n"),
-        multiPass: multiPassResolution.config,
+        multiPass: opts.reviseWithRemarks ? null : multiPassResolution.config,
         onProgress: opts.onProgress,
         tasksEnabled,
         agendaPointIds: agenda?.points.map((point) => point.id),
     });
 
     const { summary, keyPoints, actionItems } = payload;
+    const speakerNumberOffset = inferSummarySpeakerNumberOffset(
+        [summary, ...keyPoints, ...actionItems].join("\n"),
+        speakerLabelsForTranscript({
+            ...transcription,
+            text: decryptText(transcription.text) ?? "",
+            turns: readTranscriptTurns(transcription),
+        }),
+    );
     const tasks = tasksEnabled
         ? await resolveTaskProposals({
               source: "riffado",
@@ -515,7 +570,7 @@ export async function generateSummaryForRecording(
           })
         : null;
 
-    const { committed, reason } = await upsertEnhancement({
+    const { committed, reason, summaryVersion } = await upsertEnhancement({
         userId,
         recordingId,
         transcriptionId: transcription.id,
@@ -533,6 +588,7 @@ export async function generateSummaryForRecording(
         outputFormatLocale: profilePrompt?.formatLocale ?? null,
         payerUserId: summaryModel.payerUserId,
         inputs: {
+            speakerNumberOffset,
             contentId: transcription.id,
             contentSourceId: transcription.source,
             contentRevision: transcription.revision,
@@ -540,8 +596,19 @@ export async function generateSummaryForRecording(
             ...(tasksContext.scopeFingerprint
                 ? { scopeFingerprint: tasksContext.scopeFingerprint }
                 : {}),
-            multiPass: multiPassResolution.source,
+            multiPass: opts.reviseWithRemarks
+                ? "off"
+                : multiPassResolution.source,
         },
+        summaryWriteMode: opts.reviseWithRemarks
+            ? "remarks"
+            : opts.trigger !== "auto"
+              ? "regenerate"
+              : undefined,
+        expectedSummaryRevision: opts.expectedSummaryRevision,
+        expectedSummaryId: opts.expectedSummaryId,
+        remarksAppliedCount: corrections.count,
+        remarksFingerprint: corrections.fingerprint,
         allowReaped: (opts.trigger ?? "manual") === "manual",
         actorUserId: ctx.actorUserId,
         actsForOrganization: ctx.actsForOrganization,
@@ -623,6 +690,7 @@ export async function generateSummaryForRecording(
         promptFallback: profile ? false : usedPromptId !== requestedPromptId,
         multiPass,
         committed: true,
+        summaryVersion,
         titleFence,
     };
 }

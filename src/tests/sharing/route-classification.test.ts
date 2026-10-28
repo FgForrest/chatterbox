@@ -124,7 +124,13 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     "recordings/[id]/corrections/[correctionId]/route.ts": { DELETE: "view" },
     "recordings/[id]/markdown/[kind]/route.ts": { GET: "view" },
     "recordings/[id]/speakers/route.ts": { GET: "view", PUT: "view" },
+    "recordings/[id]/summary/remarks/route.ts": {
+        GET: "owner",
+        POST: "owner",
+        DELETE: "owner",
+    },
     "recordings/[id]/summary/route.ts": {
+        PUT: "owner",
         GET: "view",
         POST: "view",
         DELETE: "view",

@@ -21,6 +21,7 @@ import {
     recordingFolderAssignments,
     recordingFolders,
     recordings,
+    summaryRemarks,
     transcriptions,
     webhookDeliveries,
 } from "@/db/schema";
@@ -585,6 +586,14 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
             await tx
                 .delete(aiEnhancements)
                 .where(eq(aiEnhancements.itemId, id));
+            await tx
+                .delete(summaryRemarks)
+                .where(
+                    and(
+                        eq(summaryRemarks.itemId, id),
+                        eq(summaryRemarks.userId, userId),
+                    ),
+                );
             await deleteItemTaskDataInTx(tx, {
                 itemId: id,
                 ownerUserId: userId,

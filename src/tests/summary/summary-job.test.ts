@@ -49,6 +49,31 @@ describe("parseSummaryJobPayload", () => {
         });
     });
 
+    it.each([
+        { expectedSummaryId: null },
+        { expectedSummaryId: "summary-row", expectedSummaryRevision: 0 },
+    ])("retains the exact expected summary version: %o", (version) => {
+        expect(
+            parseSummaryJobPayload({
+                recordingId: "item",
+                trigger: "manual",
+                ...version,
+            }),
+        ).toMatchObject(version);
+    });
+
+    it.each([
+        { expectedSummaryId: "" },
+        { expectedSummaryId: "summary-row" },
+        { expectedSummaryId: "summary-row", expectedSummaryRevision: -1 },
+        { expectedSummaryRevision: 0 },
+        { expectedSummaryId: 0 },
+    ])("rejects incomplete or malformed summary identity: %o", (version) => {
+        expect(() =>
+            parseSummaryJobPayload({ recordingId: "item", ...version }),
+        ).toThrow(InvalidJobPayloadError);
+    });
+
     it("rejects a payload with no recording to summarise", () => {
         // Permanent by the worker's rules, which is right: there is nothing
         // to retry towards.

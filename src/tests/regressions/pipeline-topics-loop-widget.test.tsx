@@ -11,6 +11,7 @@ import { processingFixture } from "@/tests/pipeline/processing-fixture";
 
 const mocks = vi.hoisted(() => ({ useSummary: vi.fn() }));
 vi.mock("next-intl", () => ({
+    useLocale: () => "en",
     useExtracted: () => (message: string) => message,
 }));
 vi.mock("@/hooks/use-transcription-summary", () => ({

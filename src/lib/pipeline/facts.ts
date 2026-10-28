@@ -286,6 +286,7 @@ export async function gatherFacts(
         db
             .select({
                 id: aiEnhancements.id,
+                editedAt: aiEnhancements.editedAt,
                 inputs: aiEnhancements.inputs,
                 transcriptionId: aiEnhancements.transcriptionId,
                 inputFingerprint: aiEnhancements.inputFingerprint,
@@ -822,6 +823,7 @@ export async function gatherFacts(
                 : undefined,
         mail: item.kind === "mail" && mail ? { ...mail, shared } : null,
         summary: {
+            edited: summary?.editedAt != null,
             exists: summaryExists,
             stale: summaryStale,
             staleFingerprint: staleFingerprint ?? undefined,

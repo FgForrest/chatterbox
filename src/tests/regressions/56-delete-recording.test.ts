@@ -335,6 +335,7 @@ import {
     recordings as recordingsTable,
     recordingTaskRejections,
     recordingTasks,
+    summaryRemarks,
     taskContentVectors,
     taskMentions,
     taskUpdateProposals,
@@ -374,33 +375,35 @@ describe("DELETE /api/recordings/[id]", () => {
         // .update calls are recorded by table-reference identity so we can
         // assert both the operation order and the target table.
         const tableName = (t: unknown): string =>
-            t === transcriptionsTable
-                ? "transcriptions"
-                : t === aiEnhancements
-                  ? "ai_enhancements"
-                  : t === recordingsTable
-                    ? "recordings"
-                    : t === webhookDeliveries
-                      ? "webhook_deliveries"
-                      : t === asyncJobs
-                        ? "async_jobs"
-                        : t === learnDismissals
-                          ? "learn_dismissals"
-                          : t === recordingTasks
-                            ? "recording_tasks"
-                            : t === taskContentVectors
-                              ? "task_content_vectors"
-                              : t === taskMentions
-                                ? "task_mentions"
-                                : t === recordingTaskRejections
-                                  ? "recording_task_rejections"
-                                  : t === taskUpdateProposals
-                                    ? "task_update_proposals"
-                                    : t === chatterItems
-                                      ? "chatter_items"
-                                      : t === itemShares
-                                        ? "item_shares"
-                                        : "unknown";
+            t === summaryRemarks
+                ? "summary_remarks"
+                : t === transcriptionsTable
+                  ? "transcriptions"
+                  : t === aiEnhancements
+                    ? "ai_enhancements"
+                    : t === recordingsTable
+                      ? "recordings"
+                      : t === webhookDeliveries
+                        ? "webhook_deliveries"
+                        : t === asyncJobs
+                          ? "async_jobs"
+                          : t === learnDismissals
+                            ? "learn_dismissals"
+                            : t === recordingTasks
+                              ? "recording_tasks"
+                              : t === taskContentVectors
+                                ? "task_content_vectors"
+                                : t === taskMentions
+                                  ? "task_mentions"
+                                  : t === recordingTaskRejections
+                                    ? "recording_task_rejections"
+                                    : t === taskUpdateProposals
+                                      ? "task_update_proposals"
+                                      : t === chatterItems
+                                        ? "chatter_items"
+                                        : t === itemShares
+                                          ? "item_shares"
+                                          : "unknown";
 
         (db.transaction as Mock).mockImplementation(
             async (cb: (tx: unknown) => Promise<unknown>) => {
@@ -650,13 +653,14 @@ describe("DELETE /api/recordings/[id]", () => {
             (db.transaction as Mock).mock.invocationCallOrder[0],
         );
         // All writes ran in the same transaction…
-        expect(txCalls).toHaveLength(13);
+        expect(txCalls).toHaveLength(14);
         // …in this order: queued jobs → transcriptions → ai_enhancements →
         // Learn dismissals → webhook redaction → recording → its item.
         expect(txCalls.map((c) => `${c.op}:${c.table}`)).toEqual([
             "update:async_jobs",
             "delete:transcriptions",
             "delete:ai_enhancements",
+            "delete:summary_remarks",
             "delete:task_mentions",
             "delete:recording_tasks",
             "delete:task_content_vectors",
@@ -735,6 +739,7 @@ describe("DELETE /api/recordings/[id]", () => {
             "update:async_jobs",
             "delete:transcriptions",
             "delete:ai_enhancements",
+            "delete:summary_remarks",
             "delete:task_mentions",
             "delete:recording_tasks",
             "delete:task_content_vectors",

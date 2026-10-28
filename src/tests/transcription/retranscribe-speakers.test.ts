@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
+vi.mock("@/lib/summary/corrections", () => ({
+    summaryEditState: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock("@/db", () => ({
     db: {
         select: vi.fn(),

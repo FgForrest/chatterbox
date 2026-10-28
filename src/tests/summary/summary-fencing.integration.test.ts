@@ -234,7 +234,13 @@ describeWithDatabase("summary commit fencing (PostgreSQL)", () => {
                     itemProfileRevisionId: null,
                 },
             }),
-        ).resolves.toEqual({ committed: true });
+        ).resolves.toMatchObject({
+            committed: true,
+            summaryVersion: {
+                id: expect.any(String),
+                revision: expect.any(Number),
+            },
+        });
 
         const [processing] = await db()
             .select({ phases: itemProcessing.phases })

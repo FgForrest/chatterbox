@@ -41,6 +41,7 @@ import {
     recordingFolderAssignments,
     recordingFolders,
     recordings,
+    summaryRemarks,
     transcriptCorrections,
     transcriptions,
     transcriptSpeakerRejections,
@@ -401,6 +402,7 @@ export async function buildAndUploadExportArchive(input: {
         };
         aiProviderRates?: { count: number; path: string };
         aiUsage?: { count: number; path: string };
+        summaryRemarks?: { count: number; path: string };
         /** Mail of the pile: each a directory with message.eml and mail.json. */
         mail?: {
             id: string;
@@ -606,6 +608,19 @@ export async function buildAndUploadExportArchive(input: {
                     JSON.stringify(
                         {
                             summary: enhancement.summary,
+                            editedAt:
+                                enhancement.editedAt?.toISOString() ?? null,
+                            editedByUserId: enhancement.editedByUserId ?? null,
+                            revision: enhancement.revision ?? 0,
+                            ...(scope.kind === "personal"
+                                ? {
+                                      remarksAppliedCount:
+                                          enhancement.remarksAppliedCount ?? 0,
+                                  }
+                                : {
+                                      correctedWithRemarks:
+                                          enhancement.remarksAppliedCount > 0,
+                                  }),
                             actionItems: enhancement.actionItems,
                             keyPoints: enhancement.keyPoints,
                             source: enhancement.source,
@@ -641,6 +656,18 @@ export async function buildAndUploadExportArchive(input: {
                             transcriptionId: item.transcriptionId,
                             source: item.source,
                             summary: item.summary,
+                            editedAt: item.editedAt?.toISOString() ?? null,
+                            editedByUserId: item.editedByUserId ?? null,
+                            revision: item.revision ?? 0,
+                            ...(scope.kind === "personal"
+                                ? {
+                                      remarksAppliedCount:
+                                          item.remarksAppliedCount ?? 0,
+                                  }
+                                : {
+                                      correctedWithRemarks:
+                                          item.remarksAppliedCount > 0,
+                                  }),
                             actionItems: item.actionItems,
                             keyPoints: item.keyPoints,
                             provider: item.provider,
@@ -874,6 +901,35 @@ export async function buildAndUploadExportArchive(input: {
         ...recordingIds,
         ...archivedMail.map((mail) => mail.id),
     ]);
+    if (scope.kind === "personal" && containedItemIds.size > 0) {
+        const remarks = await db
+            .select()
+            .from(summaryRemarks)
+            .where(
+                and(
+                    eq(summaryRemarks.userId, scope.userId),
+                    inArray(summaryRemarks.itemId, [...containedItemIds]),
+                ),
+            );
+        if (remarks.length > 0) {
+            const path = "summaries/remarks.json";
+            archive.append(
+                Buffer.from(
+                    JSON.stringify(
+                        remarks.map((remark) => ({
+                            ...remark,
+                            text: decryptText(remark.text),
+                            createdAt: remark.createdAt.toISOString(),
+                        })),
+                        null,
+                        2,
+                    ),
+                ),
+                { name: path },
+            );
+            manifest.summaryRemarks = { count: remarks.length, path };
+        }
+    }
     const personShares = await collectArchivedItemShares(
         scope,
         containedItemIds,

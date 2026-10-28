@@ -40,6 +40,11 @@ export interface ArchivedMail {
         id: string;
         source: string;
         summary: string | null;
+        editedAt: string | null;
+        editedByUserId: string | null;
+        revision: number;
+        remarksAppliedCount?: number;
+        correctedWithRemarks?: boolean;
         keyPoints: unknown;
         actionItems: unknown;
         transcriptionId: string | null;
@@ -124,6 +129,10 @@ export async function collectArchivedMail(
                 itemId: aiEnhancements.itemId,
                 source: aiEnhancements.source,
                 summary: aiEnhancements.summary,
+                editedAt: aiEnhancements.editedAt,
+                editedByUserId: aiEnhancements.editedByUserId,
+                revision: aiEnhancements.revision,
+                remarksAppliedCount: aiEnhancements.remarksAppliedCount,
                 keyPoints: aiEnhancements.keyPoints,
                 actionItems: aiEnhancements.actionItems,
                 transcriptionId: aiEnhancements.transcriptionId,
@@ -187,6 +196,14 @@ export async function collectArchivedMail(
             .map((summary) => ({
                 id: summary.id,
                 source: summary.source,
+                editedAt: summary.editedAt?.toISOString() ?? null,
+                editedByUserId: summary.editedByUserId ?? null,
+                revision: summary.revision ?? 0,
+                ...(scope.kind === "personal"
+                    ? { remarksAppliedCount: summary.remarksAppliedCount ?? 0 }
+                    : {
+                          correctedWithRemarks: summary.remarksAppliedCount > 0,
+                      }),
                 summary: summary.summary ? decryptText(summary.summary) : null,
                 keyPoints: decryptJsonField(summary.keyPoints) ?? [],
                 actionItems: decryptJsonField(summary.actionItems) ?? [],

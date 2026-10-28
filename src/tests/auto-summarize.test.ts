@@ -18,6 +18,10 @@ const pipelineMocks = vi.hoisted(() => ({
     updatePhaseInTx: vi.fn(),
 }));
 
+vi.mock("@/lib/summary/corrections", () => ({
+    summaryEditState: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock("@/db", () => ({
     db: {
         select: vi.fn(),

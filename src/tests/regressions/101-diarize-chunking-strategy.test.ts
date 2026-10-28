@@ -100,6 +100,10 @@ describe("issue #101 — buildTranscriptionParams sends chunking_strategy for di
 // `openai.audio.transcriptions.create` with chunking_strategy when a
 // diarize model is in play.
 
+vi.mock("@/lib/summary/corrections", () => ({
+    summaryEditState: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock("@/db", () => ({
     db: {
         select: vi.fn(),

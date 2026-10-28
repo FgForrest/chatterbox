@@ -93,6 +93,12 @@ vi.mock("@/db/schema", async (importOriginal) => ({
     },
     transcriptions: "transcriptions",
     aiEnhancements: "aiEnhancements",
+    summaryRemarks: {
+        __table: "summaryRemarks",
+        userId: "summaryRemarks.userId",
+        itemId: "summaryRemarks.itemId",
+        createdAt: "summaryRemarks.createdAt",
+    },
     processingProfiles: {
         id: "processingProfiles.id",
         ownerUserId: "processingProfiles.ownerUserId",
@@ -326,6 +332,9 @@ function mockSelectSequence(
     let call = 0;
     dbMock.select.mockImplementation(() => ({
         from: (table: { __table?: string }) => {
+            if (table?.__table === "summaryRemarks") {
+                return { where: () => Promise.resolve([]) };
+            }
             if (table?.__table === "aiUsageEvents") {
                 return { where: () => Promise.resolve(extras.usage ?? []) };
             }
