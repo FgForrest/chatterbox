@@ -284,6 +284,66 @@ const url = getTestDatabaseUrl();
                 .where(eq(itemShares.id, "share"));
             expect((await request("?view=received")).status).toBe(404);
         });
+        it.each([
+            false,
+            true,
+        ])("hides every Learn run field from recipients when Organization sharing is %s", async (shared) => {
+            const view = shared ? "org" : "private";
+            if (shared)
+                await database.db.insert(recordingFolderAssignments).values({
+                    userId: "owner",
+                    itemId: "item",
+                    folderId: "org-root",
+                });
+            await database.db.insert(learnRuns).values({
+                id: "finished-run",
+                itemId: "item",
+                userId: "owner",
+                scopeUserId: shared ? "org" : "owner",
+                transcriptionId: kind === "audio" ? "transcript-item" : null,
+                view,
+                trigger: "manual",
+                transcriptRevision: 0,
+                vocabularyVersion: 1,
+                status: "finished",
+                finishedAt: new Date("2026-10-28T14:02:00Z"),
+                stats: { applied: 7, skipped: 3, dismissed: 2 },
+            });
+            const owner = await (await request(`?view=${view}`)).json();
+            expect(owner.item.learn).toEqual({
+                status: "finished",
+                source: kind === "audio" ? "riffado" : null,
+                at: "2026-10-28T14:02:00.000Z",
+                applied: 7,
+                skipped: 3,
+                dismissed: 2,
+                pending: 0,
+            });
+            await database.db.insert(itemShares).values({
+                itemId: "item",
+                userId: "owner",
+                receiverUserId: "recipient",
+                state: "accepted",
+            });
+            mocks.viewer = "recipient";
+            for (const tab of ["people", "speakers", "models"]) {
+                const response = await request(`?view=received&tab=${tab}`);
+                expect(response.status).toBe(200);
+                const recipient = await response.json();
+                expect(recipient.item.learn).toBeNull();
+                for (const field of [
+                    "status",
+                    "source",
+                    "at",
+                    "applied",
+                    "skipped",
+                    "dismissed",
+                    "pending",
+                ])
+                    expect(recipient.item.learn?.[field]).toBeUndefined();
+                expect(recipient.item.review).toBeNull();
+            }
+        });
         it("includes records added by earlier reviews even without other evidence", async () => {
             await database.db.insert(people).values({
                 id: "new-person",
@@ -809,7 +869,7 @@ const url = getTestDatabaseUrl();
                         status: "suggested",
                     }),
                 );
-                expect(recipient.item.learn.pending).toBe(0);
+                expect(recipient.item.learn).toBeNull();
             });
         it("returns 404 to a stranger for every view", async () => {
             mocks.viewer = "stranger";

@@ -987,6 +987,46 @@ describe.each([
         expect(mocks.fetch).toHaveBeenCalledTimes(2);
     });
     if (kind !== "folder") {
+        it("shows no Learn subtitle to recipients", async () => {
+            mocks.fetch.mockResolvedValue(
+                Response.json({
+                    ...response("people"),
+                    item: {
+                        id: "item",
+                        kind,
+                        canReview: false,
+                        modelContextAvailable: false,
+                        speakers: [],
+                        newRecordIds: [],
+                        counts: {
+                            people: 0,
+                            things: 0,
+                            corrections: 0,
+                            facts: 0,
+                            speakers: 0,
+                            models: 0,
+                        },
+                        learn: null,
+                        review: null,
+                    },
+                }),
+            );
+            render(
+                <KnowledgePanel
+                    scope={{
+                        kind: "item",
+                        itemId: "item",
+                        itemKind: kind,
+                        title: "Invented item",
+                        view: "received",
+                    }}
+                    onBack={vi.fn()}
+                />,
+            );
+            await screen.findByText("Vesna Kulra");
+            expect(screen.queryByText(/Learn/)).toBeNull();
+            expect(screen.queryByRole("button", { name: "Review" })).toBeNull();
+        });
         it.each([
             null,
             7,
