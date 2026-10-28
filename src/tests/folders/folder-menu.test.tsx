@@ -20,9 +20,13 @@ import {
 } from "@/lib/folders/drag";
 import type { RecordingFolder } from "@/types/folder";
 
-const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
+const { refresh, push, replace } = vi.hoisted(() => ({
+    refresh: vi.fn(),
+    push: (url: string) => window.history.pushState({}, "", url),
+    replace: (url: string) => window.history.replaceState({}, "", url),
+}));
 vi.mock("next/navigation", () => ({
-    useRouter: () => ({ refresh }),
+    useRouter: () => ({ refresh, push, replace }),
     useSearchParams: () => new URLSearchParams(window.location.search),
 }));
 vi.mock("posthog-js", () => ({ default: { __loaded: false } }));

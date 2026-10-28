@@ -32,6 +32,8 @@ import type { Recording } from "@/types/recording";
 const mocks = vi.hoisted(() => ({
     orgEvents: vi.fn<typeof useOrgEvents>(),
     refresh: vi.fn(),
+    push: (url: string) => window.history.pushState({}, "", url),
+    replace: (url: string) => window.history.replaceState({}, "", url),
     fetch: vi.fn<typeof fetch>(),
 }));
 vi.mock("next-intl", async (importOriginal) => {
@@ -63,7 +65,11 @@ vi.mock("next-intl", async (importOriginal) => {
     };
 });
 vi.mock("next/navigation", () => ({
-    useRouter: () => ({ refresh: mocks.refresh }),
+    useRouter: () => ({
+        refresh: mocks.refresh,
+        push: mocks.push,
+        replace: mocks.replace,
+    }),
     useSearchParams: () => new URLSearchParams(window.location.search),
 }));
 vi.mock("posthog-js", () => ({ default: { __loaded: false } }));

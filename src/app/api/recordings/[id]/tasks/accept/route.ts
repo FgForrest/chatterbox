@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/errors";
+import { readEventOrigin } from "@/lib/events/origin";
 import {
     invalid,
     readTaskBody,
@@ -29,10 +30,15 @@ export const POST = apiHandler<RecordingContext>(async (request, context) => {
     const viewer = await requireTaskViewer(request);
     const body = await readTaskBody(request);
     return NextResponse.json(
-        await acceptReview(viewer, id, {
-            proposals: idList(body.proposals, "proposals"),
-            updates: idList(body.updates, "updates"),
-            matches: idList(body.matches, "matches"),
-        }),
+        await acceptReview(
+            viewer,
+            id,
+            {
+                proposals: idList(body.proposals, "proposals"),
+                updates: idList(body.updates, "updates"),
+                matches: idList(body.matches, "matches"),
+            },
+            readEventOrigin(request.headers),
+        ),
     );
 });

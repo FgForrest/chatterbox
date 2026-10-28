@@ -368,4 +368,23 @@ describe("recording detail layout", () => {
             panelBeforeErase,
         );
     });
+    it("remounts Organization artifacts when another tab invalidates the selected recording", () => {
+        const currentRecording = { ...recording, view: "org" as const };
+        const { rerender } = render(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={currentRecording}
+                contentRevision={0}
+            />,
+        );
+        const before = screen.getByTestId("transcription-panel");
+        rerender(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={currentRecording}
+                contentRevision={1}
+            />,
+        );
+        expect(screen.getByTestId("transcription-panel")).not.toBe(before);
+    });
 });
