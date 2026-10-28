@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { loadStatistics } from "@/db/queries/statistics";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { requestTimeZone } from "@/lib/i18n/user-time-zone";
 import { isStatisticsScope } from "@/lib/statistics/data";
 
 export const GET = apiHandler(async (request: Request) => {
@@ -18,7 +19,7 @@ export const GET = apiHandler(async (request: Request) => {
     const result = await loadStatistics(
         session.user.id,
         scope,
-        params.get("tz") ?? "UTC",
+        params.get("tz") ?? (await requestTimeZone(session.user.id, request)),
     );
     return NextResponse.json(result, {
         headers: { "Cache-Control": "private, no-store" },

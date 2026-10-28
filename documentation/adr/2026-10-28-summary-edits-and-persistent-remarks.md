@@ -91,7 +91,7 @@ out of another actor's provider request. No remark text enters the system instru
   current summary in the transcript's own numbering. Display, later edits and exports use the saved
   offset instead of inferring it from edited prose or key points. The editor projects attributed
   names; saves restore canonical `Speaker N` labels.
-- Migration `0150_summary_edits_and_remarks` adds nullable edit attribution, revision and applied-remark count to
+- Migration `0151_summary_edits_and_remarks` adds nullable edit attribution, revision and applied-remark count to
   `ai_enhancements`, plus owner-scoped `summary_remarks` with item-cascade deletion. User text is
   encrypted. There are no new environment variables, services or provider defaults.
 - Remarks are removed with summary erasure/retention and item deletion. Personal backup archives

@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useDashboardRefresh } from "@/hooks/use-dashboard-refresh";
 import { getApiErrorMessage } from "@/lib/api-errors";
 
 interface UseAutoSyncOptions {
@@ -90,7 +90,7 @@ export function useAutoSync(options: UseAutoSyncOptions = {}) {
         onError,
     } = options;
 
-    const router = useRouter();
+    const refresh = useDashboardRefresh();
     const [status, setStatus] = useState<SyncStatus>({
         isAutoSyncing: false,
         lastSyncTime: null,
@@ -187,7 +187,7 @@ export function useAutoSync(options: UseAutoSyncOptions = {}) {
                     }));
 
                     if (!silent || result.newRecordings > 0) {
-                        router.refresh();
+                        refresh();
                     }
 
                     if (result.newRecordings > 0) {
@@ -236,7 +236,7 @@ export function useAutoSync(options: UseAutoSyncOptions = {}) {
                 }));
             }
         },
-        [router, minInterval, interval],
+        [refresh, minInterval, interval],
     );
 
     useEffect(() => {

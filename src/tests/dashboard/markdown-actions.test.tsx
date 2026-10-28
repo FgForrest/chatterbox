@@ -75,6 +75,46 @@ describe("MarkdownActions", () => {
         ).toContain("/markdown/summary?");
     });
 
+    it("disables download navigation and menu selection while preserving the enabled download", () => {
+        const fetchMock = vi.fn();
+        vi.stubGlobal("fetch", fetchMock);
+        const props = {
+            recordingId: "rec-1",
+            kind: "agenda" as const,
+            source: "agenda",
+            collapseAtNarrowWidth: true,
+        };
+        const { rerender } = render(<MarkdownActions {...props} disabled />);
+        const download = screen.getByLabelText("Download agenda Markdown");
+        expect(download.getAttribute("href")).toBeNull();
+        expect(download.getAttribute("aria-disabled")).toBe("true");
+        expect(download.getAttribute("tabindex")).toBe("-1");
+        expect(download.className).toContain("opacity-50");
+        expect(download.className).toContain("pointer-events-none");
+        fireEvent.click(download);
+        fireEvent.keyDown(download, { key: "Enter" });
+        fireEvent.keyDown(
+            screen.getByRole("button", { name: "Agenda actions" }),
+            { key: "Enter" },
+        );
+        const menuDownload = screen.getByRole("menuitem", {
+            name: "Download agenda Markdown",
+        });
+        expect(menuDownload.getAttribute("aria-disabled")).toBe("true");
+        expect(menuDownload.hasAttribute("data-disabled")).toBe(true);
+        expect(menuDownload.getAttribute("href")).toBeNull();
+        fireEvent.click(menuDownload);
+        fireEvent.keyDown(menuDownload, { key: "Enter" });
+        expect(screen.getByRole("menu")).toBeTruthy();
+        expect(fetchMock).not.toHaveBeenCalled();
+        fireEvent.keyDown(menuDownload, { key: "Escape" });
+        rerender(<MarkdownActions {...props} disabled={false} />);
+        expect(
+            screen
+                .getByRole("link", { name: "Download agenda Markdown" })
+                .getAttribute("href"),
+        ).toContain("/markdown/agenda?");
+    });
     it("copies the same summary Markdown returned by the download route", async () => {
         const markdown =
             "---\ntitle: Summary\n---\n\n## Summary\n\nDecisions made\n\n## Key Points\n\n- First decision\n";

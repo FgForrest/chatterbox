@@ -1,7 +1,6 @@
 "use client";
 
 import { FolderInput, Inbox, Link, Lock, UserPlus } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useExtracted } from "next-intl";
 import {
     createContext,
@@ -37,6 +36,7 @@ import {
     PopoverTrigger,
 } from "@/components/ui/popover";
 import { ActionTooltip } from "@/components/ui/tooltip";
+import { useDashboardRefresh } from "@/hooks/use-dashboard-refresh";
 import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
 import { subscribeEvents } from "@/lib/events/client";
 import type { listMyFolderInvitations } from "@/lib/sharing/folder-shares";
@@ -62,7 +62,7 @@ export function PersonSharingProvider({
     value: boolean;
     children: ReactNode;
 }) {
-    const { refresh } = useRouter();
+    const refresh = useDashboardRefresh();
     return (
         <SharingContext.Provider value={value}>
             <SharingRefreshContext.Provider value={refresh}>
@@ -616,7 +616,7 @@ export function PersonInvitations({
 }) {
     const enabled = usePersonSharing();
     const i18n = useExtracted();
-    const { refresh } = useRouter();
+    const refresh = useDashboardRefresh();
     const [invitations, setInvitations] = useState(initialInvitations);
     const [open, setOpen] = useState(false);
     useEffect(() => {
@@ -886,7 +886,7 @@ export function ReceivedItemBanner({
     shared?: boolean;
 }) {
     const i18n = useExtracted();
-    const { refresh } = useRouter();
+    const refresh = useDashboardRefresh();
     const [filing, setFiling] = useState(false);
     return (
         <div className="space-y-2">

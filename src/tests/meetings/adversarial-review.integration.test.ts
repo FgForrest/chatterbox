@@ -5,7 +5,12 @@ import {
     processingProfiles,
     userSettings,
 } from "@/db/schema";
-import { agendaSuggestionsProvider } from "@/lib/meetings/suggestions-provider";
+import { AppError, ErrorCode } from "@/lib/errors";
+import {
+    agendaSuggestionsAvailability,
+    agendaSuggestionsProvider,
+} from "@/lib/meetings/suggestions-provider";
+import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
 import { defaultProfileSettings } from "@/lib/profiles/settings";
 import { createProfile, getDefaultProfile } from "@/lib/profiles/store";
 import { localActor } from "@/tests/helpers/session-actor";
@@ -172,6 +177,7 @@ import {
     getMeeting,
     patchMeeting,
     prepareMeeting,
+    removeMeetingFromFolder,
 } from "@/lib/meetings/service";
 import { tasksForArchive } from "@/lib/tasks/archive";
 
@@ -521,6 +527,92 @@ suite("meeting planning server (PostgreSQL)", () => {
         ).toMatchObject({
             pin: { scope: "organization", credentialId: "org-cloud-provider" },
         });
+    });
+
+    it("uses the owner's configured private summary profile after the last folder is removed", async () => {
+        const settings = defaultProfileSettings("audio");
+        settings.steps.summary.provider = {
+            scope: "personal",
+            credentialId: "owner-local",
+        };
+        const own = await createProfile({
+            ownerUserId: "owner",
+            actor: localActor("owner"),
+            scope: "personal",
+            channel: "audio",
+            name: "Local profile",
+            settings,
+            isDefault: true,
+        });
+        await db
+            .insert(userSettings)
+            .values({ userId: "owner", defaultAudioProfileId: own.id })
+            .onConflictDoUpdate({
+                target: userSettings.userId,
+                set: { defaultAudioProfileId: own.id },
+            });
+        const meeting = await create();
+        await addPoint("owner", meeting.id, { text: "Keep this plan" });
+        await removeMeetingFromFolder("owner", meeting.id, "owner-folder");
+        const unfiledRecording = await resolveProfileForPlacements({
+            ownerUserId: "owner",
+            itemId: "unfiled-audio",
+            channel: "audio",
+            folderIds: [],
+            view: "private",
+            seedProfiles: false,
+            executor: db,
+            organizationUserId: "org",
+            ignoreItemAssignment: true,
+        });
+        expect(unfiledRecording).toMatchObject({
+            status: "resolved",
+            profile: { id: own.id },
+        });
+        const provider = await agendaSuggestionsProvider("owner", meeting.id);
+        expect(provider).toMatchObject({
+            folders: [],
+            pin: settings.steps.summary.provider,
+        });
+        expect(
+            await agendaSuggestionsAvailability("owner", meeting.id),
+        ).toEqual({ available: true, reason: null });
+        await expect(
+            agendaSuggestionsProvider("other", meeting.id),
+        ).rejects.toMatchObject({ statusCode: 404 });
+        providers.resolve.mockClear();
+        providers.resolve.mockRejectedValueOnce(
+            new AppError(
+                ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
+                "Pinned provider unavailable",
+                400,
+            ),
+        );
+        expect(
+            await agendaSuggestionsAvailability("owner", meeting.id),
+        ).toMatchObject({
+            available: false,
+            reason: "Pinned provider unavailable",
+        });
+        expect(providers.resolve).toHaveBeenCalledExactlyOnceWith(
+            expect.objectContaining({
+                actorUserId: "owner",
+                pin: settings.steps.summary.provider,
+            }),
+        );
+    });
+    it("keeps unfiled suggestions unavailable when no usable profile remains", async () => {
+        const meeting = await create();
+        await removeMeetingFromFolder("owner", meeting.id, "owner-folder");
+        await db.update(processingProfiles).set({ archivedAt: new Date() });
+        providers.resolve.mockClear();
+        expect(
+            await agendaSuggestionsAvailability("owner", meeting.id),
+        ).toMatchObject({
+            available: false,
+            errorCode: ErrorCode.CONFLICT,
+        });
+        expect(providers.resolve).not.toHaveBeenCalled();
     });
     it.each([
         "personal",

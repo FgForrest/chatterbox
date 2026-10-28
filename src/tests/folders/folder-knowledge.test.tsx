@@ -36,6 +36,8 @@ import type { Recording } from "@/types/recording";
 const mocks = vi.hoisted(() => ({
     orgEvents: vi.fn<typeof useOrgEvents>(),
     refresh: vi.fn(),
+    push: (url: string) => window.history.pushState({}, "", url),
+    replace: (url: string) => window.history.replaceState({}, "", url),
     fetch: vi.fn<typeof fetch>(),
 }));
 vi.mock("next-intl", async (importOriginal) => {
@@ -67,7 +69,11 @@ vi.mock("next-intl", async (importOriginal) => {
     };
 });
 vi.mock("next/navigation", () => ({
-    useRouter: () => ({ refresh: mocks.refresh }),
+    useRouter: () => ({
+        refresh: mocks.refresh,
+        push: mocks.push,
+        replace: mocks.replace,
+    }),
     useSearchParams: () => new URLSearchParams(window.location.search),
 }));
 vi.mock("posthog-js", () => ({ default: { __loaded: false } }));
@@ -359,7 +365,8 @@ describe("folder knowledge header", () => {
             />,
         );
         const button = screen.getByRole("button", { name: "Knowledge" });
-        expect(button.className).toContain("text-organization");
+        expect(button.querySelector("svg.text-organization")).toBeTruthy();
+        expect(button.className).not.toContain("text-organization");
         fireEvent.click(button);
         expect(open).toHaveBeenCalledWith(org);
     });

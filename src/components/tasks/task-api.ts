@@ -1,6 +1,8 @@
 "use client";
 
 import { parseApiError } from "@/lib/api-errors";
+import { EVENT_ORIGIN_HEADER } from "@/lib/events/origin";
+import { tabEventOrigin } from "@/lib/events/tab-origin";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import type {
     AcceptResult,
@@ -27,12 +29,13 @@ async function send<T>(
     init: RequestInit & { json?: unknown } = {},
 ): Promise<T> {
     const { json, ...rest } = init;
+    const headers = new Headers(rest.headers);
+    if (json !== undefined) headers.set("content-type", "application/json");
+    if (rest.method && rest.method !== "GET")
+        headers.set(EVENT_ORIGIN_HEADER, tabEventOrigin());
     const response = await fetch(url, {
         ...rest,
-        headers:
-            json === undefined
-                ? rest.headers
-                : { "content-type": "application/json", ...rest.headers },
+        headers,
         body: json === undefined ? rest.body : JSON.stringify(json),
     });
     if (!response.ok) {

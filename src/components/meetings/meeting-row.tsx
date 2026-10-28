@@ -67,7 +67,7 @@ export function MeetingRow({
                             : meeting.state === "live"
                               ? i18n("In progress")
                               : meeting.state === "held"
-                                ? i18n("Without recording")
+                                ? i18n("Agenda without recording")
                                 : i18n("Preparing")}
                         {!meeting.recordingItemId &&
                             meeting.state === "live" &&

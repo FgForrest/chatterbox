@@ -588,7 +588,7 @@ export function FolderTree({
                                                 }
                                             >
                                                 <CalendarClock className="text-meeting" />
-                                                {i18n("Prepare a meeting")}
+                                                {i18n("Prepare an agenda")}
                                             </DropdownMenuItem>
                                         )}
                                     {sharingEnabled &&

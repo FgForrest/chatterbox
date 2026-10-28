@@ -1,7 +1,6 @@
 "use client";
 
 import { FolderInput, Pencil, X } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useExtracted } from "next-intl";
 import { useId, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -16,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { useDashboardRefresh } from "@/hooks/use-dashboard-refresh";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { parseApiError } from "@/lib/api-errors";
 import { matchFolders } from "@/lib/folders/navigation";
@@ -73,7 +73,7 @@ export function ReceivedFolderDialog({
 }) {
     const i18n = useExtracted();
     const label = useFolderLabel();
-    const { refresh } = useRouter();
+    const refresh = useDashboardRefresh();
     const nameId = useId();
     const [name, setName] = useState(initialName);
     const [parentId, setParentId] = useState(initialParentId);
@@ -204,7 +204,7 @@ export function ReceivedFolderMenu({
 }) {
     const i18n = useExtracted();
     const confirm = useConfirm();
-    const { refresh } = useRouter();
+    const refresh = useDashboardRefresh();
     const share = folder.receivedFolder;
     if (!share) return null;
     return (

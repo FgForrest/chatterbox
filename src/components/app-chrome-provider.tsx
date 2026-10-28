@@ -22,6 +22,7 @@ import {
 import { type Provider, SettingsDialog } from "@/components/settings-dialog";
 import { Button } from "@/components/ui/button";
 import { useAutoSync } from "@/hooks/use-auto-sync";
+import { useDashboardRefresh } from "@/hooks/use-dashboard-refresh";
 import { useGoogleConnectOutcome } from "@/hooks/use-google-connection";
 import { useTheme } from "@/hooks/use-theme";
 import { getAppHistoryState } from "@/lib/history-state";
@@ -53,7 +54,7 @@ export interface AppChromeConfig {
 
 function useChromeState(config: AppChromeConfig) {
     const i18n = useExtracted();
-    const { refresh } = useRouter();
+    const refresh = useDashboardRefresh();
     const pathname = usePathname();
     const demo = pathname.startsWith("/dev/demo-dashboard");
     const { initialSettings } = config;
@@ -203,7 +204,8 @@ export function AppChromeProvider({
     const chrome = useChromeState(config);
     const i18n = useExtracted();
     const pathname = usePathname();
-    const { refresh, push } = useRouter();
+    const { push } = useRouter();
+    const refresh = useDashboardRefresh();
     const workstation =
         pathname.startsWith("/dashboard") ||
         pathname.startsWith("/dev/demo-dashboard");

@@ -12,9 +12,42 @@ import {
     unshareRecording,
 } from "@/lib/folders/folders";
 import { isSummaryStale } from "@/lib/learn/summary-refresh";
+import { requireMeetingAccess } from "@/lib/meetings/access";
+import { refreshMeetingFolderContext } from "@/lib/meetings/service";
 import { requireRecordingAccess } from "@/lib/sharing/access";
 
 type IdContext = { params: Promise<{ id: string }> };
+
+async function filingAccess(userId: string, id: string) {
+    try {
+        return await requireRecordingAccess(userId, id, {
+            kinds: ["audio", "mail"],
+        });
+    } catch (error) {
+        if (!(error instanceof AppError) || error.statusCode !== 404)
+            throw error;
+    }
+    const access = await requireMeetingAccess(userId, id);
+    if (access.agenda.meetingItemId !== id)
+        throw new AppError(ErrorCode.NOT_FOUND, "Agenda item not found", 404);
+    if (access.agenda.recordingItemId)
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            "An absorbed agenda is read-only",
+            409,
+        );
+    return {
+        kind: "meeting" as const,
+        ownerUserId: access.agenda.userId,
+        shared: access.shared,
+        role:
+            access.agenda.userId === userId
+                ? ("owner" as const)
+                : access.shared
+                  ? ("member" as const)
+                  : ("receiver" as const),
+    };
+}
 
 function readString(body: unknown, field: string): string {
     const value =
@@ -36,9 +69,7 @@ function readString(body: unknown, field: string): string {
 export const POST = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
     const { id } = await (context as IdContext).params;
-    const access = await requireRecordingAccess(session.user.id, id, {
-        kinds: ["audio", "mail"],
-    });
+    const access = await filingAccess(session.user.id, id);
     if (!access.shared && access.role === "receiver")
         throw new AppError(
             ErrorCode.FORBIDDEN,
@@ -54,6 +85,8 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         recordingId: id,
         folderId,
     });
+    if (access.kind === "meeting" && access.ownerUserId === session.user.id)
+        await refreshMeetingFolderContext(access.ownerUserId, id);
     // Shared: the Organization reads its own corrections, so a summary
     // made with the owner's may be stale there (it says so on its view).
     return NextResponse.json({
@@ -69,9 +102,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
 export const PATCH = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
     const { id } = await (context as IdContext).params;
-    const access = await requireRecordingAccess(session.user.id, id, {
-        kinds: ["audio", "mail"],
-    });
+    const access = await filingAccess(session.user.id, id);
     if (!access.shared && access.role === "receiver")
         throw new AppError(
             ErrorCode.FORBIDDEN,
@@ -84,7 +115,14 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
         recordingId: id,
         fromFolderId: readString(body, "fromFolderId"),
         toFolderId: readString(body, "toFolderId"),
+        withdraw:
+            typeof body === "object" &&
+            body !== null &&
+            "withdraw" in body &&
+            body.withdraw === true,
     });
+    if (access.kind === "meeting" && access.ownerUserId === session.user.id)
+        await refreshMeetingFolderContext(access.ownerUserId, id);
     return NextResponse.json({ moved: true });
 });
 
@@ -99,9 +137,7 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
 export const DELETE = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
     const { id } = await (context as IdContext).params;
-    const access = await requireRecordingAccess(session.user.id, id, {
-        kinds: ["audio", "mail"],
-    });
+    const access = await filingAccess(session.user.id, id);
     const body = await request.json().catch(() => null);
     if (!access.shared && access.role === "receiver") {
         const folderId =
@@ -155,6 +191,8 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
         await unshareRecording(session.user.id, id, {
             withdraw: (body as { withdraw?: unknown }).withdraw === true,
         });
+        if (access.kind === "meeting" && access.ownerUserId === session.user.id)
+            await refreshMeetingFolderContext(access.ownerUserId, id);
         return NextResponse.json({ shared: false });
     }
     await removeRecordingFromFolder({
@@ -163,5 +201,7 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
         folderId: readString(body, "folderId"),
         withdraw: (body as { withdraw?: unknown }).withdraw === true,
     });
+    if (access.kind === "meeting" && access.ownerUserId === session.user.id)
+        await refreshMeetingFolderContext(access.ownerUserId, id);
     return NextResponse.json({ assigned: false });
 });

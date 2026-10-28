@@ -30,6 +30,7 @@ export function FolderPicker({
     canCurate = false,
     onCreated,
     title,
+    allowCreate = true,
 }: {
     folders: RecordingFolder[];
     assignedIds: ReadonlySet<string>;
@@ -42,6 +43,7 @@ export function FolderPicker({
     canCurate?: boolean;
     onCreated?: (folder: RecordingFolder) => void;
     title?: string;
+    allowCreate?: boolean;
 }) {
     const i18n = useExtracted();
     const label = useFolderLabel();
@@ -188,7 +190,7 @@ export function FolderPicker({
                             name: query.trim(),
                         })}
                         onCreate={
-                            parents.length > 0
+                            allowCreate && parents.length > 0
                                 ? () => {
                                       setParentId(parents[0]?.folder.id ?? "");
                                       setCreating(true);

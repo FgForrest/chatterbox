@@ -22,8 +22,13 @@ type OptionalJob<T> = T extends { job: infer J }
 type Detail = Json<
     Exclude<Awaited<ReturnType<typeof getMeeting>>, { unchanged: true }>
 >;
-export type MeetingDetail = Omit<Detail, "cursor" | "aiSuggestions"> & {
+export type MeetingDetail = Omit<
+    Detail,
+    "cursor" | "aiSuggestions" | "suggestionTasks" | "folderRecordingIds"
+> & {
     cursor?: string;
+    suggestionTasks?: Detail["suggestionTasks"];
+    folderRecordingIds?: string[];
     aiSuggestions: OptionalJob<Detail["aiSuggestions"]>;
 };
 export type MeetingPoint = MeetingDetail["points"][number];

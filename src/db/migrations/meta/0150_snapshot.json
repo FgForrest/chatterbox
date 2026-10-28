@@ -1,5 +1,5 @@
 {
-  "id": "05f5c7db-e5a0-47f7-848c-84296b4784f0",
+  "id": "ae14d17e-cfef-4d0e-841e-c37236aecbc7",
   "prevId": "f3243683-fa31-46b3-9e7a-9f6488553e22",
   "version": "7",
   "dialect": "postgresql",
@@ -1245,32 +1245,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "edited_at": {
-          "name": "edited_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "edited_by_user_id": {
-          "name": "edited_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "revision": {
-          "name": "revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "remarks_applied_count": {
-          "name": "remarks_applied_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
         "action_items": {
           "name": "action_items",
           "type": "jsonb",
@@ -1407,21 +1381,6 @@
           "method": "btree",
           "with": {}
         },
-        "ai_enhancements_edited_by_user_id_idx": {
-          "name": "ai_enhancements_edited_by_user_id_idx",
-          "columns": [
-            {
-              "expression": "edited_by_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "ai_enhancements_produced_by_user_id_idx": {
           "name": "ai_enhancements_produced_by_user_id_idx",
           "columns": [
@@ -1488,19 +1447,6 @@
           "tableTo": "transcriptions",
           "columnsFrom": [
             "transcription_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "ai_enhancements_edited_by_user_id_users_id_fk": {
-          "name": "ai_enhancements_edited_by_user_id_users_id_fk",
-          "tableFrom": "ai_enhancements",
-          "tableTo": "users",
-          "columnsFrom": [
-            "edited_by_user_id"
           ],
           "columnsTo": [
             "id"
@@ -14519,141 +14465,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.summary_remarks": {
-      "name": "summary_remarks",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "item_id": {
-          "name": "item_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "author_user_id": {
-          "name": "author_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "text": {
-          "name": "text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "summary_remarks_owner_item_idx": {
-          "name": "summary_remarks_owner_item_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "item_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "summary_remarks_author_idx": {
-          "name": "summary_remarks_author_idx",
-          "columns": [
-            {
-              "expression": "author_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "summary_remarks_user_id_users_id_fk": {
-          "name": "summary_remarks_user_id_users_id_fk",
-          "tableFrom": "summary_remarks",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "summary_remarks_author_user_id_users_id_fk": {
-          "name": "summary_remarks_author_user_id_users_id_fk",
-          "tableFrom": "summary_remarks",
-          "tableTo": "users",
-          "columnsFrom": [
-            "author_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "summary_remarks_item_owner_fk": {
-          "name": "summary_remarks_item_owner_fk",
-          "tableFrom": "summary_remarks",
-          "tableTo": "chatter_items",
-          "columnsFrom": [
-            "item_id",
-            "user_id"
-          ],
-          "columnsTo": [
-            "id",
-            "user_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.task_content_vectors": {
       "name": "task_content_vectors",
       "schema": "",
@@ -17936,6 +17747,12 @@
         "ui_locale": {
           "name": "ui_locale",
           "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "time_zone": {
+          "name": "time_zone",
+          "type": "varchar(100)",
           "primaryKey": false,
           "notNull": false
         },

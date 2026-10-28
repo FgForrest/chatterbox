@@ -4,6 +4,7 @@ import { RotateCcw } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useTimeZone } from "use-intl/react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -27,6 +28,7 @@ interface Props {
 export function WebhookDeliveriesDialog({ webhook, onClose }: Props) {
     const i18n = useExtracted();
     const locale = useLocale();
+    const timeZone = useTimeZone();
     const [deliveries, setDeliveries] = useState<WebhookDelivery[]>([]);
 
     const webhookId = webhook?.id ?? null;
@@ -114,6 +116,7 @@ export function WebhookDeliveriesDialog({ webhook, onClose }: Props) {
                                             delivery.lastAttemptAt,
                                             locale,
                                             i18n("Never"),
+                                            timeZone,
                                         )}
                                     </p>
                                     {delivery.lastError && (

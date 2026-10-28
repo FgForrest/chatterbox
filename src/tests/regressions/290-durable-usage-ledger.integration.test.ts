@@ -1,5 +1,6 @@
 import { rmSync } from "node:fs";
 import { eq } from "drizzle-orm";
+import { pgTable, text } from "drizzle-orm/pg-core";
 import {
     afterAll,
     beforeAll,
@@ -116,6 +117,11 @@ vi.mock("@/lib/export/document-sidecars", () => ({
 }));
 vi.mock("@/lib/webhooks/emit", () => ({ emitEvent: vi.fn() }));
 
+const historicalUsers = pgTable("users", {
+    id: text("id"),
+    email: text("email"),
+});
+
 const url = getTestDatabaseUrl();
 const context: AiUsageContext = {
     recordingId: "audio",
@@ -145,7 +151,7 @@ describe.skipIf(!url)("durable usage ledger (PostgreSQL)", () => {
                 unknown
             >;
             await database.db
-                .insert(users)
+                .insert(historicalUsers)
                 .values({ id: "legacy", email: "legacy@example.test" });
             await database.db.insert(chatterItems).values({
                 id: "legacy-item",

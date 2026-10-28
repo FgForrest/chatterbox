@@ -12,6 +12,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // `apiHandler` reaches posthog-server, which pulls the validated env and
 // demands DATABASE_URL. Out of scope for a route-shape test.
 // The route says whether automatic Learn is offered here.
+vi.mock("@/lib/settings/organization", () => ({
+    organizationSettingsContext: vi.fn(),
+}));
+
 vi.mock("@/lib/knowledge/availability", () => ({
     isAutoLearnOffered: async () => false,
     isLearnDeploymentAvailable: () => true,
@@ -85,8 +89,9 @@ vi.mock("@/db", () => {
     };
 });
 
+import { GET, PUT } from "@/app/api/settings/user/route";
+
 async function put(body: Record<string, unknown>) {
-    const { PUT } = await import("@/app/api/settings/user/route");
     const res = await PUT(
         new Request("http://localhost/api/settings/user", {
             method: "PUT",
@@ -161,7 +166,6 @@ describe("PUT /api/settings/user — multi-pass fields", () => {
             },
         ];
 
-        const { GET } = await import("@/app/api/settings/user/route");
         const res = await GET(
             new Request("http://localhost/api/settings/user"),
         );

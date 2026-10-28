@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { useDashboardRefresh } from "@/hooks/use-dashboard-refresh";
 import { type ConnectionState, subscribeEvents } from "@/lib/events/client";
 
 const FALLBACK_INTERVAL_MS = 60_000;
@@ -10,7 +10,7 @@ const REFRESH_DEBOUNCE_MS = 300;
 
 /** Refresh the dashboard on mail push, with polling as a safety net. */
 export function useMailRefresh(enabled: boolean): void {
-    const { refresh } = useRouter();
+    const refresh = useDashboardRefresh();
     useEffect(() => {
         if (!enabled) return;
         let version: string | null | undefined;

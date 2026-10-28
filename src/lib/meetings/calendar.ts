@@ -1,6 +1,10 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { listMeetingRows, meetingVisibility } from "@/db/queries/meetings";
+import {
+    listMeetingRows,
+    meetingFolders,
+    meetingVisibility,
+} from "@/db/queries/meetings";
 import {
     chatterItems,
     meetingAgendas,
@@ -9,7 +13,7 @@ import {
 } from "@/db/schema";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
-import { assertCategorizableFolder } from "@/lib/folders/folders";
+import { assertCategorizableFolders } from "@/lib/folders/folders";
 import { listUpcomingCalendarEvents } from "@/lib/integrations/google/calendar-events";
 import {
     GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE,
@@ -18,7 +22,7 @@ import {
 } from "@/lib/integrations/google/config";
 import { getGoogleConnectionStatus } from "@/lib/integrations/google/connection";
 import { extractMeetCode } from "@/lib/integrations/google/meet-code";
-import { meetingViewer } from "@/lib/meetings/access";
+import { meetingViewer, requireMeetingAccess } from "@/lib/meetings/access";
 import {
     cachedMeetingCalendarSnapshot,
     readMeetingCalendarSnapshot,
@@ -41,8 +45,30 @@ export async function calendarUnavailableReason(userId: string) {
 }
 
 /** Fourteen-day event picker, ranking known recurring series by folder usage. */
-export async function meetingCalendarEvents(userId: string, folderId: string) {
-    const folder = await assertCategorizableFolder(userId, folderId);
+export async function meetingCalendarEvents(
+    userId: string,
+    folderIds: string | readonly string[],
+    agendaId?: string,
+) {
+    const access = agendaId
+        ? await requireMeetingAccess(userId, agendaId)
+        : null;
+    const folderIdsForRanking = access
+        ? access.agenda.meetingItemId
+            ? (
+                  await meetingFolders(
+                      db,
+                      access.agenda.meetingItemId,
+                      access.agenda.userId,
+                  )
+              ).map((folder) => folder.id)
+            : []
+        : (
+              await assertCategorizableFolders(
+                  userId,
+                  typeof folderIds === "string" ? [folderIds] : folderIds,
+              )
+          ).map((folder) => folder.folderId);
     const reason = await calendarUnavailableReason(userId);
     if (reason) return { reason, recurring: [], other: [] };
     const viewer = await meetingViewer(userId);
@@ -62,7 +88,7 @@ export async function meetingCalendarEvents(userId: string, folderId: string) {
         db
             .select({
                 series: recordings.calendarSeriesId,
-                count: sql<number>`count(*)::int`,
+                count: sql<number>`count(distinct ${recordings.id})::int`,
             })
             .from(recordings)
             .innerJoin(chatterItems, eq(chatterItems.id, recordings.id))
@@ -72,7 +98,10 @@ export async function meetingCalendarEvents(userId: string, folderId: string) {
             )
             .where(
                 and(
-                    eq(recordingFolderAssignments.folderId, folder.folderId),
+                    inArray(
+                        recordingFolderAssignments.folderId,
+                        folderIdsForRanking,
+                    ),
                     meetingVisibility(userId, viewer.orgUserId),
                 ),
             )

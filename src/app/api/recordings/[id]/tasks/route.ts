@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { readEventOrigin } from "@/lib/events/origin";
 import {
     invalid,
     optionalNullableString,
@@ -38,11 +39,16 @@ export const POST = apiHandler<RecordingContext>(async (request, context) => {
     if (body.status !== "proposed" && body.status !== "open") {
         throw invalid("status is proposed or open", "status");
     }
-    const task = await addTask(viewer, id, {
-        text: body.text,
-        assigneePersonId: optionalNullableString(body, "assigneePersonId"),
-        dueDate: optionalNullableString(body, "dueDate"),
-        status: body.status,
-    });
+    const task = await addTask(
+        viewer,
+        id,
+        {
+            text: body.text,
+            assigneePersonId: optionalNullableString(body, "assigneePersonId"),
+            dueDate: optionalNullableString(body, "dueDate"),
+            status: body.status,
+        },
+        readEventOrigin(request.headers),
+    );
     return NextResponse.json(task, { status: 201 });
 });

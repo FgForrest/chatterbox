@@ -106,7 +106,7 @@ function PointField({
     };
     if (!editable)
         return (
-            <span className="min-w-0 flex-1 py-1 whitespace-pre-wrap">
+            <span className="min-w-0 flex-1 border border-transparent px-1 py-1 leading-6 whitespace-pre-wrap">
                 {point.text}
             </span>
         );
@@ -118,7 +118,7 @@ function PointField({
                 aria-label={i18n("Discussion point")}
                 maxLength={2000}
                 value={draft}
-                className="min-w-0 flex-1 resize-none overflow-hidden rounded border border-transparent bg-transparent px-1 py-1 focus:border-input focus:outline-none focus:ring-1 focus:ring-ring"
+                className="min-w-0 flex-1 resize-none overflow-hidden rounded border border-transparent bg-transparent px-1 py-1 leading-6 focus:border-input focus:outline-none focus:ring-1 focus:ring-ring"
                 onChange={(event) => {
                     dirty.current = true;
                     setDraft(event.target.value.replace(/[\r\n]/gu, " "));
@@ -282,6 +282,9 @@ export function OutlineEditor({
         if (insertion && !draftReleased.current) newInput.current?.focus();
     }, [insertion]);
     const rows = outlineRows(detail.points);
+    const showProposers = detail.points.some(
+        (point) => !point.parentId && point.authorUserId !== detail.userId,
+    );
     const displayRows = outlineRows<TreePoint>([
         ...detail.points,
         ...(insertion ? [{ id: "draft", ...insertion }] : []),
@@ -424,6 +427,7 @@ export function OutlineEditor({
                 const author = detail.authors.find(
                     (entry) => entry.id === point.authorUserId,
                 );
+                const proposer = author?.name ?? i18n("Unknown author");
                 const indent = outlineMove(detail.points, point.id, false);
                 const outdent = outlineMove(detail.points, point.id, true);
                 const after =
@@ -458,28 +462,34 @@ export function OutlineEditor({
                             className="group rounded-md"
                         >
                             <div className="flex items-start gap-2">
-                                {live || readOnly ? (
-                                    <input
-                                        type="checkbox"
-                                        aria-label={i18n("Discussed: {point}", {
-                                            point: point.text,
-                                        })}
-                                        checked={Boolean(point.discussedAt)}
-                                        disabled={
-                                            !canAdd ||
-                                            subtreePending ||
-                                            point.id.startsWith("pending-")
-                                        }
-                                        onChange={(event) =>
-                                            onPatch(point, {
-                                                discussed: event.target.checked,
-                                            })
-                                        }
-                                        className="size-4 shrink-0 accent-primary"
-                                    />
-                                ) : (
-                                    <span aria-hidden="true">•</span>
-                                )}
+                                <span className="flex h-[34px] shrink-0 items-center">
+                                    {live || readOnly ? (
+                                        <input
+                                            type="checkbox"
+                                            aria-label={i18n(
+                                                "Discussed: {point}",
+                                                {
+                                                    point: point.text,
+                                                },
+                                            )}
+                                            checked={Boolean(point.discussedAt)}
+                                            disabled={
+                                                !canAdd ||
+                                                subtreePending ||
+                                                point.id.startsWith("pending-")
+                                            }
+                                            onChange={(event) =>
+                                                onPatch(point, {
+                                                    discussed:
+                                                        event.target.checked,
+                                                })
+                                            }
+                                            className="size-4 shrink-0 accent-primary"
+                                        />
+                                    ) : (
+                                        <span aria-hidden="true">•</span>
+                                    )}
+                                </span>
                                 <PointField
                                     point={point}
                                     editable={editable}
@@ -526,6 +536,14 @@ export function OutlineEditor({
                                         }
                                     }}
                                 />
+                                {showProposers && !point.parentId && (
+                                    <span
+                                        title={proposer}
+                                        className="mt-[5px] h-6 min-w-0 max-w-1/4 truncate rounded-full bg-muted px-2 text-[10px] leading-6 text-muted-foreground"
+                                    >
+                                        {proposer}
+                                    </span>
+                                )}
                                 {point.discussedAt && (
                                     <time
                                         className="text-xs text-muted-foreground"
@@ -541,7 +559,7 @@ export function OutlineEditor({
                                     </time>
                                 )}
                                 {editable && (
-                                    <div className="flex shrink-0 items-center gap-0.5">
+                                    <div className="flex h-[34px] shrink-0 items-center gap-0.5">
                                         <Button
                                             variant="ghost"
                                             size="icon-sm"
@@ -584,11 +602,6 @@ export function OutlineEditor({
                                     </div>
                                 )}
                             </div>
-                            {author && point.authorUserId !== userId && (
-                                <span className="ml-7 inline-flex rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground">
-                                    {author.name ?? i18n("Unknown author")}
-                                </span>
-                            )}
                             {point.origin === "live" && (
                                 <span className="ml-7 text-xs text-muted-foreground">
                                     {i18n("Added during the meeting")}

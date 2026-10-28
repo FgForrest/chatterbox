@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale, useTimeZone } from "next-intl";
 import { useEffect, useState } from "react";
 
 interface Props {
@@ -26,6 +27,8 @@ interface Props {
  * deliberately and visibly only after we know the client locale.
  */
 export function LocalTime({ value, variant = "datetime", className }: Props) {
+    const locale = useLocale();
+    const timeZone = useTimeZone();
     const date = value instanceof Date ? value : new Date(value);
     const iso = date.toISOString();
     const [text, setText] = useState<string>(iso);
@@ -33,10 +36,10 @@ export function LocalTime({ value, variant = "datetime", className }: Props) {
     useEffect(() => {
         setText(
             variant === "date"
-                ? date.toLocaleDateString()
-                : date.toLocaleString(),
+                ? date.toLocaleDateString(locale, { timeZone })
+                : date.toLocaleString(locale, { timeZone }),
         );
-    }, [date, variant]);
+    }, [date, variant, locale, timeZone]);
 
     return (
         <time dateTime={iso} className={className}>
