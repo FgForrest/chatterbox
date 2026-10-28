@@ -1,11 +1,11 @@
 ---
 title: Item knowledge uses the folder knowledge panel and replaces finished Learn cards
 date: 2026-10-28
-updated: 2026-10-28 13:55
+updated: 2026-10-28 16:20
 status: proposed
 kind: refactor
 issues: []
-prs: []
+prs: [300]
 areas: [src/components/dashboard/folder-knowledge-panel.tsx, src/components/learn/learn-widget.tsx, src/lib/knowledge/read-item-knowledge.ts, src/db/queries/folder-knowledge.ts]
 supersedes: [2026-10-22-organization-almanac-grows-on-share]
 superseded-by: []
@@ -62,4 +62,4 @@ Self-host and hosted use the same read and UI paths; hosted retains its existing
 
 ## Timeline
 
-- **2026-10-28:** approved detail design implemented for review, without a commit or merge.
+- **2026-10-28:** approved detail design implemented and opened as PR #300 after two cross-review rounds.
