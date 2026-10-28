@@ -2,8 +2,7 @@ import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { resolveReadableFolder } from "@/lib/folders/folders";
 import { isOrgAccount } from "@/lib/org/config";
-
-export const WRITER_NO_LONGER_CURATOR = "writer_no_longer_curator";
+import { WRITER_NO_LONGER_CURATOR_MESSAGE } from "./types";
 
 /** Whether this writer may configure or run an Organization folder export now. */
 export async function mayWriteOrganizationExport(userId: string) {
@@ -30,7 +29,7 @@ export async function resolveFolderExportScope(
         if (!(await mayWriteOrganizationExport(userId))) {
             throw new AppError(
                 ErrorCode.FORBIDDEN,
-                WRITER_NO_LONGER_CURATOR,
+                WRITER_NO_LONGER_CURATOR_MESSAGE,
                 403,
             );
         }

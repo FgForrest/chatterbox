@@ -1,5 +1,8 @@
 import { useExtracted } from "next-intl";
-import type { FolderExportConfigurationDto } from "@/lib/folder-exports/types";
+import {
+    type FolderExportConfigurationDto,
+    WRITER_NO_LONGER_CURATOR,
+} from "@/lib/folder-exports/types";
 
 export function useFolderExportLabel() {
     const i18n = useExtracted();
@@ -15,7 +18,7 @@ export function useFolderExportLabel() {
                   writer: configuration.writer.name,
               })
             : target;
-        return configuration.stoppedReason === "writer_no_longer_curator"
+        return configuration.stoppedReason === WRITER_NO_LONGER_CURATOR
             ? i18n(
                   "{export} · Stopped: the writer is no longer an Organization curator.",
                   { export: writer },

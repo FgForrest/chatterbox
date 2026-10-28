@@ -99,11 +99,18 @@ export interface GoogleDriveExportDto {
     summaryFormat: DocumentFormat;
 }
 
+/** Why an Organization folder export stopped, derived from the writer's role. */
+export const WRITER_NO_LONGER_CURATOR = "writer_no_longer_curator";
+
+/** The user-safe failure a former curator's export run stores and reports. */
+export const WRITER_NO_LONGER_CURATOR_MESSAGE =
+    "This Organization folder export stopped: its writer is no longer an Organization curator.";
+
 export interface FolderExportConfigurationDto {
     writer?: { id: string; name: string };
     canEdit?: boolean;
     canRemove?: boolean;
-    stoppedReason?: "writer_no_longer_curator" | null;
+    stoppedReason?: typeof WRITER_NO_LONGER_CURATOR | null;
     id: string;
     folderId: string;
     provider: FolderExportProviderType;

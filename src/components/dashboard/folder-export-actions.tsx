@@ -30,11 +30,12 @@ import { useFolderExportLabel } from "@/hooks/use-folder-export-label";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useGoogleConnection } from "@/hooks/use-google-connection";
 import { getApiErrorMessage } from "@/lib/api-errors";
-import type {
-    DocumentFormat,
-    ExportProvidersAvailability,
-    FolderExportConfigurationDto,
-    FolderExportProviderType,
+import {
+    type DocumentFormat,
+    type ExportProvidersAvailability,
+    type FolderExportConfigurationDto,
+    type FolderExportProviderType,
+    WRITER_NO_LONGER_CURATOR_MESSAGE,
 } from "@/lib/folder-exports/types";
 import {
     type PickerCredentials,
@@ -401,7 +402,13 @@ export function FolderExportActions({
             if (result?.status === "completed") {
                 toast.success(i18n("Synchronization audit completed"));
             } else if (result?.status === "failed") {
-                toast.error(result.error ?? i18n("Synchronization failed"));
+                toast.error(
+                    result.error === WRITER_NO_LONGER_CURATOR_MESSAGE
+                        ? i18n(
+                              "Synchronization stopped: you are no longer an Organization curator.",
+                          )
+                        : (result.error ?? i18n("Synchronization failed")),
+                );
             }
         } finally {
             setSyncing(false);

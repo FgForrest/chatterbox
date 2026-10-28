@@ -16,7 +16,7 @@ import { isMailEnabled } from "@/lib/mail/config";
 import { assertOrgScopeWritable } from "@/lib/org/config";
 import { validateRelativeExportPath } from "./filesystem-provider";
 import { enqueueExportPlan } from "./jobs";
-import { mayWriteOrganizationExport, WRITER_NO_LONGER_CURATOR } from "./scope";
+import { mayWriteOrganizationExport } from "./scope";
 import {
     type ExportTarget,
     listExportTargets,
@@ -24,11 +24,13 @@ import {
     loadExportTarget,
     toConfigurationDto,
 } from "./target";
-import type {
-    DocumentFormat,
-    ExportProvidersAvailability,
-    FolderExportConfigurationDto,
-    FolderExportProviderType,
+import {
+    type DocumentFormat,
+    type ExportProvidersAvailability,
+    type FolderExportConfigurationDto,
+    type FolderExportProviderType,
+    WRITER_NO_LONGER_CURATOR,
+    WRITER_NO_LONGER_CURATOR_MESSAGE,
 } from "./types";
 
 interface SaveFolderExportCommon {
@@ -209,7 +211,7 @@ async function configurationDto(
         ...dto,
         // The role-loss failure is stored as a code; stoppedReason carries it.
         lastError:
-            manages && dto.lastError !== WRITER_NO_LONGER_CURATOR
+            manages && dto.lastError !== WRITER_NO_LONGER_CURATOR_MESSAGE
                 ? dto.lastError
                 : null,
         writer: { id: target.userId, name: target.writerName ?? target.userId },

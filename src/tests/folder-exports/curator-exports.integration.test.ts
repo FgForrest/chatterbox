@@ -17,6 +17,7 @@ import {
     POST as addExport,
     GET as listExports,
 } from "@/app/api/folders/[id]/exports/route";
+import { POST as synchronize } from "@/app/api/folders/[id]/synchronize/route";
 import {
     asyncJobs,
     chatterItems,
@@ -41,8 +42,10 @@ import {
     materializeFolderExport,
     reconcileFolderExport,
 } from "@/lib/folder-exports/execution";
+import { exportReconcileJobHandler } from "@/lib/folder-exports/job-handlers";
 import { enqueueExportPlansForUser } from "@/lib/folder-exports/jobs";
 import { planFolderExport } from "@/lib/folder-exports/planner";
+import { WRITER_NO_LONGER_CURATOR_MESSAGE } from "@/lib/folder-exports/types";
 import {
     ensureRootFolders,
     listPersonalFolderOrganization,
@@ -53,6 +56,7 @@ import {
 } from "@/lib/integrations/google/connection";
 import type * as DriveClientModule from "@/lib/integrations/google/drive-client";
 import type { FetchDriveClientOptions } from "@/lib/integrations/google/drive-client";
+import { describeJobError } from "@/lib/jobs/retryable";
 import { domainLookupHash, lookupHash } from "@/lib/knowledge/lookup-hash";
 import { insertRecordings } from "@/tests/integration/items";
 import {
@@ -595,7 +599,7 @@ describeWithDatabase("curator Organization folder exports (PostgreSQL)", () => {
             .select({ lastError: folderExportConfigurations.lastError })
             .from(folderExportConfigurations)
             .where(eq(folderExportConfigurations.id, configuration.id));
-        expect(stored?.lastError).toBe("writer_no_longer_curator");
+        expect(stored?.lastError).toBe(WRITER_NO_LONGER_CURATOR_MESSAGE);
         expect(
             (await listFolderExports("other", "team")).configured[0],
         ).toMatchObject({
@@ -623,6 +627,47 @@ describeWithDatabase("curator Organization folder exports (PostgreSQL)", () => {
         expect(drive.tree("picked")).not.toContain(
             "Nested/Meeting inside/riffado.transcript.md",
         );
+    });
+
+    it("synchronizes only the caller's exports and reports a former curator's queued run in user-safe words", async () => {
+        const own = await createFolderExport("curator", "team", selection);
+        const others = await createFolderExport("other", "team", selection);
+        await run("curator", own.id);
+        await run("other", others.id);
+        const response = await call(synchronize, "curator", "POST");
+        expect(response.status).toBe(202);
+        const { jobId } = await response.json();
+        const [job] = await db()
+            .select()
+            .from(asyncJobs)
+            .where(eq(asyncJobs.id, jobId));
+        expect(job).toMatchObject({
+            userId: "curator",
+            kind: "folder-export-reconcile",
+            payload: { folderId: "team" },
+        });
+        const exported = (await states(own.id)).filter(
+            (state) => state.status === "exported",
+        ).length;
+        expect(exported).toBeGreaterThan(0);
+        const handle = () =>
+            exportReconcileJobHandler.run({
+                userId: "curator",
+                payload: { folderId: "team" },
+                reportProgress: () => {},
+            } as unknown as Parameters<
+                typeof exportReconcileJobHandler.run
+            >[0]);
+        expect(await handle()).toMatchObject({ checked: exported });
+        await db()
+            .update(userAccessStates)
+            .set({ capabilities: ["use"] })
+            .where(eq(userAccessStates.userId, "curator"));
+        const failure = await handle().catch((error: unknown) => error);
+        expect(describeJobError(failure)).toEqual({
+            message: WRITER_NO_LONGER_CURATOR_MESSAGE,
+            code: "FORBIDDEN",
+        });
     });
 
     it("rechecks placement at write time when an item moves out of the subtree", async () => {
