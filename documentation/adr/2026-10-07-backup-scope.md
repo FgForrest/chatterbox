@@ -1,14 +1,14 @@
 ---
 title: Backups and exports carry one scope, chosen by the account, personal or Organization, never both
 date: 2026-10-07
-updated: 2026-10-27 14:30
-status: accepted
+updated: 2026-10-28 10:10
+status: superseded
 kind: feature
 issues: []
 prs: [89]
 areas: [src/lib/export/archive-scope.ts, src/lib/export/resolve-archive-scope.ts, src/lib/export/build-archive.ts, src/lib/export/document-sidecars.ts, src/app/api/backup]
 supersedes: []
-superseded-by: []
+superseded-by: [2026-10-28-curator-organization-folder-exports]
 relates: [2026-10-27-shared-folders-are-two-way, 2026-10-22-person-to-person-sharing, 2026-09-23-shared-organization-scope, 2026-10-07-tasks-from-summaries, 2026-10-27-meeting-agendas]
 ---
 
@@ -20,6 +20,11 @@ request parameter or picker selects a scope. A recording its owner shared appear
 archives: the owner's without colleagues' contributions, the Organization's with the full
 Organization overlay. The same "only what the owner made" rule applies to every owner-scoped
 egress. Shipped in PR #89.
+
+**Superseded in part** by [curator Organization folder exports](2026-10-28-curator-organization-folder-exports.md):
+a current curator may export an Organization folder subtree through their own connection using
+Organization content scope. Only that folder-export case changes; account-selected archive scope,
+personal folder exports and every other rule here still hold.
 
 ## Why
 

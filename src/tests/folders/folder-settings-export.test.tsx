@@ -184,9 +184,21 @@ describe("folder settings export", () => {
     it.each([
         false,
         true,
-    ])("shows Organization export ownership rather than an unknown status: curator=%s", async (canCurate) => {
+    ])("shows writers to members and export controls to curators: curator=%s", async (canCurate) => {
         const fetchMock = vi.fn(async () =>
-            Response.json({ configured: [], applicableIds: [] }),
+            Response.json({
+                configured: [
+                    {
+                        id: "curator-export",
+                        targetPath: "picked",
+                        googleDrive: { rootFolderName: "Internal projects" },
+                        writer: { id: "curator", name: "Jitka Dvořáková" },
+                        canEdit: canCurate,
+                        canRemove: canCurate,
+                    },
+                ],
+                applicableIds: ["curator-export"],
+            }),
         );
         vi.stubGlobal("fetch", fetchMock);
         render(
@@ -214,11 +226,87 @@ describe("folder settings export", () => {
             </ConfirmDialogProvider>,
         );
         expect(
-            screen.getByText("Managed by the Organization account"),
+            await screen.findByText(
+                "Google Drive: Internal projects · written by Jitka Dvořáková",
+            ),
         ).toBeTruthy();
-        expect(screen.queryByText("Not configured")).toBeNull();
-        expect(fetchMock).not.toHaveBeenCalled();
-        expect(screen.queryByRole("button", { name: "Configure" })).toBeNull();
+        expect(fetchMock).toHaveBeenCalledWith("/api/folders/folder/exports");
+        if (canCurate) {
+            fireEvent.click(screen.getByRole("button", { name: "Change" }));
+            expect(
+                await screen.findByRole("button", {
+                    name: "Add Google Drive export",
+                }),
+            ).toBeTruthy();
+            expect(
+                screen.getByRole("button", { name: /Remove export/ }),
+            ).toBeTruthy();
+        } else {
+            expect(screen.queryByRole("button", { name: "Change" })).toBeNull();
+            expect(
+                screen.queryByRole("button", { name: /Remove export/ }),
+            ).toBeNull();
+        }
+    });
+    it("shows a stopped writer to curators, with removal but without editing their target", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () =>
+                Response.json({
+                    configured: [
+                        {
+                            id: "former-export",
+                            targetPath: "picked",
+                            googleDrive: {
+                                rootFolderName: "Internal projects",
+                            },
+                            writer: { id: "former", name: "Jitka Dvořáková" },
+                            canEdit: false,
+                            canRemove: true,
+                            stoppedReason: "writer_no_longer_curator",
+                        },
+                    ],
+                    applicableIds: ["former-export"],
+                    synchronizableIds: [],
+                }),
+            ),
+        );
+        render(
+            <ConfirmDialogProvider>
+                <FolderSettingsPanel
+                    folder={{ ...folder, scope: "org", parentId: orgRoot.id }}
+                    folders={[
+                        orgRoot,
+                        { ...folder, scope: "org", parentId: orgRoot.id },
+                    ]}
+                    count={1}
+                    open
+                    onOpenChange={vi.fn()}
+                    onRename={vi.fn()}
+                    onCreate={vi.fn()}
+                    onMove={vi.fn()}
+                    onDelete={vi.fn()}
+                    exportProviders={{
+                        filesystem: false,
+                        googleDrive: true,
+                        mail: false,
+                    }}
+                    canCurate
+                />
+            </ConfirmDialogProvider>,
+        );
+        const stopped =
+            "Google Drive: Internal projects · written by Jitka Dvořáková · Stopped: the writer is no longer an Organization curator.";
+        expect(await screen.findByText(stopped)).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Change" }));
+        expect(await screen.findByText(stopped)).toBeTruthy();
+        expect(screen.queryByRole("button", { name: stopped })).toBeNull();
+        expect(
+            screen.getByRole("button", { name: /Remove export/ }),
+        ).toBeTruthy();
+        expect(
+            screen.queryByRole("button", { name: "Synchronize" }),
+        ).toBeNull();
     });
     it("shows the actual export target to the Organization account", async () => {
         const fetchMock = vi.fn(async () =>

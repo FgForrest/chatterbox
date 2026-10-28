@@ -1,9 +1,10 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray, or } from "drizzle-orm";
 import { db } from "@/db";
 import { type EnqueueJobResult, enqueueJob } from "@/db/queries/async-jobs";
 import {
     folderExportConfigurations,
     folderExportMaterializations,
+    recordingFolders,
 } from "@/db/schema";
 import { nudge } from "@/lib/jobs/nudge";
 import { InvalidJobPayloadError } from "@/lib/jobs/types";
@@ -94,12 +95,26 @@ export async function enqueueExportPlan(
 
 export async function enqueueExportPlansForUser(userId: string): Promise<void> {
     const configurations = await db
-        .select({ id: folderExportConfigurations.id })
+        .select({
+            id: folderExportConfigurations.id,
+            userId: folderExportConfigurations.userId,
+        })
         .from(folderExportConfigurations)
-        .where(eq(folderExportConfigurations.userId, userId));
+        .where(
+            or(
+                eq(folderExportConfigurations.userId, userId),
+                inArray(
+                    folderExportConfigurations.folderId,
+                    db
+                        .select({ id: recordingFolders.id })
+                        .from(recordingFolders)
+                        .where(eq(recordingFolders.userId, userId)),
+                ),
+            ),
+        );
     await Promise.all(
         configurations.map((configuration) =>
-            enqueueExportPlan(userId, configuration.id),
+            enqueueExportPlan(configuration.userId, configuration.id),
         ),
     );
 }

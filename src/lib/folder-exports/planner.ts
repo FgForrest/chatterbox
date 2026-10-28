@@ -27,7 +27,6 @@ import {
     relativeFolderChain,
 } from "@/lib/folders/hierarchy";
 import { mailMarkdownDocument } from "@/lib/mail/export-document";
-import { isOrgAccount } from "@/lib/org/config";
 import {
     sharedItemCondition,
     sharedRecordingCondition,
@@ -47,6 +46,7 @@ import {
     sourceFilename,
 } from "./naming";
 import { createExportProvider } from "./provider-factory";
+import { resolveFolderExportScope } from "./scope";
 import { clearExportFailure, recordExportFailure } from "./status";
 import { type ExportTarget, loadExportTarget } from "./target";
 import type {
@@ -241,11 +241,9 @@ async function planLocked(
     const configuration = await loadExportTarget(userId, exportId);
     if (!configuration) return 0;
 
-    // The organization account exports every shared recording: the
-    // owner's rows and audio, as a shared recording is one recording.
-    // Everyone else exports their own library.
-    const isOrg = await isOrgAccount(userId);
-    const organization = await listExportFolderOrganization(userId);
+    const { contentUserId, isOrganization: isOrg } =
+        await resolveFolderExportScope(userId, configuration.folderId);
+    const organization = await listExportFolderOrganization(contentUserId);
     const configSubtree = descendantFolderIds(
         organization.folders,
         configuration.folderId,
@@ -257,14 +255,14 @@ async function planLocked(
         .where(
             and(
                 isOrg
-                    ? sharedRecordingCondition(userId)
+                    ? sharedRecordingCondition(contentUserId)
                     : eq(recordings.userId, userId),
                 isNull(recordings.deletedAt),
             ),
         );
     // The Organization's rows: those the owner of a shared recording holds.
     const sharedContent = and(
-        sharedRecordingCondition(userId),
+        sharedRecordingCondition(contentUserId),
         isNull(recordings.deletedAt),
     );
     const mailRows = configuration.exportMail
@@ -288,7 +286,7 @@ async function planLocked(
               .where(
                   and(
                       isOrg
-                          ? sharedItemCondition(userId, chatterItems.id)
+                          ? sharedItemCondition(contentUserId, chatterItems.id)
                           : eq(chatterItems.userId, userId),
                       isNull(chatterItems.deletedAt),
                   ),
@@ -714,7 +712,7 @@ async function planLocked(
             if (kept) artifacts.push(kept);
         }
         const document = await mailMarkdownDocument({
-            viewerUserId: userId,
+            viewerUserId: contentUserId,
             ownerUserId: mail.userId,
             itemId: mail.id,
         });
