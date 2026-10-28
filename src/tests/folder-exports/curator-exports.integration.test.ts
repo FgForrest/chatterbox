@@ -591,17 +591,31 @@ describeWithDatabase("curator Organization folder exports (PostgreSQL)", () => {
             reconcileFolderExport("curator", "team"),
         ).rejects.toMatchObject({ statusCode: 403 });
         expect(drive.calls).toHaveLength(callsBefore);
+        const [stored] = await db()
+            .select({ lastError: folderExportConfigurations.lastError })
+            .from(folderExportConfigurations)
+            .where(eq(folderExportConfigurations.id, configuration.id));
+        expect(stored?.lastError).toBe("writer_no_longer_curator");
         expect(
             (await listFolderExports("other", "team")).configured[0],
         ).toMatchObject({
             stoppedReason: "writer_no_longer_curator",
+            lastError: null,
             canEdit: false,
             canRemove: true,
         });
         expect(
-            (await listFolderExports("member", "team")).configured[0]
-                ?.stoppedReason,
-        ).toBeNull();
+            (await listFolderExports("member", "team")).configured[0],
+        ).toMatchObject({ stoppedReason: null, lastError: null });
+        if (reason === "revoked") {
+            await db()
+                .update(userAccessStates)
+                .set({ capabilities: ["use", "org.curate"] })
+                .where(eq(userAccessStates.userId, "curator"));
+            expect(
+                (await listFolderExports("other", "team")).configured[0],
+            ).toMatchObject({ stoppedReason: null, lastError: null });
+        }
         expect(drive.tree("picked")).toEqual(treeBefore);
         expect(drive.tree("picked")).toContain(
             "Nested/Meeting inside/audio.mp3",

@@ -207,6 +207,11 @@ async function configurationDto(
     const manages = canManage ?? (await mayWriteOrganizationExport(viewerId));
     return {
         ...dto,
+        // The role-loss failure is stored as a code; stoppedReason carries it.
+        lastError:
+            manages && dto.lastError !== WRITER_NO_LONGER_CURATOR
+                ? dto.lastError
+                : null,
         writer: { id: target.userId, name: target.writerName ?? target.userId },
         canEdit: manages && target.userId === viewerId,
         canRemove: manages,
