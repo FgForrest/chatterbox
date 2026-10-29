@@ -503,7 +503,10 @@ describe("transcription dialog", () => {
         expect(collapse.getAttribute("aria-expanded")).toBe("true");
 
         const footer = widget?.querySelector("footer");
-        expect(footer?.textContent).toContain("Custom");
+        expect(
+            footer?.querySelector('[data-testid="transcript-provenance"]'),
+        ).toBeTruthy();
+        expect(footer?.textContent).not.toContain("Custom");
         expect(footer?.textContent).toContain("openai");
         expect(footer?.textContent).toContain("whisper-1");
         expect(footer?.textContent).toContain("English (detected)");

@@ -6,6 +6,7 @@ import {
     fireEvent,
     render,
     screen,
+    within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskRow } from "@/components/tasks/task-row";
@@ -222,20 +223,96 @@ it("renders a read-only agenda task without mutation controls", () => {
     fireEvent.click(screen.getByRole("checkbox"));
     expect(onChange).not.toHaveBeenCalled();
 });
-it("frames agenda-specific actions in the shared task row", () => {
+describe.each([true, false])("task action line with editing=%s", (canEdit) => {
+    it.each([
+        true,
+        false,
+    ])("keeps the follow toggle last with following=%s", (following) => {
+        render(
+            <TaskRow
+                task={task({
+                    canEdit,
+                    canUndoMatch: canEdit,
+                    canClose: canEdit,
+                    canFollow: true,
+                    following,
+                })}
+                organizationOnly
+                onChange={vi.fn()}
+                onMerge={vi.fn()}
+                onUndoMatch={vi.fn()}
+                actions={
+                    <>
+                        <span>Older</span>
+                        <span>Changed during the meeting</span>
+                        <button type="button">Add</button>
+                    </>
+                }
+            />,
+        );
+        const follow = screen.getByRole("button", {
+            name: following ? "Following" : "Follow",
+        });
+        const actionLine = follow.closest(".task-row-actions");
+        expect(actionLine?.lastElementChild).toBe(follow);
+        expect(follow.getAttribute("aria-pressed")).toBe(String(following));
+        expect(follow.title).toBe(following ? "Stop following" : "Follow");
+        expect(follow.classList.contains("task-following")).toBe(following);
+        expect(follow.classList.contains("text-primary")).toBe(following);
+        const hoverTools = actionLine?.querySelector(".task-row-hover-actions");
+        expect(hoverTools).toBeInstanceOf(HTMLElement);
+        if (!(hoverTools instanceof HTMLElement))
+            throw new Error("Missing hover tools");
+        expect(hoverTools.nextElementSibling).toBe(follow);
+        expect(within(hoverTools).getByText("Older")).toBeTruthy();
+        expect(
+            within(hoverTools).getByText("Changed during the meeting"),
+        ).toBeTruthy();
+        expect(
+            within(hoverTools).getByRole("button", { name: "Add" }),
+        ).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Drop" }) !== null).toBe(
+            canEdit,
+        );
+        expect(
+            screen.queryByRole("button", { name: "Undo match" }) !== null,
+        ).toBe(canEdit);
+    });
+});
+
+it.each([
+    { name: "Note", status: "open" },
+    { name: "Merge into another task", status: "open" },
+    { name: "Undo match", status: "open" },
+    { name: "Drop", status: "open" },
+    { name: "Restore", status: "dropped" },
+] as const)("renders $name as an icon button with a focus tooltip", async ({
+    name,
+    status,
+}) => {
     render(
         <TaskRow
-            task={task()}
+            task={task({
+                status,
+                canClose: true,
+                canEdit: true,
+                canUndoMatch: true,
+            })}
             organizationOnly
             onChange={vi.fn()}
-            actions={<button type="button">Remove from agenda</button>}
+            onMerge={vi.fn()}
+            onUndoMatch={vi.fn()}
         />,
     );
-    expect(
-        screen
-            .getByRole("button", { name: "Remove from agenda" })
-            .closest("li"),
-    ).toBeTruthy();
+    const button = screen.getByRole("button", { name });
+    expect(button.textContent).toBe("");
+    expect(button.querySelector("svg")).not.toBeNull();
+    expect(button.classList.contains("size-6")).toBe(true);
+    expect(button.classList.contains("hover:bg-accent")).toBe(true);
+    expect(button.classList.contains("text-muted-foreground")).toBe(true);
+    expect(button.classList.contains("hover:text-foreground")).toBe(true);
+    act(() => button.focus());
+    expect((await screen.findByRole("tooltip")).textContent).toBe(name);
 });
 
 it("closes and drops live tasks while keeping the assignee note read-only", () => {

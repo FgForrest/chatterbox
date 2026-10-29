@@ -18,7 +18,7 @@ The manual picker can use any available profile for that kind of item. Starting 
 
 While it runs, the card shows how long it has taken and, for a multi-pass summary, how far it is: `Summarizing — 1/3 passes`, then `Merging 3 passes…`. You can leave the page; the summary keeps going and is there when you come back.
 
-Summaries are written in Markdown, so headings, lists and tables show as such. **Key Points** are the last section inside the same summary box. Copied and downloaded Markdown keeps that order: summary text, then key points. Provider, model, multi-pass badge and warnings with their actions are in the footer below the tasks.
+Summaries are written in Markdown, so headings, lists and tables show as such. **Key Points** are the last section inside the same summary box. Copied and downloaded Markdown keeps that order: summary text, then key points. The footer below the tasks shows warnings with their actions in an amber band, then one line with the profile, provider, model and markers such as multi-pass or **Hand-edited**.
 
 If you correct names in the transcript after the summary was written, the summary shows **May contain stale names or terms** with a **Regenerate** link. The workflow strip also marks work made from older inputs as **Outdated**.
 
@@ -52,7 +52,7 @@ Chatterbox includes summary instructions such as **General Summary**, **Meeting 
 
 ![A summary made with two of three passes](images/summary-multi-pass.png)
 
-A profile can run a summary 2 to 5 times and merge the results, so a point only one pass noticed still makes it into the summary. It costs about as many times more as there are passes. The footer says **multi-pass · 3**. When a pass failed and the summary was made from fewer, the badge turns amber, for example **multi-pass · 2/3**; hover over it to see why.
+A profile can run a summary 2 to 5 times and merge the results, so a point only one pass noticed still makes it into the summary. It costs about as many times more as there are passes. The footer says **multi-pass · 3**. When a pass failed and the summary was made from fewer, the marker turns amber, for example **multi-pass · 2/3**; hover over it to see why.
 
 <span id="tasks-from-a-summary" />
 <span id="tasks-across-items" />

@@ -18,6 +18,7 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog";
+import { ActionTooltip } from "@/components/ui/tooltip";
 import type { MergeCandidateView } from "@/lib/tasks/proposals";
 import type { TaskMergePreview } from "@/lib/tasks/tasks";
 import { cn } from "@/lib/utils";
@@ -191,22 +192,30 @@ export function MergeTaskPicker({
 
     return (
         <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-                {inlineTrigger ? (
-                    <button
-                        type="button"
-                        className="inline-flex items-center gap-1 hover:text-foreground"
-                    >
-                        <Combine className="size-3" aria-hidden="true" />
-                        {label ?? i18n("Merge into another task")}
-                    </button>
-                ) : (
+            {inlineTrigger ? (
+                <ActionTooltip label={label ?? i18n("Merge into another task")}>
+                    <DialogTrigger asChild>
+                        <Button
+                            type="button"
+                            size="icon-xs"
+                            variant="ghost"
+                            aria-label={
+                                label ?? i18n("Merge into another task")
+                            }
+                            className="text-muted-foreground hover:text-foreground"
+                        >
+                            <Combine className="size-3" aria-hidden="true" />
+                        </Button>
+                    </DialogTrigger>
+                </ActionTooltip>
+            ) : (
+                <DialogTrigger asChild>
                     <Button type="button" size="sm" variant="ghost">
                         <Combine className="size-3.5" aria-hidden="true" />
                         {label ?? i18n("Merge into another task")}
                     </Button>
-                )}
-            </DialogTrigger>
+                </DialogTrigger>
+            )}
             <DialogContent className="sm:max-w-xl">
                 <DialogHeader>
                     <DialogTitle>{i18n("Merge into another task")}</DialogTitle>

@@ -27,6 +27,7 @@ import {
     SpeakerTags,
     type TranscriptSpeakerTag,
 } from "@/components/people/speaker-tags";
+import { ProvenanceLine } from "@/components/pipeline/provenance-line";
 import {
     useWorkflowWidgetOpen,
     WorkflowWidget,
@@ -708,65 +709,98 @@ export function TranscriptionPanel({
     const transcriptFooter = activeTranscript
         ? {
               status: (
-                  <div className="flex flex-wrap items-center gap-4 text-xs">
-                      <span className="rounded bg-muted px-2 py-0.5 font-medium">
-                          {activeTranscript.source === "plaud"
-                              ? "Plaud"
-                              : activeTranscript.source === "mixed"
-                                ? i18n("Mix")
-                                : i18n("Custom")}
-                      </span>
-                      {activeTranscript.provider && (
-                          <span className="rounded bg-muted px-2 py-0.5">
-                              {activeTranscript.provider}
-                          </span>
-                      )}
-                      {activeTranscript.model && (
-                          <span className="rounded bg-muted px-2 py-0.5 font-mono">
-                              {activeTranscript.model}
-                          </span>
-                      )}
-                      <RecordingLanguage
-                          key={`${recording.id}:${view ?? "private"}`}
-                          recordingId={recording.id}
-                          detectedLanguage={activeTranscript.language}
-                          readOnly={readOnly}
-                          view={view}
-                          source={activeTranscript.source}
-                          refreshKey={reviewsFinished + followUpRevision}
-                          onReload={() => {
-                              setFollowUpRevision((count) => count + 1);
-                              onTranscriptStale?.();
-                          }}
-                          onTranscribe={onTranscribe}
-                          onResummarize={() => {
-                              if (
-                                  summarySource === "riffado" &&
-                                  resummarizeAction &&
-                                  !resummarizeAction.disabled
-                              ) {
-                                  resummarizeAction.run();
-                              }
-                          }}
-                          resummarizeDisabled={
-                              summarySource !== "riffado" ||
-                              (resummarizeAction?.disabled ?? true)
-                          }
-                          transcriptionDisabled={
-                              transcriptionRunning ||
-                              Boolean(recording.audioReaped)
-                          }
-                      />
-                      <span>
-                          {activeTranscript.text.trim()
-                              ? activeTranscript.text.trim().split(/\s+/).length
-                              : 0}{" "}
-                          {i18n("words")}
-                      </span>
-                      <span>
-                          {activeTranscript.text.length} {i18n("characters")}
-                      </span>
-                  </div>
+                  <ProvenanceLine
+                      data-testid="transcript-provenance"
+                      items={[
+                          {
+                              key: "source",
+                              content:
+                                  activeTranscript.source === "plaud" ? (
+                                      <span>Plaud</span>
+                                  ) : (
+                                      activeTranscript.source === "mixed" && (
+                                          <span>{i18n("Mix")}</span>
+                                      )
+                                  ),
+                          },
+                          {
+                              key: "provider",
+                              content: activeTranscript.provider && (
+                                  <span>{activeTranscript.provider}</span>
+                              ),
+                          },
+                          {
+                              key: "model",
+                              content: activeTranscript.model && (
+                                  <span>{activeTranscript.model}</span>
+                              ),
+                          },
+                          {
+                              key: "language",
+                              content: (
+                                  <RecordingLanguage
+                                      key={`${recording.id}:${view ?? "private"}`}
+                                      recordingId={recording.id}
+                                      detectedLanguage={
+                                          activeTranscript.language
+                                      }
+                                      readOnly={readOnly}
+                                      view={view}
+                                      source={activeTranscript.source}
+                                      refreshKey={
+                                          reviewsFinished + followUpRevision
+                                      }
+                                      onReload={() => {
+                                          setFollowUpRevision(
+                                              (count) => count + 1,
+                                          );
+                                          onTranscriptStale?.();
+                                      }}
+                                      onTranscribe={onTranscribe}
+                                      onResummarize={() => {
+                                          if (
+                                              summarySource === "riffado" &&
+                                              resummarizeAction &&
+                                              !resummarizeAction.disabled
+                                          ) {
+                                              resummarizeAction.run();
+                                          }
+                                      }}
+                                      resummarizeDisabled={
+                                          summarySource !== "riffado" ||
+                                          (resummarizeAction?.disabled ?? true)
+                                      }
+                                      transcriptionDisabled={
+                                          transcriptionRunning ||
+                                          Boolean(recording.audioReaped)
+                                      }
+                                  />
+                              ),
+                          },
+                          {
+                              key: "words",
+                              content: (
+                                  <span>
+                                      {activeTranscript.text.trim()
+                                          ? activeTranscript.text
+                                                .trim()
+                                                .split(/\s+/).length
+                                          : 0}{" "}
+                                      {i18n("words")}
+                                  </span>
+                              ),
+                          },
+                          {
+                              key: "characters",
+                              content: (
+                                  <span>
+                                      {activeTranscript.text.length}{" "}
+                                      {i18n("characters")}
+                                  </span>
+                              ),
+                          },
+                      ]}
+                  />
               ),
               actions: null,
           }
