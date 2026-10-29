@@ -1832,6 +1832,13 @@ export function Workstation({
     const settingsFolder = folderOrganization.folders.find(
         (folder) => folder.id === settingsFolderId && !folder.receivedFolder,
     );
+    // Derived like settingsFolder: a folder deleted or moved away by
+    // someone else closes its dialog and frees the shortcuts.
+    const folderActionFolder = folderAction
+        ? folderOrganization.folders.find(
+              (folder) => folder.id === folderAction.folderId,
+          )
+        : undefined;
     const navigation = useMemo(() => {
         const meetingItems = meetings.map((meeting) => ({
             id: meeting.meetingItemId ?? meeting.id,
@@ -1910,7 +1917,7 @@ export function Workstation({
             !paletteOpen &&
             !shortcutsOpen &&
             !settingsFolder &&
-            !folderAction &&
+            !folderActionFolder &&
             !firstLevelFolderOpen &&
             meetingFolderId === undefined,
     });
@@ -2543,30 +2550,23 @@ export function Workstation({
                 onOpenChange={setFirstLevelFolderOpen}
                 onCreated={handleFolderCreated}
             />
-            {folderAction &&
-                folderOrganization.folders.find(
-                    (folder) => folder.id === folderAction.folderId,
-                ) && (
-                    <FolderActionDialog
-                        key={`${folderAction.folderId}:${folderAction.action}`}
-                        folder={
-                            folderOrganization.folders.find(
-                                (folder) => folder.id === folderAction.folderId,
-                            ) as RecordingFolder
-                        }
-                        folders={folderOrganization.folders}
-                        action={folderAction.action}
-                        returnFocusElement={folderAction.returnFocusElement}
-                        open
-                        onOpenChange={(open) => {
-                            if (!open) setFolderAction(null);
-                        }}
-                        onCreate={handleCreateFolder}
-                        onMove={handleMoveFolder}
-                        canCurate={canCurate}
-                        isOrgAccount={isOrgAccount}
-                    />
-                )}
+            {folderAction && folderActionFolder && (
+                <FolderActionDialog
+                    key={`${folderAction.folderId}:${folderAction.action}`}
+                    folder={folderActionFolder}
+                    folders={folderOrganization.folders}
+                    action={folderAction.action}
+                    returnFocusElement={folderAction.returnFocusElement}
+                    open
+                    onOpenChange={(open) => {
+                        if (!open) setFolderAction(null);
+                    }}
+                    onCreate={handleCreateFolder}
+                    onMove={handleMoveFolder}
+                    canCurate={canCurate}
+                    isOrgAccount={isOrgAccount}
+                />
+            )}
             {settingsFolder && (
                 <FolderSettingsPanel
                     key={settingsFolder.id}

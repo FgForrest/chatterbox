@@ -1745,6 +1745,31 @@ describe("Workstation folder locations", () => {
         expect(mocks.folderActionProps?.action).toBe(action);
         expect(mocks.folderActionProps?.returnFocusElement).toBe(button);
     });
+    it("closes a folder action whose folder disappears and frees the shortcuts", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => Response.json({ ok: true })),
+        );
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?folder=personal-child&recording=first",
+        );
+        render(<Workstation {...folderProps} />);
+        fireEvent.click(screen.getByRole("button", { name: "Header move" }));
+        expect(screen.getByText("Folder action")).toBeTruthy();
+        fireEvent.keyDown(window, { key: "j" });
+        expect(window.location.search).toContain("recording=first");
+        fireEvent.click(
+            screen.getByRole("button", { name: "Folder settings" }),
+        );
+        await act(async () => {
+            await mocks.settingsProps?.onDelete(personalChildFolder.id);
+        });
+        expect(screen.queryByText("Folder action")).toBeNull();
+        fireEvent.keyDown(window, { key: "j" });
+        expect(window.location.search).toContain("recording=second");
+    });
     it.each([
         "palette",
         "search",
