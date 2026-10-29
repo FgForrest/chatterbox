@@ -594,3 +594,38 @@ describe("mail detail layout", () => {
         expect(blocks?.className).toBe("flex flex-col gap-6");
     });
 });
+
+it("uses a neutral pressed surface for formatted mail", async () => {
+    stubMailFetch({
+        segments: [bodySegment],
+        html: "<p>Formatted content</p>",
+    });
+    render(
+        <MailDetailPane
+            mail={mail}
+            dateTimeFormat="absolute"
+            onBackToList={vi.fn()}
+            hiddenOnMobile={false}
+            onChanged={vi.fn()}
+            folders={[]}
+            folderAssignments={[]}
+            onSelectFolder={vi.fn()}
+            onAddToFolder={vi.fn()}
+            onRemoveFromFolder={vi.fn()}
+            onMoveBetweenFolders={vi.fn()}
+        />,
+    );
+    const trigger = await screen.findByRole("button", {
+        name: "Show formatted",
+    });
+    expect(trigger.classList.contains("text-primary")).toBe(false);
+    fireEvent.click(trigger);
+    await screen.findByTitle("Formatted mail");
+    expect(trigger.getAttribute("aria-pressed")).toBe("true");
+    expect(trigger.classList.contains("bg-accent")).toBe(true);
+    expect(trigger.className).not.toMatch(/(?:^|:)text-primary/);
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute("aria-pressed")).toBe("false");
+    expect(trigger.classList.contains("text-primary")).toBe(false);
+    expect(screen.queryByTitle("Formatted mail")).toBeNull();
+});

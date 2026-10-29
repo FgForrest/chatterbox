@@ -13,6 +13,7 @@ import {
 } from "@/components/tasks/task-list-controls";
 import { TaskRow } from "@/components/tasks/task-row";
 import { Button } from "@/components/ui/button";
+import { HeadingCount } from "@/components/ui/heading-count";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useTaskListData } from "@/hooks/use-task-list-data";
 import { folderDisplayPath } from "@/lib/folders/labels";
@@ -249,9 +250,9 @@ export function FolderTasksPanel({
                                     <span>
                                         {folderDisplayPath(entry, byId, label)}
                                     </span>
-                                    <span className="text-xs font-normal tabular-nums text-muted-foreground">
+                                    <HeadingCount>
                                         {groups.get(entry.id)?.length}
-                                    </span>
+                                    </HeadingCount>
                                 </h3>
                                 <ul className="divide-y">
                                     {groups.get(entry.id)?.map((task) => (

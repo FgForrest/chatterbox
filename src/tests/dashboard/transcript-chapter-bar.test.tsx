@@ -97,7 +97,7 @@ function rect(top: number, height = 20): DOMRect {
 }
 
 function openList() {
-    fireEvent.keyDown(screen.getByRole("button", { name: /1 \/ 2 Opening/ }), {
+    fireEvent.keyDown(screen.getByRole("button", { name: /Opening 1 \/ 2/ }), {
         key: "Enter",
     });
 }
@@ -164,18 +164,18 @@ describe("transcript chapter bar", () => {
     it("tracks forward and backward reading across topic headings", () => {
         render(<Harness />);
         expect(
-            screen.getByRole("button", { name: "1 / 2 Opening" }),
+            screen.getByRole("button", { name: "Opening 1 / 2" }),
         ).toBeTruthy();
         const box = screen.getByRole("region", { name: "Transcript content" });
         box.scrollTop = 500;
         fireEvent.scroll(box);
         expect(
-            screen.getByRole("button", { name: `2 / 2 ${topics[1].title}` }),
+            screen.getByRole("button", { name: `${topics[1].title} 2 / 2` }),
         ).toBeTruthy();
         box.scrollTop = 100;
         fireEvent.scroll(box);
         expect(
-            screen.getByRole("button", { name: "1 / 2 Opening" }),
+            screen.getByRole("button", { name: "Opening 1 / 2" }),
         ).toBeTruthy();
     });
 
@@ -191,7 +191,7 @@ describe("transcript chapter bar", () => {
         });
         render(<Harness />);
         expect(
-            screen.getByRole("button", { name: "1 / 2 Opening" }),
+            screen.getByRole("button", { name: "Opening 1 / 2" }),
         ).toBeTruthy();
     });
 
@@ -216,7 +216,7 @@ describe("transcript chapter bar", () => {
         });
         expect(HTMLElement.prototype.scrollTo).toHaveBeenCalled();
         expect(
-            screen.getByRole("button", { name: `2 / 2 ${topics[1].title}` }),
+            screen.getByRole("button", { name: `${topics[1].title} 2 / 2` }),
         ).toBeTruthy();
         expect(playback.seek).not.toHaveBeenCalled();
     });
@@ -243,18 +243,18 @@ describe("transcript chapter bar", () => {
         const box = screen.getByRole("region", { name: "Transcript content" });
         expect(box.scrollTop).toBe(0);
         expect(
-            screen.getByRole("button", { name: `2 / 2 ${topics[1].title}` }),
+            screen.getByRole("button", { name: `${topics[1].title} 2 / 2` }),
         ).toBeTruthy();
         fireEvent.scroll(box);
         expect(
-            screen.getByRole("button", { name: `2 / 2 ${topics[1].title}` }),
+            screen.getByRole("button", { name: `${topics[1].title} 2 / 2` }),
         ).toBeTruthy();
         act(() => {
             for (const listener of listeners)
                 listener({ ms: 11000, playing: false });
         });
         expect(
-            screen.getByRole("button", { name: "1 / 2 Opening" }),
+            screen.getByRole("button", { name: "Opening 1 / 2" }),
         ).toBeTruthy();
     });
 
@@ -270,7 +270,7 @@ describe("transcript chapter bar", () => {
         expect(onSelect).toHaveBeenCalledWith(1);
         expect(screen.queryByRole("menu")).toBeNull();
         fireEvent.keyDown(
-            screen.getByRole("button", { name: `2 / 2 ${topics[1].title}` }),
+            screen.getByRole("button", { name: `${topics[1].title} 2 / 2` }),
             { key: "Enter" },
         );
         fireEvent.click(
@@ -339,7 +339,7 @@ describe("transcript chapter bar", () => {
         render(<Harness hasCorrections />);
         expect(
             screen
-                .getByRole("button", { name: "1 / 2 Opening" })
+                .getByRole("button", { name: "Opening 1 / 2" })
                 .querySelector(".truncate"),
         ).toBeTruthy();
         expect(screen.getByText("Original").className).toContain(

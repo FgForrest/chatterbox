@@ -80,7 +80,8 @@ export function RecordingTasks({
                 {dropped.length > 0 && (
                     <button
                         type="button"
-                        className="text-xs text-muted-foreground hover:text-foreground"
+                        aria-expanded={showDropped}
+                        className="rounded px-1 text-xs text-muted-foreground hover:text-foreground"
                         onClick={() => setShowDropped(!showDropped)}
                     >
                         {showDropped

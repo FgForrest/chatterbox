@@ -81,7 +81,7 @@ describe("the Needs review filter", () => {
             },
         );
         fireEvent.click(
-            screen.getByRole("menuitemcheckbox", { name: "Needs review (1)" }),
+            screen.getByRole("menuitemcheckbox", { name: "Needs review 1" }),
         );
         expect(screen.queryByText("Weekly")).toBeNull();
         expect(screen.getByText("Budget")).toBeTruthy();

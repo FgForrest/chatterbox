@@ -53,7 +53,7 @@ export function ArrivalNotice({
             </span>
             <div className="min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                    <div className="flex min-w-0 items-baseline gap-2 text-xs">
+                    <div className="flex min-w-0 flex-1 items-baseline gap-2 text-xs">
                         <strong
                             className={cn(
                                 "font-semibold",
@@ -79,7 +79,7 @@ export function ArrivalNotice({
                                   : i18n("New recording")}
                         </strong>
                         {more > 0 && (
-                            <span className="text-muted-foreground">
+                            <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
                                 {i18n("+{count} more", { count: String(more) })}
                             </span>
                         )}

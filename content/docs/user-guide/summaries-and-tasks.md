@@ -28,6 +28,8 @@ The item's owner can use **Edit summary** (the pencil in the card header) on a g
 
 ![Editing summary text and key points](images/summary-edit.png)
 
+While editing, the **Edit summary** button is inactive. Use the editor’s **Save** or **Cancel** buttons to finish; focus returns to the pencil.
+
 Edit **Summary text** as Markdown and **Key Points**, each on its own line starting with `- `, then **Save** or **Cancel**. Speaker links show the current names, for example `[Alex Morgan](#speaker-1)`. Keep the `#speaker-N` link so the name follows later speaker renames. Editing the summary does not edit tasks; change those in the task list below it.
 
 Saved text has a **Hand-edited** footer marker; hover over it to see who edited it and when. Automatic processing never overwrites it, including after re-transcription or Learn corrections. It may therefore describe older input. A manual **Re-summarize**, profile change or **Regenerate** asks for confirmation before replacing hand edits. The owner can choose **Write a remark** there instead. Confirming a replacement clears the hand-edited marker.
@@ -125,7 +127,7 @@ Right-click **Tasks** in the navigation, press the context-menu key or Shift+F10
 
 ### Notes and follows
 
-Ticking a task opens an optional note box. Choose **Skip** or **Save note**. **Note** opens it again at any time. There is one encrypted note of at most 2,000 characters per task; saving replaces it. Everyone who sees the task reads the note with its author and time. Anyone allowed to mark it done may write the note. Notes are searched and backed up; they never enter summary prompts.
+Ticking a task opens an optional note box. Choose **Skip** or **Save note**. **Note** opens it again after the editor closes. While editing, its trigger is inactive; use **Skip** or **Save note**. Focus then returns to **Note**. There is one encrypted note of at most 2,000 characters per task; saving replaces it. Everyone who sees the task reads the note with its author and time. Anyone allowed to mark it done may write the note. Notes are searched and backed up; they never enter summary prompts.
 
 **Follow** is available on visible tasks under a recording or mail and on the Tasks page. **Following** remains visible between row actions. A follow survives unsharing: the task is hidden until its item becomes visible again. Followers can open the task detail page. Follows and unfollows belong to the follower's personal backup. Own tasks and changes on followed tasks do not raise the assignment badge.
 

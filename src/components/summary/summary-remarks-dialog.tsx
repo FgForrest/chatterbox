@@ -13,6 +13,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { HeadingCount } from "@/components/ui/heading-count";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ActionTooltip } from "@/components/ui/tooltip";
@@ -125,10 +126,11 @@ export function SummaryRemarksDialog({
                             className="space-y-3"
                             aria-label={i18n("Stored remarks")}
                         >
-                            <h3 className="text-sm font-medium">
-                                {i18n("Stored remarks ({count})", {
-                                    count: String(data.remarks.length),
-                                })}
+                            <h3 className="flex items-baseline gap-2 text-sm font-medium">
+                                {i18n("Stored remarks")}{" "}
+                                <HeadingCount>
+                                    {data.remarks.length}
+                                </HeadingCount>
                             </h3>
                             <ul className="space-y-2">
                                 {data.remarks.map((remark) => (

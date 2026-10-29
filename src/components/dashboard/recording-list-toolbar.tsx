@@ -250,9 +250,10 @@ export function RecordingListToolbar({
                                         }
                                     >
                                         <GraduationCap className="mr-2 size-3.5" />
-                                        {i18n("Needs review ({count})", {
-                                            count: String(reviewCount),
-                                        })}
+                                        {i18n("Needs review")}{" "}
+                                        <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                                            {reviewCount}
+                                        </span>
                                     </DropdownMenuCheckboxItem>
                                 )}
                                 <DropdownMenuSeparator />
