@@ -52,7 +52,8 @@ describe("summary editor sizing", () => {
             expect(field.style.height).toBe(`${height}px`);
             expect(field.classList.contains("font-mono")).toBe(false);
             for (const className of [
-                "text-sm",
+                "text-base",
+                "md:text-sm",
                 "leading-6",
                 "resize-none",
                 "overflow-y-auto",
@@ -60,6 +61,7 @@ describe("summary editor sizing", () => {
                 maximum,
             ])
                 expect(field.classList.contains(className)).toBe(true);
+            expect(field.getAttribute("data-slot")).toBe("textarea");
         }
     });
 

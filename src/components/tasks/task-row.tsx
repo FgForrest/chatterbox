@@ -32,6 +32,8 @@ import { TaskEvidenceLink } from "@/components/tasks/task-evidence-link";
 import { DueDateField, TaskTextInput } from "@/components/tasks/task-fields";
 import { TaskFolderPicker } from "@/components/tasks/task-folder-picker";
 import type { TaskRowChange } from "@/components/tasks/use-recording-tasks";
+import { EditorActions } from "@/components/ui/editor-actions";
+import { Textarea } from "@/components/ui/textarea";
 import {
     Tooltip,
     TooltipContent,
@@ -465,7 +467,8 @@ export function TaskRow({
                 )}
                 {noteOpen && task.canClose && !notesReadOnly && (
                     <div className="space-y-2">
-                        <textarea
+                        <Textarea
+                            autoGrow
                             ref={noteInput}
                             aria-label={i18n("Note")}
                             maxLength={2000}
@@ -473,33 +476,21 @@ export function TaskRow({
                             onChange={(event) =>
                                 setNoteDraft(event.target.value)
                             }
-                            className="min-h-20 w-full rounded-md border bg-background p-2"
+                            className="min-h-20 max-h-[50vh]"
                         />
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            <span>
-                                {i18n(
-                                    "One note per task. Everyone who sees the task can read it.",
-                                )}
-                            </span>
-                            <button
-                                type="button"
-                                className="ml-auto"
-                                onClick={() => setNoteOpen(false)}
-                            >
-                                {i18n("Skip")}
-                            </button>
-                            <button
-                                type="button"
-                                className="rounded-md bg-primary px-3 py-1.5 text-primary-foreground"
-                                onClick={() => {
-                                    const note = noteDraft.trim() || null;
-                                    onChange({ note }, { note });
-                                    setNoteOpen(false);
-                                }}
-                            >
-                                {i18n("Save note")}
-                            </button>
-                        </div>
+                        <EditorActions
+                            hint={i18n(
+                                "One note per task. Everyone who sees the task can read it.",
+                            )}
+                            cancelLabel={i18n("Skip")}
+                            saveLabel={i18n("Save note")}
+                            onCancel={() => setNoteOpen(false)}
+                            onSave={() => {
+                                const note = noteDraft.trim() || null;
+                                onChange({ note }, { note });
+                                setNoteOpen(false);
+                            }}
+                        />
                     </div>
                 )}
             </div>

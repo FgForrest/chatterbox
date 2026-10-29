@@ -252,6 +252,14 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
             screen.queryByRole("button", { name: "Re-summarize" }),
         ).toBeNull();
         expect(screen.queryByTestId("recording-tasks")).toBeNull();
+        for (const field of screen.getAllByRole("textbox")) {
+            expect(field.getAttribute("data-slot")).toBe("textarea");
+            expect(field.classList.contains("resize-none")).toBe(true);
+        }
+        for (const name of ["Cancel", "Save"])
+            expect(
+                screen.getByRole("button", { name }).classList.contains("h-8"),
+            ).toBe(true);
         fireEvent.change(screen.getByLabelText(/Summary text/), {
             target: { value: "Discarded draft" },
         });

@@ -14,6 +14,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { ActionTooltip } from "@/components/ui/tooltip";
 import { type RecordingView, withRecordingView } from "@/lib/sharing/view";
 import type { SummaryRemark } from "@/lib/summary/edits";
@@ -193,10 +194,10 @@ export function SummaryRemarksDialog({
                         </section>
                         <div className="space-y-2">
                             <Label htmlFor={id}>{i18n("New remark")}</Label>
-                            <textarea
-                                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            <Textarea
+                                autoGrow
+                                className="min-h-24 max-h-[40vh]"
                                 id={id}
-                                rows={4}
                                 maxLength={20_000}
                                 value={text}
                                 onChange={(event) =>

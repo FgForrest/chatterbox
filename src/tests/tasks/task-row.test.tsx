@@ -86,6 +86,7 @@ beforeEach(() => {
 
 afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     toastError.mockReset();
     locale.current = "en";
@@ -258,4 +259,63 @@ it("closes and drops live tasks while keeping the assignee note read-only", () =
         { status: "dropped" },
         { status: "dropped" },
     );
+});
+
+it("focuses the proportional auto-growing note field and saves through the shared actions", () => {
+    const height = vi
+        .spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get")
+        .mockReturnValue(100);
+    const { onChange } = renderTask(task({ canClose: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Note" }));
+    const field = screen.getByRole<HTMLTextAreaElement>("textbox", {
+        name: "Note",
+    });
+    expect(document.activeElement).toBe(field);
+    expect(field.dataset.slot).toBe("textarea");
+    expect(field.maxLength).toBe(2000);
+    expect(field.classList.contains("font-mono")).toBe(false);
+    expect(field.classList.contains("resize-y")).toBe(false);
+    for (const className of [
+        "text-base",
+        "md:text-sm",
+        "resize-none",
+        "min-h-20",
+        "max-h-[50vh]",
+    ])
+        expect(field.classList.contains(className)).toBe(true);
+    expect(field.style.height).toBe("100px");
+    height.mockReturnValue(320);
+    fireEvent.change(field, {
+        target: { value: "  A longer note\nwith a second line.  " },
+    });
+    expect(field.style.height).toBe("320px");
+    for (const name of ["Skip", "Save note"])
+        expect(
+            screen.getByRole("button", { name }).classList.contains("h-8"),
+        ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(
+        { note: "A longer note\nwith a second line." },
+        { note: "A longer note\nwith a second line." },
+    );
+    expect(screen.queryByRole("textbox", { name: "Note" })).toBeNull();
+});
+
+it("Skip closes the note without saving or clearing its draft", () => {
+    const { onChange } = renderTask(
+        task({ canClose: true, note: "Saved note" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Note" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Note" }), {
+        target: { value: "Unsaved draft" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox", { name: "Note" })).toBeNull();
+    expect(screen.getByText("Saved note")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Note" }));
+    expect(
+        screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Note" })
+            .value,
+    ).toBe("Unsaved draft");
 });
