@@ -136,6 +136,7 @@ describe.each([
         expect(nextRun.textContent).toBe(
             "Profile Meeting notes · Local provider · local-model",
         );
+        expect(nextRun.closest(".font-mono")).toBeNull();
         expect(nextRun.querySelector(".font-mono")).toBeNull();
         expect(fetchMock).toHaveBeenCalledWith(
             `/api/recordings/item/summary/remarks?profileId=profile${view === "org" ? "&view=org" : ""}`,
