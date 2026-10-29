@@ -3220,6 +3220,7 @@ function taskTabScope(
     tab: TaskTab,
     organization: boolean,
 ): SQL {
+    // All narrows nothing: taskTabConditions always applies taskVisible.
     if (tab === "all") return sql`true`;
     if (tab === "mine") return assignedToViewer(viewer);
     if (organization && viewer.isCurator) {

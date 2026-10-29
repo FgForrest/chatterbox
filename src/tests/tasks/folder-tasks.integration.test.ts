@@ -187,6 +187,23 @@ describe.skipIf(!url)("folder tasks across all visible sources", () => {
                 text: encryptText("Other own task"),
             },
             {
+                id: "org-own",
+                userId: "org",
+                itemId: null,
+                source: "personal",
+                status: "open",
+                text: encryptText("Organization own task"),
+            },
+            {
+                id: "org-own-filed",
+                userId: "org",
+                itemId: null,
+                folderId: "team-child",
+                source: "personal",
+                status: "open",
+                text: encryptText("Organization own filed task"),
+            },
+            {
                 id: "proposed",
                 userId: "viewer",
                 itemId: "owned",
@@ -295,6 +312,20 @@ describe.skipIf(!url)("folder tasks across all visible sources", () => {
             "task-shared-other",
             "task-shared-owned",
         ]);
+    });
+    it("never shows another user's own tasks in an unfiltered All", async () => {
+        expect(ids(await list("all", null))).toEqual(
+            [
+                "own",
+                "own-child",
+                "own-sibling",
+                "task-owned",
+                "task-received",
+                "task-shared-other",
+                "task-shared-owned",
+                "task-sibling-item",
+            ].sort(),
+        );
     });
     it("excludes inaccessible folders and hides received tasks when capability is absent", async () => {
         expect(await list("all", "other-private")).toEqual([]);

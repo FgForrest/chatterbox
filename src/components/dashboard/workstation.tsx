@@ -1932,7 +1932,7 @@ export function Workstation({
     };
     const assignRecording = (id: string, folderId: string) =>
         handleFolderAssignment(id, folderId, true);
-    const closeKnowledge = () => {
+    const closeFolderView = () => {
         setKnowledgeFolderId(null);
         setTasksFolderId(null);
         setMobileView("list");
@@ -1951,7 +1951,7 @@ export function Workstation({
         tasksOpen: tasksFolderId !== null && tasksFolderId === selectedFolderId,
         onTasks: (folder: RecordingFolder) => {
             if (tasksFolderId === folder.id) {
-                closeKnowledge();
+                closeFolderView();
                 return;
             }
             selectionRevisionRef.current += 1;
@@ -1976,7 +1976,7 @@ export function Workstation({
             knowledgeFolderId === selectedFolderId,
         onKnowledge: (folder: RecordingFolder) => {
             if (knowledgeFolderId === folder.id) {
-                closeKnowledge();
+                closeFolderView();
                 return;
             }
             selectionRevisionRef.current += 1;
@@ -2270,7 +2270,7 @@ export function Workstation({
                                 folder={selectedFolder}
                                 organization={folderOrganization}
                                 isOrgAccount={isOrgAccount}
-                                onBack={closeKnowledge}
+                                onBack={closeFolderView}
                             />
                         ) : knowledgeFolderId &&
                           selectedFolder?.id === knowledgeFolderId ? (
@@ -2278,7 +2278,7 @@ export function Workstation({
                                 key={knowledgeFolderId}
                                 folder={selectedFolder}
                                 contentRevision={orgContentRevision}
-                                onBack={closeKnowledge}
+                                onBack={closeFolderView}
                             />
                         ) : currentMeetingId ? (
                             <div
