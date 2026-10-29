@@ -132,7 +132,11 @@ describe.each([
         expect(screen.getByText("JD")).toBeTruthy();
         expect(screen.getByText(remark.authorName)).toBeTruthy();
         expect(document.querySelector("time")?.dateTime).toBe(remark.createdAt);
-        expect(screen.getByText("local-model")).toBeTruthy();
+        const nextRun = screen.getByText(/local-model/);
+        expect(nextRun.textContent).toBe(
+            "Profile Meeting notes · Local provider · local-model",
+        );
+        expect(nextRun.querySelector(".font-mono")).toBeNull();
         expect(fetchMock).toHaveBeenCalledWith(
             `/api/recordings/item/summary/remarks?profileId=profile${view === "org" ? "&view=org" : ""}`,
             expect.any(Object),
