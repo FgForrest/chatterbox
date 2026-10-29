@@ -2,7 +2,11 @@
 
 import {
     ChevronDown,
+    History,
+    ListX,
     Loader2,
+    MessageSquareText,
+    PencilLine,
     Play,
     Square,
     WandSparkles,
@@ -12,13 +16,24 @@ import { nanoid } from "nanoid";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useExtracted, useFormatter } from "next-intl";
-import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
+import {
+    type ComponentProps,
+    type ReactNode,
+    useEffect,
+    useId,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
 import { ItemHeader } from "@/components/items/item-header";
 import { announceTasksChanged } from "@/components/tasks/task-api";
 import { TaskRow } from "@/components/tasks/task-row";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EditorActions } from "@/components/ui/editor-actions";
 import { SearchCombobox } from "@/components/ui/search-combobox";
+import { Textarea } from "@/components/ui/textarea";
+import { ActionTooltip } from "@/components/ui/tooltip";
 import { inviteeNames } from "@/lib/meetings/invitee-names";
 import { groupAgendaTasks } from "@/lib/meetings/task-groups";
 import type { TaskChange, TaskView } from "@/lib/tasks/tasks";
@@ -27,16 +42,11 @@ import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 import { AgendaExport } from "./agenda-export";
 import { AgendaFolderTags } from "./agenda-folder-tags";
-import { meetingRequest, meetingUrl } from "./api";
 import { AttachRecordingDialog } from "./attach-recording-dialog";
 import { MeetingSettings } from "./meeting-settings";
+import { OlderTasksDialog } from "./older-tasks-dialog";
 import { OutlineEditor, type PointPatch } from "./outline-editor";
-import type {
-    MeetingDetail,
-    MeetingPoint,
-    MeetingTask,
-    OlderTask,
-} from "./types";
+import type { MeetingDetail, MeetingPoint, MeetingTask } from "./types";
 import { useAgenda } from "./use-agenda";
 
 export type AgendaVariant = "meeting" | "live" | "recording";
@@ -82,13 +92,9 @@ export function AgendaBody({
     const { detail, mutate } = agenda;
     const [collapsed, setCollapsed] = useState(variant === "recording");
     const [olderOpen, setOlderOpen] = useState(false);
-    const [scope, setScope] = useState<"invited" | "all">("invited");
-    const [older, setOlder] = useState<OlderTask[] | null>(null);
-    const [olderError, setOlderError] = useState<string | null>(null);
     const [attachOpen, setAttachOpen] = useState(false);
     const [now, setNow] = useState(Date.now());
     const suggestionsReasonId = useId();
-    const loadTasksError = i18n("Could not load tasks");
     const sourceRecordings = useMemo(() => {
         const folderIds = new Set(detail?.folderRecordingIds ?? []);
         return [
@@ -118,25 +124,6 @@ export function AgendaBody({
         if (variant !== "recording" && detail?.redirectTo)
             router.replace(detail.redirectTo);
     }, [detail?.redirectTo, router, variant]);
-    useEffect(() => {
-        if (!olderOpen) return;
-        const controller = new AbortController();
-        setOlder(null);
-        setOlderError(null);
-        void meetingRequest<{ tasks: OlderTask[] }>(
-            meetingUrl(id, `/older-tasks?scope=${scope}`),
-            "GET",
-            undefined,
-            controller.signal,
-        )
-            .then((result) => {
-                if (!controller.signal.aborted) setOlder(result.tasks);
-            })
-            .catch(() => {
-                if (!controller.signal.aborted) setOlderError(loadTasksError);
-            });
-        return () => controller.abort();
-    }, [id, olderOpen, scope, loadTasksError]);
     if (!detail)
         return (
             <Card>
@@ -435,107 +422,38 @@ export function AgendaBody({
                             </h3>
                             <ul className="divide-y rounded-lg border">
                                 {group.tasks.map((task) => (
-                                    <TaskRow
+                                    <AgendaTaskRow
                                         key={task.id}
                                         task={task}
                                         recording={task.recording}
                                         evidence={task.evidence}
                                         readOnly={
-                                            readOnly || taskPending(task.id)
+                                            readOnly || (live && !canEdit)
                                         }
-                                        notesReadOnly={live}
-                                        actions={
-                                            <>
-                                                {task.agendaOrigin ===
-                                                    "older" && (
-                                                    <span>{i18n("Older")}</span>
-                                                )}
-                                                {taskChanged(task) && (
-                                                    <span>
-                                                        {i18n(
-                                                            "Changed during the meeting",
-                                                        )}
-                                                    </span>
-                                                )}
-                                                {live &&
-                                                    canEdit &&
-                                                    task.status === "open" &&
-                                                    task.canClose && (
-                                                        <button
-                                                            type="button"
-                                                            disabled={taskPending(
-                                                                task.id,
-                                                            )}
-                                                            onClick={() =>
-                                                                changeTask(
-                                                                    task,
-                                                                    {
-                                                                        status: "done",
-                                                                    },
-                                                                    {
-                                                                        status: "done",
-                                                                    },
-                                                                )
-                                                            }
-                                                        >
-                                                            {i18n("Done")}
-                                                        </button>
-                                                    )}
-                                                {canEdit && (
-                                                    <button
-                                                        type="button"
-                                                        disabled={taskPending(
-                                                            task.id,
-                                                        )}
-                                                        aria-label={i18n(
-                                                            "Remove {task} from agenda",
-                                                            { task: task.text },
-                                                        )}
-                                                        onClick={() =>
-                                                            removeTask(
-                                                                task,
-                                                                true,
-                                                            )
-                                                        }
-                                                    >
-                                                        {i18n(
-                                                            "Remove from agenda",
-                                                        )}
-                                                    </button>
-                                                )}
-                                                {(live || task.agendaNote) && (
-                                                    <AgendaTaskNote
-                                                        task={task}
-                                                        readOnly={
-                                                            !canEdit ||
-                                                            taskPending(task.id)
-                                                        }
-                                                        onSave={(note) => {
-                                                            void mutate(
-                                                                `/tasks/${encodeURIComponent(task.id)}`,
-                                                                "PATCH",
-                                                                { note },
-                                                                (value) => ({
-                                                                    ...value,
-                                                                    tasks: value.tasks.map(
-                                                                        (
-                                                                            entry,
-                                                                        ) =>
-                                                                            entry.id ===
-                                                                            task.id
-                                                                                ? {
-                                                                                      ...entry,
-                                                                                      agendaNote:
-                                                                                          note,
-                                                                                  }
-                                                                                : entry,
-                                                                    ),
-                                                                }),
-                                                            );
-                                                        }}
-                                                    />
-                                                )}
-                                            </>
+                                        pending={taskPending(task.id)}
+                                        canEdit={canEdit}
+                                        live={live}
+                                        changed={taskChanged(task)}
+                                        onRemove={() => removeTask(task, true)}
+                                        onNote={(note) =>
+                                            mutate(
+                                                `/tasks/${encodeURIComponent(task.id)}`,
+                                                "PATCH",
+                                                { note },
+                                                (value) => ({
+                                                    ...value,
+                                                    tasks: value.tasks.map(
+                                                        (entry) =>
+                                                            entry.id === task.id
+                                                                ? {
+                                                                      ...entry,
+                                                                      agendaNote:
+                                                                          note,
+                                                                  }
+                                                                : entry,
+                                                    ),
+                                                }),
+                                            )
                                         }
                                         currentItemId={detail.taskSource?.id}
                                         organizationOnly={detail.folders.some(
@@ -589,155 +507,12 @@ export function AgendaBody({
                     </p>
                 )}
                 {canEdit && !live && (
-                    <>
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            aria-expanded={olderOpen}
-                            onClick={() => setOlderOpen((value) => !value)}
-                        >
-                            <ChevronDown className="size-4" />
-                            {i18n("Older unfinished tasks in these folders")}
-                        </Button>
-                        {olderOpen && (
-                            <section className="space-y-3 rounded-lg border p-3">
-                                <div className="flex items-center justify-between gap-2">
-                                    <h3 className="text-sm font-medium">
-                                        {i18n("Older unfinished tasks")}
-                                    </h3>
-                                    <label className="text-xs">
-                                        {i18n("Show")}
-                                        <select
-                                            className="ml-2 rounded border bg-background p-1"
-                                            value={scope}
-                                            onChange={(event) =>
-                                                setScope(
-                                                    event.target.value === "all"
-                                                        ? "all"
-                                                        : "invited",
-                                                )
-                                            }
-                                        >
-                                            <option value="invited">
-                                                {i18n("Invitees only")}
-                                            </option>
-                                            <option value="all">
-                                                {i18n("Everyone")}
-                                            </option>
-                                        </select>
-                                    </label>
-                                </div>
-                                {olderError ? (
-                                    <p role="alert">{olderError}</p>
-                                ) : !older ? (
-                                    <output>{i18n("Loading tasks…")}</output>
-                                ) : (
-                                    groupAgendaTasks(
-                                        older.filter(
-                                            (task) =>
-                                                !detail.tasks.some(
-                                                    (entry) =>
-                                                        entry.id === task.id &&
-                                                        !entry.removedAt,
-                                                ),
-                                        ),
-                                        detail.invitees,
-                                    )
-                                        .filter((group) => group.tasks.length)
-                                        .map((group) => (
-                                            <section
-                                                key={group.name ?? "unassigned"}
-                                                className="space-y-2"
-                                            >
-                                                <h4 className="text-xs font-medium">
-                                                    {group.name ??
-                                                        i18n("No assignee")}
-                                                    {!group.invited &&
-                                                        group.name && (
-                                                            <span className="ml-2 text-muted-foreground">
-                                                                {i18n(
-                                                                    "Not invited",
-                                                                )}
-                                                            </span>
-                                                        )}
-                                                </h4>
-                                                <ul className="divide-y rounded-lg border">
-                                                    {group.tasks.map((task) => (
-                                                        <TaskRow
-                                                            key={task.id}
-                                                            task={task}
-                                                            recording={
-                                                                task.recording
-                                                            }
-                                                            evidence={
-                                                                task.evidence
-                                                            }
-                                                            readOnly
-                                                            showAssignee={false}
-                                                            organizationOnly={
-                                                                false
-                                                            }
-                                                            onChange={() => {}}
-                                                            actions={
-                                                                <Button
-                                                                    size="sm"
-                                                                    variant="ghost"
-                                                                    disabled={
-                                                                        busy
-                                                                    }
-                                                                    onClick={() =>
-                                                                        void mutate(
-                                                                            "/tasks",
-                                                                            "POST",
-                                                                            {
-                                                                                taskId: task.id,
-                                                                            },
-                                                                            (
-                                                                                value,
-                                                                            ) => ({
-                                                                                ...value,
-                                                                                tasks: [
-                                                                                    ...value.tasks.filter(
-                                                                                        (
-                                                                                            entry,
-                                                                                        ) =>
-                                                                                            entry.id !==
-                                                                                            task.id,
-                                                                                    ),
-                                                                                    {
-                                                                                        ...task,
-                                                                                        removedAt:
-                                                                                            null,
-                                                                                        agendaNote:
-                                                                                            null,
-                                                                                        agendaOrigin:
-                                                                                            "older",
-                                                                                        position: 100000,
-                                                                                    },
-                                                                                ],
-                                                                            }),
-                                                                        )
-                                                                    }
-                                                                >
-                                                                    {i18n(
-                                                                        "Add to agenda",
-                                                                    )}
-                                                                </Button>
-                                                            }
-                                                        />
-                                                    ))}
-                                                </ul>
-                                            </section>
-                                        ))
-                                )}
-                                {older?.length === 0 && (
-                                    <p className="text-xs text-muted-foreground">
-                                        {i18n("No older unfinished tasks")}
-                                    </p>
-                                )}
-                            </section>
-                        )}
-                    </>
+                    <OlderTasksDialog
+                        detail={detail}
+                        open={olderOpen}
+                        onOpenChange={setOlderOpen}
+                        mutate={mutate}
+                    />
                 )}
             </CardContent>
         </Card>
@@ -1352,36 +1127,153 @@ export function AgendaBody({
     );
 }
 
+function AgendaTaskRow({
+    task,
+    canEdit,
+    live,
+    pending,
+    changed,
+    onRemove,
+    onNote,
+    ...rowProps
+}: Omit<ComponentProps<typeof TaskRow>, "task"> & {
+    task: MeetingTask;
+    canEdit: boolean;
+    live: boolean;
+    pending: boolean;
+    changed: boolean;
+    onRemove: () => void;
+    onNote: (note: string | null) => Promise<boolean>;
+}) {
+    const i18n = useExtracted();
+    const [noteOpen, setNoteOpen] = useState(false);
+    return (
+        <TaskRow
+            {...rowProps}
+            task={task}
+            pending={pending}
+            notesReadOnly={live}
+            badges={
+                <>
+                    {task.agendaOrigin === "older" && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-xs">
+                            <History className="size-3" aria-hidden="true" />
+                            {i18n("Older")}
+                        </span>
+                    )}
+                    {changed && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-xs">
+                            <PencilLine className="size-3" aria-hidden="true" />
+                            {i18n("Changed during the meeting")}
+                        </span>
+                    )}
+                </>
+            }
+            extraNotes={
+                noteOpen && canEdit ? (
+                    <AgendaTaskNote
+                        task={task}
+                        saving={pending}
+                        onCancel={() => setNoteOpen(false)}
+                        onSave={async (note) => {
+                            if (await onNote(note)) setNoteOpen(false);
+                        }}
+                    />
+                ) : task.agendaNote ? (
+                    <div className="flex gap-2 border-l-2 border-primary/30 pl-3">
+                        <MessageSquareText
+                            className="mt-1 size-3 shrink-0"
+                            aria-hidden="true"
+                        />
+                        <div>
+                            <p className="whitespace-pre-wrap">
+                                {task.agendaNote}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                                {i18n("Meeting note")}
+                            </p>
+                        </div>
+                    </div>
+                ) : null
+            }
+            actions={
+                <>
+                    {canEdit && (live || task.agendaNote) && (
+                        <ActionTooltip label={i18n("Meeting note")}>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                disabled={pending}
+                                aria-label={i18n("Meeting note")}
+                                className="text-muted-foreground hover:text-foreground"
+                                onClick={() => setNoteOpen(true)}
+                            >
+                                <MessageSquareText
+                                    className="size-3"
+                                    aria-hidden="true"
+                                />
+                            </Button>
+                        </ActionTooltip>
+                    )}
+                    {canEdit && (
+                        <ActionTooltip label={i18n("Remove from agenda")}>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                disabled={pending}
+                                aria-label={i18n("Remove {task} from agenda", {
+                                    task: task.text,
+                                })}
+                                className="text-muted-foreground hover:text-foreground"
+                                onClick={onRemove}
+                            >
+                                <ListX className="size-3" aria-hidden="true" />
+                            </Button>
+                        </ActionTooltip>
+                    )}
+                </>
+            }
+        />
+    );
+}
+
 function AgendaTaskNote({
     task,
-    readOnly,
+    saving,
+    onCancel,
     onSave,
 }: {
     task: MeetingTask;
-    readOnly: boolean;
-    onSave: (note: string | null) => void;
+    saving: boolean;
+    onCancel: () => void;
+    onSave: (note: string | null) => Promise<void>;
 }) {
     const i18n = useExtracted();
     const [draft, setDraft] = useState(task.agendaNote ?? "");
-    useEffect(() => setDraft(task.agendaNote ?? ""), [task.agendaNote]);
-    return readOnly ? (
-        <span>{task.agendaNote}</span>
-    ) : (
-        <input
-            aria-label={i18n("Meeting note for {task}", { task: task.text })}
-            placeholder={i18n("Meeting note")}
-            className="w-full rounded border bg-background px-2 py-1 text-xs"
-            value={draft}
-            maxLength={2000}
-            onChange={(event) => setDraft(event.target.value)}
-            onBlur={() => {
-                if ((draft.trim() || null) !== task.agendaNote)
-                    onSave(draft.trim() || null);
-            }}
-            onKeyDown={(event) => {
-                if (event.nativeEvent.isComposing) return;
-                if (event.key === "Enter") event.currentTarget.blur();
-            }}
-        />
+    const input = useRef<HTMLTextAreaElement>(null);
+    useEffect(() => input.current?.focus(), []);
+    return (
+        <div className="space-y-2">
+            <Textarea
+                autoGrow
+                ref={input}
+                aria-label={i18n("Meeting note for {task}", {
+                    task: task.text,
+                })}
+                className="min-h-20 max-h-[50vh]"
+                value={draft}
+                maxLength={2000}
+                onChange={(event) => setDraft(event.target.value)}
+            />
+            <EditorActions
+                cancelLabel={i18n("Cancel")}
+                saveLabel={i18n("Save")}
+                saving={saving}
+                onCancel={onCancel}
+                onSave={() => void onSave(draft.trim() || null)}
+            />
+        </div>
     );
 }

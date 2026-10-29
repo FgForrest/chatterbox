@@ -554,60 +554,6 @@ export function TaskList({
             </div>
 
             <ul className="divide-y rounded-lg border">
-                {!organization && tab === "mine" && (
-                    <OwnTaskForm
-                        open={addOpen}
-                        focusRequest={addRequest}
-                        folders={folders}
-                        defaultFolderId={
-                            selectedPrivate?.kind === "private"
-                                ? null
-                                : (selectedPrivate?.id ?? null)
-                        }
-                        onOpenChange={(open) => {
-                            setAddOpen(open);
-                            if (!open && addRequest) setParam("add", null);
-                        }}
-                        onReconciled={(temporaryId, task) => {
-                            const entry = ownInserts.current.get(temporaryId);
-                            if (task && entry)
-                                ownInserts.current.set(temporaryId, {
-                                    ...entry,
-                                    task,
-                                    reconciled: true,
-                                });
-                            else ownInserts.current.delete(temporaryId);
-                            versions.current.delete(temporaryId);
-                            if (task)
-                                versions.current.set(task.id, task.version);
-                            setTasks((current) => {
-                                const remaining = (current ?? []).filter(
-                                    (row) =>
-                                        row.id !== temporaryId &&
-                                        row.id !== task?.id,
-                                );
-                                return task &&
-                                    entry?.query === currentQuery.current &&
-                                    ownMatchesFolder(task)
-                                    ? [task, ...remaining]
-                                    : remaining;
-                            });
-                        }}
-                        onAdded={(task) => {
-                            ownInserts.current.set(task.id, {
-                                task,
-                                query: ownMatchesFolder(task) ? query : null,
-                                reconciled: false,
-                            });
-                            versions.current.set(task.id, task.version);
-                            setTasks((current) =>
-                                ownMatchesFolder(task)
-                                    ? [task, ...(current ?? [])]
-                                    : current,
-                            );
-                        }}
-                    />
-                )}
                 {tasks === null ? (
                     <li className="flex items-center gap-2 p-8 text-sm text-muted-foreground">
                         <Loader2 className="size-4 animate-spin" />
@@ -638,6 +584,59 @@ export function TaskList({
                     ))
                 )}
             </ul>
+            {!organization && tab === "mine" && (
+                <OwnTaskForm
+                    open={addOpen}
+                    focusRequest={addRequest}
+                    folders={folders}
+                    defaultFolderId={
+                        selectedPrivate?.kind === "private"
+                            ? null
+                            : (selectedPrivate?.id ?? null)
+                    }
+                    onOpenChange={(open) => {
+                        setAddOpen(open);
+                        if (!open && addRequest) setParam("add", null);
+                    }}
+                    onReconciled={(temporaryId, task) => {
+                        const entry = ownInserts.current.get(temporaryId);
+                        if (task && entry)
+                            ownInserts.current.set(temporaryId, {
+                                ...entry,
+                                task,
+                                reconciled: true,
+                            });
+                        else ownInserts.current.delete(temporaryId);
+                        versions.current.delete(temporaryId);
+                        if (task) versions.current.set(task.id, task.version);
+                        setTasks((current) => {
+                            const remaining = (current ?? []).filter(
+                                (row) =>
+                                    row.id !== temporaryId &&
+                                    row.id !== task?.id,
+                            );
+                            return task &&
+                                entry?.query === currentQuery.current &&
+                                ownMatchesFolder(task)
+                                ? [task, ...remaining]
+                                : remaining;
+                        });
+                    }}
+                    onAdded={(task) => {
+                        ownInserts.current.set(task.id, {
+                            task,
+                            query: ownMatchesFolder(task) ? query : null,
+                            reconciled: false,
+                        });
+                        versions.current.set(task.id, task.version);
+                        setTasks((current) =>
+                            ownMatchesFolder(task)
+                                ? [task, ...(current ?? [])]
+                                : current,
+                        );
+                    }}
+                />
+            )}
         </div>
     );
 }

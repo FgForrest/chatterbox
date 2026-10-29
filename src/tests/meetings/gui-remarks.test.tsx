@@ -352,7 +352,7 @@ it.each([
     fireEvent.click(screen.getByRole("button", { name: "Smazat agendu" }));
     const dialog = screen.getByRole("alertdialog");
     expect(dialog.textContent).toContain("Smazat tuto agendu v Klepně?");
-    expect(dialog.textContent).toContain("Úkoly dokončené nebo zrušené");
+    expect(dialog.textContent).toContain("Úkoly dokončené nebo zahozené");
     expect(dialog.textContent?.includes("Událost v Google Kalendáři")).toBe(
         linked,
     );

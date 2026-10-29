@@ -95,7 +95,7 @@ Pokud zkontrolujete navrženou změnu, ale nemáte právo ji použít, Klepna ji
 
 ![Směrovaný návrh úkolu ve schránce na stránce Úkoly](images/tasks-routed.png)
 
-U sdíleného úkolu mohou vlastník jeho domovské položky a kurátoři Organizace upravovat text, termín a řešitele, úkol zrušit, sloučit a uzavřít. Řešitel jej může také uzavřít nebo znovu otevřít, napsat poznámku a sloučit s jiným úkolem přiřazeným jemu. U soukromého úkolu může tyto úkony provádět pouze jeho vlastník. Tato práva úkolů jsou výjimkou z ostatních pravidel úprav sdílených položek.
+U sdíleného úkolu mohou vlastník jeho domovské položky a kurátoři Organizace upravovat text, termín a řešitele, úkol zahodit, sloučit a uzavřít. Řešitel jej může také uzavřít nebo znovu otevřít, napsat poznámku a sloučit s jiným úkolem přiřazeným jemu. U soukromého úkolu může tyto úkony provádět pouze jeho vlastník. Tato práva úkolů jsou výjimkou z ostatních pravidel úprav sdílených položek.
 
 Po smazání domovské položky se domovem stane nejnovější přeživší zmínka ve stejném rozsahu. Pokud žádná nezůstane, úkol zmizí. Po odebrání sdílené domovské položky z Organizace se domovem stane nejnovější zbývající sdílená zmínka. Pokud žádná nezůstane, úkol se stane soukromým spolu s odebranou položkou. Odebraná zmínka již není v Organizaci viditelná. Retence, která odstraní zvuk nebo vytvořený obsah, domov nepřesouvá.
 
@@ -112,11 +112,11 @@ Po smazání domovské položky se domovem stane nejnovější přeživší zmí
 
 ![Úkoly, které sledujete](images/tasks-tracked.png)
 
-Filtry zobrazí otevřené, hotové nebo zrušené úkoly, úkoly z jedné složky i úkoly po termínu, splatné tento týden nebo zatím bez termínu. Seznam lze třídit podle novosti nebo termínu splnění. U každého úkolu najdete akce, ke kterým máte oprávnění, a **Kde to zaznělo** pro každou zmínku.
+Filtry zobrazí otevřené, hotové nebo zahozené úkoly, úkoly z jedné složky i úkoly po termínu, splatné tento týden nebo zatím bez termínu. Seznam lze třídit podle novosti nebo termínu splnění. U každého úkolu najdete akce, ke kterým máte oprávnění, a **Kde to zaznělo** pro každou zmínku.
 
 ### Vlastní úkoly
 
-**Přidat úkol** je první řádek seznamu **Moje**. Zadejte nejvýše 2 000 znaků a volitelný termín. **Jen vy** znamená, že autor je vždy řešitelem a jediným čtenářem, i když Úkoly otevře kurátor nebo účet Organizace. Můžete upravit text a termín, úkol dokončit, zrušit, obnovit i sloučit. Nemá nahrávku, nelze jej sdílet ani změnit řešitele, nezvyšuje odznak a přežije retenci i smazání položek.
+**Přidat úkol** najdete vlevo pod seznamem **Moje**. Zadejte nejvýše 2 000 znaků a volitelný termín. **Jen vy** znamená, že autor je vždy řešitelem a jediným čtenářem, i když Úkoly otevře kurátor nebo účet Organizace. Můžete upravit text a termín, úkol dokončit, zahodit, obnovit i sloučit. Nemá nahrávku, nelze jej sdílet ani změnit řešitele, nezvyšuje odznak a přežije retenci i smazání položek.
 
 Štítek složky vedle **Jen vy** umožňuje úkol volitelně zařadit do jedné z Vašich soukromých složek. Výchozí je soukromá složka vybraná ve filtru Úkolů, jinak **Bez složky**. V řádku zdroje úkolu klikněte na název složky nebo **Zařadit do složky**; volba **Bez složky** zařazení zruší. U nezařazeného úkolu se akce při použití myši zobrazí po najetí nebo zaměření klávesnicí, na dotykovém zařízení je stále viditelná. Složka slouží jen k orientaci: nikomu neuděluje přístup a úkoly nemění počty položek ve sloupcích knihovny. Úkoly z nahrávek a pošty nadále používají složky své zdrojové položky.
 

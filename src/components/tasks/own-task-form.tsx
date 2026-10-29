@@ -6,11 +6,12 @@ import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { addOwnTask } from "@/components/tasks/task-api";
 import { TaskFolderPicker } from "@/components/tasks/task-folder-picker";
+import { Button } from "@/components/ui/button";
 import { folderDisplayPath } from "@/lib/folders/labels";
 import type { TaskListItem } from "@/lib/tasks/tasks";
 import type { RecordingFolder } from "@/types/folder";
 
-/** The first row of Mine creates a private task. */
+/** The form below Mine creates a private task. */
 export function OwnTaskForm({
     open,
     onOpenChange,
@@ -54,20 +55,22 @@ export function OwnTaskForm({
         onOpenChange(false);
     };
     return (
-        <li className="p-3 text-sm">
+        <div className={open ? "rounded-lg border p-3 text-sm" : undefined}>
             {!open ? (
-                <button
+                <Button
                     ref={triggerRef}
+                    variant="ghost"
+                    size="sm"
                     type="button"
-                    className="flex w-full items-center gap-2 text-left aria-disabled:opacity-50"
+                    className="aria-disabled:opacity-50"
                     aria-disabled={saving}
                     onClick={() => {
                         if (!saving) onOpenChange(true);
                     }}
                 >
-                    <Plus className="size-4" />
+                    <Plus className="mr-1 size-3.5" aria-hidden="true" />
                     {i18n("Add task")}
-                </button>
+                </Button>
             ) : (
                 <form
                     className="space-y-2"
@@ -211,6 +214,6 @@ export function OwnTaskForm({
                     </div>
                 </form>
             )}
-        </li>
+        </div>
     );
 }

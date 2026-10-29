@@ -508,9 +508,8 @@ describe("task review rows", () => {
             />,
         );
 
-        const checkbox = screen.getByRole("checkbox", { name: "Done" });
-        expect(checkbox).toHaveProperty("disabled", false);
-        expect(checkbox.getAttribute("aria-disabled")).toBe("true");
+        expect(screen.queryByRole("checkbox", { name: "Done" })).toBeNull();
+        expect(screen.getByRole("img", { name: "Open" })).toBeTruthy();
         expect(
             screen.getByRole("button", { name: "Assigned to Ada" }),
         ).toHaveProperty("disabled", true);

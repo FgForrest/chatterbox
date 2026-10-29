@@ -804,16 +804,19 @@ export function SummaryWidget({
         {
             key: "multi-pass",
             content: multiPassBadge && (
-                <span
-                    className={
-                        multiPassBadge.degraded
-                            ? "text-amber-600 dark:text-amber-400"
-                            : undefined
-                    }
-                    title={multiPassBadge.title}
-                >
-                    {multiPassBadge.label}
-                </span>
+                <ActionTooltip label={multiPassBadge.title}>
+                    <span
+                        // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users reach the pass explanation
+                        tabIndex={0}
+                        className={`rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring${
+                            multiPassBadge.degraded
+                                ? " text-amber-600 dark:text-amber-400"
+                                : ""
+                        }`}
+                    >
+                        {multiPassBadge.label}
+                    </span>
+                </ActionTooltip>
             ),
         },
         {
