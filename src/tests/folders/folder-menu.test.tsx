@@ -87,11 +87,11 @@ vi.mock("@/components/dashboard/recording-list", () => ({
         header,
         navigationContent,
     }: {
-        header: ReactNode;
+        header: (shownCount: number) => ReactNode;
         navigationContent: ReactNode;
     }) => (
         <>
-            {header}
+            {header(0)}
             {navigationContent}
         </>
     ),
@@ -298,7 +298,7 @@ describe("folder row menu", () => {
         ).toBeTruthy();
     });
 
-    it("opens the existing create panel focused on the child name and creates in the clicked folder", async () => {
+    it("opens the dedicated create dialog focused on the child name and creates in the clicked folder", async () => {
         const fetchMock = vi.fn(async () =>
             Response.json({
                 folder: {
@@ -317,7 +317,9 @@ describe("folder row menu", () => {
         fireEvent.click(
             screen.getByRole("menuitem", { name: "New subfolder" }),
         );
-        expect(screen.getByRole("dialog", { name: "Cedar" })).toBeTruthy();
+        expect(
+            screen.getByRole("dialog", { name: "New subfolder" }),
+        ).toBeTruthy();
         const name = screen.getByRole("textbox", {
             name: "New subfolder name",
         });
@@ -350,8 +352,8 @@ describe("folder row menu", () => {
             screen.queryByRole("textbox", { name: "New subfolder name" }),
         ).toBeNull();
         expect(
-            screen.getByRole("button", { name: "New subfolder" }),
-        ).toBeTruthy();
+            screen.queryByRole("button", { name: "New subfolder" }),
+        ).toBeNull();
     });
 
     it.each([
@@ -361,13 +363,10 @@ describe("folder row menu", () => {
         const fetchMock = vi.fn();
         vi.stubGlobal("fetch", fetchMock);
         workstation(canCurate);
-        fireEvent.contextMenu(
+        fireEvent.click(
             screen.getByRole("button", { name: "Cedar, 0 recordings" }),
         );
-        fireEvent.click(
-            screen.getByRole("menuitem", { name: "Folder settings" }),
-        );
-        fireEvent.click(screen.getByRole("button", { name: "Move to…" }));
+        fireEvent.click(screen.getAllByRole("button", { name: "Move to…" })[0]);
         const destinations = screen.getByRole("combobox", {
             name: "Destination folder",
         });
@@ -463,8 +462,12 @@ describe("folder row menu", () => {
         fireEvent.click(
             screen.getByRole("button", { name: "Juniper, 0 recordings" }),
         );
-        fireEvent.click(screen.getByRole("button", { name: "New subfolder" }));
-        expect(screen.getByRole("dialog", { name: "Juniper" })).toBeTruthy();
+        fireEvent.click(
+            screen.getAllByRole("button", { name: "New subfolder" })[0],
+        );
+        expect(
+            screen.getByRole("dialog", { name: "New subfolder" }),
+        ).toBeTruthy();
         await waitFor(() =>
             expect(document.activeElement).toBe(
                 screen.getByRole("textbox", { name: "New subfolder name" }),

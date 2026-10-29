@@ -16,6 +16,7 @@ import type { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ArrivalNotice } from "@/components/dashboard/arrival-notice";
 import type { CommandPalette as CommandPaletteComponent } from "@/components/dashboard/command-palette";
+import type { FolderActionDialog as FolderActionDialogComponent } from "@/components/dashboard/folder-action-dialog";
 import type { FolderSettingsPanel as FolderSettingsPanelComponent } from "@/components/dashboard/folder-settings-panel";
 import type { LibraryLocationHeader as LibraryLocationHeaderComponent } from "@/components/dashboard/library-location-header";
 import type { RecordingListHandle } from "@/components/dashboard/recording-list";
@@ -35,6 +36,9 @@ const mocks = vi.hoisted(() => ({
     error: vi.fn(),
     custom: vi.fn<typeof toast.custom>(() => "new-item"),
     dismiss: vi.fn<typeof toast.dismiss>(() => "new-item"),
+    folderActionProps: null as ComponentProps<
+        typeof FolderActionDialogComponent
+    > | null,
     settingsProps: null as ComponentProps<
         typeof FolderSettingsPanelComponent
     > | null,
@@ -240,6 +244,14 @@ vi.mock("@/components/dashboard/recording-list", () => ({
         );
     },
 }));
+vi.mock("@/components/dashboard/folder-action-dialog", () => ({
+    FolderActionDialog: (
+        props: ComponentProps<typeof FolderActionDialogComponent>,
+    ) => {
+        mocks.folderActionProps = props;
+        return <div>Folder action</div>;
+    },
+}));
 vi.mock("@/components/dashboard/folder-settings-panel", () => ({
     FolderSettingsPanel: (
         props: ComponentProps<typeof FolderSettingsPanelComponent>,
@@ -255,12 +267,21 @@ vi.mock("@/components/dashboard/folder-tree", () => ({
         onRecent,
         onSettings,
     }: {
-        onSettings: (folder: typeof personalChildFolder) => void;
+        onSettings: (
+            folder: typeof personalChildFolder | typeof rootFolder,
+            action?: "create",
+        ) => void;
         onNewFolder?: () => void;
         onSelectFolder: (folder: typeof personalChildFolder) => void;
         onRecent: () => void;
     }) => (
         <section aria-label="Folder tree">
+            <button
+                type="button"
+                onClick={() => onSettings(rootFolder, "create")}
+            >
+                New subfolder
+            </button>
             <button type="button" onClick={onNewFolder}>
                 New folder
             </button>
@@ -289,11 +310,21 @@ vi.mock("@/components/dashboard/library-location-header", () => ({
         folder,
         shownCount,
         onSettings,
+        onNewFolder,
+        onMoveFolder,
     }: ComponentProps<typeof LibraryLocationHeaderComponent>) =>
         variant === "rail" && part === "header" && folder ? (
-            <button type="button" onClick={() => onSettings(folder)}>
-                {`Header settings, ${shownCount} shown`}
-            </button>
+            <>
+                <button type="button" onClick={() => onSettings(folder)}>
+                    {`Header settings, ${shownCount} shown`}
+                </button>
+                <button type="button" onClick={onNewFolder}>
+                    Header subfolder
+                </button>
+                <button type="button" onClick={() => onMoveFolder?.(folder)}>
+                    Header move
+                </button>
+            </>
         ) : null,
 }));
 vi.mock("@/components/dashboard/workstation-detail-pane", () => ({
@@ -838,6 +869,7 @@ beforeEach(() => {
     mocks.uploadOptions = null;
     mocks.paletteProps = null;
     mocks.settingsProps = null;
+    mocks.folderActionProps = null;
     window.history.replaceState({}, "", "/dashboard");
 });
 
@@ -1698,6 +1730,47 @@ describe("Workstation folder locations", () => {
         expect(mocks.settingsProps?.folder.id).toBe("personal-child");
     });
     it.each([
+        { launcher: "New subfolder", action: "create" },
+        { launcher: "Header subfolder", action: "create" },
+        { launcher: "Header move", action: "move" },
+    ])("retains the focused $launcher launcher for dialog close", ({
+        launcher,
+        action,
+    }) => {
+        window.history.replaceState({}, "", "/dashboard?folder=personal-child");
+        render(<Workstation {...folderProps} />);
+        const button = screen.getByRole("button", { name: launcher });
+        button.focus();
+        fireEvent.click(button);
+        expect(mocks.folderActionProps?.action).toBe(action);
+        expect(mocks.folderActionProps?.returnFocusElement).toBe(button);
+    });
+    it("closes a folder action whose folder disappears and frees the shortcuts", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => Response.json({ ok: true })),
+        );
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?folder=personal-child&recording=first",
+        );
+        render(<Workstation {...folderProps} />);
+        fireEvent.click(screen.getByRole("button", { name: "Header move" }));
+        expect(screen.getByText("Folder action")).toBeTruthy();
+        fireEvent.keyDown(window, { key: "j" });
+        expect(window.location.search).toContain("recording=first");
+        fireEvent.click(
+            screen.getByRole("button", { name: "Folder settings" }),
+        );
+        await act(async () => {
+            await mocks.settingsProps?.onDelete(personalChildFolder.id);
+        });
+        expect(screen.queryByText("Folder action")).toBeNull();
+        fireEvent.keyDown(window, { key: "j" });
+        expect(window.location.search).toContain("recording=second");
+    });
+    it.each([
         "palette",
         "search",
     ])("opens a %s item outside the folder in Recent with working list navigation", (source) => {
@@ -2058,8 +2131,13 @@ describe("Workstation folder locations", () => {
         act(() => {
             deletion = mocks.settingsProps?.onDelete(personalChildFolder.id);
         });
+        fireEvent.click(screen.getByRole("button", { name: "New subfolder" }));
+        expect(mocks.folderActionProps?.action).toBe("create");
         await act(async () => {
-            await mocks.settingsProps?.onCreate(rootFolder.id, created.name);
+            await mocks.folderActionProps?.onCreate(
+                rootFolder.id,
+                created.name,
+            );
         });
         expect(
             mocks.paletteProps?.folders?.some(

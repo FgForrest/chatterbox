@@ -314,6 +314,9 @@ section_folders() {
     open "/dashboard"
     click_button "Clients, 4 recordings" 1500
     page folders
+    click_button "Folder tasks" 2000
+    page folder-tasks
+    click_button "Folder tasks" 1200
     click_button "Bluefin Logistics, 4 recordings" 1500
     click_button "Folder settings" 1200
     dialog folder-pane

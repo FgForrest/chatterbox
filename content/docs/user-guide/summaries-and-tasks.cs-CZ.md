@@ -109,18 +109,21 @@ Po smazání domovské položky se domovem stane nejnovější přeživší zmí
 
 - **Moje**: úkoly přiřazené Vám a Vaše vlastní soukromé úkoly. Klepna určí Váš záznam v Almanachu podle e-mailové adresy; otevřete svůj záznam v Almanachu a zvolte **To jsem já**, pokud se Vám zde úkoly nezobrazují.
 - **Sledované**: úkoly, které výslovně sledujete, a úkoly z Vašich položek přiřazené jiným osobám nebo nikomu. **Přestat sledovat** odebere oba druhy. Kurátoři mohou přepnout na **Všechny úkoly Organizace**; účet Organizace nadále vidí všechny sdílené úkoly. Staré odkazy `tab=tracked` otevírají tuto záložku.
+- **Všechny**: každý úkol, který smíte vidět: Vaše vlastní soukromé úkoly a úkoly z Vašich položek, z položek Organizace i z položek, které s Vámi někdo sdílí. Filtr složky zahrnuje i podsložky a filtr řešitele funguje jako ve Sledovaných. Účet Organizace má Sledované a Všechny, bez Moje.
 
 ![Úkoly, které sledujete](images/tasks-tracked.png)
 
 Filtry zobrazí otevřené, hotové nebo zahozené úkoly, úkoly z jedné složky i úkoly po termínu, splatné tento týden nebo zatím bez termínu. Seznam lze třídit podle novosti nebo termínu splnění. U každého úkolu najdete akce, ke kterým máte oprávnění, a **Kde to zaznělo** pro každou zmínku.
 
+V knihovně otevřou **Úkoly ve složce** (seznam úkolů pod názvem složky) stejný seznam v pravém panelu, seskupený podle složek, s výchozím **Všechny**. **Otevřít v Úkolech** zachová složku i seznam. Viz [Úkoly ve složce](recordings.md#folder-tasks).
+
 ### Vlastní úkoly
 
-**Přidat úkol** najdete vpravo nahoře v seznamu **Moje**, vedle řazení. Formulář se otevře jako první řádek seznamu a po přidání jeho místo nahoře zaujme nový úkol. Zadejte nejvýše 2 000 znaků a volitelný termín. **Jen vy** znamená, že autor je vždy řešitelem a jediným čtenářem, i když Úkoly otevře kurátor nebo účet Organizace. Můžete upravit text a termín, úkol dokončit, zahodit, obnovit i sloučit. Nemá nahrávku, nelze jej sdílet ani změnit řešitele, nezvyšuje odznak a přežije retenci i smazání položek.
+**Přidat úkol** najdete vpravo nahoře v seznamech **Moje** a **Všechny**, vedle řazení. Dokud je formulář otevřený, tlačítko je neaktivní; úkol přidáte nebo zrušíte tlačítky formuláře. Formulář se otevře jako první řádek seznamu a po přidání jeho místo nahoře zaujme nový úkol. Zadejte nejvýše 2 000 znaků a volitelný termín. **Jen vy** znamená, že autor je vždy řešitelem a jediným čtenářem, i když Úkoly otevře kurátor nebo účet Organizace. Můžete upravit text a termín, úkol dokončit, zahodit, obnovit i sloučit. Nemá nahrávku, nelze jej sdílet ani změnit řešitele, nezvyšuje odznak a přežije retenci i smazání položek.
 
 Štítek složky vedle **Jen vy** umožňuje úkol volitelně zařadit do jedné z Vašich soukromých složek. Výchozí je soukromá složka vybraná ve filtru Úkolů, jinak **Bez složky**. V řádku zdroje úkolu klikněte na název složky nebo **Zařadit do složky**; volba **Bez složky** zařazení zruší. U nezařazeného úkolu se akce při použití myši zobrazí po najetí nebo zaměření klávesnicí, na dotykovém zařízení je stále viditelná. Složka slouží jen k orientaci: nikomu neuděluje přístup a úkoly nemění počty položek ve sloupcích knihovny. Úkoly z nahrávek a pošty nadále používají složky své zdrojové položky.
 
-Výběr soukromé složky v seznamu **Moje** zahrne vlastní úkoly zařazené do ní i jejích podsložek. Kořen **Soukromé** obsahuje všechny Vaše vlastní úkoly včetně nezařazených, stejně jako **Všechny složky**. Složka Organizace vlastní úkoly skryje. Smazání složky nebo její přesun mimo soukromý strom zruší zařazení úkolu ve stejné transakci; úkol přežije a zůstane soukromý.
+Výběr soukromé složky v seznamu **Moje** nebo **Všechny** zahrne vlastní úkoly zařazené do ní i jejích podsložek. Kořen **Soukromé** obsahuje všechny Vaše vlastní úkoly včetně nezařazených, stejně jako **Všechny složky**. Složka Organizace vlastní úkoly skryje. Smazání složky nebo její přesun mimo soukromý strom zruší zařazení úkolu ve stejné transakci; úkol přežije a zůstane soukromý.
 
 Pravé tlačítko na **Úkoly** v navigaci, klávesa místní nabídky, Shift+F10 nebo dlouhý dotyk otevřou Moje se zaměřeným formulářem. Ctrl+kliknutí a prostřední tlačítko nadále otevřou novou záložku prohlížeče. Pro nabídku prohlížeče podržte při kliknutí pravým tlačítkem Shift, Ctrl, Alt nebo Meta.
 

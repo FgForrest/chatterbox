@@ -19,7 +19,8 @@ import type {
 
 const { navigation, translate, orgEvent, changeTask } = vi.hoisted(() => ({
     navigation: { params: new URLSearchParams(), replace: vi.fn() },
-    translate: (text: string) => text,
+    translate: (text: string | { message: string }) =>
+        typeof text === "string" ? text : text.message,
     orgEvent: { current: null as (() => void) | null },
     changeTask: vi.fn(),
 }));
@@ -164,6 +165,25 @@ async function openAssignee() {
     });
     await screen.findByRole("option", { name: "All assignees" });
 }
+
+it("marks new tasks as seen once when the Tasks page opens", async () => {
+    const view = render(<TaskList organization={false} />);
+    await screen.findByText("Nothing here.");
+    expect(fetchMock).toHaveBeenCalledWith("/api/tasks/pending", {
+        method: "POST",
+    });
+    fetchMock.mockClear();
+    navigation.params.set("state", "done");
+    view.rerender(<TaskList organization={false} />);
+    await waitFor(() =>
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/tasks?tab=followed&state=done&sort=created",
+        ),
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/tasks/pending", {
+        method: "POST",
+    });
+});
 
 it("offers server assignees in locale order after All assignees and No assignee", async () => {
     render(<TaskList organization={false} />);
@@ -321,4 +341,45 @@ it("reloads tasks and options after a saved assignee change", async () => {
     expect(
         screen.getByRole("combobox", { name: "Assignee" }).textContent,
     ).toContain(firstPerson.name);
+});
+
+it.each([
+    false,
+    true,
+])("supports All and its folder filter with organization=%s", async (organization) => {
+    navigation.params = new URLSearchParams(
+        "tab=all&folder=folder-1&assignee=person-1",
+    );
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+        if (String(input) === "/api/tasks/assignees?tab=all")
+            return Response.json({ assignees });
+        if (String(input).startsWith("/api/tasks?"))
+            return Response.json({ tasks: [] });
+        return Response.json({ folders: [] });
+    });
+    render(<TaskList organization={organization} />);
+    await screen.findByText("Nothing here.");
+    expect(
+        screen
+            .getByRole("button", { name: "All" })
+            .getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(fetchMock).toHaveBeenCalledWith(
+        "/api/tasks?tab=all&state=open&sort=created&folder=folder-1&assignee=person-1",
+    );
+    expect(fetchMock).toHaveBeenCalledWith("/api/tasks/assignees?tab=all");
+    expect(screen.queryByRole("button", { name: "Mine" }) === null).toBe(
+        organization,
+    );
+});
+
+it("bookmarks the All segment explicitly", async () => {
+    navigation.params = new URLSearchParams("folder=folder-1");
+    render(<TaskList organization={false} />);
+    await screen.findByText("Nothing here.");
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(navigation.replace).toHaveBeenCalledWith(
+        "/tasks?folder=folder-1&tab=all",
+        { scroll: false },
+    );
 });

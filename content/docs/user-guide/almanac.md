@@ -83,7 +83,7 @@ Restore requests to `/api/knowledge/care/restore` accept at most 32 MiB of UTF-8
 
 ## Folder knowledge
 
-Open a folder on the dashboard and choose **Knowledge** beside its name. Everyone who can see the folder can read this view. It covers items in that folder and all its subfolders, without counting parent folders. People come from confirmed speakers, corrections and fact evidence; things from corrections and evidence. Corrections show heard-as forms used in those items and their use counts. Facts show supported evidence with the item and date, including mail.
+Open a folder on the dashboard and choose **Knowledge** (the book) in the icon row below its name; click it again to return to the item. Everyone who can see an owned or Organization folder can read its knowledge. It covers items in that folder and all its subfolders, without counting parent folders. People come from confirmed speakers, corrections and fact evidence; things from corrections and evidence. Corrections show heard-as forms used in those items and their use counts. Facts show supported evidence with the item and date, including mail.
 
 Curators also see open-problem flags on Organization records, corrections and facts. Expand a flag to apply the same fixes as in Care, directly in the folder. Other viewers keep the read-only view.
 

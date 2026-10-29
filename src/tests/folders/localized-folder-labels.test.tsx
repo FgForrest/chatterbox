@@ -187,8 +187,6 @@ describe("localized folder labels", () => {
                 onOpenChange={vi.fn()}
                 onRename={vi.fn()}
                 onDelete={vi.fn()}
-                onCreate={vi.fn()}
-                onMove={vi.fn()}
                 exportProviders={{
                     filesystem: false,
                     googleDrive: false,

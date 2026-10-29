@@ -251,8 +251,6 @@ describe("folder person sharing UI", () => {
                         open
                         onOpenChange={vi.fn()}
                         onRename={vi.fn()}
-                        onCreate={vi.fn()}
-                        onMove={vi.fn()}
                         onDelete={vi.fn()}
                         exportProviders={{
                             filesystem: false,
@@ -278,8 +276,6 @@ describe("folder person sharing UI", () => {
                         open
                         onOpenChange={vi.fn()}
                         onRename={vi.fn()}
-                        onCreate={vi.fn()}
-                        onMove={vi.fn()}
                         onDelete={vi.fn()}
                         exportProviders={{
                             filesystem: false,

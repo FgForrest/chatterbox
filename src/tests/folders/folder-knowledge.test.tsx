@@ -9,7 +9,7 @@ import {
     waitFor,
 } from "@testing-library/react";
 import type * as NextIntl from "next-intl";
-import type { ComponentProps } from "react";
+import { type ComponentProps, useCallback, useMemo } from "react";
 import type { TranslationValues } from "use-intl/core";
 import { IntlProvider, useTranslations } from "use-intl/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -46,25 +46,35 @@ vi.mock("next-intl", async (importOriginal) => {
         ...original,
         useExtracted: () => {
             const translate = useTranslations();
-            const ids = new Map(
-                Object.entries(messagesForLocale("en")).map(([id, source]) => [
-                    source,
-                    id,
-                ]),
+            const ids = useMemo(
+                () =>
+                    new Map(
+                        Object.entries(messagesForLocale("en")).map(
+                            ([id, source]) => [source, id],
+                        ),
+                    ),
+                [],
             );
-            return (
-                message:
-                    | string
-                    | Parameters<ReturnType<typeof NextIntl.useExtracted>>[0],
-                values?: TranslationValues,
-            ) => {
-                if (typeof message === "string")
-                    return translate(ids.get(message) ?? message, values);
-                return translate(
-                    message.id ?? ids.get(message.message) ?? message.message,
-                    message.values,
-                );
-            };
+            return useCallback(
+                (
+                    message:
+                        | string
+                        | Parameters<
+                              ReturnType<typeof NextIntl.useExtracted>
+                          >[0],
+                    values?: TranslationValues,
+                ) => {
+                    if (typeof message === "string")
+                        return translate(ids.get(message) ?? message, values);
+                    return translate(
+                        message.id ??
+                            ids.get(message.message) ??
+                            message.message,
+                        message.values,
+                    );
+                },
+                [translate, ids],
+            );
         },
     };
 });
@@ -365,7 +375,8 @@ describe("folder knowledge header", () => {
             />,
         );
         const button = screen.getByRole("button", { name: "Knowledge" });
-        expect(button.querySelector("svg.text-organization")).toBeTruthy();
+        expect(button.querySelector("svg.text-organization")).toBeNull();
+        expect(button.querySelector("svg.text-knowledge")).toBeNull();
         expect(button.className).not.toContain("text-organization");
         fireEvent.click(button);
         expect(open).toHaveBeenCalledWith(org);
@@ -378,6 +389,17 @@ describe("folder knowledge panel", () => {
         render(<FolderKnowledgePanel folder={folder} onBack={back} />);
         expect(await screen.findByText("Vesna Kulra")).toBeTruthy();
         expect(screen.getByText("no e-mail")).toBeTruthy();
+        expect(
+            screen
+                .getByRole("heading", { level: 2 })
+                .querySelector(".text-knowledge"),
+        ).toBeTruthy();
+        expect(screen.getByRole("tab", { name: "People" }).className).toContain(
+            "aria-selected:border-knowledge",
+        );
+        expect(screen.getByRole("tab", { name: "People" }).className).toContain(
+            "aria-selected:text-knowledge",
+        );
         expect(mocks.fetch).toHaveBeenCalledTimes(1);
         expect(
             screen.getAllByRole("tab").map((tab) => tab.textContent),
@@ -629,6 +651,98 @@ const workstationProps: ComponentProps<typeof Workstation> = {
         assignments: [{ recordingId: recording.id, folderId: folder.id }],
     },
 };
+
+describe("dashboard folder Tasks navigation", () => {
+    beforeEach(() => {
+        const fallback = mocks.fetch.getMockImplementation();
+        mocks.fetch.mockImplementation(async (input, init) => {
+            const url = String(input);
+            if (url.startsWith("/api/tasks/assignees"))
+                return Response.json({ assignees: [] });
+            if (url.startsWith("/api/tasks?"))
+                return Response.json({ tasks: [] });
+            if (url === "/api/tasks/pending") return Response.json({});
+            if (!fallback) throw new Error("Missing fetch implementation");
+            return fallback(input, init);
+        });
+    });
+    const tasks = () =>
+        screen.getAllByRole("button", { name: "Folder tasks" })[0];
+    const knowledge = () =>
+        screen.getAllByRole("button", { name: "Knowledge" })[0];
+    it("opens Tasks, switches mutually with Knowledge, and restores the selected item on a second click", async () => {
+        render(<Workstation {...workstationProps} />);
+        fireEvent.click(tasks());
+        await screen.findByText("No tasks in this folder");
+        expect(window.history.state.mobileView).toBe("detail");
+        expect(window.location.search).toContain("tasks=1");
+        expect(window.location.search).toContain("recording=item");
+        expect(tasks().getAttribute("aria-pressed")).toBe("true");
+        expect(screen.queryByText("Item detail")).toBeNull();
+        fireEvent.click(knowledge());
+        await screen.findByText("Vesna Kulra");
+        expect(window.location.search).not.toContain("tasks=");
+        expect(
+            screen.queryByRole("region", { name: "Folder tasks" }),
+        ).toBeNull();
+        expect(tasks().getAttribute("aria-pressed")).toBe("false");
+        fireEvent.click(tasks());
+        await screen.findByText("No tasks in this folder");
+        expect(window.location.search).not.toContain("knowledge=");
+        expect(knowledge().getAttribute("aria-pressed")).toBe("false");
+        fireEvent.click(tasks());
+        expect(
+            screen.queryByRole("region", { name: "Folder tasks" }),
+        ).toBeNull();
+        expect(window.location.search).not.toContain("tasks=");
+        expect(screen.getByText("Item detail")).toBeTruthy();
+    });
+    it("restores task links through history and clears the view when selecting an item or another folder", async () => {
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?folder=folder&recording=item&tasks=1",
+        );
+        render(<Workstation {...workstationProps} />);
+        await screen.findByText("No tasks in this folder");
+        fireEvent.click(
+            screen.getByRole("button", {
+                name: recording.filename,
+                hidden: true,
+            }),
+        );
+        expect(
+            screen.queryByRole("region", { name: "Folder tasks" }),
+        ).toBeNull();
+        act(() => {
+            window.history.replaceState(
+                {},
+                "",
+                "/dashboard?folder=folder&recording=item&tasks=1",
+            );
+            window.dispatchEvent(new PopStateEvent("popstate"));
+        });
+        await screen.findByText("No tasks in this folder");
+        fireEvent.click(
+            screen.getAllByRole("button", { name: "Back to parent folder" })[0],
+        );
+        expect(
+            screen.queryByRole("region", { name: "Folder tasks" }),
+        ).toBeNull();
+        expect(window.location.search).not.toContain("tasks=");
+    });
+    it("keeps the Tasks view and URL when its selected item disappears on refresh", async () => {
+        const view = render(<Workstation {...workstationProps} />);
+        fireEvent.click(tasks());
+        await screen.findByText("No tasks in this folder");
+        view.rerender(<Workstation {...workstationProps} recordings={[]} />);
+        expect(window.location.search).toContain("tasks=1");
+        expect(
+            screen.getByRole("region", { name: "Folder tasks" }),
+        ).toBeTruthy();
+        expect(window.location.search).not.toContain("recording=");
+    });
+});
 
 it.each([
     "en",

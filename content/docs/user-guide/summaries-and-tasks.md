@@ -105,18 +105,21 @@ When the home item is deleted, the newest surviving mention in the same scope be
 
 - **Mine**: tasks assigned to you and your own private tasks. Chatterbox knows which person in the Almanac is you by your email address; open your own person in the Almanac and choose **This is me** if your tasks do not show here.
 - **Followed**: tasks you explicitly follow, plus tasks from your own items assigned to others or nobody. **Stop following** removes either kind. Curators can switch to **All Organization tasks**; the Organization account continues to see all shared tasks. Old `tab=tracked` links still open this tab.
+- **All**: every task you may see: your own private tasks, tasks on your items, on Organization items and on items shared with you. The folder filter includes subfolders, and the assignee filter works here as on Followed. The Organization account has Followed and All, without Mine.
 
 ![Tasks you track](images/tasks-tracked.png)
 
 The filters show open, done or dropped tasks, tasks from one folder, and tasks that are overdue, due this week or have no date. Sort by newest or by due date. Each task offers the actions you have permission to use and **Where it was said** for every mention.
 
+In the library, **Folder tasks** (the checklist below a folder’s name) opens the same list in the right pane, grouped by folder, starting on **All**. **Open in Tasks** keeps the folder and list. See [Folder tasks](recordings.md#folder-tasks).
+
 ### Own tasks
 
-**Add task** is at the top right of **Mine**, next to the sort order. The form opens as the first row of the list, and the new task takes its place at the top when you add it. Enter up to 2,000 characters and an optional due date. **Only you** means the author is always the assignee and the only person who can see it, including when a curator or the Organization account opens Tasks. You may edit, finish, drop, restore and merge it. It has no recording, cannot be shared or reassigned, raises no badge, and survives item retention and deletion.
+**Add task** is at the top right of **Mine** and **All**, next to the sort order. While the form is open the button is inactive; add the task or cancel it with the form’s own buttons. The form opens as the first row of the list, and the new task takes its place at the top when you add it. Enter up to 2,000 characters and an optional due date. **Only you** means the author is always the assignee and the only person who can see it, including when a curator or the Organization account opens Tasks. You may edit, finish, drop, restore and merge it. It has no recording, cannot be shared or reassigned, raises no badge, and survives item retention and deletion.
 
 The folder pill next to **Only you** optionally files the task in one of your private folders. It defaults to the private folder selected in the Tasks filter, otherwise **No folder**. On the task's source line, click its folder name or **File in a folder** to move it; **No folder** clears it. The unfiled action appears on hover or keyboard focus with a mouse and stays visible on touch. A folder only helps you organize: it never grants anyone access and tasks do not change the library's folder item counts. Recording and mail tasks keep using their source item's folders.
 
-Selecting a private folder in **Mine** includes own tasks filed there or in its subfolders. The **Private** root includes all your own tasks, including unfiled ones, as does **All folders**. An Organization folder hides own tasks. Deleting a folder or moving it outside your private tree clears the task's folder in the same transaction; the task stays private and survives.
+Selecting a private folder in **Mine** or **All** includes own tasks filed there or in its subfolders. The **Private** root includes all your own tasks, including unfiled ones, as does **All folders**. An Organization folder hides own tasks. Deleting a folder or moving it outside your private tree clears the task's folder in the same transaction; the task stays private and survives.
 
 Right-click **Tasks** in the navigation, press the context-menu key or Shift+F10 while it is focused, or long press it on touch to open Mine with the form focused. Ctrl-click and middle-click retain normal new-tab behavior. Hold Shift, Ctrl, Alt or Meta while right-clicking to open the browser menu.
 

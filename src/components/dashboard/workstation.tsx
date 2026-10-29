@@ -14,6 +14,7 @@ import {
     showCornerNotice,
 } from "@/components/dashboard/corner-notice";
 import { FirstLevelFolderDialog } from "@/components/dashboard/first-level-folder-dialog";
+import { FolderActionDialog } from "@/components/dashboard/folder-action-dialog";
 import { FolderKnowledgePanel } from "@/components/dashboard/folder-knowledge-panel";
 import { FolderSettingsPanel } from "@/components/dashboard/folder-settings-panel";
 import { FolderTree } from "@/components/dashboard/folder-tree";
@@ -44,6 +45,7 @@ import {
     type Invitation,
     PersonInvitations,
 } from "@/components/sharing/person-sharing";
+import { FolderTasksPanel } from "@/components/tasks/folder-tasks-panel";
 import { Button } from "@/components/ui/button";
 import {
     noteDashboardUrlChange,
@@ -268,6 +270,12 @@ export function Workstation({
     const [knowledgeFolderId, setKnowledgeFolderId] = useState<string | null>(
         null,
     );
+    const [tasksFolderId, setTasksFolderId] = useState<string | null>(null);
+    const [folderAction, setFolderAction] = useState<{
+        folderId: string;
+        action: "create" | "move";
+        returnFocusElement: HTMLElement | null;
+    } | null>(null);
     const [settingsFolderId, setSettingsFolderId] = useState<string | null>(
         null,
     );
@@ -276,9 +284,6 @@ export function Workstation({
         view: "form" | "list";
     } | null>(null);
     const handleExportReopen = useCallback(() => setExportReturn(null), []);
-    const [settingsAction, setSettingsAction] = useState<
-        "create" | undefined
-    >();
     const handleFolderCreated = useCallback((folder: CreatedFolder) => {
         setFolderOrganization((current) =>
             current.folders.some((item) => item.id === folder.id)
@@ -364,6 +369,7 @@ export function Workstation({
             method: "push" | "replace" = "replace",
             intendedMobileView = mobileViewRef.current,
             knowledge = false,
+            tasks = false,
         ) => {
             const params = new URLSearchParams(window.location.search);
             clearItemLinkContext(params);
@@ -374,7 +380,9 @@ export function Workstation({
             params.delete("view");
             params.delete("googleExport");
             params.delete("knowledge");
+            params.delete("tasks");
             if (knowledge) params.set("knowledge", "1");
+            if (tasks) params.set("tasks", "1");
             if (folderId) {
                 params.set("folder", folderId);
             }
@@ -394,6 +402,7 @@ export function Workstation({
             setPendingUploadSelection(null);
             setItemLinkQuery("");
             setKnowledgeFolderId(null);
+            setTasksFolderId(null);
             setCurrentRecording(recording);
             setMobileView("detail");
             let folderId = selectedFolderIdRef.current;
@@ -435,6 +444,7 @@ export function Workstation({
             setPendingUploadSelection(null);
             setItemLinkQuery("");
             setKnowledgeFolderId(null);
+            setTasksFolderId(null);
             setCurrentRecording(null);
             setCurrentMeetingId(id);
             setMobileView("detail");
@@ -443,6 +453,7 @@ export function Workstation({
             params.delete("recording");
             params.delete("view");
             params.delete("knowledge");
+            params.delete("tasks");
             params.set("meeting", id);
             handledLocationQuery.current = params.toString();
             navigateDashboard(params, "push", "detail");
@@ -467,6 +478,7 @@ export function Workstation({
             setPendingUploadSelection(null);
             setItemLinkQuery("");
             setKnowledgeFolderId(null);
+            setTasksFolderId(null);
             setSelectedFolderId(folder.id);
             rememberFolder(folder.id);
             const pool =
@@ -562,6 +574,7 @@ export function Workstation({
                 setCurrentMeetingId(meetingId);
                 setCurrentRecording(null);
                 setKnowledgeFolderId(null);
+                setTasksFolderId(null);
                 setSelectedFolderId(params.get("folder"));
                 setMobileView(
                     window.history.state?.mobileView === "list"
@@ -593,8 +606,17 @@ export function Workstation({
             const previewingKnowledge = Boolean(
                 locationFolder && params.get("knowledge") === "1",
             );
+            const previewingTasks = Boolean(
+                locationFolder &&
+                    !previewingKnowledge &&
+                    params.get("tasks") === "1",
+            );
+            const previewingFolderView = previewingKnowledge || previewingTasks;
             setKnowledgeFolderId(
                 previewingKnowledge ? (locationFolder?.id ?? null) : null,
+            );
+            setTasksFolderId(
+                previewingTasks ? (locationFolder?.id ?? null) : null,
             );
             if (recordingId) {
                 const preferred =
@@ -615,7 +637,7 @@ export function Workstation({
                 else params.delete("view");
                 setItemLinkQuery(linked ? params.toString() : "");
                 const restoredView = window.history.state?.mobileView;
-                const nextMobileView = previewingKnowledge
+                const nextMobileView = previewingFolderView
                     ? "detail"
                     : restoredView === "list" || restoredView === "detail"
                       ? restoredView
@@ -635,6 +657,7 @@ export function Workstation({
                     "replace",
                     nextMobileView,
                     previewingKnowledge,
+                    previewingTasks,
                 );
                 return;
             }
@@ -666,13 +689,14 @@ export function Workstation({
                           )[0] ?? null)
                     : null;
             setCurrentRecording(initial);
-            setMobileView(previewingKnowledge ? "detail" : "list");
+            setMobileView(previewingFolderView ? "detail" : "list");
             writeSelection(
                 initial,
                 locationFolder?.id ?? null,
                 "replace",
-                previewingKnowledge ? "detail" : "list",
+                previewingFolderView ? "detail" : "list",
                 previewingKnowledge,
+                previewingTasks,
             );
         },
         [
@@ -873,6 +897,9 @@ export function Workstation({
                             knowledgeFolderId &&
                                 knowledgeFolderId === selectedFolderId,
                         ),
+                        Boolean(
+                            tasksFolderId && tasksFolderId === selectedFolderId,
+                        ),
                     );
             }
         }
@@ -899,6 +926,7 @@ export function Workstation({
         orgRecordings,
         currentRecording,
         knowledgeFolderId,
+        tasksFolderId,
         selectedFolderId,
         writeSelection,
     ]);
@@ -1804,6 +1832,13 @@ export function Workstation({
     const settingsFolder = folderOrganization.folders.find(
         (folder) => folder.id === settingsFolderId && !folder.receivedFolder,
     );
+    // Derived like settingsFolder: a folder deleted or moved away by
+    // someone else closes its dialog and frees the shortcuts.
+    const folderActionFolder = folderAction
+        ? folderOrganization.folders.find(
+              (folder) => folder.id === folderAction.folderId,
+          )
+        : undefined;
     const navigation = useMemo(() => {
         const meetingItems = meetings.map((meeting) => ({
             id: meeting.meetingItemId ?? meeting.id,
@@ -1847,9 +1882,22 @@ export function Workstation({
         meetings,
         userId,
     ]);
+    const openFolderAction = (
+        folder: RecordingFolder,
+        action: "create" | "move",
+    ) => {
+        setFolderAction({
+            folderId: folder.id,
+            action,
+            returnFocusElement:
+                document.activeElement instanceof HTMLElement
+                    ? document.activeElement
+                    : null,
+        });
+    };
     const openFolderSettings = (folder: RecordingFolder, action?: "create") => {
-        setSettingsAction(action);
-        setSettingsFolderId(folder.id);
+        if (action) openFolderAction(folder, action);
+        else setSettingsFolderId(folder.id);
     };
 
     // Keyboard shortcuts (global). Disabled while any modal is open
@@ -1869,12 +1917,14 @@ export function Workstation({
             !paletteOpen &&
             !shortcutsOpen &&
             !settingsFolder &&
+            !folderActionFolder &&
             !firstLevelFolderOpen &&
             meetingFolderId === undefined,
     });
 
     const navigateRecent = () => {
         setKnowledgeFolderId(null);
+        setTasksFolderId(null);
         selectionRevisionRef.current += 1;
         setPendingUploadSelection(null);
         setItemLinkQuery("");
@@ -1889,8 +1939,9 @@ export function Workstation({
     };
     const assignRecording = (id: string, folderId: string) =>
         handleFolderAssignment(id, folderId, true);
-    const closeKnowledge = () => {
+    const closeFolderView = () => {
         setKnowledgeFolderId(null);
+        setTasksFolderId(null);
         setMobileView("list");
         writeSelection(selectedRecording, selectedFolderId, "replace", "list");
     };
@@ -1904,15 +1955,41 @@ export function Workstation({
         onNavigate: (folder: RecordingFolder | null) =>
             folder ? selectFolderByUser(folder) : navigateRecent(),
         onSettings: (folder: RecordingFolder) => openFolderSettings(folder),
-        knowledgeOpen: knowledgeFolderId === selectedFolderId,
-        onKnowledge: (folder: RecordingFolder) => {
-            if (knowledgeFolderId === folder.id) {
-                closeKnowledge();
+        tasksOpen: tasksFolderId !== null && tasksFolderId === selectedFolderId,
+        onTasks: (folder: RecordingFolder) => {
+            if (tasksFolderId === folder.id) {
+                closeFolderView();
                 return;
             }
             selectionRevisionRef.current += 1;
             setPendingUploadSelection(null);
             setItemLinkQuery("");
+            setKnowledgeFolderId(null);
+            setTasksFolderId(folder.id);
+            setMobileView("detail");
+            writeSelection(
+                currentRecording,
+                folder.id,
+                "push",
+                "detail",
+                false,
+                true,
+            );
+        },
+        onMoveFolder: (folder: RecordingFolder) =>
+            openFolderAction(folder, "move"),
+        knowledgeOpen:
+            knowledgeFolderId !== null &&
+            knowledgeFolderId === selectedFolderId,
+        onKnowledge: (folder: RecordingFolder) => {
+            if (knowledgeFolderId === folder.id) {
+                closeFolderView();
+                return;
+            }
+            selectionRevisionRef.current += 1;
+            setPendingUploadSelection(null);
+            setItemLinkQuery("");
+            setTasksFolderId(null);
             setKnowledgeFolderId(folder.id);
             setMobileView("detail");
             writeSelection(currentRecording, folder.id, "push", "detail", true);
@@ -2193,13 +2270,22 @@ export function Workstation({
                                 }
                             />
                         </div>
-                        {knowledgeFolderId &&
-                        selectedFolder?.id === knowledgeFolderId ? (
+                        {tasksFolderId &&
+                        selectedFolder?.id === tasksFolderId ? (
+                            <FolderTasksPanel
+                                key={tasksFolderId}
+                                folder={selectedFolder}
+                                organization={folderOrganization}
+                                isOrgAccount={isOrgAccount}
+                                onBack={closeFolderView}
+                            />
+                        ) : knowledgeFolderId &&
+                          selectedFolder?.id === knowledgeFolderId ? (
                             <FolderKnowledgePanel
                                 key={knowledgeFolderId}
                                 folder={selectedFolder}
                                 contentRevision={orgContentRevision}
-                                onBack={closeKnowledge}
+                                onBack={closeFolderView}
                             />
                         ) : currentMeetingId ? (
                             <div
@@ -2464,6 +2550,23 @@ export function Workstation({
                 onOpenChange={setFirstLevelFolderOpen}
                 onCreated={handleFolderCreated}
             />
+            {folderAction && folderActionFolder && (
+                <FolderActionDialog
+                    key={`${folderAction.folderId}:${folderAction.action}`}
+                    folder={folderActionFolder}
+                    folders={folderOrganization.folders}
+                    action={folderAction.action}
+                    returnFocusElement={folderAction.returnFocusElement}
+                    open
+                    onOpenChange={(open) => {
+                        if (!open) setFolderAction(null);
+                    }}
+                    onCreate={handleCreateFolder}
+                    onMove={handleMoveFolder}
+                    canCurate={canCurate}
+                    isOrgAccount={isOrgAccount}
+                />
+            )}
             {settingsFolder && (
                 <FolderSettingsPanel
                     key={settingsFolder.id}
@@ -2475,14 +2578,11 @@ export function Workstation({
                         if (!open) setSettingsFolderId(null);
                     }}
                     onRename={handleRenameFolder}
-                    onCreate={handleCreateFolder}
-                    onMove={handleMoveFolder}
                     onDelete={handleDeleteFolder}
                     exportProviders={exportProviders}
                     mailEnabled={mailEnabled}
                     canCurate={canCurate}
                     isOrgAccount={isOrgAccount}
-                    initialAction={settingsAction}
                     onReopenHandled={handleExportReopen}
                     reopenExport={
                         exportReturn?.folderId === settingsFolder.id
