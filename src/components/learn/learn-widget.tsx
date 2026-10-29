@@ -72,6 +72,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { HeadingCount } from "@/components/ui/heading-count";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { followJob } from "@/lib/jobs/client";
@@ -2047,9 +2048,7 @@ function ReviewSection({
                 <h3 id={`${id}-title`} className="text-sm font-semibold">
                     {title}
                 </h3>
-                <span className="text-xs tabular-nums text-muted-foreground">
-                    {count}
-                </span>
+                <HeadingCount>{count}</HeadingCount>
                 <span className="ml-auto text-xs tabular-nums text-muted-foreground">
                     {i18n("{selected} of {total} selected", {
                         selected: String(selected),

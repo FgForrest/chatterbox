@@ -346,6 +346,7 @@ export function TemplateList({
                                     <Pencil className="size-4" />
                                 </Button>
                                 <Button
+                                    className="text-muted-foreground hover:text-red-600 focus-visible:text-red-600 dark:hover:text-red-400 dark:focus-visible:text-red-400"
                                     variant="ghost"
                                     size="icon-sm"
                                     aria-label={i18n("Delete {name}", {
@@ -356,7 +357,7 @@ export function TemplateList({
                                         disabled || config.templates.length <= 1
                                     }
                                 >
-                                    <Trash2 className="size-4 text-destructive" />
+                                    <Trash2 className="size-4" />
                                 </Button>
                             </div>
                         </li>

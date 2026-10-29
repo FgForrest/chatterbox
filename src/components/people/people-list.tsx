@@ -4,10 +4,11 @@ import { ChevronRight, Plus, Search, UsersRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useExtracted, useLocale } from "next-intl";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useProductName } from "@/components/product-name-provider";
 import { Button } from "@/components/ui/button";
+import { InlineEditorTrigger } from "@/components/ui/inline-editor-trigger";
 import { Input } from "@/components/ui/input";
 import { formatDateTime } from "@/lib/format-date";
 import { initials } from "@/lib/utils";
@@ -32,6 +33,7 @@ export function PeopleList({ people }: { people: PersonSummary[] }) {
     const router = useRouter();
     const [query, setQuery] = useState("");
     const [creating, setCreating] = useState(false);
+    const createTrigger = useRef<HTMLButtonElement>(null);
     const [saving, setSaving] = useState(false);
     const [newName, setNewName] = useState("");
 
@@ -64,7 +66,7 @@ export function PeopleList({ people }: { people: PersonSummary[] }) {
             }
 
             setNewName("");
-            setCreating(false);
+            closeCreator();
             router.refresh();
             toast.success(i18n("{name} added", { name: displayName }));
         } catch (error) {
@@ -81,6 +83,7 @@ export function PeopleList({ people }: { people: PersonSummary[] }) {
     function closeCreator() {
         setCreating(false);
         setNewName("");
+        createTrigger.current?.focus();
     }
 
     const creatorForm = (
@@ -144,14 +147,15 @@ export function PeopleList({ people }: { people: PersonSummary[] }) {
                             )}
                         </p>
                         <div className="mt-7 w-full">
-                            {creating ? (
-                                creatorForm
-                            ) : (
-                                <Button onClick={() => setCreating(true)}>
-                                    <Plus className="size-4" />{" "}
-                                    {i18n("Add your first person")}
-                                </Button>
-                            )}
+                            <InlineEditorTrigger
+                                ref={createTrigger}
+                                open={creating}
+                                onClick={() => setCreating(true)}
+                            >
+                                <Plus className="size-4" />
+                                {i18n("Add your first person")}
+                            </InlineEditorTrigger>
+                            {creating && creatorForm}
                         </div>
                     </div>
                 </section>
@@ -184,19 +188,16 @@ export function PeopleList({ people }: { people: PersonSummary[] }) {
                                     aria-label={i18n("Search people")}
                                 />
                             </div>
-                            <Button
+                            <InlineEditorTrigger
+                                ref={createTrigger}
+                                open={creating}
                                 variant="outline"
                                 className="shrink-0"
-                                onClick={() =>
-                                    creating
-                                        ? closeCreator()
-                                        : setCreating(true)
-                                }
-                                aria-expanded={creating}
+                                onClick={() => setCreating(true)}
                             >
                                 <Plus className="size-4" />
-                                {creating ? i18n("Cancel") : i18n("Add person")}
-                            </Button>
+                                {i18n("Add person")}
+                            </InlineEditorTrigger>
                         </div>
                     </div>
 

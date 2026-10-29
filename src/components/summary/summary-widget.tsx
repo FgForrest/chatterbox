@@ -45,6 +45,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { InlineEditorTrigger } from "@/components/ui/inline-editor-trigger";
 import {
     Select,
     SelectContent,
@@ -129,6 +130,11 @@ export function SummaryWidget({
     const [editing, setEditing] = useState<
         (SummaryVersion & { summary: string; keyPoints: string[] }) | null
     >(null);
+    const editTrigger = useRef<HTMLButtonElement>(null);
+    const closeEditor = () => {
+        setEditing(null);
+        editTrigger.current?.focus();
+    };
     const [remarksOpen, setRemarksOpen] = useState(false);
     const [confirmRun, setConfirmRun] = useState<
         (SummaryVersion & { profileId?: string }) | null
@@ -417,7 +423,7 @@ export function SummaryWidget({
 
     const headerActions = (
         <div className="flex shrink-0 items-center justify-end gap-1">
-            {source === "riffado" && canChange && (
+            {source === "riffado" && canChange && !editing && (
                 <ActionTooltip
                     label={
                         working
@@ -459,7 +465,9 @@ export function SummaryWidget({
             {canCorrect && (
                 <>
                     <ActionTooltip label={i18n("Edit summary")}>
-                        <Button
+                        <InlineEditorTrigger
+                            ref={editTrigger}
+                            open={editing !== null}
                             type="button"
                             size="icon-sm"
                             variant="ghost"
@@ -487,23 +495,25 @@ export function SummaryWidget({
                             }
                         >
                             <Pencil className="size-4" />
-                        </Button>
+                        </InlineEditorTrigger>
                     </ActionTooltip>
-                    <ActionTooltip label={i18n("Summary remarks")}>
-                        <Button
-                            type="button"
-                            size="icon-sm"
-                            variant="ghost"
-                            aria-label={i18n("Summary remarks")}
-                            disabled={working}
-                            onClick={() => setRemarksOpen(true)}
-                        >
-                            <MessageSquareText className="size-4" />
-                        </Button>
-                    </ActionTooltip>
+                    {!editing && (
+                        <ActionTooltip label={i18n("Summary remarks")}>
+                            <Button
+                                type="button"
+                                size="icon-sm"
+                                variant="ghost"
+                                aria-label={i18n("Summary remarks")}
+                                disabled={working}
+                                onClick={() => setRemarksOpen(true)}
+                            >
+                                <MessageSquareText className="size-4" />
+                            </Button>
+                        </ActionTooltip>
+                    )}
                 </>
             )}
-            {canSwitchSource && onSourceChange && (
+            {!editing && canSwitchSource && onSourceChange && (
                 <SourceSwitcher
                     compact
                     ariaLabel={i18n("Summary source")}
@@ -514,7 +524,7 @@ export function SummaryWidget({
                     }
                 />
             )}
-            {hasSummary && (
+            {!editing && hasSummary && (
                 <MarkdownActions
                     recordingId={itemId}
                     kind="summary"
@@ -542,7 +552,7 @@ export function SummaryWidget({
                 key={contextKey}
                 summary={editing.summary}
                 keyPoints={editing.keyPoints}
-                onCancel={() => setEditing(null)}
+                onCancel={closeEditor}
                 onSave={(text, points) =>
                     saveSummary(
                         storeEditedSpeakerReferences(text),
@@ -688,7 +698,7 @@ export function SummaryWidget({
                             key={`ai-${item.slice(0, 32)}`}
                             className="flex items-start gap-2 text-sm text-muted-foreground"
                         >
-                            <ListChecks className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                            <ListChecks className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
                             <Markdown
                                 inline
                                 speakerAttributions={speakerAttributions}
@@ -897,14 +907,14 @@ export function SummaryWidget({
                 collapseLabel={i18n("Collapse summary")}
                 expandLabel={i18n("Expand summary")}
                 headerAction={
-                    editing ? (
-                        <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Pencil className="size-3.5" />
-                            {i18n("Editing summary")}
-                        </span>
-                    ) : (
-                        headerActions
-                    )
+                    <div className="flex items-center gap-2">
+                        {editing && (
+                            <span className="text-sm text-muted-foreground">
+                                {i18n("Editing summary")}
+                            </span>
+                        )}
+                        {headerActions}
+                    </div>
                 }
                 footer={
                     editing

@@ -194,7 +194,8 @@ export function ItemHeader({
                             size="icon-sm"
                             className={cn(
                                 "relative shrink-0",
-                                knowledgeOpen && "bg-accent",
+                                knowledgeOpen &&
+                                    "bg-accent text-knowledge hover:text-knowledge",
                             )}
                             aria-pressed={knowledgeOpen}
                             aria-label={i18n("Knowledge")}
@@ -203,7 +204,7 @@ export function ItemHeader({
                             <BookOpen
                                 className={cn(
                                     "size-4",
-                                    organization && "text-organization",
+                                    knowledgeOpen && "text-knowledge",
                                 )}
                             />
                             {pendingLearnCount > 0 && (

@@ -49,10 +49,7 @@ export function TaskDetail({ initialTask }: { initialTask: TaskListItem }) {
     };
     return (
         <div className="mx-auto max-w-4xl space-y-4">
-            <Link
-                href="/tasks"
-                className="text-sm text-primary hover:underline"
-            >
+            <Link href="/tasks" className="text-sm text-tasks hover:underline">
                 {i18n("Tasks")}
             </Link>
             <h1 className="text-xl font-semibold">{task.text}</h1>

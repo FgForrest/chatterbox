@@ -238,6 +238,14 @@ function renderWidget(
 }
 
 beforeEach(() => {
+    vi.stubGlobal(
+        "ResizeObserver",
+        class {
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        },
+    );
     vi.clearAllMocks();
     resetState();
 });

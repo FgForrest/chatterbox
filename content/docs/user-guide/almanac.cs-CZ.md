@@ -13,13 +13,13 @@ Obsahuje karty **Lidé**, **Věci**, **Slovník** a **Kontrola**. Kurátoři Org
 
 ![Lidé](images/almanac-people.png)
 
-Každý, koho jste pojmenovali jako řečníka, je zde, včetně počtu nahrávek, ve kterých je slyšet. **Přidat osobu** umožní přidat někoho ještě před tím, než promluví. Lidé označení jako **Organizace** pocházejí z nahrávek sdílených s Organizací (viz [Organizace](organization.md)).
+Každý, koho jste pojmenovali jako řečníka, je zde, včetně počtu nahrávek, ve kterých je slyšet. **Přidat osobu** umožní přidat někoho ještě před tím, než promluví. Dokud je formulář otevřený, spouštěcí tlačítko je neaktivní; použijte **Přidat osobu** nebo **Zrušit** uvnitř formuláře. Lidé označení jako **Organizace** pocházejí z nahrávek sdílených s Organizací (viz [Organizace](organization.md)).
 
 Kliknutím na osobu otevřete její stránku:
 
 ![Osoba](images/almanac-person.png)
 
-- **Také známý jako**: přezdívky a jiné varianty jmen. Vyhledávání podle nich osobu najde a Učení je rozpoznává v přepisech.
+- **Také známý jako**: přezdívky a jiné varianty jmen. Dokud je editor **Přidat přezdívku** otevřený, spouštěcí tlačítko je neaktivní; použijte **Přidat** nebo **Zrušit** ve formuláři. Vyhledávání podle nich osobu najde a Učení je rozpoznává v přepisech.
 - **Poznámky**: cokoli si chcete zapamatovat. U organizačních osob jsou poznámky Vaše vlastní.
 - **Co je známo**: fakta jako *pracuje pro Bluefin Logistics* nebo *má roli provozního ředitele*. **Přidat faktum** umožní zvolit vztah a druhou stranu z Almanachu, nebo použít prostý text. Klepna odmítá fakta o zdraví, rodině, osobnosti, výkonnosti nebo demografii.
 - **Nahrávky**: kde tato osoba mluví.
@@ -32,7 +32,7 @@ Kliknutím na osobu otevřete její stránku:
 
 ![Věci](images/almanac-things.png)
 
-Almanach používá základní typy **Osoba**, **Organizace**, **Tým**, **Projekt**, **Produkt nebo systém**, **Pojem**, **Místo** a **Dokument**. Věci můžete vyhledat, filtrovat podle typu, nebo kliknout na **Přidat věc**.
+Almanach používá základní typy **Osoba**, **Organizace**, **Tým**, **Projekt**, **Produkt nebo systém**, **Pojem**, **Místo** a **Dokument**. Věci můžete vyhledat, filtrovat podle typu, nebo kliknout na **Přidat věc**. Dokud je formulář otevřený, spouštěcí tlačítko je neaktivní; použijte **Přidat věc** nebo **Zrušit** uvnitř formuláře.
 
 ![Věc](images/almanac-thing.png)
 

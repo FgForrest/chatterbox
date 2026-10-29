@@ -31,6 +31,8 @@ import { TaskRow } from "@/components/tasks/task-row";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EditorActions } from "@/components/ui/editor-actions";
+import { HeadingCount } from "@/components/ui/heading-count";
+import { InlineEditorTrigger } from "@/components/ui/inline-editor-trigger";
 import { SearchCombobox } from "@/components/ui/search-combobox";
 import { Textarea } from "@/components/ui/textarea";
 import { ActionTooltip } from "@/components/ui/tooltip";
@@ -311,7 +313,7 @@ export function AgendaBody({
             <CardHeader>
                 <div className="flex flex-wrap items-center gap-2">
                     <CardTitle>{i18n("1 · Task review")}</CardTitle>
-                    <span className="text-xs text-muted-foreground">
+                    <HeadingCount>
                         {i18n(
                             "{count, plural, one {# task} other {# tasks}} · {done, number} done",
                             {
@@ -321,14 +323,14 @@ export function AgendaBody({
                                 ).length,
                             },
                         )}
-                    </span>
+                    </HeadingCount>
                     {changedCount > 0 && (
-                        <span className="text-xs text-muted-foreground">
+                        <HeadingCount>
                             {i18n(
                                 "{count, number} changed during the meeting",
                                 { count: changedCount },
                             )}
-                        </span>
+                        </HeadingCount>
                     )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -520,9 +522,9 @@ export function AgendaBody({
     const pointsCard = (
         <Card className={cn(live && "order-1 sm:order-2")}>
             <CardHeader>
-                <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                     <CardTitle>{i18n("2 · Discussion points")}</CardTitle>
-                    <span className="text-xs text-muted-foreground">
+                    <HeadingCount>
                         {live || readOnly
                             ? i18n(
                                   "{discussed, number} of {total, number} discussed",
@@ -532,7 +534,7 @@ export function AgendaBody({
                                   "{count, plural, one {# point} other {# points}}",
                                   { count: detail.points.length },
                               )}
-                    </span>
+                    </HeadingCount>
                     {canEdit && !live && (
                         <Button
                             variant="outline"
@@ -548,6 +550,7 @@ export function AgendaBody({
                                     : undefined
                             }
                             onClick={suggest}
+                            className="ml-auto"
                         >
                             <WandSparkles
                                 className="size-4"
@@ -850,25 +853,28 @@ export function AgendaBody({
             ) : (
                 <button
                     type="button"
-                    className="flex w-full items-center justify-between gap-2 text-left"
+                    className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md text-left"
                     aria-expanded={!collapsed}
                     onClick={() => setCollapsed((value) => !value)}
                 >
-                    <span>
-                        <span className="font-medium">{i18n("Agenda")}</span>
-                        <span className="ml-2 text-xs text-muted-foreground">
-                            {i18n(
-                                "{discussed, number} of {total, plural, one {# point discussed} other {# points discussed}} · {tasks, plural, one {# task} other {# tasks}}",
-                                {
-                                    discussed,
-                                    total: detail.points.length,
-                                    tasks: tasks.length,
-                                },
-                            )}
-                        </span>
+                    <span className="whitespace-nowrap font-medium">
+                        {i18n("Agenda")}
+                    </span>
+                    <span className="min-w-0 text-right text-xs tabular-nums text-muted-foreground [overflow-wrap:anywhere]">
+                        {i18n(
+                            "{discussed, number} of {total, plural, one {# point discussed} other {# points discussed}} · {tasks, plural, one {# task} other {# tasks}}",
+                            {
+                                discussed,
+                                total: detail.points.length,
+                                tasks: tasks.length,
+                            },
+                        )}
                     </span>
                     <ChevronDown
-                        className={cn("size-4", !collapsed && "rotate-180")}
+                        className={cn(
+                            "size-4 shrink-0",
+                            !collapsed && "rotate-180",
+                        )}
                     />
                 </button>
             )}
@@ -1033,7 +1039,7 @@ export function AgendaBody({
                                                                     )?.text;
                                                                 return (
                                                                     <Link
-                                                                        className="underline"
+                                                                        className="text-tasks underline"
                                                                         key={
                                                                             taskId
                                                                         }
@@ -1147,6 +1153,18 @@ function AgendaTaskRow({
 }) {
     const i18n = useExtracted();
     const [noteOpen, setNoteOpen] = useState(false);
+    const noteTrigger = useRef<HTMLButtonElement>(null);
+    const restoreNoteFocus = useRef(false);
+    const closeNote = () => {
+        restoreNoteFocus.current = true;
+        setNoteOpen(false);
+    };
+    useEffect(() => {
+        if (!noteOpen && !pending && restoreNoteFocus.current) {
+            restoreNoteFocus.current = false;
+            noteTrigger.current?.focus();
+        }
+    }, [noteOpen, pending]);
     return (
         <TaskRow
             {...rowProps}
@@ -1174,13 +1192,13 @@ function AgendaTaskRow({
                     <AgendaTaskNote
                         task={task}
                         saving={pending}
-                        onCancel={() => setNoteOpen(false)}
+                        onCancel={closeNote}
                         onSave={async (note) => {
-                            if (await onNote(note)) setNoteOpen(false);
+                            if (await onNote(note)) closeNote();
                         }}
                     />
                 ) : task.agendaNote ? (
-                    <div className="flex gap-2 border-l-2 border-primary/30 pl-3">
+                    <div className="flex gap-2 border-l-2 border-border pl-3">
                         <MessageSquareText
                             className="mt-1 size-3 shrink-0"
                             aria-hidden="true"
@@ -1200,7 +1218,9 @@ function AgendaTaskRow({
                 <>
                     {canEdit && (live || task.agendaNote) && (
                         <ActionTooltip label={i18n("Meeting note")}>
-                            <Button
+                            <InlineEditorTrigger
+                                ref={noteTrigger}
+                                open={noteOpen}
                                 type="button"
                                 variant="ghost"
                                 size="icon-xs"
@@ -1213,7 +1233,7 @@ function AgendaTaskRow({
                                     className="size-3"
                                     aria-hidden="true"
                                 />
-                            </Button>
+                            </InlineEditorTrigger>
                         </ActionTooltip>
                     )}
                     {canEdit && (

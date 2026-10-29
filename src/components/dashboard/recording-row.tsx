@@ -325,7 +325,7 @@ export function RecordingRow({
                                 <DropdownMenuItem
                                     onSelect={() => setShareOpen(true)}
                                 >
-                                    <UserPlus className="text-person-share" />
+                                    <UserPlus />
                                     {i18n("Share…")}
                                 </DropdownMenuItem>
                             )}

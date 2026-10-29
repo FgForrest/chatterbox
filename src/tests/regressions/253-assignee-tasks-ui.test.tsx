@@ -1062,7 +1062,13 @@ describe("#253 task desk UI", () => {
         const merge = screen.getByRole("button", {
             name: "Merge into another task",
         });
-        expect(merge.className).toBe(note.className);
+        const restClasses = [...note.classList].filter(
+            (value) =>
+                !value.startsWith("aria-disabled:") &&
+                !value.startsWith("dark:aria-disabled:"),
+        );
+        expect([...merge.classList]).toEqual(restClasses);
+        expect(note.getAttribute("aria-expanded")).toBe("false");
         expect(merge.querySelector("svg")?.classList.contains("size-3")).toBe(
             true,
         );

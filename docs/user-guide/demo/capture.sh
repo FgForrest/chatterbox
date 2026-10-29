@@ -163,13 +163,13 @@ section_dashboard() {
     needs_review
     tag row "Weekly product sync" "button"
     crop recording-list-needs-review "css:[aria-label='Current location']" "css:[role=menu]" row
-    ab find role menuitemcheckbox click --name "Needs review (1)" >/dev/null
+    ab find role menuitemcheckbox click --name "Needs review 1" >/dev/null
     escape
 }
 
 needs_review() {
     click_button "All · Newest"
-    ab find role menuitemcheckbox click --name "Needs review (1)" >/dev/null
+    ab find role menuitemcheckbox click --name "Needs review 1" >/dev/null
     ab wait 900 >/dev/null
 }
 

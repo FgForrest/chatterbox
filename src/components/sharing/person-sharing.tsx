@@ -469,7 +469,11 @@ export function OwnerSharingActions({
                     <Button
                         variant="ghost"
                         size="icon-sm"
-                        className="text-person-share hover:text-person-share"
+                        className={
+                            active.length > 0
+                                ? "text-person-share hover:text-person-share"
+                                : undefined
+                        }
                         aria-label={
                             shared ? i18n("Manage sharing") : i18n("Share")
                         }
@@ -928,7 +932,6 @@ export function ReceivedItemBanner({
                 <Button
                     variant="outline"
                     size="sm"
-                    className="text-person-share"
                     onClick={() => setFiling(true)}
                 >
                     <FolderInput className="size-4" />

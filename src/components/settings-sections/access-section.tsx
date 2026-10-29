@@ -2,7 +2,7 @@
 
 import { RefreshCw, Search, ShieldCheck } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm-dialog";
 import { useProductName } from "@/components/product-name-provider";
@@ -90,6 +90,8 @@ export function AccessSection() {
     const [hasMore, setHasMore] = useState(false);
     const [listError, setListError] = useState<string | null>(null);
     const [selected, setSelected] = useState<string | null>(null);
+    const selection = useRef({ subject: selected, generation: 0 });
+    const detailRequest = useRef(0);
     const [detail, setDetail] = useState<AccessDetail | null>(null);
     const [history, setHistory] = useState<HistoryEntry[]>([]);
     const [unfinished, setUnfinished] = useState<PendingRevocation[]>([]);
@@ -204,20 +206,45 @@ export function AccessSection() {
         setHasMore(body.hasMore);
     }, [explain, page, query]);
 
+    const selectPerson = (subject: string | null) => {
+        if (selection.current.subject === subject) return;
+        selection.current = {
+            subject,
+            generation: selection.current.generation + 1,
+        };
+        setDetail(null);
+        setHistory([]);
+        setSelected(subject);
+    };
+
     const loadDetail = useCallback(
-        async (subject: string) => {
+        async (subject: string, generation = selection.current.generation) => {
+            if (
+                selection.current.subject !== subject ||
+                selection.current.generation !== generation
+            )
+                return;
+            const request = ++detailRequest.current;
+            const isCurrent = () =>
+                selection.current.subject === subject &&
+                selection.current.generation === generation &&
+                detailRequest.current === request;
             const response = await fetch(
                 `/api/access/subjects/${encodeURIComponent(subject)}`,
             );
             if (!response.ok) {
-                toast.error(explain(await parseApiError(response)));
+                const error = await parseApiError(response);
+                if (!isCurrent()) return;
+                toast.error(explain(error));
                 setDetail(null);
+                setHistory([]);
                 return;
             }
             const body = (await response.json()) as {
                 access: AccessDetail;
                 history: HistoryEntry[];
             };
+            if (!isCurrent()) return;
             setDetail(body.access);
             setHistory(body.history);
         },
@@ -260,6 +287,10 @@ export function AccessSection() {
         capability: Capability,
         grant: boolean,
     ) => {
+        const generation = selection.current.generation;
+        const isCurrent = () =>
+            selection.current.subject === current.subject &&
+            selection.current.generation === generation;
         setBusy(true);
         try {
             const response = await fetch(
@@ -277,32 +308,35 @@ export function AccessSection() {
             );
             if (!response.ok) {
                 const body = await parseApiError(response);
+                if (!isCurrent()) return;
                 toast.error(explain(body));
                 const fresh = body.details?.access as AccessDetail | undefined;
-                if (fresh) setDetail(fresh);
-                else await loadDetail(current.subject);
+                if (fresh) {
+                    ++detailRequest.current;
+                    setDetail(fresh);
+                } else await loadDetail(current.subject, generation);
                 return;
             }
             const outcome = (await response.json()) as ChangeOutcome;
-            setDetail(outcome.access);
-            if (outcome.status === "partial") {
+            if (isCurrent()) setDetail(outcome.access);
+            if (isCurrent() && outcome.status === "partial") {
                 toast.warning(
                     i18n(
                         "Only part of the change was saved. The current state is shown; try the rest again.",
                     ),
                 );
-            } else if (outcome.stillEffective.length > 0) {
+            } else if (isCurrent() && outcome.stillEffective.length > 0) {
                 toast.warning(
                     i18n(
                         "The managed group was removed, but the access is still granted elsewhere at the identity provider.",
                     ),
                 );
-            } else if (outcome.status === "applied") {
+            } else if (isCurrent() && outcome.status === "applied") {
                 toast.success(i18n("Access changed"));
             }
-            reportRevocation(outcome.revocation);
+            if (isCurrent()) reportRevocation(outcome.revocation);
             await Promise.all([
-                loadDetail(current.subject),
+                loadDetail(current.subject, generation),
                 loadList(),
                 loadUnfinished(),
             ]);
@@ -333,6 +367,10 @@ export function AccessSection() {
     };
 
     const retryRevocation = async (current: AccessDetail) => {
+        const generation = selection.current.generation;
+        const isCurrent = () =>
+            selection.current.subject === current.subject &&
+            selection.current.generation === generation;
         setBusy(true);
         try {
             const response = await fetch(
@@ -344,18 +382,22 @@ export function AccessSection() {
                 },
             );
             if (!response.ok) {
-                toast.error(explain(await parseApiError(response)));
+                const error = await parseApiError(response);
+                if (isCurrent()) toast.error(explain(error));
                 return;
             }
             const body = (await response.json()) as {
                 revocation: ChangeOutcome["revocation"];
             };
-            if (body.revocation === "done") {
+            if (isCurrent() && body.revocation === "done") {
                 toast.success(i18n("Sessions ended"));
-            } else {
+            } else if (isCurrent()) {
                 reportRevocation(body.revocation);
             }
-            await Promise.all([loadDetail(current.subject), loadUnfinished()]);
+            await Promise.all([
+                loadDetail(current.subject, generation),
+                loadUnfinished(),
+            ]);
         } finally {
             setBusy(false);
         }
@@ -428,7 +470,7 @@ export function AccessSection() {
                                 key={person.subject}
                                 size="sm"
                                 variant="outline"
-                                onClick={() => setSelected(person.subject)}
+                                onClick={() => selectPerson(person.subject)}
                             >
                                 {personLabel(person)}
                             </Button>
@@ -477,9 +519,15 @@ export function AccessSection() {
                             <li key={row.subject}>
                                 <button
                                     type="button"
-                                    className="flex w-full items-center justify-between gap-3 py-2 text-left"
+                                    className="flex w-full items-center justify-between gap-3 rounded-md py-2 text-left aria-pressed:bg-accent"
                                     aria-pressed={selected === row.subject}
-                                    onClick={() => setSelected(row.subject)}
+                                    onClick={() =>
+                                        selectPerson(
+                                            selected === row.subject
+                                                ? null
+                                                : row.subject,
+                                        )
+                                    }
                                 >
                                     <span className="min-w-0">
                                         <span className="block truncate text-sm font-medium">
@@ -543,7 +591,7 @@ export function AccessSection() {
                 </div>
             </SettingsCard>
 
-            {detail && (
+            {detail && detail.subject === selected && (
                 <SettingsCard
                     title={personLabel(detail)}
                     description={detail.email ?? detail.username ?? undefined}

@@ -20,6 +20,7 @@ import {
 import { PersonActions } from "@/components/people/person-actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { HeadingCount } from "@/components/ui/heading-count";
 import { formatDateTime } from "@/lib/format-date";
 import { itemDetailHref } from "@/lib/item-detail";
 import type { PageRelation } from "@/lib/knowledge/fact-page";
@@ -230,14 +231,12 @@ export function PersonDetail({
 
             <Card>
                 <CardHeader className="border-b">
-                    <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
                         <CardTitle className="flex items-center gap-2">
                             <AudioLines className="size-5 text-primary" />{" "}
                             {i18n("Recordings")}
                         </CardTitle>
-                        <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                            {heard.length}
-                        </span>
+                        <HeadingCount>{heard.length}</HeadingCount>
                     </div>
                     <p className="text-sm text-muted-foreground">
                         {i18n(

@@ -215,12 +215,13 @@ function WebhookRow({
                     <Pencil className="size-4" />
                 </Button>
                 <Button
+                    className="text-muted-foreground hover:text-red-600 focus-visible:text-red-600 dark:hover:text-red-400 dark:focus-visible:text-red-400"
                     variant="outline"
                     size="icon"
                     onClick={() => onDelete(webhook.id)}
                     aria-label={i18n("Delete webhook")}
                 >
-                    <Trash2 className="size-4 text-destructive" />
+                    <Trash2 className="size-4" />
                 </Button>
             </div>
         </div>

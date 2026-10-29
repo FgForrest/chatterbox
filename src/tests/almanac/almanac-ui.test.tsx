@@ -181,8 +181,11 @@ describe("ThingsList", () => {
             screen.getByLabelText("Nicknames (optional, separated by commas)"),
             { target: { value: "ATL, Atlasko" } },
         );
-        // The form's own button, once it is open.
-        fireEvent.click(screen.getByRole("button", { name: "Add thing" }));
+        const add = screen
+            .getAllByRole<HTMLButtonElement>("button", { name: "Add thing" })
+            .find((button) => button.form !== null);
+        if (!add) throw new Error("Missing form submit button");
+        fireEvent.click(add);
         await waitFor(() =>
             expect(fetch).toHaveBeenCalledWith(
                 "/api/knowledge/entities",

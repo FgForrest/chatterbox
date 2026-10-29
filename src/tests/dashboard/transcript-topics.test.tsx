@@ -184,7 +184,7 @@ function renderPanel(
 /** Radix opens a dropdown from the keyboard in jsdom, not from a click. */
 function openTopics(_count: number) {
     fireEvent.keyDown(
-        screen.getByRole("button", { name: /1 \/ 2 Objednání jízdenky/ }),
+        screen.getByRole("button", { name: /Objednání jízdenky 1 \/ 2/ }),
         { key: "Enter" },
     );
 }
@@ -295,7 +295,7 @@ describe("transcript topics", () => {
         expect(screen.queryByRole("dialog")).toBeNull();
         finishDetection(json({ topics: TOPICS }));
         await screen.findByRole("button", {
-            name: /1 \/ 2 Objednání jízdenky/,
+            name: /Objednání jízdenky 1 \/ 2/,
         });
         expect(fetchMock).toHaveBeenCalledWith(
             "/api/recordings/rec-1/topics?source=plaud",
@@ -334,7 +334,7 @@ describe("transcript topics", () => {
         );
         settle();
         await screen.findByRole("button", {
-            name: /1 \/ 2 Objednání jízdenky/,
+            name: /Objednání jízdenky 1 \/ 2/,
         });
         expect(toastMock.success).toHaveBeenCalledWith("Topics detected");
     });
@@ -379,10 +379,12 @@ describe("transcript topics", () => {
 
         renderPanel({ ...PLAUD, source: "riffado" });
 
-        await screen.findByRole("button", {
-            name: /1 \/ 2 Objednání jízdenky/,
+        const bar = await screen.findByRole("button", {
+            name: /Objednání jízdenky 1 \/ 2/,
         });
         expect(toastMock.success).toHaveBeenCalledWith("Topics detected");
+        // The title starts the row; the position sits at the right end.
+        expect(bar.firstElementChild?.className).toContain("text-left");
     });
 
     it("says so when a job it picked up fails", async () => {

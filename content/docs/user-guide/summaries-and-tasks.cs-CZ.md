@@ -30,6 +30,8 @@ Vlastník položky může u vygenerovaného shrnutí použít **Upravit shrnutí
 
 ![Úprava textu shrnutí a klíčových bodů](images/summary-edit.png)
 
+Během úprav je tlačítko **Upravit shrnutí** neaktivní. Úpravy dokončíte tlačítkem **Uložit** nebo **Zrušit** v editoru; zaměření se vrátí na tužku.
+
 Upravte **Text shrnutí** ve formátu Markdown a **Klíčové body**, každý na samostatném řádku začínajícím `- `, a zvolte **Uložit** nebo **Zrušit**. Odkazy na mluvčí zobrazují aktuální jména, například `[Alex Morgan](#speaker-1)`. Zachovejte odkaz `#speaker-N`, aby jméno sledovalo pozdější přejmenování mluvčího. Úprava shrnutí nemění úkoly; ty upravujte v seznamu pod ním.
 
 Uložený text má v zápatí štítek **Upraveno ručně**; po najetí myší se zobrazí autor a čas úpravy. Automatické zpracování ho nikdy nepřepíše, ani po novém přepisu nebo opravách Učení. Může proto popisovat starší vstup. Ruční **Shrnout znovu**, změna profilu nebo **Vygenerovat znovu** vyžaduje před nahrazením ručních úprav potvrzení. Vlastník zde může místo toho zvolit **Napsat připomínku**. Potvrzené nahrazení štítek ruční úpravy odstraní.
@@ -129,7 +131,7 @@ Pravé tlačítko na **Úkoly** v navigaci, klávesa místní nabídky, Shift+F1
 
 ### Poznámky a sledování
 
-Zaškrtnutí úkolu otevře nepovinnou poznámku. Zvolte **Přeskočit** nebo **Uložit poznámku**. Akce **Poznámka** ji otevře kdykoli. Úkol má jednu šifrovanou poznámku do 2 000 znaků; uložení nahradí předchozí text. Všichni čtenáři úkolu ji vidí spolu s autorem a časem. Psát ji může každý, kdo smí úkol označit jako hotový. Poznámky se prohledávají a zálohují, do instrukcí pro shrnutí se neposílají.
+Zaškrtnutí úkolu otevře nepovinnou poznámku. Zvolte **Přeskočit** nebo **Uložit poznámku**. Akce **Poznámka** ji po zavření editoru znovu otevře. Během úprav je její tlačítko neaktivní; použijte **Přeskočit** nebo **Uložit poznámku**. Zaměření se pak vrátí na **Poznámku**. Úkol má jednu šifrovanou poznámku do 2 000 znaků; uložení nahradí předchozí text. Všichni čtenáři úkolu ji vidí spolu s autorem a časem. Psát ji může každý, kdo smí úkol označit jako hotový. Poznámky se prohledávají a zálohují, do instrukcí pro shrnutí se neposílají.
 
 **Sledovat** je dostupné u viditelných úkolů pod nahrávkou i poštou a na stránce Úkoly. Stav **Sledujete** zůstává viditelný. Sledování přežije odebrání sdílení: úkol se skryje a po obnovení viditelnosti se vrátí. Sledující může otevřít detail úkolu. Sledování i jeho výslovné zrušení patří do osobní zálohy sledujícího. Vlastní úkoly ani změny sledovaných úkolů nezvyšují odznak přiřazených úkolů.
 

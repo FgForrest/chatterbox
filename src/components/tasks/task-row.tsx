@@ -37,6 +37,7 @@ import { TaskFolderPicker } from "@/components/tasks/task-folder-picker";
 import type { TaskRowChange } from "@/components/tasks/use-recording-tasks";
 import { Button } from "@/components/ui/button";
 import { EditorActions } from "@/components/ui/editor-actions";
+import { InlineEditorTrigger } from "@/components/ui/inline-editor-trigger";
 import { Textarea } from "@/components/ui/textarea";
 import {
     ActionTooltip,
@@ -118,6 +119,18 @@ export function TaskRow({
     const canNote = suppliedTask.canClose && !readOnly && !notesReadOnly;
     const [reasonOpen, setReasonOpen] = useState(false);
     const noteInput = useRef<HTMLTextAreaElement>(null);
+    const noteTrigger = useRef<HTMLButtonElement>(null);
+    const restoreNoteFocus = useRef(false);
+    const closeNote = () => {
+        restoreNoteFocus.current = true;
+        setNoteOpen(false);
+    };
+    useEffect(() => {
+        if (!noteOpen && !pending && restoreNoteFocus.current) {
+            restoreNoteFocus.current = false;
+            noteTrigger.current?.focus();
+        }
+    }, [noteOpen, pending]);
     useEffect(() => {
         if (noteOpen) noteInput.current?.focus();
     }, [noteOpen]);
@@ -309,7 +322,7 @@ export function TaskRow({
                     </div>
                 )}
                 {task.note && !noteOpen && (
-                    <div className="flex gap-2 border-l-2 border-primary/30 pl-3">
+                    <div className="flex gap-2 border-l-2 border-border pl-3">
                         <MessageSquare className="mt-1 size-3 shrink-0" />
                         <div>
                             <p className="whitespace-pre-wrap">{task.note}</p>
@@ -351,12 +364,12 @@ export function TaskRow({
                             )}
                             cancelLabel={i18n("Skip")}
                             saveLabel={i18n("Save note")}
-                            onCancel={() => setNoteOpen(false)}
+                            onCancel={closeNote}
                             saveDisabled={pending}
                             onSave={() => {
                                 const note = noteDraft.trim() || null;
                                 onChange({ note }, { note });
-                                setNoteOpen(false);
+                                closeNote();
                             }}
                         />
                     </div>
@@ -456,7 +469,9 @@ export function TaskRow({
                                 )}
                                 {task.canClose && !notesReadOnly && (
                                     <ActionTooltip label={i18n("Note")}>
-                                        <Button
+                                        <InlineEditorTrigger
+                                            ref={noteTrigger}
+                                            open={noteOpen}
                                             type="button"
                                             size="icon-xs"
                                             variant="ghost"
@@ -465,7 +480,7 @@ export function TaskRow({
                                             onClick={() => setNoteOpen(true)}
                                         >
                                             <MessageSquare className="size-3" />
-                                        </Button>
+                                        </InlineEditorTrigger>
                                     </ActionTooltip>
                                 )}
                                 {(task.canMerge || task.canEdit) &&

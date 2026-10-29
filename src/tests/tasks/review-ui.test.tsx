@@ -317,6 +317,44 @@ describe.each([
         await screen.findByRole("heading", { name: "Task review" });
     }
 
+    it("keeps the title icon and comparison labels neutral", async () => {
+        await openFrame(
+            state({
+                canEdit: true,
+                reviewed: false,
+                tasks: [],
+                proposals: [],
+                updates: [],
+                matches: [
+                    match(),
+                    match({
+                        id: "ambiguous",
+                        ambiguous: true,
+                        quote: "Another mention",
+                    }),
+                ],
+            }),
+        );
+        const title = screen.getByRole("heading", { name: "Task review" });
+        expect(title.querySelector("svg")?.getAttribute("class")).not.toMatch(
+            /text-(tasks|primary)/,
+        );
+        for (const label of [
+            "Earlier task",
+            "Said now",
+            "Choose a task match",
+        ]) {
+            const element = screen
+                .getAllByText(label)
+                .find((node) => ["H4", "LEGEND"].includes(node.tagName));
+            expect(element?.classList.contains("text-muted-foreground")).toBe(
+                true,
+            );
+            expect(element?.classList.contains("font-semibold")).toBe(true);
+            expect(element?.className).not.toMatch(/text-(tasks|primary)/);
+        }
+    });
+
     it("ticks, edits, and applies a proposal", async () => {
         const proposal = task();
         const current = state({
