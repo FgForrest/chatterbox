@@ -20,16 +20,64 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
-function editor() {
+function editor(
+    onSave = vi.fn().mockResolvedValue(true),
+    keyPoints = ["First point", "Second point"],
+) {
     return render(
         <SummaryEditor
             summary="Summary prose"
-            keyPoints={["First point", "Second point"]}
-            onSave={vi.fn().mockResolvedValue(true)}
+            keyPoints={keyPoints}
+            onSave={onSave}
             onCancel={vi.fn()}
         />,
     );
 }
+
+describe("summary editor key points", () => {
+    it("opens with a list marker on each stored point and the list hint", () => {
+        editor();
+        expect(
+            screen.getByRole<HTMLTextAreaElement>("textbox", {
+                name: /Key Points/,
+            }).value,
+        ).toBe("- First point\n- Second point");
+        expect(screen.getByText("one per line, starting with -")).toBeTruthy();
+    });
+
+    it.each([
+        "- One\n\n- Two",
+        "One\nTwo",
+    ])("saves %s as separate points without markers", async (draft) => {
+        const onSave = vi.fn().mockResolvedValue(true);
+        editor(onSave);
+        fireEvent.change(screen.getByRole("textbox", { name: /Key Points/ }), {
+            target: { value: draft },
+        });
+        await act(async () =>
+            fireEvent.click(screen.getByRole("button", { name: "Save" })),
+        );
+        expect(onSave).toHaveBeenCalledExactlyOnceWith("Summary prose", [
+            "One",
+            "Two",
+        ]);
+    });
+
+    it("preserves stored leading markers when saving an unchanged draft", async () => {
+        const onSave = vi.fn().mockResolvedValue(true);
+        const points = ["- First point", "* Second point", "• Third point"];
+        editor(onSave, points);
+        expect(
+            screen.getByRole<HTMLTextAreaElement>("textbox", {
+                name: /Key Points/,
+            }).value,
+        ).toBe("- - First point\n- * Second point\n- • Third point");
+        await act(async () =>
+            fireEvent.click(screen.getByRole("button", { name: "Save" })),
+        );
+        expect(onSave).toHaveBeenCalledExactlyOnceWith("Summary prose", points);
+    });
+});
 
 const fields = [
     { name: /Summary text/, minimum: "min-h-64", maximum: "max-h-[70vh]" },

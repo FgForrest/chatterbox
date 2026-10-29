@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { EditorActions } from "@/components/ui/editor-actions";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { parseKeyPoints } from "@/lib/summary/key-points";
 
 /** Edit summary prose and key points inside either item's shared summary card. */
 export function SummaryEditor({
@@ -25,7 +26,9 @@ export function SummaryEditor({
     const i18n = useExtracted();
     const id = useId();
     const [text, setText] = useState(summary);
-    const [points, setPoints] = useState(keyPoints.join("\n"));
+    const [points, setPoints] = useState(() =>
+        keyPoints.map((point) => `- ${point}`).join("\n"),
+    );
     const [saving, setSaving] = useState(false);
     return (
         <form
@@ -33,13 +36,7 @@ export function SummaryEditor({
             onSubmit={async (event) => {
                 event.preventDefault();
                 setSaving(true);
-                const saved = await onSave(
-                    text,
-                    points
-                        .split(/\r?\n/)
-                        .map((point) => point.trim())
-                        .filter(Boolean),
-                );
+                const saved = await onSave(text, parseKeyPoints(points));
                 setSaving(false);
                 if (saved === true) {
                     toast.success(i18n("Summary saved"));
@@ -85,7 +82,7 @@ export function SummaryEditor({
                     <Label htmlFor={`${id}-points`}>
                         {i18n("Key Points")}{" "}
                         <span className="text-muted-foreground">
-                            {i18n("one per line")}
+                            {i18n("one per line, starting with -")}
                         </span>
                     </Label>
                     <Textarea
