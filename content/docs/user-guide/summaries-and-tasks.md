@@ -28,7 +28,7 @@ The item's owner can use **Edit summary** (the pencil in the card header) on a g
 
 ![Editing summary text and key points](images/summary-edit.png)
 
-Edit **Summary text** as Markdown and **Key Points**, one per line, then **Save** or **Cancel**. Speaker links show the current names, for example `[Alex Morgan](#speaker-1)`. Keep the `#speaker-N` link so the name follows later speaker renames. Editing the summary does not edit tasks; change those in the task list below it.
+Edit **Summary text** as Markdown and **Key Points**, each on its own line starting with `- `, then **Save** or **Cancel**. Speaker links show the current names, for example `[Alex Morgan](#speaker-1)`. Keep the `#speaker-N` link so the name follows later speaker renames. Editing the summary does not edit tasks; change those in the task list below it.
 
 Saved text has a **Hand-edited** footer marker; hover over it to see who edited it and when. Automatic processing never overwrites it, including after re-transcription or Learn corrections. It may therefore describe older input. A manual **Re-summarize**, profile change or **Regenerate** asks for confirmation before replacing hand edits. The owner can choose **Write a remark** there instead. Confirming a replacement clears the hand-edited marker.
 

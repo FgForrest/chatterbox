@@ -457,7 +457,7 @@ section_summary_corrections() {
     tag summary "Summary" ".bg-card"
     scroll_to summary
     click_button "Edit summary" 1200
-    ab fill "textarea[id$='-points']" $'Pilot priced separately from rollout\nRotterdam only; Antwerp after the pilot, in summer at the earliest' >/dev/null
+    ab fill "textarea[id$='-points']" $'- Pilot priced separately from rollout\n- Rotterdam only; Antwerp after the pilot, in summer at the earliest' >/dev/null
     blur
     scroll_to summary
     crop summary-edit summary

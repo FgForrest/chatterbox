@@ -246,8 +246,16 @@ afterEach(cleanup);
 
 describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
     it("edits summary prose and key points in place and cancels without a write", () => {
+        state.summaryData = summary({
+            keyPoints: ["First point", "Second point"],
+        });
         renderWidget(kind);
         fireEvent.click(screen.getByRole("button", { name: "Edit summary" }));
+        expect(
+            screen.getByRole<HTMLTextAreaElement>("textbox", {
+                name: /Key Points/,
+            }).value,
+        ).toBe("- First point\n- Second point");
         expect(screen.getByText("Editing summary")).toBeTruthy();
         expect(
             screen.queryByRole("button", { name: "Re-summarize" }),
@@ -255,6 +263,14 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         expect(screen.queryByTestId("recording-tasks")).toBeNull();
         expect(screen.queryByTestId("summary-provenance")).toBeNull();
         expect(screen.queryByTestId("summary-attention")).toBeNull();
+        for (const field of screen.getAllByRole("textbox")) {
+            expect(field.getAttribute("data-slot")).toBe("textarea");
+            expect(field.classList.contains("resize-none")).toBe(true);
+        }
+        for (const name of ["Cancel", "Save"])
+            expect(
+                screen.getByRole("button", { name }).classList.contains("h-8"),
+            ).toBe(true);
         fireEvent.change(screen.getByLabelText(/Summary text/), {
             target: { value: "Discarded draft" },
         });
@@ -263,7 +279,10 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         expect(screen.getByText("A concise result")).toBeTruthy();
     });
 
-    it("saves the two fields separately and leaves tasks out of the edit", async () => {
+    it.each([
+        "- One\n\n- Two",
+        "One\nTwo",
+    ])("saves the two fields separately and leaves tasks out of the edit: %s", async (points) => {
         renderWidget(kind);
         fireEvent.click(screen.getByRole("button", { name: "Edit summary" }));
         fireEvent.change(screen.getByLabelText(/Summary text/), {
@@ -272,7 +291,7 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
             },
         });
         fireEvent.change(screen.getByLabelText(/Key Points/), {
-            target: { value: "One\n\nTwo" },
+            target: { value: points },
         });
         await act(async () =>
             fireEvent.click(screen.getByRole("button", { name: "Save" })),
