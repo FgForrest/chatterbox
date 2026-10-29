@@ -209,7 +209,7 @@ describe("access detail selection generations", () => {
         "success",
         "failure with access",
         "failure without access",
-    ])("preserves B when A's pending write returns %s", async (result) => {
+    ])("preserves B and still reports A's pending write when it returns %s", async (result) => {
         render(<AccessSection />);
         await select("A");
         const toggle = await screen.findByRole("switch", {
@@ -245,15 +245,20 @@ describe("access detail selection generations", () => {
                     url === "/api/access/subjects/A" && !init?.method,
             ),
         ).toHaveLength(1);
-        expect(toast.error).not.toHaveBeenCalled();
-        expect(
-            screen.queryByRole("button", {
-                name: "Sign in again to manage access.",
-            }),
-        ).toBeNull();
+        if (result === "success") {
+            expect(toast.success).toHaveBeenCalledWith("Access changed");
+            expect(toast.error).not.toHaveBeenCalled();
+        } else {
+            expect(toast.error).toHaveBeenCalledOnce();
+            expect(
+                screen.getByRole("button", {
+                    name: "Sign in again to manage access.",
+                }),
+            ).toBeTruthy();
+        }
     });
 
-    it("discards an old write failure after returning to the same person", async () => {
+    it("reports an old write failure but keeps the detail after returning to the same person", async () => {
         render(<AccessSection />);
         await select("A");
         const toggle = await screen.findByRole("switch", {
@@ -279,12 +284,7 @@ describe("access detail selection generations", () => {
                 "This account is disabled at the identity provider.",
             ),
         ).toBeNull();
-        expect(toast.error).not.toHaveBeenCalled();
-        expect(
-            screen.queryByRole("button", {
-                name: "Sign in again to manage access.",
-            }),
-        ).toBeNull();
+        expect(toast.error).toHaveBeenCalledOnce();
     });
 
     it.each([
@@ -319,7 +319,7 @@ describe("access detail selection generations", () => {
     it.each([
         "success",
         "failure",
-    ])("does not refresh A after its pending session write returns %s while B is selected", async (result) => {
+    ])("reports but does not refresh A after its pending session write returns %s while B is selected", async (result) => {
         render(<AccessSection />);
         await select("A");
         const end = await screen.findByRole("button", { name: "End sessions" });
@@ -341,6 +341,8 @@ describe("access detail selection generations", () => {
                     url === "/api/access/subjects/A" && !init?.method,
             ),
         ).toHaveLength(1);
-        expect(toast.error).not.toHaveBeenCalled();
+        if (result === "success")
+            expect(toast.success).toHaveBeenCalledWith("Sessions ended");
+        else expect(toast.error).toHaveBeenCalledOnce();
     });
 });

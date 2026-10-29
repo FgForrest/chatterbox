@@ -307,9 +307,11 @@ export function AccessSection() {
                 },
             );
             if (!response.ok) {
+                // A write's outcome is always reported; only the detail of a
+                // person no longer selected is left alone.
                 const body = await parseApiError(response);
-                if (!isCurrent()) return;
                 toast.error(explain(body));
+                if (!isCurrent()) return;
                 const fresh = body.details?.access as AccessDetail | undefined;
                 if (fresh) {
                     ++detailRequest.current;
@@ -319,22 +321,22 @@ export function AccessSection() {
             }
             const outcome = (await response.json()) as ChangeOutcome;
             if (isCurrent()) setDetail(outcome.access);
-            if (isCurrent() && outcome.status === "partial") {
+            if (outcome.status === "partial") {
                 toast.warning(
                     i18n(
                         "Only part of the change was saved. The current state is shown; try the rest again.",
                     ),
                 );
-            } else if (isCurrent() && outcome.stillEffective.length > 0) {
+            } else if (outcome.stillEffective.length > 0) {
                 toast.warning(
                     i18n(
                         "The managed group was removed, but the access is still granted elsewhere at the identity provider.",
                     ),
                 );
-            } else if (isCurrent() && outcome.status === "applied") {
+            } else if (outcome.status === "applied") {
                 toast.success(i18n("Access changed"));
             }
-            if (isCurrent()) reportRevocation(outcome.revocation);
+            reportRevocation(outcome.revocation);
             await Promise.all([
                 loadDetail(current.subject, generation),
                 loadList(),
@@ -368,9 +370,6 @@ export function AccessSection() {
 
     const retryRevocation = async (current: AccessDetail) => {
         const generation = selection.current.generation;
-        const isCurrent = () =>
-            selection.current.subject === current.subject &&
-            selection.current.generation === generation;
         setBusy(true);
         try {
             const response = await fetch(
@@ -383,15 +382,15 @@ export function AccessSection() {
             );
             if (!response.ok) {
                 const error = await parseApiError(response);
-                if (isCurrent()) toast.error(explain(error));
+                toast.error(explain(error));
                 return;
             }
             const body = (await response.json()) as {
                 revocation: ChangeOutcome["revocation"];
             };
-            if (isCurrent() && body.revocation === "done") {
+            if (body.revocation === "done") {
                 toast.success(i18n("Sessions ended"));
-            } else if (isCurrent()) {
+            } else {
                 reportRevocation(body.revocation);
             }
             await Promise.all([
