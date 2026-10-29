@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDownWideNarrow, ListChecks, Loader2 } from "lucide-react";
+import { ArrowDownWideNarrow, ListChecks, Loader2, Plus } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useExtracted, useLocale } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -88,6 +88,9 @@ export function TaskList({
             ? "followed"
             : "mine";
     const [addOpen, setAddOpen] = useState(false);
+    const [addSaving, setAddSaving] = useState(false);
+    const [addClicks, setAddClicks] = useState(0);
+    const addTrigger = useRef<HTMLButtonElement>(null);
     const addRequest = params.get("add");
     useEffect(() => {
         setAddOpen(Boolean(addRequest));
@@ -551,9 +554,82 @@ export function TaskList({
                         ? i18n("By due date")
                         : i18n("Newest first")}
                 </button>
+                {!organization && tab === "mine" && (
+                    <button
+                        ref={addTrigger}
+                        type="button"
+                        aria-disabled={addSaving}
+                        aria-expanded={addOpen}
+                        onClick={() => {
+                            if (addSaving) return;
+                            setAddOpen(true);
+                            setAddClicks((count) => count + 1);
+                        }}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition-colors hover:bg-accent aria-disabled:opacity-50"
+                    >
+                        <Plus className="size-3.5" aria-hidden="true" />
+                        {i18n("Add task")}
+                    </button>
+                )}
             </div>
 
             <ul className="divide-y rounded-lg border">
+                {!organization && tab === "mine" && (
+                    <OwnTaskForm
+                        open={addOpen}
+                        focusRequest={`${addRequest ?? ""}:${addClicks}`}
+                        triggerRef={addTrigger}
+                        onSavingChange={setAddSaving}
+                        folders={folders}
+                        defaultFolderId={
+                            selectedPrivate?.kind === "private"
+                                ? null
+                                : (selectedPrivate?.id ?? null)
+                        }
+                        onOpenChange={(open) => {
+                            setAddOpen(open);
+                            if (!open && addRequest) setParam("add", null);
+                        }}
+                        onReconciled={(temporaryId, task) => {
+                            const entry = ownInserts.current.get(temporaryId);
+                            if (task && entry)
+                                ownInserts.current.set(temporaryId, {
+                                    ...entry,
+                                    task,
+                                    reconciled: true,
+                                });
+                            else ownInserts.current.delete(temporaryId);
+                            versions.current.delete(temporaryId);
+                            if (task)
+                                versions.current.set(task.id, task.version);
+                            setTasks((current) => {
+                                const remaining = (current ?? []).filter(
+                                    (row) =>
+                                        row.id !== temporaryId &&
+                                        row.id !== task?.id,
+                                );
+                                return task &&
+                                    entry?.query === currentQuery.current &&
+                                    ownMatchesFolder(task)
+                                    ? [task, ...remaining]
+                                    : remaining;
+                            });
+                        }}
+                        onAdded={(task) => {
+                            ownInserts.current.set(task.id, {
+                                task,
+                                query: ownMatchesFolder(task) ? query : null,
+                                reconciled: false,
+                            });
+                            versions.current.set(task.id, task.version);
+                            setTasks((current) =>
+                                ownMatchesFolder(task)
+                                    ? [task, ...(current ?? [])]
+                                    : current,
+                            );
+                        }}
+                    />
+                )}
                 {tasks === null ? (
                     <li className="flex items-center gap-2 p-8 text-sm text-muted-foreground">
                         <Loader2 className="size-4 animate-spin" />
@@ -584,59 +660,6 @@ export function TaskList({
                     ))
                 )}
             </ul>
-            {!organization && tab === "mine" && (
-                <OwnTaskForm
-                    open={addOpen}
-                    focusRequest={addRequest}
-                    folders={folders}
-                    defaultFolderId={
-                        selectedPrivate?.kind === "private"
-                            ? null
-                            : (selectedPrivate?.id ?? null)
-                    }
-                    onOpenChange={(open) => {
-                        setAddOpen(open);
-                        if (!open && addRequest) setParam("add", null);
-                    }}
-                    onReconciled={(temporaryId, task) => {
-                        const entry = ownInserts.current.get(temporaryId);
-                        if (task && entry)
-                            ownInserts.current.set(temporaryId, {
-                                ...entry,
-                                task,
-                                reconciled: true,
-                            });
-                        else ownInserts.current.delete(temporaryId);
-                        versions.current.delete(temporaryId);
-                        if (task) versions.current.set(task.id, task.version);
-                        setTasks((current) => {
-                            const remaining = (current ?? []).filter(
-                                (row) =>
-                                    row.id !== temporaryId &&
-                                    row.id !== task?.id,
-                            );
-                            return task &&
-                                entry?.query === currentQuery.current &&
-                                ownMatchesFolder(task)
-                                ? [task, ...remaining]
-                                : remaining;
-                        });
-                    }}
-                    onAdded={(task) => {
-                        ownInserts.current.set(task.id, {
-                            task,
-                            query: ownMatchesFolder(task) ? query : null,
-                            reconciled: false,
-                        });
-                        versions.current.set(task.id, task.version);
-                        setTasks((current) =>
-                            ownMatchesFolder(task)
-                                ? [task, ...(current ?? [])]
-                                : current,
-                        );
-                    }}
-                />
-            )}
         </div>
     );
 }

@@ -112,7 +112,7 @@ The filters show open, done or dropped tasks, tasks from one folder, and tasks t
 
 ### Own tasks
 
-**Add task** is below the list on the left in **Mine**. Enter up to 2,000 characters and an optional due date. **Only you** means the author is always the assignee and the only person who can see it, including when a curator or the Organization account opens Tasks. You may edit, finish, drop, restore and merge it. It has no recording, cannot be shared or reassigned, raises no badge, and survives item retention and deletion.
+**Add task** is at the top right of **Mine**, next to the sort order. The form opens as the first row of the list, and the new task takes its place at the top when you add it. Enter up to 2,000 characters and an optional due date. **Only you** means the author is always the assignee and the only person who can see it, including when a curator or the Organization account opens Tasks. You may edit, finish, drop, restore and merge it. It has no recording, cannot be shared or reassigned, raises no badge, and survives item retention and deletion.
 
 The folder pill next to **Only you** optionally files the task in one of your private folders. It defaults to the private folder selected in the Tasks filter, otherwise **No folder**. On the task's source line, click its folder name or **File in a folder** to move it; **No folder** clears it. The unfiled action appears on hover or keyboard focus with a mouse and stays visible on touch. A folder only helps you organize: it never grants anyone access and tasks do not change the library's folder item counts. Recording and mail tasks keep using their source item's folders.
 
