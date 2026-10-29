@@ -18,9 +18,9 @@ Ruční výběr může použít libovolný dostupný profil pro daný druh polo�
 
 Během zpracování karta ukazuje, jak dlouho už operace trvá a u funkce **Vícenásobné shrnování** také postup: `Probíhá shrnutí — 1/3 průchodů`, poté `Slučování 3 průchodů…`. Můžete stránku opustit; shrnutí se nezastaví a po návratu bude připravené.
 
-Shrnutí jsou psána ve formátu Markdown, takže nadpisy, seznamy a tabulky se tak i zobrazují. **Klíčové body** jsou poslední částí uvnitř stejného rámečku jako text shrnutí. Stažený i zkopírovaný Markdown zachovává pořadí text, potom klíčové body. Poskytovatel, model, odznak vícenásobného shrnování a upozornění s akcemi jsou v zápatí pod úkoly.
+Shrnutí jsou psána ve formátu Markdown, takže nadpisy, seznamy a tabulky se tak i zobrazují. **Klíčové body** jsou poslední částí uvnitř stejného rámečku jako text shrnutí. Stažený i zkopírovaný Markdown zachovává pořadí text, potom klíčové body. Zápatí pod úkoly ukazuje upozornění s akcemi ve žlutém pruhu a pod ním jeden řádek s profilem, poskytovatelem, modelem a označeními, například vícenásobným shrnováním nebo **Upraveno ručně**.
 
-Pokud opravíte jména v přepisu po vytvoření shrnutí, u shrnutí se objeví upozornění **Mohou obsahovat neaktuální jména nebo pojmy** s odkazem na **Znovu vygenerovat**. Pruh pracovního postupu označí práci vytvořenou ze starších vstupů jako **Zastaralé**.
+Pokud opravíte jména v přepisu po vytvoření shrnutí, u shrnutí se objeví upozornění **Může obsahovat zastaralá jména nebo pojmy** s odkazem **Vygenerovat znovu**. Pruh pracovního postupu označí práci vytvořenou ze starších vstupů jako **Zastaralé**.
 
 <span id="edit-a-summary" />
 
@@ -32,7 +32,7 @@ Vlastník položky může u vygenerovaného shrnutí použít **Upravit shrnutí
 
 Upravte **Text shrnutí** ve formátu Markdown a **Klíčové body**, každý na samostatném řádku, a zvolte **Uložit** nebo **Zrušit**. Odkazy na mluvčí zobrazují aktuální jména, například `[Alex Morgan](#speaker-1)`. Zachovejte odkaz `#speaker-N`, aby jméno sledovalo pozdější přejmenování mluvčího. Úprava shrnutí nemění úkoly; ty upravujte v seznamu pod ním.
 
-Uložený text má v zápatí štítek **Upraveno ručně**; po najetí myší se zobrazí autor a čas úpravy. Automatické zpracování ho nikdy nepřepíše, ani po novém přepisu nebo opravách Učení. Může proto popisovat starší vstup. Ruční **Shrnout znovu**, změna profilu nebo **Znovu vygenerovat** vyžaduje před nahrazením ručních úprav potvrzení. Vlastník zde může místo toho zvolit **Napsat připomínku**. Potvrzené nahrazení štítek ruční úpravy odstraní.
+Uložený text má v zápatí štítek **Upraveno ručně**; po najetí myší se zobrazí autor a čas úpravy. Automatické zpracování ho nikdy nepřepíše, ani po novém přepisu nebo opravách Učení. Může proto popisovat starší vstup. Ruční **Shrnout znovu**, změna profilu nebo **Vygenerovat znovu** vyžaduje před nahrazením ručních úprav potvrzení. Vlastník zde může místo toho zvolit **Napsat připomínku**. Potvrzené nahrazení štítek ruční úpravy odstraní.
 
 <span id="correct-a-summary-with-remarks" />
 
@@ -56,7 +56,7 @@ Klepna obsahuje instrukce shrnutí, například **Obecné shrnutí**, **Zápis z
 
 ![Shrnutí vytvořené dvěma ze tří kroků](images/summary-multi-pass.png)
 
-Profil může shrnout přepis 2krát až 5krát a výsledky sloučit, takže i bod zachycený jen jedním během se objeví ve shrnutí. Cena procesu je přibližně tolikrát vyšší, kolik běhů nastavíte. Zápatí uvádí **Vícenásobné shrnování · 3**. Pokud některý běh selže a shrnutí vznikne z menšího počtu, odznak zežloutne, například **Vícenásobné shrnování · 2/3**; najeďte na něj kurzorem a zobrazí se důvod.
+Profil může shrnout přepis 2krát až 5krát a výsledky sloučit, takže i bod zachycený jen jedním během se objeví ve shrnutí. Cena procesu je přibližně tolikrát vyšší, kolik běhů nastavíte. Zápatí uvádí **Vícenásobné shrnování · 3**. Pokud některý běh selže a shrnutí vznikne z menšího počtu, údaj zežloutne, například **Vícenásobné shrnování · 2/3**; najeďte na něj kurzorem a zobrazí se důvod.
 
 <span id="tasks-from-a-summary" />
 <span id="tasks-across-items" />
