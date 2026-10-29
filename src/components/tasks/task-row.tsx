@@ -4,6 +4,9 @@ import "./task-row.css";
 
 import {
     ArrowUpRight,
+    Circle,
+    CircleCheck,
+    CircleSlash,
     Eye,
     Lock,
     Mail,
@@ -55,8 +58,11 @@ import type { RecordingFolder } from "@/types/folder";
 export function TaskRow({
     task: suppliedTask,
     readOnly = false,
+    pending = false,
     notesReadOnly = false,
     actions,
+    badges,
+    extraNotes,
     recording,
     evidence,
     currentItemId,
@@ -71,8 +77,12 @@ export function TaskRow({
 }: {
     task: TaskView;
     readOnly?: boolean;
+    /** A save is in flight: fields lock, the done checkbox stays in place, disabled. */
+    pending?: boolean;
     notesReadOnly?: boolean;
     actions?: ReactNode;
+    badges?: ReactNode;
+    extraNotes?: ReactNode;
     /** The recording it came from, on the Tasks page. */
     recording?: TaskListItem["recording"];
     /** The latest visible item that evidences the task. */
@@ -90,16 +100,17 @@ export function TaskRow({
     onFollow?: () => void;
     folders?: RecordingFolder[];
 }) {
-    const task = readOnly
-        ? {
-              ...suppliedTask,
-              canEdit: false,
-              canClose: false,
-              canFollow: false,
-              canMerge: false,
-              canUndoMatch: false,
-          }
-        : suppliedTask;
+    const task =
+        readOnly || pending
+            ? {
+                  ...suppliedTask,
+                  canEdit: false,
+                  canClose: false,
+                  canFollow: false,
+                  canMerge: false,
+                  canUndoMatch: false,
+              }
+            : suppliedTask;
     const i18n = useExtracted();
     const format = useFormatter();
     const [noteOpen, setNoteOpen] = useState(false);
@@ -117,11 +128,17 @@ export function TaskRow({
     const dropped = task.status === "dropped";
     const editable = task.canEdit && !dropped;
     let closeReason: string | null = null;
-    if (!readOnly && task.receivedOwnerName && !task.canClose && !dropped) {
+    if (
+        !readOnly &&
+        !pending &&
+        task.receivedOwnerName &&
+        !task.canClose &&
+        !dropped
+    ) {
         closeReason = i18n("Only {owner} can edit this task.", {
             owner: task.receivedOwnerName,
         });
-    } else if (!readOnly && !task.canClose && !dropped) {
+    } else if (!readOnly && !pending && !task.canClose && !dropped) {
         if (!task.assignee) {
             closeReason = i18n(
                 "Nobody is assigned yet. Only the recording's owner or a curator can mark it done.",
@@ -138,47 +155,52 @@ export function TaskRow({
             );
         }
     }
-    const checkbox = (
-        <input
-            type="checkbox"
-            className="mt-1 size-4 shrink-0 accent-primary aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-            checked={done}
-            disabled={dropped || readOnly}
-            aria-disabled={closeReason ? true : undefined}
-            onClick={() => {
-                if (closeReason) {
-                    toast.error(closeReason);
+    const StatusIcon = dropped ? CircleSlash : done ? CircleCheck : Circle;
+    const statusMark =
+        (pending ? suppliedTask.canClose && !readOnly : task.canClose) &&
+        !dropped ? (
+            <input
+                type="checkbox"
+                disabled={pending}
+                className="mt-1 size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+                checked={done}
+                onChange={(event) => {
+                    const status = event.target.checked ? "done" : "open";
+                    onChange({ status }, { status });
+                    if (status === "done" && !notesReadOnly) setNoteOpen(true);
+                }}
+                aria-label={i18n("Done")}
+            />
+        ) : (
+            <span
+                role="img"
+                aria-label={
+                    dropped
+                        ? i18n("Dropped")
+                        : done
+                          ? i18n("Done")
+                          : i18n("Open")
                 }
-            }}
-            onKeyDown={(event) => {
-                if (closeReason && event.key === " ") {
-                    event.preventDefault();
-                    toast.error(closeReason);
-                }
-            }}
-            onChange={(event) => {
-                if (!task.canClose || dropped) return;
-                const status = event.target.checked ? "done" : "open";
-                onChange({ status }, { status });
-                if (status === "done" && !notesReadOnly) setNoteOpen(true);
-            }}
-            aria-label={i18n("Done")}
-        />
-    );
+                tabIndex={closeReason ? 0 : undefined}
+                className="mt-1 inline-flex size-4 shrink-0 rounded-full text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+            >
+                <StatusIcon className="size-4" aria-hidden="true" />
+            </span>
+        );
 
     return (
         <li className="task-row group flex items-start gap-3 p-3 text-sm">
             {closeReason ? (
                 <TooltipProvider>
                     <Tooltip>
-                        <TooltipTrigger asChild>{checkbox}</TooltipTrigger>
+                        <TooltipTrigger asChild>{statusMark}</TooltipTrigger>
                         <TooltipContent className="max-w-72">
                             {closeReason}
                         </TooltipContent>
                     </Tooltip>
                 </TooltipProvider>
             ) : (
-                checkbox
+                statusMark
             )}
             <div className="min-w-0 flex-1 space-y-1.5">
                 {editable ? (
@@ -274,6 +296,59 @@ export function TaskRow({
                         )}
                     </div>
                 )}
+                {task.note && !noteOpen && (
+                    <div className="flex gap-2 border-l-2 border-primary/30 pl-3">
+                        <MessageSquare className="mt-1 size-3 shrink-0" />
+                        <div>
+                            <p className="whitespace-pre-wrap">{task.note}</p>
+                            <p className="text-xs text-muted-foreground">
+                                {task.noteBy?.name ?? i18n("Unknown author")}
+                                {task.noteUpdatedAt && (
+                                    <>
+                                        {" "}
+                                        ·{" "}
+                                        {format.dateTime(
+                                            new Date(task.noteUpdatedAt),
+                                            {
+                                                dateStyle: "medium",
+                                                timeStyle: "short",
+                                            },
+                                        )}
+                                    </>
+                                )}
+                            </p>
+                        </div>
+                    </div>
+                )}
+                {noteOpen && task.canClose && !notesReadOnly && (
+                    <div className="space-y-2">
+                        <Textarea
+                            autoGrow
+                            ref={noteInput}
+                            aria-label={i18n("Note")}
+                            maxLength={2000}
+                            value={noteDraft}
+                            onChange={(event) =>
+                                setNoteDraft(event.target.value)
+                            }
+                            className="min-h-20 max-h-[50vh]"
+                        />
+                        <EditorActions
+                            hint={i18n(
+                                "One note per task. Everyone who sees the task can read it.",
+                            )}
+                            cancelLabel={i18n("Skip")}
+                            saveLabel={i18n("Save note")}
+                            onCancel={() => setNoteOpen(false)}
+                            onSave={() => {
+                                const note = noteDraft.trim() || null;
+                                onChange({ note }, { note });
+                                setNoteOpen(false);
+                            }}
+                        />
+                    </div>
+                )}
+                {extraNotes}
                 <div className="task-row-pills flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     {own ? (
                         <span className="inline-flex items-center gap-1 rounded-md border bg-muted px-2 py-1">
@@ -349,10 +424,15 @@ export function TaskRow({
                             />
                         )}
                     {dropped && (
-                        <span className="rounded bg-muted px-1.5">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-xs">
+                            <CircleSlash
+                                className="size-3"
+                                aria-hidden="true"
+                            />
                             {i18n("Dropped")}
                         </span>
                     )}
+                    {badges}
                     <TooltipProvider>
                         <div className="task-row-actions ml-auto flex flex-wrap items-center justify-end gap-3">
                             <div className="task-row-hover-actions flex flex-wrap items-center justify-end gap-1">
@@ -478,58 +558,6 @@ export function TaskRow({
                         </div>
                     </TooltipProvider>
                 </div>
-                {task.note && !noteOpen && (
-                    <div className="flex gap-2 border-l-2 border-primary/30 pl-3">
-                        <MessageSquare className="mt-1 size-3 shrink-0" />
-                        <div>
-                            <p className="whitespace-pre-wrap">{task.note}</p>
-                            <p className="text-xs text-muted-foreground">
-                                {task.noteBy?.name ?? i18n("Unknown author")}
-                                {task.noteUpdatedAt && (
-                                    <>
-                                        {" "}
-                                        ·{" "}
-                                        {format.dateTime(
-                                            new Date(task.noteUpdatedAt),
-                                            {
-                                                dateStyle: "medium",
-                                                timeStyle: "short",
-                                            },
-                                        )}
-                                    </>
-                                )}
-                            </p>
-                        </div>
-                    </div>
-                )}
-                {noteOpen && task.canClose && !notesReadOnly && (
-                    <div className="space-y-2">
-                        <Textarea
-                            autoGrow
-                            ref={noteInput}
-                            aria-label={i18n("Note")}
-                            maxLength={2000}
-                            value={noteDraft}
-                            onChange={(event) =>
-                                setNoteDraft(event.target.value)
-                            }
-                            className="min-h-20 max-h-[50vh]"
-                        />
-                        <EditorActions
-                            hint={i18n(
-                                "One note per task. Everyone who sees the task can read it.",
-                            )}
-                            cancelLabel={i18n("Skip")}
-                            saveLabel={i18n("Save note")}
-                            onCancel={() => setNoteOpen(false)}
-                            onSave={() => {
-                                const note = noteDraft.trim() || null;
-                                onChange({ note }, { note });
-                                setNoteOpen(false);
-                            }}
-                        />
-                    </div>
-                )}
             </div>
         </li>
     );

@@ -559,8 +559,8 @@ describe("person sharing controls", () => {
                 expect.objectContaining({ method: "POST" }),
             ),
         );
-        fireEvent.click(screen.getByRole("checkbox"));
         if (assigned) {
+            fireEvent.click(screen.getByRole("checkbox"));
             expect(change).toHaveBeenCalledWith(
                 { status: "done" },
                 { status: "done" },
@@ -575,6 +575,12 @@ describe("person sharing controls", () => {
                 { note: "Receiver outcome" },
             );
         } else {
+            expect(screen.queryByRole("checkbox")).toBeNull();
+            const mark = screen.getByRole("img", { name: "Open" });
+            fireEvent.pointerMove(mark, { pointerType: "mouse" });
+            expect((await screen.findByRole("tooltip")).textContent).toBe(
+                "Only Alex Morgan can edit this task.",
+            );
             expect(change).not.toHaveBeenCalled();
             expect(screen.queryByRole("button", { name: "Note" })).toBeNull();
             expect(screen.queryByRole("textbox")).toBeNull();

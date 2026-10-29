@@ -7,7 +7,6 @@ import {
     screen,
     waitFor,
 } from "@testing-library/react";
-import type { ReactNode } from "react";
 import type { TranslationValues } from "use-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialogProvider } from "@/components/confirm-dialog";
@@ -35,23 +34,6 @@ vi.mock("next-intl", () => ({
     }),
 }));
 vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
-vi.mock("@/components/tasks/task-row", () => ({
-    TaskRow: ({
-        task,
-        actions,
-        readOnly,
-    }: {
-        task: { text: string; note: string | null };
-        actions?: ReactNode;
-        readOnly?: boolean;
-    }) => (
-        <li data-read-only={readOnly}>
-            <p>{task.text}</p>
-            {task.note && <p>{task.note}</p>}
-            {actions}
-        </li>
-    ),
-}));
 let server: MeetingDetail;
 function render(ui: Parameters<typeof baseRender>[0]) {
     return baseRender(ui, { wrapper: ConfirmDialogProvider });
@@ -264,14 +246,20 @@ describe.each([
             );
         }
     });
-    it("uses task permissions for quick Done and the existing task route", async () => {
+    it("uses the checkbox and the existing task route to complete live tasks", async () => {
         await mount();
-        if (variant !== "live") {
-            expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
-            return;
-        }
+        expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "Add older tasks…" }) !== null,
+        ).toBe(variant === "meeting");
+        expect(
+            screen.queryByText("Older unfinished tasks in these folders"),
+        ).toBeNull();
+        if (variant !== "live") return;
         await act(async () =>
-            fireEvent.click(screen.getAllByRole("button", { name: "Done" })[0]),
+            fireEvent.click(
+                screen.getAllByRole("checkbox", { name: "Done" })[0],
+            ),
         );
         expect(fetchMock).toHaveBeenCalledWith(
             expect.stringContaining("/api/tasks/"),
@@ -280,6 +268,7 @@ describe.each([
                 body: expect.stringContaining('"status":"done"'),
             }),
         );
+        expect(screen.queryByRole("textbox", { name: "Note" })).toBeNull();
     });
     it.each([
         "planned",
@@ -524,8 +513,9 @@ it("keeps other task rows editable while one save waits", async () => {
         screen
             .getByText("Second")
             .closest("li")
-            ?.getAttribute("data-read-only"),
-    ).toBe("false");
+            ?.querySelector("input[type=checkbox]")
+            ?.getAttribute("disabled"),
+    ).toBeNull();
     expect(
         screen.getByRole("button", { name: "Remove Second from agenda" }),
     ).toHaveProperty("disabled", false);
@@ -555,4 +545,80 @@ it("keeps a hidden absorbed agenda read-only when its recording id is redacted",
     expect(
         screen.queryByText(/The meeting ended without a recording/),
     ).toBeNull();
+});
+
+it("shows agenda badges and the labelled meeting note outside hover tools, with icon actions", async () => {
+    server = detail({
+        liveStartedAt: at,
+        tasks: [
+            task("Follow up", null, {
+                agendaOrigin: "older",
+                statusChangedAt: at,
+                agendaNote: "Meeting update",
+            }),
+        ],
+    });
+    render(<AgendaBody id="agenda" initial={server} userId="owner" />);
+    for (const label of ["Older", "Changed during the meeting"]) {
+        const badge = screen.getByText(label);
+        expect(badge.closest(".task-row-hover-actions")).toBeNull();
+        expect(badge.closest(".task-row-pills")).toBeTruthy();
+        expect(badge.querySelector("svg")).toBeTruthy();
+    }
+    expect(
+        screen.getByText("Meeting update").closest(".task-row-pills"),
+    ).toBeNull();
+    expect(screen.getByText("Meeting note")).toBeTruthy();
+    for (const label of ["Meeting note", "Remove Follow up from agenda"]) {
+        const button = screen.getByRole("button", { name: label });
+        expect(button.textContent).toBe("");
+        expect(button.querySelector("svg")).toBeTruthy();
+        expect(button.closest(".task-row-hover-actions")).toBeTruthy();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Meeting note" }));
+    const editor = screen.getByRole("textbox", {
+        name: "Meeting note for Follow up",
+    });
+    expect(document.activeElement).toBe(editor);
+    expect(editor.closest(".task-row-pills")).toBeNull();
+    fireEvent.change(editor, { target: { value: "  Updated note  " } });
+    await act(async () =>
+        fireEvent.click(screen.getByRole("button", { name: "Save" })),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+        "/api/meetings/agenda/tasks/Follow%20up",
+        expect.objectContaining({
+            method: "PATCH",
+            body: JSON.stringify({ note: "Updated note" }),
+        }),
+    );
+    expect(
+        screen.queryByRole("textbox", { name: "Meeting note for Follow up" }),
+    ).toBeNull();
+});
+
+it("keeps meeting notes visible to viewers without offering edits or older tasks", () => {
+    server = detail({
+        permissions: { view: true, edit: false, manage: false },
+        tasks: [task("Follow up", null, { agendaNote: "Meeting update" })],
+    });
+    render(<AgendaBody id="agenda" initial={server} userId="viewer" />);
+    expect(screen.getByText("Meeting update")).toBeTruthy();
+    for (const name of [
+        "Meeting note",
+        "Remove Follow up from agenda",
+        "Add older tasks…",
+    ])
+        expect(screen.queryByRole("button", { name })).toBeNull();
+});
+
+it("does not complete tasks in live mode without agenda editing permission", () => {
+    server = detail({
+        state: "live",
+        permissions: { view: true, edit: false, manage: false },
+        tasks: [task("Follow up", null)],
+    });
+    render(<AgendaBody id="agenda" initial={server} userId="viewer" />);
+    expect(screen.queryByRole("checkbox", { name: "Done" })).toBeNull();
+    expect(screen.getByRole("img", { name: "Open" })).toBeTruthy();
 });

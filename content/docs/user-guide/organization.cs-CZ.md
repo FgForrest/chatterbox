@@ -36,7 +36,7 @@ Každý může sdílenou položku otevřít a číst, přehrát nebo stáhnout s
 
 Během sdílení mohou název, přepis, mluvčí, shrnutí, témata a kontrolu Učení měnit vlastník položky a kurátoři Organizace. Ostatní členové mají obsah jen pro čtení. Vygenerované shrnutí smí ručně upravit a jeho soukromé připomínky spravovat pouze vlastník položky; kurátoři je mohou znovu vygenerovat, po potvrzení nahrazení ručních úprav. Viz [Úpravy shrnutí a připomínky](summaries-and-tasks.md#edit-a-summary). Změny z obou pohledů upravují jednu společnou verzi v rozsahu Organizace. Zpracování používá nastavení a šablony Organizace; mluvčí lze vybírat jen z osob Organizace a nové jméno se stane osobou Organizace. Sdílení nechá automatické zpracování vlastníka pokračovat a neoznačí dokončené kroky jako zastaralé.
 
-Úkoly mají vlastní oprávnění. Vlastník domovské položky a kurátoři mohou sdílený úkol upravit, zrušit, uzavřít a sloučit. Jeho řešitel jej může také uzavřít nebo znovu otevřít. Úkol může shromažďovat zmínky z několika sdílených nahrávek a zpráv; viz [Úkoly napříč položkami](summaries-and-tasks.md#tasks-across-items).
+Úkoly mají vlastní oprávnění. Vlastník domovské položky a kurátoři mohou sdílený úkol upravit, zahodit, uzavřít a sloučit. Jeho řešitel jej může také uzavřít nebo znovu otevřít. Úkol může shromažďovat zmínky z několika sdílených nahrávek a zpráv; viz [Úkoly napříč položkami](summaries-and-tasks.md#tasks-across-items).
 
 Osoby uvedené ve sdílených nahrávkách se stávají **osobami Organizace**, viditelnými pro všechny v [Almanachu](almanac.md). Kurátoři se o ně starají: přejmenovávají je, slučují a mažou pro všechny. Stále si k osobám Organizace můžete vést soukromé poznámky a přiřadit jim vlastní přezdívky.
 

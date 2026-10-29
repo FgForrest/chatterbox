@@ -158,9 +158,8 @@ describe("#253 task desk UI", () => {
         expect(document.activeElement).toBe(
             screen.getByRole("button", { name: "Add task" }),
         );
-        expect(screen.getByRole("checkbox").getAttribute("aria-disabled")).toBe(
-            "true",
-        );
+        expect(screen.queryByRole("checkbox")).toBeNull();
+        expect(screen.getByRole("img", { name: "Open" })).toBeTruthy();
         const trigger = screen.getByRole("button", { name: "Add task" });
         expect(trigger.getAttribute("aria-disabled")).toBe("true");
         expect(trigger.classList.contains("aria-disabled:opacity-50")).toBe(
@@ -787,7 +786,7 @@ describe("#253 task desk UI", () => {
             css.indexOf(".task-row .task-row-folder-action"),
         ).toBeGreaterThan(css.indexOf("@media"));
     });
-    it("puts Add task first on Mine and focuses the own-task form opened from navigation", async () => {
+    it("puts Add task below Mine and focuses the own-task form opened from navigation", async () => {
         navigation.params.set("add", "request-1");
         render(<TaskList organization={false} />);
         const text = await screen.findByRole("textbox", { name: "Task text" });
@@ -913,12 +912,15 @@ describe("#253 task desk UI", () => {
             ),
         ).toBe(tab === "followed" || canEdit);
     });
-    it("offers Add task before task rows", async () => {
+    it("offers Add task below task rows", async () => {
         render(<TaskList organization={false} />);
         const add = screen.getByRole("button", { name: "Add task" });
-        expect(add.closest("li")).toBe(
-            document.querySelector("ul")?.firstElementChild,
-        );
+        expect(add.closest("ul")).toBeNull();
+        expect(
+            document.querySelector("ul")?.nextElementSibling?.contains(add),
+        ).toBe(true);
+        expect(add.classList.contains("hover:bg-accent")).toBe(true);
+        expect(add.querySelector(".lucide-plus")).toBeTruthy();
         fireEvent.click(add);
         expect(document.activeElement).toBe(
             screen.getByRole("textbox", { name: "Task text" }),

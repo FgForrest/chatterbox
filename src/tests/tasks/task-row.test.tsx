@@ -71,7 +71,11 @@ function task(overrides: Partial<TaskView> = {}): TaskView {
 function renderTask(value: TaskView) {
     const onChange = vi.fn();
     render(<TaskRow task={value} organizationOnly onChange={onChange} />);
-    return { onChange, checkbox: screen.getByRole("checkbox") };
+    return {
+        onChange,
+        checkbox: screen.queryByRole("checkbox"),
+        mark: screen.queryByRole("img"),
+    };
 }
 
 beforeEach(() => {
@@ -95,6 +99,7 @@ afterEach(() => {
 
 it.each(["open", "done"] as const)("toggles a closable %s task", (status) => {
     const { checkbox, onChange } = renderTask(task({ status, canClose: true }));
+    if (!checkbox) throw new Error("Missing checkbox");
     expect(checkbox).toHaveProperty("disabled", false);
     expect(checkbox.hasAttribute("aria-disabled")).toBe(false);
     fireEvent.click(checkbox);
@@ -135,75 +140,83 @@ const cases = [
 describe.each([
     "en",
     "cs-CZ",
-] as const)("unavailable checkbox in %s", (language) => {
+] as const)("unavailable status mark in %s", (language) => {
     it.each(
         cases,
-    )("explains $label on hover and click without changing the task", async ({
+    )("explains $label on hover without offering a checkbox", async ({
         overrides,
         en,
         cs,
     }) => {
         locale.current = language;
         const value = task(overrides);
-        const { checkbox, onChange } = renderTask(value);
-        const reason = language === "en" ? en : cs;
-
-        expect(checkbox).toHaveProperty("disabled", false);
-        expect(checkbox.getAttribute("aria-disabled")).toBe("true");
-        expect(
-            checkbox.classList.contains("aria-disabled:cursor-not-allowed"),
-        ).toBe(true);
-        expect(checkbox.classList.contains("aria-disabled:opacity-50")).toBe(
-            true,
+        const { mark, checkbox, onChange } = renderTask(value);
+        expect(checkbox).toBeNull();
+        if (!mark) throw new Error("Missing status mark");
+        expect(mark.getAttribute("aria-label")).toBe(
+            language === "en" ? "Open" : "Otevřené",
         );
-        const text = screen.getByText(value.text);
-        expect(text.className).not.toMatch(/opacity|text-muted/);
-        expect(text.closest("li")?.className).not.toMatch(/opacity|text-muted/);
-
-        fireEvent.pointerMove(checkbox, { pointerType: "mouse" });
-        expect((await screen.findByRole("tooltip")).textContent).toBe(reason);
-        fireEvent.click(checkbox);
-        expect(toastError).toHaveBeenCalledExactlyOnceWith(reason);
+        expect(mark.querySelector(".lucide-circle")).toBeTruthy();
+        fireEvent.pointerMove(mark, { pointerType: "mouse" });
+        expect((await screen.findByRole("tooltip")).textContent).toBe(
+            language === "en" ? en : cs,
+        );
+        fireEvent.click(mark);
+        expect(toastError).not.toHaveBeenCalled();
         expect(onChange).not.toHaveBeenCalled();
-        expect(checkbox).toHaveProperty("checked", false);
-        expect(value.status).toBe("open");
+        expect(screen.getByText(value.text).className).not.toMatch(
+            /opacity|text-muted/,
+        );
+    });
+
+    it.each(
+        cases,
+    )("explains $label to keyboard users who focus the mark", async ({
+        overrides,
+        en,
+        cs,
+    }) => {
+        locale.current = language;
+        const { mark } = renderTask(task(overrides));
+        if (!mark) throw new Error("Missing status mark");
+        expect(mark.tabIndex).toBe(0);
+        act(() => mark.focus());
+        expect(document.activeElement).toBe(mark);
+        expect((await screen.findByRole("tooltip")).textContent).toBe(
+            language === "en" ? en : cs,
+        );
     });
 });
 
-it("explains an unavailable checkbox on Space while keeping it focused and unchanged", () => {
-    const { checkbox, onChange } = renderTask(task());
-    act(() => checkbox.focus());
-    expect(document.activeElement).toBe(checkbox);
-    expect(fireEvent.keyDown(checkbox, { key: " ", code: "Space" })).toBe(
-        false,
+it("keeps a status mark without a reason out of the tab order", () => {
+    const { mark } = renderTask(
+        task({ canEdit: true, canClose: true, status: "dropped" }),
     );
-    fireEvent.keyUp(checkbox, { key: " ", code: "Space" });
-    expect(toastError).toHaveBeenCalledExactlyOnceWith(cases[0]?.en);
-    expect(onChange).not.toHaveBeenCalled();
-    expect(checkbox).toHaveProperty("checked", false);
-    expect(document.activeElement).toBe(checkbox);
+    if (!mark) throw new Error("Missing status mark");
+    expect(mark.hasAttribute("tabindex")).toBe(false);
 });
 
-it("leaves an unavailable completed task checked", () => {
-    const { checkbox, onChange } = renderTask(task({ status: "done" }));
-    fireEvent.click(checkbox);
-    expect(checkbox).toHaveProperty("checked", true);
+it("shows a completed status mark and keeps the text struck through", () => {
+    const { mark, checkbox, onChange } = renderTask(task({ status: "done" }));
+    expect(checkbox).toBeNull();
+    expect(mark?.getAttribute("aria-label")).toBe("Done");
+    expect(mark?.querySelector(".lucide-circle-check")).toBeTruthy();
+    expect(
+        screen.getByText("Send the draft").classList.contains("line-through"),
+    ).toBe(true);
     expect(onChange).not.toHaveBeenCalled();
-    expect(toastError).toHaveBeenCalledExactlyOnceWith(cases[0]?.en);
 });
 
 it.each([
     true,
     false,
-])("keeps a dropped task plainly disabled with canClose=%s", (canClose) => {
-    const { checkbox, onChange } = renderTask(
+])("shows a dropped status mark with canClose=%s", (canClose) => {
+    const { mark, checkbox } = renderTask(
         task({ status: "dropped", canClose }),
     );
-    expect(checkbox).toHaveProperty("disabled", true);
-    expect(checkbox.hasAttribute("aria-disabled")).toBe(false);
-    fireEvent.click(checkbox);
-    expect(toastError).not.toHaveBeenCalled();
-    expect(onChange).not.toHaveBeenCalled();
+    expect(checkbox).toBeNull();
+    expect(mark?.getAttribute("aria-label")).toBe("Dropped");
+    expect(mark?.querySelector(".lucide-circle-slash")).toBeTruthy();
     expect(screen.queryByRole("tooltip")).toBeNull();
 });
 
@@ -217,11 +230,41 @@ it("renders a read-only agenda task without mutation controls", () => {
             onChange={onChange}
         />,
     );
-    expect(screen.getByRole("checkbox")).toHaveProperty("disabled", true);
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.getByRole("img", { name: "Open" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Drop" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Note" })).toBeNull();
-    fireEvent.click(screen.getByRole("checkbox"));
     expect(onChange).not.toHaveBeenCalled();
+});
+
+it("keeps a disabled done checkbox in place while a save is pending", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+        <TaskRow
+            task={task({ canEdit: true, canClose: true, status: "done" })}
+            pending
+            organizationOnly
+            onChange={onChange}
+        />,
+    );
+    const checkbox = screen.getByRole("checkbox", {
+        name: "Done",
+    }) as HTMLInputElement;
+    expect(checkbox.disabled).toBe(true);
+    expect(checkbox.checked).toBe(true);
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Drop" })).toBeNull();
+
+    rerender(
+        <TaskRow
+            task={task({ canEdit: true, canClose: false })}
+            pending
+            organizationOnly
+            onChange={onChange}
+        />,
+    );
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.getByRole("img", { name: "Open" })).toBeTruthy();
 });
 describe.each([true, false])("task action line with editing=%s", (canEdit) => {
     it.each([
@@ -241,13 +284,13 @@ describe.each([true, false])("task action line with editing=%s", (canEdit) => {
                 onChange={vi.fn()}
                 onMerge={vi.fn()}
                 onUndoMatch={vi.fn()}
-                actions={
+                badges={
                     <>
                         <span>Older</span>
                         <span>Changed during the meeting</span>
-                        <button type="button">Add</button>
                     </>
                 }
+                actions={<button type="button">Add</button>}
             />,
         );
         const follow = screen.getByRole("button", {
@@ -264,9 +307,12 @@ describe.each([true, false])("task action line with editing=%s", (canEdit) => {
         if (!(hoverTools instanceof HTMLElement))
             throw new Error("Missing hover tools");
         expect(hoverTools.nextElementSibling).toBe(follow);
-        expect(within(hoverTools).getByText("Older")).toBeTruthy();
+        expect(within(hoverTools).queryByText("Older")).toBeNull();
         expect(
-            within(hoverTools).getByText("Changed during the meeting"),
+            within(hoverTools).queryByText("Changed during the meeting"),
+        ).toBeNull();
+        expect(
+            screen.getByText("Older").closest(".task-row-pills"),
         ).toBeTruthy();
         expect(
             within(hoverTools).getByRole("button", { name: "Add" }),
@@ -395,4 +441,54 @@ it("Skip closes the note without saving or clearing its draft", () => {
         screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Note" })
             .value,
     ).toBe("Unsaved draft");
+});
+
+it.each([
+    "note",
+    "editor",
+    "badges",
+    "extra notes",
+])("keeps the pills/actions line last with %s", (state) => {
+    const { container } = render(
+        <TaskRow
+            task={task({ canClose: true, canFollow: true, note: "Task note" })}
+            organizationOnly
+            onChange={vi.fn()}
+            badges={state === "badges" ? <span>Visible state</span> : undefined}
+            extraNotes={
+                state === "extra notes" ? <p>Meeting note</p> : undefined
+            }
+        />,
+    );
+    if (state === "editor")
+        fireEvent.click(screen.getByRole("button", { name: "Note" }));
+    const pills = container.querySelector(".task-row-pills");
+    expect(pills?.parentElement?.lastElementChild).toBe(pills);
+    expect(
+        container.querySelector(".task-row-hover-actions")?.textContent,
+    ).not.toContain("Task note");
+    if (state === "editor") {
+        for (const name of ["Skip", "Save note"])
+            expect(
+                screen
+                    .getByRole("button", { name })
+                    .closest(".task-row-hover-actions"),
+            ).toBeNull();
+    }
+    if (state === "badges")
+        expect(
+            screen.getByText("Visible state").closest(".task-row-actions"),
+        ).toBeNull();
+    if (state === "extra notes")
+        expect(
+            screen.getByText("Meeting note").closest(".task-row-pills"),
+        ).toBeNull();
+});
+
+it("uses Zahodit for Drop and reserves Zrušit for Cancel in Czech", () => {
+    locale.current = "cs-CZ";
+    renderTask(task({ canEdit: true }));
+    expect(screen.getByRole("button", { name: "Zahodit" })).toBeTruthy();
+    expect(translatedSourceMessage("cs-CZ", "Cancel")).toBe("Zrušit");
+    expect(translatedSourceMessage("cs-CZ", "Dropped")).toBe("Zahozené");
 });
