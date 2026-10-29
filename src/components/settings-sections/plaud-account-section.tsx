@@ -253,7 +253,7 @@ export function PlaudAccountSection({
                             <Button
                                 variant="ghost"
                                 onClick={() => setConfirmOpen("disconnect")}
-                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                className="text-muted-foreground hover:text-red-600 focus-visible:text-red-600 dark:hover:text-red-400 dark:focus-visible:text-red-400"
                             >
                                 <Link2Off className="size-4 mr-2" />{" "}
                                 {i18n("Disconnect")}

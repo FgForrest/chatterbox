@@ -190,18 +190,23 @@ export function ItemHeader({
                     <ActionTooltip label={i18n("Knowledge")}>
                         <Button
                             type="button"
-                            variant="outline"
+                            variant="ghost"
                             size="icon-sm"
                             className={cn(
                                 "relative shrink-0",
-                                organization &&
-                                    "border-organization/40 bg-organization/10 text-organization hover:bg-organization/20 hover:text-organization",
+                                knowledgeOpen &&
+                                    "bg-accent text-knowledge hover:text-knowledge",
                             )}
                             aria-pressed={knowledgeOpen}
                             aria-label={i18n("Knowledge")}
                             onClick={onKnowledge}
                         >
-                            <BookOpen className="size-4" />
+                            <BookOpen
+                                className={cn(
+                                    "size-4",
+                                    knowledgeOpen && "text-knowledge",
+                                )}
+                            />
                             {pendingLearnCount > 0 && (
                                 <output
                                     className="absolute -right-1 -top-1 min-w-4 rounded-full bg-[var(--step-review)] px-1 text-[10px] leading-4 text-background"

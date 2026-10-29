@@ -29,7 +29,18 @@ vi.mock("next-intl", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { error: mocks.error } }));
 vi.mock("@/components/tasks/task-row", () => ({
-    TaskRow: ({ actions }: { actions: ReactNode }) => <li>{actions}</li>,
+    TaskRow: ({
+        actions,
+        extraNotes,
+    }: {
+        actions: ReactNode;
+        extraNotes?: ReactNode;
+    }) => (
+        <li>
+            {extraNotes}
+            {actions}
+        </li>
+    ),
 }));
 function render(ui: Parameters<typeof baseRender>[0]) {
     return baseRender(ui, { wrapper: ConfirmDialogProvider });
@@ -364,6 +375,7 @@ it("task source sends its previous field and task notes respect composition", as
         taskSourceItemId: "source",
         previous: { taskSourceItemId: null },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Meeting note" }));
     const note = screen.getByLabelText("Meeting note for Follow up");
     act(() => note.focus());
     fireEvent.change(note, { target: { value: "New note" } });
@@ -371,7 +383,11 @@ it("task source sends its previous field and task notes respect composition", as
     fireEvent.keyDown(note, { key: "Enter", isComposing: true });
     expect(document.activeElement).toBe(note);
     expect(fetchMock).not.toHaveBeenCalled();
-    await act(async () => fireEvent.keyDown(note, { key: "Enter" }));
+    fireEvent.keyDown(note, { key: "Enter" });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await act(async () =>
+        fireEvent.click(screen.getByRole("button", { name: "Save" })),
+    );
     expect(fetchMock).toHaveBeenCalledWith(
         "/api/meetings/agenda/tasks/Follow%20up",
         expect.objectContaining({

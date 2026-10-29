@@ -27,7 +27,8 @@ const { navigation, translate } = vi.hoisted(() => ({
         push: vi.fn(),
         replace: vi.fn(),
     },
-    translate: (text: string) => text,
+    translate: (text: string | { message: string }) =>
+        typeof text === "string" ? text : text.message,
 }));
 vi.mock("next/navigation", () => ({
     useRouter: () => navigation,
@@ -158,9 +159,8 @@ describe("#253 task desk UI", () => {
         expect(document.activeElement).toBe(
             screen.getByRole("button", { name: "Add task" }),
         );
-        expect(screen.getByRole("checkbox").getAttribute("aria-disabled")).toBe(
-            "true",
-        );
+        expect(screen.queryByRole("checkbox")).toBeNull();
+        expect(screen.getByRole("img", { name: "Open" })).toBeTruthy();
         const trigger = screen.getByRole("button", { name: "Add task" });
         expect(trigger.getAttribute("aria-disabled")).toBe("true");
         expect(trigger.classList.contains("aria-disabled:opacity-50")).toBe(
@@ -787,11 +787,14 @@ describe("#253 task desk UI", () => {
             css.indexOf(".task-row .task-row-folder-action"),
         ).toBeGreaterThan(css.indexOf("@media"));
     });
-    it("puts Add task first on Mine and focuses the own-task form opened from navigation", async () => {
+    it("opens the own-task form from navigation as the focused first row of Mine", async () => {
         navigation.params.set("add", "request-1");
         render(<TaskList organization={false} />);
         const text = await screen.findByRole("textbox", { name: "Task text" });
         expect(document.activeElement).toBe(text);
+        expect(text.closest("li")).toBe(
+            document.querySelector("ul")?.firstElementChild,
+        );
         expect(screen.getByText("Only you")).toBeTruthy();
         fireEvent.change(text, { target: { value: "Prepare the plan" } });
         fireEvent.change(screen.getByLabelText("Due date"), {
@@ -913,16 +916,79 @@ describe("#253 task desk UI", () => {
             ),
         ).toBe(tab === "followed" || canEdit);
     });
-    it("offers Add task before task rows", async () => {
+    it("adds above existing Mine rows and keeps them below the new task", async () => {
+        const existing = ["Older one", "Older two"].map((text, index) => ({
+            ...task({ id: `existing-${index}`, text }),
+            recording: null,
+            evidence: null,
+            visibleMentionQuotes: [],
+        }));
+        const fallback = fetchMock.getMockImplementation();
+        fetchMock.mockImplementation(
+            async (url: string, init?: RequestInit) => {
+                if (url.startsWith("/api/tasks?"))
+                    return Response.json({ tasks: existing });
+                if (url === "/api/tasks" && init?.method === "POST")
+                    return Response.json(
+                        task({
+                            id: "fresh",
+                            recordingId: null,
+                            source: "personal",
+                            own: true,
+                            text: "Fresh reminder",
+                        }),
+                    );
+                if (!fallback) throw new Error("Missing fetch mock");
+                return fallback(url, init);
+            },
+        );
+        render(<TaskList organization={false} />);
+        await screen.findByText("Older one");
+        fireEvent.click(screen.getByRole("button", { name: "Add task" }));
+        const list = document.querySelector("ul");
+        const text = screen.getByRole("textbox", { name: "Task text" });
+        expect(text.closest("li")).toBe(list?.firstElementChild);
+        fireEvent.change(text, { target: { value: "Fresh reminder" } });
+        await act(async () =>
+            fireEvent.click(screen.getByRole("button", { name: "Add" })),
+        );
+        const rows = [...(list?.children ?? [])].map(
+            (row) => row.textContent ?? "",
+        );
+        expect(rows).toHaveLength(3);
+        expect(rows[0]).toContain("Fresh reminder");
+        expect(rows[1]).toContain("Older one");
+        expect(rows[2]).toContain("Older two");
+    });
+    it.each([
+        ["Followed", false],
+        ["the Organization view", true],
+    ] as const)("offers no Add task in %s", async (_view, organization) => {
+        if (!organization) navigation.params.set("tab", "followed");
+        render(<TaskList organization={organization} />);
+        await act(async () => {});
+        expect(screen.queryByRole("button", { name: "Add task" })).toBeNull();
+        expect(screen.queryByRole("textbox", { name: "Task text" })).toBeNull();
+    });
+    it("offers Add task at the top right of Mine and opens the form as the first row", async () => {
         render(<TaskList organization={false} />);
         const add = screen.getByRole("button", { name: "Add task" });
-        expect(add.closest("li")).toBe(
-            document.querySelector("ul")?.firstElementChild,
-        );
+        const list = document.querySelector("ul");
+        expect(add.closest("ul")).toBeNull();
+        expect(list?.previousElementSibling?.lastElementChild).toBe(add);
+        expect(add.querySelector(".lucide-plus")).toBeTruthy();
+        expect(add.getAttribute("aria-expanded")).toBe("false");
         fireEvent.click(add);
-        expect(document.activeElement).toBe(
-            screen.getByRole("textbox", { name: "Task text" }),
-        );
+        const text = screen.getByRole("textbox", { name: "Task text" });
+        expect(document.activeElement).toBe(text);
+        expect(text.closest("li")).toBe(list?.firstElementChild);
+        expect(add.getAttribute("aria-expanded")).toBe("true");
+        act(() => add.focus());
+        expect(add.getAttribute("aria-disabled")).toBe("true");
+        expect(add.classList.contains("aria-disabled:opacity-50")).toBe(true);
+        fireEvent.click(add);
+        expect(document.activeElement).toBe(add);
+        expect(screen.getByRole("textbox", { name: "Task text" })).toBe(text);
         await act(async () => {});
     });
     it.each([
@@ -996,7 +1062,13 @@ describe("#253 task desk UI", () => {
         const merge = screen.getByRole("button", {
             name: "Merge into another task",
         });
-        expect(merge.className).toBe(note.className);
+        const restClasses = [...note.classList].filter(
+            (value) =>
+                !value.startsWith("aria-disabled:") &&
+                !value.startsWith("dark:aria-disabled:"),
+        );
+        expect([...merge.classList]).toEqual(restClasses);
+        expect(note.getAttribute("aria-expanded")).toBe("false");
         expect(merge.querySelector("svg")?.classList.contains("size-3")).toBe(
             true,
         );

@@ -4,6 +4,9 @@ import "./task-row.css";
 
 import {
     ArrowUpRight,
+    Circle,
+    CircleCheck,
+    CircleSlash,
     Eye,
     Lock,
     Mail,
@@ -32,7 +35,12 @@ import { TaskEvidenceLink } from "@/components/tasks/task-evidence-link";
 import { DueDateField, TaskTextInput } from "@/components/tasks/task-fields";
 import { TaskFolderPicker } from "@/components/tasks/task-folder-picker";
 import type { TaskRowChange } from "@/components/tasks/use-recording-tasks";
+import { Button } from "@/components/ui/button";
+import { EditorActions } from "@/components/ui/editor-actions";
+import { InlineEditorTrigger } from "@/components/ui/inline-editor-trigger";
+import { Textarea } from "@/components/ui/textarea";
 import {
+    ActionTooltip,
     Tooltip,
     TooltipContent,
     TooltipProvider,
@@ -51,8 +59,11 @@ import type { RecordingFolder } from "@/types/folder";
 export function TaskRow({
     task: suppliedTask,
     readOnly = false,
+    pending = false,
     notesReadOnly = false,
     actions,
+    badges,
+    extraNotes,
     recording,
     evidence,
     currentItemId,
@@ -67,8 +78,12 @@ export function TaskRow({
 }: {
     task: TaskView;
     readOnly?: boolean;
+    /** A save is in flight: fields lock, the done checkbox stays in place, disabled. */
+    pending?: boolean;
     notesReadOnly?: boolean;
     actions?: ReactNode;
+    badges?: ReactNode;
+    extraNotes?: ReactNode;
     /** The recording it came from, on the Tasks page. */
     recording?: TaskListItem["recording"];
     /** The latest visible item that evidences the task. */
@@ -86,20 +101,36 @@ export function TaskRow({
     onFollow?: () => void;
     folders?: RecordingFolder[];
 }) {
-    const task = readOnly
-        ? {
-              ...suppliedTask,
-              canEdit: false,
-              canClose: false,
-              canFollow: false,
-              canMerge: false,
-              canUndoMatch: false,
-          }
-        : suppliedTask;
+    const task =
+        readOnly || pending
+            ? {
+                  ...suppliedTask,
+                  canEdit: false,
+                  canClose: false,
+                  canFollow: false,
+                  canMerge: false,
+                  canUndoMatch: false,
+              }
+            : suppliedTask;
     const i18n = useExtracted();
     const format = useFormatter();
     const [noteOpen, setNoteOpen] = useState(false);
+    // The permission, not the pending-adjusted copy: ticking done opens the editor while that save is in flight.
+    const canNote = suppliedTask.canClose && !readOnly && !notesReadOnly;
+    const [reasonOpen, setReasonOpen] = useState(false);
     const noteInput = useRef<HTMLTextAreaElement>(null);
+    const noteTrigger = useRef<HTMLButtonElement>(null);
+    const restoreNoteFocus = useRef(false);
+    const closeNote = () => {
+        restoreNoteFocus.current = true;
+        setNoteOpen(false);
+    };
+    useEffect(() => {
+        if (!noteOpen && !pending && restoreNoteFocus.current) {
+            restoreNoteFocus.current = false;
+            noteTrigger.current?.focus();
+        }
+    }, [noteOpen, pending]);
     useEffect(() => {
         if (noteOpen) noteInput.current?.focus();
     }, [noteOpen]);
@@ -113,11 +144,17 @@ export function TaskRow({
     const dropped = task.status === "dropped";
     const editable = task.canEdit && !dropped;
     let closeReason: string | null = null;
-    if (!readOnly && task.receivedOwnerName && !task.canClose && !dropped) {
+    if (
+        !readOnly &&
+        !pending &&
+        task.receivedOwnerName &&
+        !task.canClose &&
+        !dropped
+    ) {
         closeReason = i18n("Only {owner} can edit this task.", {
             owner: task.receivedOwnerName,
         });
-    } else if (!readOnly && !task.canClose && !dropped) {
+    } else if (!readOnly && !pending && !task.canClose && !dropped) {
         if (!task.assignee) {
             closeReason = i18n(
                 "Nobody is assigned yet. Only the recording's owner or a curator can mark it done.",
@@ -134,47 +171,61 @@ export function TaskRow({
             );
         }
     }
-    const checkbox = (
-        <input
-            type="checkbox"
-            className="mt-1 size-4 shrink-0 accent-primary aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-            checked={done}
-            disabled={dropped || readOnly}
-            aria-disabled={closeReason ? true : undefined}
-            onClick={() => {
-                if (closeReason) {
-                    toast.error(closeReason);
+    const StatusIcon = dropped ? CircleSlash : done ? CircleCheck : Circle;
+    const statusMark =
+        (pending ? suppliedTask.canClose && !readOnly : task.canClose) &&
+        !dropped ? (
+            <input
+                type="checkbox"
+                disabled={pending}
+                className="mt-1 size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+                checked={done}
+                onChange={(event) => {
+                    const status = event.target.checked ? "done" : "open";
+                    onChange({ status }, { status });
+                    if (status === "done" && !notesReadOnly) setNoteOpen(true);
+                }}
+                aria-label={i18n("Done")}
+            />
+        ) : (
+            <span
+                role="img"
+                aria-label={
+                    dropped
+                        ? i18n("Dropped")
+                        : done
+                          ? i18n("Done")
+                          : i18n("Open")
                 }
-            }}
-            onKeyDown={(event) => {
-                if (closeReason && event.key === " ") {
-                    event.preventDefault();
-                    toast.error(closeReason);
-                }
-            }}
-            onChange={(event) => {
-                if (!task.canClose || dropped) return;
-                const status = event.target.checked ? "done" : "open";
-                onChange({ status }, { status });
-                if (status === "done" && !notesReadOnly) setNoteOpen(true);
-            }}
-            aria-label={i18n("Done")}
-        />
-    );
+                tabIndex={closeReason ? 0 : undefined}
+                className="mt-1 inline-flex size-4 shrink-0 rounded-full text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+            >
+                <StatusIcon className="size-4" aria-hidden="true" />
+            </span>
+        );
 
     return (
         <li className="task-row group flex items-start gap-3 p-3 text-sm">
             {closeReason ? (
                 <TooltipProvider>
-                    <Tooltip>
-                        <TooltipTrigger asChild>{checkbox}</TooltipTrigger>
+                    <Tooltip open={reasonOpen} onOpenChange={setReasonOpen}>
+                        <TooltipTrigger
+                            asChild
+                            onClick={(event) => {
+                                // A tap opens the reason too; touch has no hover and Radix closes on click.
+                                event.preventDefault();
+                                setReasonOpen(true);
+                            }}
+                        >
+                            {statusMark}
+                        </TooltipTrigger>
                         <TooltipContent className="max-w-72">
                             {closeReason}
                         </TooltipContent>
                     </Tooltip>
                 </TooltipProvider>
             ) : (
-                checkbox
+                statusMark
             )}
             <div className="min-w-0 flex-1 space-y-1.5">
                 {editable ? (
@@ -270,6 +321,60 @@ export function TaskRow({
                         )}
                     </div>
                 )}
+                {task.note && !noteOpen && (
+                    <div className="flex gap-2 border-l-2 border-border pl-3">
+                        <MessageSquare className="mt-1 size-3 shrink-0" />
+                        <div>
+                            <p className="whitespace-pre-wrap">{task.note}</p>
+                            <p className="text-xs text-muted-foreground">
+                                {task.noteBy?.name ?? i18n("Unknown author")}
+                                {task.noteUpdatedAt && (
+                                    <>
+                                        {" "}
+                                        ·{" "}
+                                        {format.dateTime(
+                                            new Date(task.noteUpdatedAt),
+                                            {
+                                                dateStyle: "medium",
+                                                timeStyle: "short",
+                                            },
+                                        )}
+                                    </>
+                                )}
+                            </p>
+                        </div>
+                    </div>
+                )}
+                {noteOpen && canNote && (
+                    <div className="space-y-2">
+                        <Textarea
+                            autoGrow
+                            ref={noteInput}
+                            aria-label={i18n("Note")}
+                            maxLength={2000}
+                            value={noteDraft}
+                            onChange={(event) =>
+                                setNoteDraft(event.target.value)
+                            }
+                            className="min-h-20 max-h-[50vh]"
+                        />
+                        <EditorActions
+                            hint={i18n(
+                                "One note per task. Everyone who sees the task can read it.",
+                            )}
+                            cancelLabel={i18n("Skip")}
+                            saveLabel={i18n("Save note")}
+                            onCancel={closeNote}
+                            saveDisabled={pending}
+                            onSave={() => {
+                                const note = noteDraft.trim() || null;
+                                onChange({ note }, { note });
+                                closeNote();
+                            }}
+                        />
+                    </div>
+                )}
+                {extraNotes}
                 <div className="task-row-pills flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     {own ? (
                         <span className="inline-flex items-center gap-1 rounded-md border bg-muted px-2 py-1">
@@ -345,163 +450,142 @@ export function TaskRow({
                             />
                         )}
                     {dropped && (
-                        <span className="rounded bg-muted px-1.5">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-xs">
+                            <CircleSlash
+                                className="size-3"
+                                aria-hidden="true"
+                            />
                             {i18n("Dropped")}
                         </span>
                     )}
-                    <div className="task-row-actions ml-auto flex flex-wrap items-center justify-end gap-3">
-                        {actions}
-                        {task.canClose && !notesReadOnly && (
-                            <button
-                                type="button"
-                                className="inline-flex items-center gap-1 hover:text-foreground"
-                                onClick={() => setNoteOpen(true)}
-                            >
-                                <MessageSquare className="size-3" />
-                                {i18n("Note")}
-                            </button>
-                        )}
-                        {(task.canMerge || task.canEdit) &&
-                            task.status === "open" &&
-                            onMerge && (
-                                <MergeTaskPicker
-                                    itemId={task.recordingId}
-                                    sourceTaskId={task.id}
-                                    taskVersion={task.version}
-                                    inlineTrigger
-                                    onMerge={onMerge}
-                                />
+                    {badges}
+                    <TooltipProvider>
+                        <div className="task-row-actions ml-auto flex flex-wrap items-center justify-end gap-3">
+                            <div className="task-row-hover-actions flex flex-wrap items-center justify-end gap-1">
+                                {actions && (
+                                    <div className="flex flex-wrap items-center gap-3">
+                                        {actions}
+                                    </div>
+                                )}
+                                {task.canClose && !notesReadOnly && (
+                                    <ActionTooltip label={i18n("Note")}>
+                                        <InlineEditorTrigger
+                                            ref={noteTrigger}
+                                            open={noteOpen}
+                                            type="button"
+                                            size="icon-xs"
+                                            variant="ghost"
+                                            aria-label={i18n("Note")}
+                                            className="text-muted-foreground hover:text-foreground"
+                                            onClick={() => setNoteOpen(true)}
+                                        >
+                                            <MessageSquare className="size-3" />
+                                        </InlineEditorTrigger>
+                                    </ActionTooltip>
+                                )}
+                                {(task.canMerge || task.canEdit) &&
+                                    task.status === "open" &&
+                                    onMerge && (
+                                        <MergeTaskPicker
+                                            itemId={task.recordingId}
+                                            sourceTaskId={task.id}
+                                            taskVersion={task.version}
+                                            inlineTrigger
+                                            onMerge={onMerge}
+                                        />
+                                    )}
+                                {task.canUndoMatch && onUndoMatch && (
+                                    <ActionTooltip label={i18n("Undo match")}>
+                                        <Button
+                                            type="button"
+                                            size="icon-xs"
+                                            variant="ghost"
+                                            aria-label={i18n("Undo match")}
+                                            className="text-muted-foreground hover:text-foreground"
+                                            onClick={onUndoMatch}
+                                        >
+                                            <Unlink className="size-3" />
+                                        </Button>
+                                    </ActionTooltip>
+                                )}
+                                {task.canEdit && (
+                                    <ActionTooltip
+                                        label={
+                                            dropped
+                                                ? i18n("Restore")
+                                                : i18n("Drop")
+                                        }
+                                    >
+                                        <Button
+                                            type="button"
+                                            size="icon-xs"
+                                            variant="ghost"
+                                            aria-label={
+                                                dropped
+                                                    ? i18n("Restore")
+                                                    : i18n("Drop")
+                                            }
+                                            className="text-muted-foreground hover:text-foreground"
+                                            onClick={() => {
+                                                const status = dropped
+                                                    ? "open"
+                                                    : "dropped";
+                                                onChange(
+                                                    { status },
+                                                    { status },
+                                                );
+                                            }}
+                                        >
+                                            {dropped ? (
+                                                <RotateCcw className="size-3" />
+                                            ) : (
+                                                <Trash2 className="size-3" />
+                                            )}
+                                        </Button>
+                                    </ActionTooltip>
+                                )}
+                            </div>
+                            {task.canFollow && !own && (
+                                <button
+                                    type="button"
+                                    aria-pressed={following}
+                                    title={
+                                        following
+                                            ? i18n("Stop following")
+                                            : i18n("Follow")
+                                    }
+                                    className={cn(
+                                        "inline-flex items-center gap-1 hover:text-foreground",
+                                        following &&
+                                            "task-following text-primary",
+                                    )}
+                                    onClick={() => {
+                                        const next = !following;
+                                        setFollowing(next);
+                                        void setTaskFollow(task.id, next)
+                                            .then(() => {
+                                                announceTasksChanged();
+                                                onFollow?.();
+                                            })
+                                            .catch(() => {
+                                                setFollowing(!next);
+                                                toast.error(
+                                                    i18n(
+                                                        "Could not save the task",
+                                                    ),
+                                                );
+                                            });
+                                    }}
+                                >
+                                    <Eye className="size-3" />
+                                    {following
+                                        ? i18n("Following")
+                                        : i18n("Follow")}
+                                </button>
                             )}
-                        {task.canFollow && !own && (
-                            <button
-                                type="button"
-                                aria-pressed={following}
-                                title={
-                                    following
-                                        ? i18n("Stop following")
-                                        : i18n("Follow")
-                                }
-                                className={cn(
-                                    "inline-flex items-center gap-1 hover:text-foreground",
-                                    following && "task-following text-primary",
-                                )}
-                                onClick={() => {
-                                    const next = !following;
-                                    setFollowing(next);
-                                    void setTaskFollow(task.id, next)
-                                        .then(() => {
-                                            announceTasksChanged();
-                                            onFollow?.();
-                                        })
-                                        .catch(() => {
-                                            setFollowing(!next);
-                                            toast.error(
-                                                i18n("Could not save the task"),
-                                            );
-                                        });
-                                }}
-                            >
-                                <Eye className="size-3" />
-                                {following ? i18n("Following") : i18n("Follow")}
-                            </button>
-                        )}
-                        {task.canUndoMatch && onUndoMatch && (
-                            <button
-                                type="button"
-                                className="inline-flex items-center gap-1 hover:text-foreground"
-                                onClick={onUndoMatch}
-                            >
-                                <Unlink className="size-3" />
-                                {i18n("Undo match")}
-                            </button>
-                        )}
-                        {task.canEdit && (
-                            <button
-                                type="button"
-                                className="ml-auto inline-flex items-center gap-1 hover:text-foreground"
-                                onClick={() => {
-                                    const status = dropped ? "open" : "dropped";
-                                    onChange({ status }, { status });
-                                }}
-                            >
-                                {dropped ? (
-                                    <>
-                                        <RotateCcw className="size-3" />
-                                        {i18n("Restore")}
-                                    </>
-                                ) : (
-                                    <>
-                                        <Trash2 className="size-3" />
-                                        {i18n("Drop")}
-                                    </>
-                                )}
-                            </button>
-                        )}
-                    </div>
+                        </div>
+                    </TooltipProvider>
                 </div>
-                {task.note && !noteOpen && (
-                    <div className="flex gap-2 border-l-2 border-primary/30 pl-3">
-                        <MessageSquare className="mt-1 size-3 shrink-0" />
-                        <div>
-                            <p className="whitespace-pre-wrap">{task.note}</p>
-                            <p className="text-xs text-muted-foreground">
-                                {task.noteBy?.name ?? i18n("Unknown author")}
-                                {task.noteUpdatedAt && (
-                                    <>
-                                        {" "}
-                                        ·{" "}
-                                        {format.dateTime(
-                                            new Date(task.noteUpdatedAt),
-                                            {
-                                                dateStyle: "medium",
-                                                timeStyle: "short",
-                                            },
-                                        )}
-                                    </>
-                                )}
-                            </p>
-                        </div>
-                    </div>
-                )}
-                {noteOpen && task.canClose && !notesReadOnly && (
-                    <div className="space-y-2">
-                        <textarea
-                            ref={noteInput}
-                            aria-label={i18n("Note")}
-                            maxLength={2000}
-                            value={noteDraft}
-                            onChange={(event) =>
-                                setNoteDraft(event.target.value)
-                            }
-                            className="min-h-20 w-full rounded-md border bg-background p-2"
-                        />
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            <span>
-                                {i18n(
-                                    "One note per task. Everyone who sees the task can read it.",
-                                )}
-                            </span>
-                            <button
-                                type="button"
-                                className="ml-auto"
-                                onClick={() => setNoteOpen(false)}
-                            >
-                                {i18n("Skip")}
-                            </button>
-                            <button
-                                type="button"
-                                className="rounded-md bg-primary px-3 py-1.5 text-primary-foreground"
-                                onClick={() => {
-                                    const note = noteDraft.trim() || null;
-                                    onChange({ note }, { note });
-                                    setNoteOpen(false);
-                                }}
-                            >
-                                {i18n("Save note")}
-                            </button>
-                        </div>
-                    </div>
-                )}
             </div>
         </li>
     );

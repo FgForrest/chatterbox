@@ -54,7 +54,7 @@ Nahoře naleznete:
 
 ![Změna profilu z řádku složek](images/profile-chip-menu.png)
 
-Pod tím jsou přehrávač a prvky pracovního postupu. [Přepis](transcripts.md), kontrola Učení, [Shrnutí](summaries-and-tasks.md) a Kontrola úkolů se zobrazují v tomto pořadí, jak k nim postup dospěje. Hotové prvky se během další práce složí do jednoho řádku.
+Pod tím jsou přehrávač a prvky pracovního postupu. [Přepis](transcripts.md), kontrola Učení, [Shrnutí](summaries-and-tasks.md) a Kontrola úkolů se zobrazují v tomto pořadí, jak k nim postup dospěje. Hotový přepis a shrnutí se během další práce složí do jednoho řádku. Dokončené výsledky Učení najdete pod ikonou knihy **Znalosti** v záhlaví položky; **Zpět** vrátí detail.
 
 <span id="the-player" />
 
@@ -111,19 +111,27 @@ Výběr složky otevře rovnou vyhledávací pole. Před psaním ukazuje naposle
 
 Jedna nahrávka může být ve více složkách najednou. Kliknutím na **×** u štítku složky ji odeberete z konkrétní složky. Zobrazuje se tu také zamýšlená složka Organizace; položka s volbou **Bez automatického zpracování** u ní nabízí **Sdílet nyní**, dokud ji nenasdílíte nebo umístění nezrušíte.
 
-Pro správu složek použijte **⋯ → Nastavení složky** vedle složky. Volbou **Nová podsložka** v nabídce **⋯** vytvoříte podsložku; stejnou nabídku otevřete kliknutím pravým tlačítkem na řádek složky. Panel obsahuje akce **Nová podsložka**, **Přejmenovat**, **Přesunout do…** a **Smazat složku**. Můžete také složky přetahovat pro změnu pořadí nebo vnoření. Smazáním složky nesmažete nahrávky v ní obsažené.
+Složku spravujete řádkem ikon pod jejím názvem; počet položek je na konci řádku s názvem. Řádek podle Vašich oprávnění nabízí **Připravit agendu** (kalendář), **Úkoly ve složce** (seznam úkolů), **Znalosti** (kniha), **Nová podsložka**, **Přesunout do…** a úplně vpravo **Nastavení složky** (**⋯**). Ikona otevřeného pohledu je zvýrazněná; dalším kliknutím se vrátíte k položce. Přijaté složky nabízejí přípravu agendy, **Úkoly ve složce** a vlastní nabídku.
 
-Kliknutím na složku zobrazíte její položky v seznamu. Název aktuální složky v drobečkové navigaci nebo **⋯** vedle počtu položek otevře přejmenování, poštovní adresy, výchozí profily, novou podsložku, přesun a smazání:
+Kliknutím na složku zobrazíte její položky v seznamu. **Nová podsložka** a **Přesunout do…** otevřou malé okno; **Nová podsložka** je i v nabídce **⋯** a místní nabídce složky ve stromu. Přetahováním lze měnit pořadí i vnoření. Název aktuální složky nebo **⋯** na konci řádku ikon otevře její nastavení: přejmenování, sdílení, poštovní adresy, výchozí profily, export a smazání. Smazáním složky nesmažete její nahrávky:
 
 ![Složka](images/folder-pane.png)
 
 Nastavení složky ukazuje **Název** jako text; **Přejmenovat** otevře pole pro úpravu. **E-mail do složky** ukazuje adresu, kopírování a čas posledního e-mailu, pokud je příjem pošty zapnutý. **Výchozí profil zpracování** ukazuje aktuální profily nahrávek a pošty včetně zděděných hodnot; **Změnit** je upraví. **Export** ukazuje cíle nebo **Nenastaveno**, s akcí **Změnit** či **Nastavit** pro export na disk nebo Google Drive. Viz [Zpracování a profily](processing-and-profiles.md#folder-default-profiles) a [Exporty, zálohy a uchovávání](exports-backups-retention.md#folder-exports).
 
+<span id="folder-tasks" />
+
+### Úkoly ve složce
+
+**Úkoly ve složce** ukážou v pravém panelu úkoly této složky i jejích podsložek, seskupené podle složek. Výchozí je **Všechny**; **Moje** a **Sledované** seznam zúží a filtry stavu a řešitele fungují jako na stránce Úkoly. **Přidat úkol** otevře formulář jako první řádek; u soukromé složky je tato složka předvybraná. Tlačítko je neaktivní, dokud úkol nepřidáte nebo formulář nezrušíte. **Otevřít v Úkolech** otevře stránku Úkoly se stejnou složkou a seznamem. Účet Organizace nemá **Moje** a vlastní úkoly přidávat nemůže.
+
+![Úkoly ve složce](images/folder-tasks.png)
+
 <span id="folder-knowledge" />
 
 ### Znalosti složky
 
-Tlačítko **Znalosti** vedle názvu aktuální složky otevře pohled pouze pro čtení místo detailu položky. Na telefonu se otevře samostatný pohled; **Zpět** vrátí seznam. Je dostupný v každé soukromé složce i složce Organizace pro každého čtenáře.
+**Znalosti** v řádku ikon složky otevřou pohled pouze pro čtení místo detailu položky; pokud jsou otevřené **Úkoly ve složce**, nahradí je. Dalším kliknutím se vrátíte k položce; na telefonu **Zpět** vrátí seznam. Pohled je dostupný v každé soukromé složce i složce Organizace pro každého čtenáře.
 
 Karty **Lidé**, **Věci**, **Opravy** a **Fakta** ukazují znalosti zmíněné položkami složky a jejích podsložek, počty použití, poslední použití a položky s doklady. Stav e-mailu osoby je informace, nikoli problém k opravě. Soukromé složky ukazují Vaše znalosti i znalosti Organizace; složky Organizace jen znalosti Organizace. Karty se načítají samostatně a delší seznamy mají ovládání Předchozí/Další.
 

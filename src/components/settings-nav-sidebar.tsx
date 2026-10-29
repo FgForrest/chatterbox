@@ -219,7 +219,7 @@ export function SettingsNavSidebar({
                                                     }
                                                     className={
                                                         item.id === "dev"
-                                                            ? "text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 data-[active=true]:bg-red-500/10 data-[active=true]:text-red-700 dark:data-[active=true]:text-red-300"
+                                                            ? "data-[active=true]:bg-accent"
                                                             : undefined
                                                     }
                                                 >

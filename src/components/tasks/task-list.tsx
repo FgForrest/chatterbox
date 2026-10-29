@@ -2,20 +2,15 @@
 
 import { ArrowDownWideNarrow, ListChecks, Loader2 } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useExtracted, useLocale } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import { useExtracted } from "next-intl";
+import { useEffect, useRef, useState } from "react";
 import { OwnTaskForm } from "@/components/tasks/own-task-form";
 import { RoutedProposalsInbox } from "@/components/tasks/routed-proposals-inbox";
 import {
-    announceTasksChanged,
-    changeTask,
-    mergeTaskIntoTarget,
-    type TaskMergeOptions,
-    TaskRequestError,
-} from "@/components/tasks/task-api";
-import { localToday } from "@/components/tasks/task-fields";
-import { useTaskMergeFailure } from "@/components/tasks/task-merge-feedback";
+    AddTaskTrigger,
+    TaskAssigneeSelect,
+    TaskStateSelect,
+} from "@/components/tasks/task-list-controls";
 import { TaskRow } from "@/components/tasks/task-row";
 import {
     Select,
@@ -25,16 +20,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { useFolderLabel } from "@/hooks/use-folder-label";
-import { useOrgEvents } from "@/hooks/use-org-events";
-import { useTaskFolderTree } from "@/hooks/use-task-folder-tree";
-import { descendantFolderIds } from "@/lib/folders/hierarchy";
-import { privateTreeFolders } from "@/lib/folders/private-tree";
-import type {
-    TaskAssignee,
-    TaskChange,
-    TaskListItem,
-    TaskView,
-} from "@/lib/tasks/tasks";
+import { useTaskListData } from "@/hooks/use-task-list-data";
 import { cn } from "@/lib/utils";
 import type { RecordingFolder } from "@/types/folder";
 
@@ -76,18 +62,21 @@ export function TaskList({
     canCurate?: boolean;
 }) {
     const i18n = useExtracted();
-    const showMergeFailure = useTaskMergeFailure();
     const folderLabel = useFolderLabel();
-    const locale = useLocale();
     const router = useRouter();
     const pathname = usePathname();
     const params = useSearchParams();
     const tab =
-        organization ||
-        ["tracked", "followed"].includes(params.get("tab") ?? "")
-            ? "followed"
-            : "mine";
+        params.get("tab") === "all"
+            ? "all"
+            : organization ||
+                ["tracked", "followed"].includes(params.get("tab") ?? "")
+              ? "followed"
+              : "mine";
     const [addOpen, setAddOpen] = useState(false);
+    const [addSaving, setAddSaving] = useState(false);
+    const [addClicks, setAddClicks] = useState(0);
+    const addTrigger = useRef<HTMLButtonElement>(null);
     const addRequest = params.get("add");
     useEffect(() => {
         setAddOpen(Boolean(addRequest));
@@ -95,41 +84,16 @@ export function TaskList({
     const allOrganization = canCurate && params.get("organization") === "true";
     const state = params.get("state") ?? "open";
     const folder = params.get("folder") ?? ALL;
-    const assignee = tab === "followed" ? params.get("assignee") || ALL : ALL;
+    const assignee = tab !== "mine" ? params.get("assignee") || ALL : ALL;
     const due = params.get("due") ?? ALL;
     const sort = params.get("sort") === "due" ? "due" : "created";
 
-    const [tasks, setTasks] = useState<TaskListItem[] | null>(null);
-    const ownInserts = useRef(
-        new Map<
-            string,
-            { task: TaskListItem; query: string | null; reconciled: boolean }
-        >(),
-    );
-    const loadRequest = useRef(0);
-    const folders = useTaskFolderTree();
-    const privateFolders = privateTreeFolders(folders);
-    const selectedPrivate = privateFolders.find((entry) => entry.id === folder);
-    const ownMatchesFolder = (task: TaskListItem) =>
-        folder === ALL ||
-        !task.own ||
-        (selectedPrivate &&
-            (selectedPrivate.kind === "private" ||
-                (task.folder &&
-                    descendantFolderIds(privateFolders, selectedPrivate.id).has(
-                        task.folder.id,
-                    ))));
-    const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
-    const assigneeNames = useRef(new Map<string, string>());
-    const assigneeRequest = useRef(0);
-    const sortedAssignees = useMemo(
-        () =>
-            [...assignees].sort((a, b) => a.name.localeCompare(b.name, locale)),
-        [assignees, locale],
-    );
     const setParam = (key: string, value: string | null) => {
         const next = new URLSearchParams(params.toString());
-        if (value === null || (value === ALL && key !== "state"))
+        if (
+            value === null ||
+            (value === ALL && key !== "state" && key !== "tab")
+        )
             next.delete(key);
         else next.set(key, value);
         const query = next.toString();
@@ -137,232 +101,54 @@ export function TaskList({
             scroll: false,
         });
     };
+    const {
+        tasks,
+        reload,
+        update,
+        merge,
+        onAdded,
+        onReconciled,
+        folders,
+        selectedPrivate,
+        sortedAssignees,
+    } = useTaskListData({
+        tab,
+        state,
+        folder,
+        assignee,
+        due,
+        sort,
+        allOrganization,
+        // Opening the list is seeing what is new.
+        markSeen: true,
+    });
 
-    const query = useMemo(() => {
-        const search = new URLSearchParams({ tab, state, sort });
-        if (allOrganization) search.set("organization", "true");
-        if (folder !== ALL) search.set("folder", folder);
-        if (assignee !== ALL) search.set("assignee", assignee);
-        if (due !== ALL) {
-            search.set("due", due);
-            search.set("today", localToday());
-        }
-        return search.toString();
-    }, [tab, state, sort, folder, assignee, due, allOrganization]);
-
-    const currentQuery = useRef(query);
-    currentQuery.current = query;
-
-    const loadAssignees = useCallback(async () => {
-        if (tab !== "followed") return;
-        const request = ++assigneeRequest.current;
-        try {
-            const response = await fetch(
-                `/api/tasks/assignees${allOrganization ? "?organization=true" : ""}`,
-            );
-            if (!response.ok) throw new Error();
-            const body = (await response.json()) as {
-                assignees: TaskAssignee[];
-            };
-            if (request !== assigneeRequest.current) return;
-            for (const person of body.assignees) {
-                assigneeNames.current.set(person.personId, person.name);
-            }
-            if (
-                assignee !== ALL &&
-                assignee !== "none" &&
-                !body.assignees.some((person) => person.personId === assignee)
-            ) {
-                let name = assigneeNames.current.get(assignee);
-                if (!name) {
-                    const personResponse = await fetch(
-                        `/api/people/${encodeURIComponent(assignee)}`,
-                    );
-                    if (personResponse.ok) {
-                        const { person } = (await personResponse.json()) as {
-                            person: { displayName: string };
-                        };
-                        name = person.displayName;
-                        assigneeNames.current.set(assignee, name);
-                    }
-                }
-                body.assignees.push({
-                    personId: assignee,
-                    name: name ?? i18n("Assignee"),
-                });
-            }
-            if (request === assigneeRequest.current)
-                setAssignees(body.assignees);
-        } catch {
-            return;
-        }
-    }, [tab, assignee, i18n, allOrganization]);
-
-    useEffect(() => {
-        void loadAssignees();
-        return () => {
-            assigneeRequest.current++;
-        };
-    }, [loadAssignees]);
-
-    const load = useCallback(async () => {
-        const request = ++loadRequest.current;
-        const reconciled = [...ownInserts.current]
-            .filter(([, entry]) => entry.reconciled)
-            .map(([id]) => id);
-        const insertedRows = () =>
-            [...ownInserts.current.values()]
-                .filter((entry) => entry.query === query)
-                .map((entry) => entry.task);
-        try {
-            const response = await fetch(`/api/tasks?${query}`);
-            if (!response.ok) throw new Error();
-            const body = (await response.json()) as { tasks: TaskListItem[] };
-            if (request !== loadRequest.current) return;
-            for (const id of reconciled) ownInserts.current.delete(id);
-            const inserts = insertedRows();
-            const insertedIds = new Set(inserts.map((task) => task.id));
-            const rows = [
-                ...inserts,
-                ...body.tasks.filter((task) => !insertedIds.has(task.id)),
-            ];
-            versions.current = new Map(
-                rows.map((task) => [task.id, task.version]),
-            );
-            setTasks(rows);
-        } catch {
-            if (request !== loadRequest.current) return;
-            setTasks(insertedRows());
-            toast.error(i18n("Could not load your tasks"));
-        }
-    }, [query, i18n]);
-
-    useEffect(() => {
-        setTasks(null);
-        void load();
-        return () => {
-            loadRequest.current++;
-        };
-    }, [load]);
-
-    // Opening the list is seeing what is new.
-    useEffect(() => {
-        void fetch("/api/tasks/pending", { method: "POST" })
-            .then(() => announceTasksChanged())
-            .catch(() => {});
-    }, []);
-
-    const reload = useCallback(
-        () => Promise.all([load(), loadAssignees()]),
-        [load, loadAssignees],
-    );
-
-    useOrgEvents(true, () => void reload());
-
-    // Per row: the version the server last returned, and the write in
-    // flight, so quick changes to one row go one after another.
-    const versions = useRef(new Map<string, number>());
-    const pending = useRef(new Map<string, Promise<void>>());
-
-    const update = (
-        task: TaskListItem,
-        change: Omit<TaskChange, "version">,
-        optimistic: Partial<TaskView>,
-    ) => {
-        setTasks(
-            (current) =>
-                current
-                    ?.map((row) =>
-                        row.id === task.id ? { ...row, ...optimistic } : row,
-                    )
-                    .filter(ownMatchesFolder) ?? null,
-        );
-        const run = (pending.current.get(task.id) ?? Promise.resolve())
-            .then(async () => {
-                const saved = await changeTask(task.id, {
-                    ...change,
-                    version: versions.current.get(task.id) ?? task.version,
-                });
-                versions.current.set(task.id, saved.version);
-                if (pending.current.get(task.id) === run) {
-                    setTasks(
-                        (current) =>
-                            current?.map((row) =>
-                                row.id === task.id ? { ...row, ...saved } : row,
-                            ) ?? null,
-                    );
-                }
-                if (change.assigneePersonId !== undefined) await reload();
-            })
-            .catch(async (error: unknown) => {
-                toast.error(
-                    error instanceof TaskRequestError && error.conflict
-                        ? i18n("Someone changed this meanwhile. Reloaded.")
-                        : error instanceof Error && error.message
-                          ? error.message
-                          : i18n("Could not save the task"),
-                );
-                versions.current.clear();
-                await reload();
-            })
-            .finally(() => {
-                if (pending.current.get(task.id) === run) {
-                    pending.current.delete(task.id);
-                }
-            });
-        pending.current.set(task.id, run);
-    };
-
-    const merge = async (
-        task: TaskListItem,
-        targetTaskId: string,
-        options?: TaskMergeOptions,
-    ) => {
-        const snapshot = tasks;
-        setTasks(
-            (current) => current?.filter((row) => row.id !== task.id) ?? null,
-        );
-        try {
-            const result = await mergeTaskIntoTarget(
-                task.id,
-                targetTaskId,
-                options,
-            );
-            announceTasksChanged();
-            await reload();
-            return { ownerNotified: result.mergeOwnerNotified };
-        } catch (error) {
-            setTasks(snapshot);
-            showMergeFailure(error);
-            return false;
-        }
-    };
-
-    const tabs = organization
-        ? []
-        : [
-              { key: "mine", label: i18n("Mine") },
-              { key: "followed", label: i18n("Followed") },
-          ];
+    const tabs = [
+        ...(!organization ? [{ key: "mine", label: i18n("Mine") }] : []),
+        { key: "followed", label: i18n("Followed") },
+        { key: "all", label: i18n({ id: "tasks_scope_all", message: "All" }) },
+    ];
 
     return (
         <div className="mx-auto max-w-4xl space-y-4">
             <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
                     <h1 className="flex items-center gap-2 text-xl font-semibold">
-                        <ListChecks className="size-5 text-primary" />
+                        <ListChecks className="size-5 text-tasks" />
                         {i18n("Tasks")}
                     </h1>
                     <p className="text-sm text-muted-foreground">
                         {organization
                             ? i18n("Tasks from the Organization's recordings.")
-                            : tab === "mine"
-                              ? i18n(
-                                    "Assigned to you, including your own private tasks.",
-                                )
-                              : i18n(
-                                    "Tasks you follow, and tasks from your items assigned to others.",
-                                )}
+                            : tab === "all"
+                              ? i18n("All tasks you can see.")
+                              : tab === "mine"
+                                ? i18n(
+                                      "Assigned to you, including your own private tasks.",
+                                  )
+                                : i18n(
+                                      "Tasks you follow, and tasks from your items assigned to others.",
+                                  )}
                     </p>
                 </div>
                 {tabs.length > 0 && (
@@ -425,31 +211,12 @@ export function TaskList({
                     </Select>
                 )}
 
-                <Select
-                    value={state}
-                    onValueChange={(value) =>
+                <TaskStateSelect
+                    state={state}
+                    onChange={(value) =>
                         setParam("state", value === "open" ? null : value)
                     }
-                >
-                    <SelectTrigger
-                        className="h-8 w-32 text-xs"
-                        aria-label={i18n("State")}
-                    >
-                        <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="open">
-                            {i18n("Open tasks")}
-                        </SelectItem>
-                        <SelectItem value="done">{i18n("Done")}</SelectItem>
-                        <SelectItem value="dropped">
-                            {i18n("Dropped")}
-                        </SelectItem>
-                        <SelectItem value="all">
-                            {i18n("All states")}
-                        </SelectItem>
-                    </SelectContent>
-                </Select>
+                />
                 <Select
                     value={folder}
                     onValueChange={(value) => setParam("folder", value)}
@@ -479,34 +246,12 @@ export function TaskList({
                         )}
                     </SelectContent>
                 </Select>
-                {tab === "followed" && (
-                    <Select
-                        value={assignee}
-                        onValueChange={(value) => setParam("assignee", value)}
-                    >
-                        <SelectTrigger
-                            className="h-8 w-48 text-xs"
-                            aria-label={i18n("Assignee")}
-                        >
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value={ALL}>
-                                {i18n("All assignees")}
-                            </SelectItem>
-                            <SelectItem value="none">
-                                {i18n("No assignee")}
-                            </SelectItem>
-                            {sortedAssignees.map((person) => (
-                                <SelectItem
-                                    key={person.personId}
-                                    value={person.personId}
-                                >
-                                    {person.name}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
+                {tab !== "mine" && (
+                    <TaskAssigneeSelect
+                        assignee={assignee}
+                        assignees={sortedAssignees}
+                        onChange={(value) => setParam("assignee", value)}
+                    />
                 )}
                 <Select
                     value={due}
@@ -551,16 +296,30 @@ export function TaskList({
                         ? i18n("By due date")
                         : i18n("Newest first")}
                 </button>
+                {!organization && tab !== "followed" && (
+                    <AddTaskTrigger
+                        open={addOpen}
+                        saving={addSaving}
+                        triggerRef={addTrigger}
+                        onOpen={() => {
+                            setAddOpen(true);
+                            setAddClicks((count) => count + 1);
+                        }}
+                    />
+                )}
             </div>
 
             <ul className="divide-y rounded-lg border">
-                {!organization && tab === "mine" && (
+                {!organization && tab !== "followed" && (
                     <OwnTaskForm
                         open={addOpen}
-                        focusRequest={addRequest}
+                        focusRequest={`${addRequest ?? ""}:${addClicks}`}
+                        triggerRef={addTrigger}
+                        onSavingChange={setAddSaving}
                         folders={folders}
                         defaultFolderId={
-                            selectedPrivate?.kind === "private"
+                            selectedPrivate?.kind === "private" ||
+                            selectedPrivate?.receivedFolder
                                 ? null
                                 : (selectedPrivate?.id ?? null)
                         }
@@ -568,44 +327,8 @@ export function TaskList({
                             setAddOpen(open);
                             if (!open && addRequest) setParam("add", null);
                         }}
-                        onReconciled={(temporaryId, task) => {
-                            const entry = ownInserts.current.get(temporaryId);
-                            if (task && entry)
-                                ownInserts.current.set(temporaryId, {
-                                    ...entry,
-                                    task,
-                                    reconciled: true,
-                                });
-                            else ownInserts.current.delete(temporaryId);
-                            versions.current.delete(temporaryId);
-                            if (task)
-                                versions.current.set(task.id, task.version);
-                            setTasks((current) => {
-                                const remaining = (current ?? []).filter(
-                                    (row) =>
-                                        row.id !== temporaryId &&
-                                        row.id !== task?.id,
-                                );
-                                return task &&
-                                    entry?.query === currentQuery.current &&
-                                    ownMatchesFolder(task)
-                                    ? [task, ...remaining]
-                                    : remaining;
-                            });
-                        }}
-                        onAdded={(task) => {
-                            ownInserts.current.set(task.id, {
-                                task,
-                                query: ownMatchesFolder(task) ? query : null,
-                                reconciled: false,
-                            });
-                            versions.current.set(task.id, task.version);
-                            setTasks((current) =>
-                                ownMatchesFolder(task)
-                                    ? [task, ...(current ?? [])]
-                                    : current,
-                            );
-                        }}
+                        onReconciled={onReconciled}
+                        onAdded={onAdded}
                     />
                 )}
                 {tasks === null ? (

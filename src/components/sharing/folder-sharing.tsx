@@ -221,7 +221,7 @@ export function ReceivedFolderMenu({
                 {i18n("Shared by {owner}", { owner: share.ownerName })}
             </DropdownMenuItem>
             <DropdownMenuItem
-                className="text-destructive"
+                variant="destructive"
                 onSelect={() => {
                     void confirm({
                         title: i18n("Remove and end sharing"),

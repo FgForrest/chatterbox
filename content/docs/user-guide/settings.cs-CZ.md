@@ -108,4 +108,6 @@ Přístup ke Kalendáři a Meet je volitelný a pouze pro čtení. Po připojen�
 
 **Agenda** je položka, kterou v Klepně připravujete pro **schůzku** nebo událost. Volby **Připravit agendu**, **Nastavení agendy** a **Smazat agendu** pracují s touto položkou. Smazáním agendy se odstraní její body a poznámky; událost v Google Kalendáři i agenda dříve zapsaná do události zůstávají. Změny úkolů provedené během schůzky platí dál. Zápis agendy do Kalendáře je samostatná akce pořadatele s výslovným souhlasem se zápisem.
 
+Agendu lze stejně jako nahrávku zařadit do několika složek pomocí **Přidat do složky**, přesunout nebo odebrat ze složky pomocí **×** na jejím štítku. Příprava spojuje aktivitu ze všech jejích složek. Odebráním posledního zařazení agenda zůstane ve Vaší knihovně. Agenda již připojená a sloučená s nahrávkou je jen pro čtení.
+
 Dále: [Klepna v Claude](claude.md)

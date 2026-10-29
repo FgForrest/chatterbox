@@ -49,7 +49,7 @@ You do not have to open the review: the proposals also appear in the transcript 
 
 ## After the review
 
-![What the review did](images/learn-results.png)
+![The item Knowledge panel after the review](images/item-knowledge.png)
 
 Finished Learn states leave the detail page. Open the book icon **Knowledge** in the item header to see the result in place of the detail content; **Back** returns. It uses the same panel as folder Knowledge, limited to this item: **Speakers** (recordings only), **People**, **Things**, **Corrections**, **Facts**, and **What the models receive**, with counts. New entries are marked, corrections show their occurrence count, and the latest review's facts distinguish new facts from facts mentioned again. Reviewers can see applied, rejected and skipped proposals in the relevant tabs. The subtitle shows when Learn finished and its applied count when known. **Re-learn** starts another run; **Propose rejected items again** clears the item's rejections first. Running, waiting, failed and stopped states remain on the detail page.
 

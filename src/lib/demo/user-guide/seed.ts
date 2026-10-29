@@ -20,6 +20,7 @@ import {
     processingProfiles,
     recordingFolders,
     recordingTasks,
+    summaryRemarks,
     taskMentions,
     taskUpdateProposals,
     transcriptCorrections,
@@ -677,6 +678,7 @@ async function seedRecording(
             provider: summary.provider,
             model: summary.model,
             pipeline: "legacy",
+            remarksAppliedCount: summary.remarks?.length ?? 0,
             multiPass: summary.multiPass
                 ? {
                       roundsRequested: summary.multiPass.rounds,
@@ -687,6 +689,15 @@ async function seedRecording(
         });
         if (!done.committed)
             throw new Error(`Summary of ${fixture.key} refused`);
+        for (const text of summary.remarks ?? []) {
+            await db.insert(summaryRemarks).values({
+                itemId: recordingId,
+                userId,
+                authorUserId: userId,
+                text: encryptText(text),
+                createdAt: startTime,
+            });
+        }
     }
 
     if (fixture.learn) {

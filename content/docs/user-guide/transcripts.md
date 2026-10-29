@@ -10,7 +10,7 @@ A recording without a transcript offers two buttons:
 - **Transcribe** sends the audio to your account's transcription provider (Settings → Transcription). It also works while the recording is still waiting to be filed.
 - **Transcribe in browser** runs Whisper inside your browser. It is free and nothing leaves your computer, but it is slower.
 
-**Re-transcribe** on a recording that has a transcript asks for confirmation, then runs it again with your current provider. This is a paid provider call. It replaces the transcript and regenerates the summary, title, topics, and Learn results. Speaker names you gave are carried over to the new transcript as suggestions, to confirm with one click.
+**Re-transcribe** on a recording that has a transcript asks for confirmation, then runs it again with your current provider. This is a paid provider call. It replaces the transcript and refreshes generated results according to the processing profile. A hand-edited summary is kept, and an existing title is not replaced automatically. See [Summary edits](summaries-and-tasks.md#edit-a-summary). Speaker names you gave are carried over to the new transcript as suggestions, to confirm with one click.
 
 A recording is transcribed automatically only after it is filed and its [processing profile](processing-and-profiles.md) has **Run automatically** on for transcription. The profile can choose a different provider and language from the account defaults used by **Transcribe**.
 
@@ -73,7 +73,7 @@ A lecture or a long monologue is split into paragraphs of about half a minute, a
 
 ## Playing from the transcript
 
-![A sentence playing, highlighted](images/sentence-playback.png)
+![A highlighted sentence with its play button](images/sentence-playback.png)
 
 - **Click a sentence** to play the recording from it. Click again to pause.
 - **Click a timestamp** to move the player there without playing.

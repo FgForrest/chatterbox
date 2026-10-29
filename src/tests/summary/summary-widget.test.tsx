@@ -6,6 +6,7 @@ import {
     fireEvent,
     render,
     screen,
+    within,
 } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -237,21 +238,50 @@ function renderWidget(
 }
 
 beforeEach(() => {
+    vi.stubGlobal(
+        "ResizeObserver",
+        class {
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        },
+    );
     vi.clearAllMocks();
     resetState();
 });
 
-afterEach(cleanup);
+afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+});
 
 describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
     it("edits summary prose and key points in place and cancels without a write", () => {
+        state.summaryData = summary({
+            keyPoints: ["First point", "Second point"],
+        });
         renderWidget(kind);
         fireEvent.click(screen.getByRole("button", { name: "Edit summary" }));
+        expect(
+            screen.getByRole<HTMLTextAreaElement>("textbox", {
+                name: /Key Points/,
+            }).value,
+        ).toBe("- First point\n- Second point");
         expect(screen.getByText("Editing summary")).toBeTruthy();
         expect(
             screen.queryByRole("button", { name: "Re-summarize" }),
         ).toBeNull();
         expect(screen.queryByTestId("recording-tasks")).toBeNull();
+        expect(screen.queryByTestId("summary-provenance")).toBeNull();
+        expect(screen.queryByTestId("summary-attention")).toBeNull();
+        for (const field of screen.getAllByRole("textbox")) {
+            expect(field.getAttribute("data-slot")).toBe("textarea");
+            expect(field.classList.contains("resize-none")).toBe(true);
+        }
+        for (const name of ["Cancel", "Save"])
+            expect(
+                screen.getByRole("button", { name }).classList.contains("h-8"),
+            ).toBe(true);
         fireEvent.change(screen.getByLabelText(/Summary text/), {
             target: { value: "Discarded draft" },
         });
@@ -260,7 +290,10 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         expect(screen.getByText("A concise result")).toBeTruthy();
     });
 
-    it("saves the two fields separately and leaves tasks out of the edit", async () => {
+    it.each([
+        "- One\n\n- Two",
+        "One\nTwo",
+    ])("saves the two fields separately and leaves tasks out of the edit: %s", async (points) => {
         renderWidget(kind);
         fireEvent.click(screen.getByRole("button", { name: "Edit summary" }));
         fireEvent.change(screen.getByLabelText(/Summary text/), {
@@ -269,7 +302,7 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
             },
         });
         fireEvent.change(screen.getByLabelText(/Key Points/), {
-            target: { value: "One\n\nTwo" },
+            target: { value: points },
         });
         await act(async () =>
             fireEvent.click(screen.getByRole("button", { name: "Save" })),
@@ -331,14 +364,16 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         });
     });
 
-    it("shows owner correction chips and hides both actions for readers", () => {
+    it("shows owner correction provenance and hides both actions for readers", () => {
         state.summaryData = summary({
             editedAt: "2026-10-28T10:00:00Z",
             correctedWithRemarks: true,
             remarksAppliedCount: 2,
         });
         const rendered = renderWidget(kind);
-        expect(screen.getByText("Hand-edited")).toBeTruthy();
+        expect(
+            screen.getByText("Hand-edited").closest("[tabindex='0']"),
+        ).toBeTruthy();
         expect(
             screen.getByRole("button", { name: "From remarks · {count}" }),
         ).toBeTruthy();
@@ -626,6 +661,143 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         ).toBe("true");
     });
 
+    it("groups both notices above the quiet provenance line with working actions", () => {
+        renderWidget(kind);
+        const attention = screen.getByTestId("summary-attention");
+        const provenance = screen.getByTestId("summary-provenance");
+        expect(attention.parentElement).toBe(provenance.parentElement);
+        expect(attention.nextElementSibling).toBe(provenance);
+        expect(attention.children).toHaveLength(2);
+        expect(
+            within(attention).getByText("May contain stale names or terms"),
+        ).toBeTruthy();
+        expect(
+            within(attention).getByText("Folders changed since this summary:"),
+        ).toBeTruthy();
+        expect(
+            within(provenance).queryByRole("button", { name: "Regenerate" }),
+        ).toBeNull();
+        expect(
+            within(provenance).queryByRole("button", {
+                name: "Match tasks again",
+            }),
+        ).toBeNull();
+        const icons = attention.querySelectorAll("svg");
+        expect(icons).toHaveLength(2);
+        for (const icon of icons) {
+            expect(icon.getAttribute("aria-hidden")).toBe("true");
+        }
+        fireEvent.click(
+            within(attention).getByRole("button", { name: "Regenerate" }),
+        );
+        fireEvent.click(
+            within(attention).getByRole("button", {
+                name: "Match tasks again",
+            }),
+        );
+        expect(mocks.handleSummarize).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([
+        { stale: true, scopeChanged: false },
+        { stale: false, scopeChanged: true },
+    ])("shows one attention line for $stale stale and $scopeChanged scope changed", (notices) => {
+        state.summaryData = summary(notices);
+        renderWidget(kind, { canChange: false });
+        const attention = screen.getByTestId("summary-attention");
+        expect(attention.children).toHaveLength(1);
+        expect(within(attention).queryByRole("button")).toBeNull();
+    });
+
+    it("omits the attention band when the summary is current", () => {
+        state.summaryData = summary({ stale: false, scopeChanged: false });
+        renderWidget(kind);
+        expect(screen.queryByTestId("summary-attention")).toBeNull();
+        expect(screen.getByTestId("summary-provenance")).toBeTruthy();
+    });
+
+    it("puts Profile first and separates plain provenance items without chips", () => {
+        state.summaryData = summary({
+            editedAt: "2026-10-28T10:00:00Z",
+            correctedWithRemarks: true,
+            remarksAppliedCount: 2,
+        });
+        renderWidget(kind);
+        const provenance = screen.getByTestId("summary-provenance");
+        expect(provenance.firstElementChild?.textContent).toBe(
+            "ProfileDaily notes",
+        );
+        expect(within(provenance).queryByText("Custom")).toBeNull();
+        const provider = within(provenance).getByText("OpenAI");
+        const model = within(provenance).getByText("gpt-summary");
+        expect(provider.tagName).toBe("SPAN");
+        expect(model.tagName).toBe("SPAN");
+        expect(
+            provenance.querySelector(
+                '[class*="font-mono"], [class~="bg-muted"], [class~="bg-amber-500/15"]',
+            ),
+        ).toBeNull();
+        expect(
+            [...provenance.children].flatMap((item) =>
+                item.firstElementChild?.getAttribute("aria-hidden") === "true"
+                    ? ["·", (item.textContent ?? "").slice(1)]
+                    : [item.textContent],
+            ),
+        ).toEqual([
+            "ProfileDaily notes",
+            "·",
+            "OpenAI",
+            "·",
+            "gpt-summary",
+            "·",
+            "multi-pass · {passes}",
+            "·",
+            "Hand-edited",
+            "·",
+            "From remarks · {count}",
+        ]);
+        const separators = within(provenance).getAllByText("·");
+        expect(separators).toHaveLength(5);
+        for (const separator of separators) {
+            expect(separator.getAttribute("aria-hidden")).toBe("true");
+        }
+    });
+
+    it("keeps degraded multi-pass provenance amber with its explanation", async () => {
+        state.summaryData = summary({
+            multiPass: { roundsRequested: 3, passesUsed: 1, merged: false },
+        });
+        vi.stubGlobal(
+            "ResizeObserver",
+            class {
+                observe() {}
+                unobserve() {}
+                disconnect() {}
+            },
+        );
+        renderWidget(kind);
+        const label = within(
+            screen.getByTestId("summary-provenance"),
+        ).getByText("multi-pass · {passes}");
+        expect(label.classList.contains("text-amber-600")).toBe(true);
+        expect(label.tabIndex).toBe(0);
+        act(() => label.focus());
+        expect((await screen.findByRole("tooltip")).textContent).toBe(
+            "Only 1 of {requested} passes succeeded, so it is shown unmerged.",
+        );
+    });
+
+    it("omits separators for absent provenance items", () => {
+        state.summaryData = summary({
+            provider: undefined,
+            multiPass: undefined,
+        });
+        renderWidget(kind, { canChange: false });
+        const provenance = screen.getByTestId("summary-provenance");
+        expect(provenance.textContent).toBe("gpt-summary");
+        expect(within(provenance).queryByText("·")).toBeNull();
+    });
+
     it("keeps key points inside the summary box and metadata below the task list", () => {
         renderWidget(kind);
         const box = screen.getByRole("region", { name: "Summary content" });
@@ -796,7 +968,7 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
     it.each([
         false,
         true,
-    ])("shows the earlier-content chip when stale is %s", (stale) => {
+    ])("shows the earlier-content notice when stale is %s", (stale) => {
         state.summaryData = summary({ olderContent: true, stale });
         renderWidget(kind, { learnHold: "review" });
 
@@ -815,7 +987,7 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         expect(mocks.handleSummarize).toHaveBeenCalledOnce();
     });
 
-    it("shows the earlier-content chip without Regenerate for a read-only viewer", () => {
+    it("shows the earlier-content notice without Regenerate for a read-only viewer", () => {
         state.summaryData = summary({ olderContent: true });
         renderWidget(kind, { canChange: false });
 
@@ -892,6 +1064,19 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
     });
 
     if (kind === "audio") {
+        it("starts Plaud provenance with Plaud and hides our notices and profile", () => {
+            state.summaryData = summary({
+                source: "plaud",
+                olderContent: true,
+            });
+            renderWidget(kind, { source: "plaud" });
+            const provenance = screen.getByTestId("summary-provenance");
+            expect(provenance.firstElementChild?.textContent).toBe("Plaud");
+            expect(within(provenance).queryByText("Custom")).toBeNull();
+            expect(within(provenance).queryByText("Profile")).toBeNull();
+            expect(screen.queryByTestId("summary-attention")).toBeNull();
+        });
+
         it("keeps the source switcher audio-only", () => {
             renderWidget(kind);
             expect(

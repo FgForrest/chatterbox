@@ -122,16 +122,21 @@ function expectCollapsed() {
     expect(
         screen.queryByRole("group", { name: "Transcript speakers" }),
     ).toBeNull();
-    expect(screen.queryByRole("button", { name: /1 \/ 3 Opening/ })).toBeNull();
+    expect(
+        screen.queryByRole("button", { name: /Opening\. 1 \/ 3/ }),
+    ).toBeNull();
     expect(screen.queryByRole("button", { name: "Detect topics" })).toBeNull();
     const card = document.getElementById("recording-transcription-rec-card");
     expect(card?.querySelector("footer")?.closest("[hidden]")).toBeTruthy();
 }
 
 function openTopics() {
-    fireEvent.keyDown(screen.getByRole("button", { name: /1 \/ 3 Opening/ }), {
-        key: "Enter",
-    });
+    fireEvent.keyDown(
+        screen.getByRole("button", { name: /Opening\. 1 \/ 3/ }),
+        {
+            key: "Enter",
+        },
+    );
 }
 
 describe("transcript card behavior", () => {
@@ -260,17 +265,17 @@ describe("transcript card behavior", () => {
         box.scrollTop = 500;
         fireEvent.scroll(box);
         expect(
-            screen.getByRole("button", { name: /2 \/ 3 Brief/ }),
+            screen.getByRole("button", { name: /Brief\. 2 \/ 3/ }),
         ).toBeTruthy();
         collapse();
         expand();
         expect(
-            screen.getByRole("button", { name: /2 \/ 3 Brief/ }),
+            screen.getByRole("button", { name: /Brief\. 2 \/ 3/ }),
         ).toBeTruthy();
         fireEvent.wheel(box);
         fireEvent.scroll(box);
         expect(
-            screen.getByRole("button", { name: /3 \/ 3 Discussion/ }),
+            screen.getByRole("button", { name: /Discussion\. 3 \/ 3/ }),
         ).toBeTruthy();
     });
 

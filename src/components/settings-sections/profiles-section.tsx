@@ -22,6 +22,7 @@ import {
 } from "@/components/settings/profile-row-actions";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { Button } from "@/components/ui/button";
+import { HeadingCount } from "@/components/ui/heading-count";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import type { ProfileChannel, ProfileScope } from "@/lib/profiles/settings";
@@ -609,17 +610,21 @@ export function ProfilesSection() {
                                 <div className="flex flex-wrap items-center gap-2">
                                     <h3
                                         id={`profiles-${section}`}
-                                        className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide"
+                                        className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide"
                                     >
                                         <Icon
-                                            className="size-3.5 text-muted-foreground"
+                                            className={
+                                                section === "organization"
+                                                    ? "size-3.5 text-organization"
+                                                    : "size-3.5 text-muted-foreground"
+                                            }
                                             aria-hidden="true"
                                         />
                                         {label}
                                     </h3>
-                                    <span className="text-xs tabular-nums text-muted-foreground">
+                                    <HeadingCount>
                                         {pagination.total}
-                                    </span>
+                                    </HeadingCount>
                                     {section === "organization" && (
                                         <p className="text-xs text-muted-foreground">
                                             {i18n(
@@ -632,7 +637,12 @@ export function ProfilesSection() {
                                             type="button"
                                             size="sm"
                                             variant="ghost"
-                                            className="ml-auto"
+                                            className={
+                                                archivedOpen
+                                                    ? "ml-auto bg-accent"
+                                                    : "ml-auto"
+                                            }
+                                            aria-pressed={archivedOpen}
                                             aria-expanded={archivedOpen}
                                             aria-controls="archived-profiles"
                                             onClick={() =>

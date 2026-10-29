@@ -587,7 +587,7 @@ export function FolderTree({
                                                     onPrepareMeeting(folder)
                                                 }
                                             >
-                                                <CalendarClock className="text-meeting" />
+                                                <CalendarClock />
                                                 {i18n("Prepare an agenda")}
                                             </DropdownMenuItem>
                                         )}
@@ -599,7 +599,7 @@ export function FolderTree({
                                                     setSharingFolder(folder)
                                                 }
                                             >
-                                                <UserPlus className="text-person-share" />
+                                                <UserPlus />
                                                 {i18n("Share folder…")}
                                             </DropdownMenuItem>
                                         )}

@@ -348,7 +348,11 @@ export function MailDetailPane({
                         />
                     ) : undefined
                 }
-                onKnowledge={() => setKnowledgeItem(mail.id)}
+                onKnowledge={() =>
+                    setKnowledgeItem((open) =>
+                        open === mail.id ? null : mail.id,
+                    )
+                }
                 knowledgeOpen={knowledgeItem === mail.id}
                 pendingLearnCount={
                     canChange ? (processing?.learnFindingsWaiting ?? 0) : 0
@@ -376,7 +380,9 @@ export function MailDetailPane({
             )}
             <div
                 hidden={knowledgeItem === mail.id}
-                className={knowledgeItem === mail.id ? "hidden" : "contents"}
+                className={
+                    knowledgeItem === mail.id ? "hidden" : "flex flex-col gap-6"
+                }
             >
                 {mail.view === "received" ? (
                     <>
@@ -559,7 +565,10 @@ export function MailDetailPane({
                                         <Button
                                             variant="ghost"
                                             size="sm"
-                                            className="h-7 gap-1 px-2 text-xs"
+                                            className={cn(
+                                                "h-7 gap-1 px-2 text-xs",
+                                                showFormatted && "bg-accent",
+                                            )}
                                             aria-pressed={showFormatted}
                                             onClick={() =>
                                                 void toggleFormatted()

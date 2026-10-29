@@ -4,10 +4,11 @@ import { Boxes, ChevronRight, FileUp, Plus, Search } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useExtracted } from "next-intl";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ImportDialog } from "@/components/almanac/import-dialog";
 import { Button } from "@/components/ui/button";
+import { InlineEditorTrigger } from "@/components/ui/inline-editor-trigger";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { getApiErrorMessage } from "@/lib/api-errors";
@@ -44,6 +45,11 @@ export function ThingsList({
     const [query, setQuery] = useState("");
     const [typeFilter, setTypeFilter] = useState("");
     const [creating, setCreating] = useState(false);
+    const createTrigger = useRef<HTMLButtonElement>(null);
+    const closeCreator = () => {
+        setCreating(false);
+        createTrigger.current?.focus();
+    };
     const [importing, setImporting] = useState(false);
     const [typeKey, setTypeKey] = useState(types[0]?.key ?? "");
     const [name, setName] = useState("");
@@ -109,7 +115,7 @@ export function ThingsList({
             setName("");
             setNicknames("");
             setDescription("");
-            setCreating(false);
+            closeCreator();
             router.refresh();
         } finally {
             setSaving(false);
@@ -174,11 +180,7 @@ export function ThingsList({
                 />
             </label>
             <div className="flex justify-end gap-2 sm:col-span-2">
-                <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => setCreating(false)}
-                >
+                <Button type="button" variant="ghost" onClick={closeCreator}>
                     {i18n("Cancel")}
                 </Button>
                 <Button type="submit" disabled={!name.trim() || saving}>
@@ -190,14 +192,15 @@ export function ThingsList({
 
     const actions = (
         <div className="flex shrink-0 gap-2">
-            <Button
+            <InlineEditorTrigger
+                ref={createTrigger}
+                open={creating}
                 variant="outline"
-                onClick={() => setCreating(!creating)}
-                aria-expanded={creating}
+                onClick={() => setCreating(true)}
             >
                 <Plus className="size-4" />
-                {creating ? i18n("Cancel") : i18n("Add thing")}
-            </Button>
+                {i18n("Add thing")}
+            </InlineEditorTrigger>
             <Button variant="outline" onClick={() => setImporting(true)}>
                 <FileUp className="size-4" /> {i18n("Import a list")}
             </Button>
@@ -220,7 +223,7 @@ export function ThingsList({
                                 "Organizations, projects, products and terms. Learn corrects their misheard names and proposes facts about them.",
                             )}
                         </p>
-                        {!creating && actions}
+                        {actions}
                     </div>
                     {creating && (
                         <div className="mt-6 text-left">{creator}</div>

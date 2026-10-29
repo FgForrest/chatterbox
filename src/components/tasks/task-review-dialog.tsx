@@ -29,6 +29,7 @@ import type {
     TaskRowChange,
 } from "@/components/tasks/use-recording-tasks";
 import { Button } from "@/components/ui/button";
+import { HeadingCount } from "@/components/ui/heading-count";
 import type { WorkflowWidgetFrame } from "@/lib/pipeline/workflow-widgets";
 import type {
     TaskMatchView,
@@ -555,9 +556,7 @@ function SectionTitle({ title, count }: { title: string; count: number }) {
     return (
         <h3 className="flex items-baseline gap-2 text-sm font-semibold">
             {title}
-            <span className="text-xs font-normal tabular-nums text-muted-foreground">
-                {count}
-            </span>
+            <HeadingCount>{count}</HeadingCount>
         </h3>
     );
 }
@@ -817,7 +816,7 @@ function SuggestedMatchRow({
             )}
             <div className="grid gap-3 sm:grid-cols-2">
                 <section className="min-w-0 space-y-2 rounded-md bg-muted/40 p-3">
-                    <h4 className="text-xs font-semibold text-primary">
+                    <h4 className="text-xs font-semibold text-muted-foreground">
                         {i18n("Earlier task")}
                     </h4>
                     <CandidateDetails match={match} />
@@ -836,7 +835,7 @@ function SuggestedMatchRow({
                     />
                 </section>
                 <section className="min-w-0 space-y-2 rounded-md bg-muted/40 p-3">
-                    <h4 className="text-xs font-semibold text-primary">
+                    <h4 className="text-xs font-semibold text-muted-foreground">
                         {i18n("Said now")}
                     </h4>
                     <MatchEvidence
@@ -896,7 +895,7 @@ function AmbiguousMatchRow({
     return (
         <li className="-mx-2 rounded-md border px-3 py-2 text-sm">
             <fieldset className="space-y-2">
-                <legend className="text-xs font-semibold text-primary">
+                <legend className="text-xs font-semibold text-muted-foreground">
                     {i18n("Choose a task match")}
                 </legend>
                 <div role="radiogroup" aria-label={i18n("Choose a task match")}>

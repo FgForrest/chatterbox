@@ -7,6 +7,7 @@ import {
     Pencil,
     RefreshCw,
     Sparkles,
+    TriangleAlert,
 } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import {
@@ -22,6 +23,7 @@ import { MarkdownActions } from "@/components/dashboard/markdown-actions";
 import { HelpLink } from "@/components/help/help-button";
 import { Markdown } from "@/components/markdown";
 import { RecordingAgendaContext } from "@/components/meetings/recording-agenda-context";
+import { ProvenanceLine } from "@/components/pipeline/provenance-line";
 import {
     WorkflowWidget,
     WorkflowWidgetLine,
@@ -43,6 +45,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { InlineEditorTrigger } from "@/components/ui/inline-editor-trigger";
 import {
     Select,
     SelectContent,
@@ -127,6 +130,11 @@ export function SummaryWidget({
     const [editing, setEditing] = useState<
         (SummaryVersion & { summary: string; keyPoints: string[] }) | null
     >(null);
+    const editTrigger = useRef<HTMLButtonElement>(null);
+    const closeEditor = () => {
+        setEditing(null);
+        editTrigger.current?.focus();
+    };
     const [remarksOpen, setRemarksOpen] = useState(false);
     const [confirmRun, setConfirmRun] = useState<
         (SummaryVersion & { profileId?: string }) | null
@@ -415,7 +423,7 @@ export function SummaryWidget({
 
     const headerActions = (
         <div className="flex shrink-0 items-center justify-end gap-1">
-            {source === "riffado" && canChange && (
+            {source === "riffado" && canChange && !editing && (
                 <ActionTooltip
                     label={
                         working
@@ -457,7 +465,9 @@ export function SummaryWidget({
             {canCorrect && (
                 <>
                     <ActionTooltip label={i18n("Edit summary")}>
-                        <Button
+                        <InlineEditorTrigger
+                            ref={editTrigger}
+                            open={editing !== null}
                             type="button"
                             size="icon-sm"
                             variant="ghost"
@@ -485,23 +495,25 @@ export function SummaryWidget({
                             }
                         >
                             <Pencil className="size-4" />
-                        </Button>
+                        </InlineEditorTrigger>
                     </ActionTooltip>
-                    <ActionTooltip label={i18n("Summary remarks")}>
-                        <Button
-                            type="button"
-                            size="icon-sm"
-                            variant="ghost"
-                            aria-label={i18n("Summary remarks")}
-                            disabled={working}
-                            onClick={() => setRemarksOpen(true)}
-                        >
-                            <MessageSquareText className="size-4" />
-                        </Button>
-                    </ActionTooltip>
+                    {!editing && (
+                        <ActionTooltip label={i18n("Summary remarks")}>
+                            <Button
+                                type="button"
+                                size="icon-sm"
+                                variant="ghost"
+                                aria-label={i18n("Summary remarks")}
+                                disabled={working}
+                                onClick={() => setRemarksOpen(true)}
+                            >
+                                <MessageSquareText className="size-4" />
+                            </Button>
+                        </ActionTooltip>
+                    )}
                 </>
             )}
-            {canSwitchSource && onSourceChange && (
+            {!editing && canSwitchSource && onSourceChange && (
                 <SourceSwitcher
                     compact
                     ariaLabel={i18n("Summary source")}
@@ -512,7 +524,7 @@ export function SummaryWidget({
                     }
                 />
             )}
-            {hasSummary && (
+            {!editing && hasSummary && (
                 <MarkdownActions
                     recordingId={itemId}
                     kind="summary"
@@ -540,7 +552,7 @@ export function SummaryWidget({
                 key={contextKey}
                 summary={editing.summary}
                 keyPoints={editing.keyPoints}
-                onCancel={() => setEditing(null)}
+                onCancel={closeEditor}
                 onSave={(text, points) =>
                     saveSummary(
                         storeEditedSpeakerReferences(text),
@@ -686,7 +698,7 @@ export function SummaryWidget({
                             key={`ai-${item.slice(0, 32)}`}
                             className="flex items-start gap-2 text-sm text-muted-foreground"
                         >
-                            <ListChecks className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                            <ListChecks className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
                             <Markdown
                                 inline
                                 speakerAttributions={speakerAttributions}
@@ -699,6 +711,171 @@ export function SummaryWidget({
                 </ul>
             </div>
         ) : null;
+
+    const provenanceItems = [
+        {
+            key: "source",
+            content:
+                source === "plaud" && kind === "audio" ? (
+                    <span>Plaud</span>
+                ) : (
+                    source === "riffado" &&
+                    displayedProfileName && (
+                        <span className="inline-flex items-center gap-1">
+                            {i18n("Profile")}
+                            {profileEditing && canChange ? (
+                                <Select
+                                    open
+                                    onOpenChange={(next) => {
+                                        if (!next) setProfileEditing(false);
+                                    }}
+                                    value={
+                                        summaryData?.profileId ??
+                                        summaryProfileId
+                                    }
+                                    onValueChange={(next) => {
+                                        setProfileEditing(false);
+                                        if (
+                                            next ===
+                                            (summaryData?.profileId ??
+                                                summaryProfileId)
+                                        )
+                                            return;
+                                        setSummaryProfileId(next);
+                                        if (hasSummary) requestSummary(next);
+                                    }}
+                                >
+                                    <SelectTrigger
+                                        className="h-7 w-auto text-xs"
+                                        aria-label={i18n("Processing profile")}
+                                    >
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {summaryProfileOptions.map(
+                                            (profile) => (
+                                                <SelectItem
+                                                    key={profile.id}
+                                                    value={profile.id}
+                                                >
+                                                    {profile.name}
+                                                </SelectItem>
+                                            ),
+                                        )}
+                                    </SelectContent>
+                                </Select>
+                            ) : (
+                                <>
+                                    {displayedProfileName && (
+                                        <span>{displayedProfileName}</span>
+                                    )}
+                                    {canChange &&
+                                        summaryProfileOptions.length > 0 && (
+                                            <ActionTooltip
+                                                label={i18n(
+                                                    "Change summary profile",
+                                                )}
+                                            >
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon-xs"
+                                                    disabled={
+                                                        working ||
+                                                        summaryProfilesLoading
+                                                    }
+                                                    aria-label={i18n(
+                                                        "Change summary profile",
+                                                    )}
+                                                    onClick={() =>
+                                                        setProfileEditing(true)
+                                                    }
+                                                >
+                                                    <Pencil className="size-3" />
+                                                </Button>
+                                            </ActionTooltip>
+                                        )}
+                                </>
+                            )}
+                        </span>
+                    )
+                ),
+        },
+        {
+            key: "provider",
+            content: summaryData?.provider && (
+                <span>{summaryData.provider}</span>
+            ),
+        },
+        {
+            key: "model",
+            content: summaryData?.model && <span>{summaryData.model}</span>,
+        },
+        {
+            key: "multi-pass",
+            content: multiPassBadge && (
+                <ActionTooltip label={multiPassBadge.title}>
+                    <span
+                        // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users reach the pass explanation
+                        tabIndex={0}
+                        className={`rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring${
+                            multiPassBadge.degraded
+                                ? " text-amber-600 dark:text-amber-400"
+                                : ""
+                        }`}
+                    >
+                        {multiPassBadge.label}
+                    </span>
+                </ActionTooltip>
+            ),
+        },
+        {
+            key: "hand-edited",
+            content: summaryData?.editedAt && (
+                <ActionTooltip
+                    label={i18n("Edited by {name} on {date}", {
+                        name:
+                            summaryData.editedByName ?? i18n("Unknown author"),
+                        date: new Date(summaryData.editedAt).toLocaleString(
+                            locale,
+                        ),
+                    })}
+                >
+                    <span
+                        // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users reach the editor and date tooltip
+                        tabIndex={0}
+                        className="inline-flex items-center gap-1 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                        <Pencil className="size-3" />
+                        {i18n("Hand-edited")}
+                    </span>
+                </ActionTooltip>
+            ),
+        },
+        {
+            key: "remarks",
+            content:
+                summaryData?.correctedWithRemarks &&
+                (canCorrect ? (
+                    <button
+                        type="button"
+                        disabled={working}
+                        className="inline-flex items-center gap-1 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                        onClick={() => setRemarksOpen(true)}
+                    >
+                        <MessageSquareText className="size-3" />
+                        {i18n("From remarks · {count}", {
+                            count: String(summaryData.remarksAppliedCount ?? 0),
+                        })}
+                    </button>
+                ) : (
+                    <span className="inline-flex items-center gap-1">
+                        <MessageSquareText className="size-3" />
+                        {i18n("Corrected from remarks")}
+                    </span>
+                )),
+        },
+    ];
 
     return (
         <>
@@ -730,246 +907,84 @@ export function SummaryWidget({
                 collapseLabel={i18n("Collapse summary")}
                 expandLabel={i18n("Expand summary")}
                 headerAction={
-                    editing ? (
-                        <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Pencil className="size-3.5" />
-                            {i18n("Editing summary")}
-                        </span>
-                    ) : (
-                        headerActions
-                    )
+                    <div className="flex items-center gap-2">
+                        {editing && (
+                            <span className="text-sm text-muted-foreground">
+                                {i18n("Editing summary")}
+                            </span>
+                        )}
+                        {headerActions}
+                    </div>
                 }
                 footer={
                     editing
                         ? undefined
                         : {
                               status: (
-                                  <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                                      {kind === "audio" && (
-                                          <span className="rounded bg-muted px-2 py-0.5 font-medium">
-                                              {source === "plaud"
-                                                  ? "Plaud"
-                                                  : i18n("Custom")}
-                                          </span>
-                                      )}
-                                      {summaryData?.editedAt && (
-                                          <ActionTooltip
-                                              label={i18n(
-                                                  "Edited by {name} on {date}",
-                                                  {
-                                                      name:
-                                                          summaryData.editedByName ??
-                                                          i18n(
-                                                              "Unknown author",
-                                                          ),
-                                                      date: new Date(
-                                                          summaryData.editedAt,
-                                                      ).toLocaleString(locale),
-                                                  },
-                                              )}
-                                          >
-                                              <span className="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 font-medium">
-                                                  <Pencil className="size-3" />
-                                                  {i18n("Hand-edited")}
-                                              </span>
-                                          </ActionTooltip>
-                                      )}
-                                      {summaryData?.correctedWithRemarks &&
-                                          (canCorrect ? (
-                                              <button
-                                                  type="button"
-                                                  disabled={working}
-                                                  className="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 hover:bg-accent"
-                                                  onClick={() =>
-                                                      setRemarksOpen(true)
-                                                  }
-                                              >
-                                                  <MessageSquareText className="size-3" />
-                                                  {i18n(
-                                                      "From remarks · {count}",
-                                                      {
-                                                          count: String(
-                                                              summaryData.remarksAppliedCount ??
-                                                                  0,
-                                                          ),
-                                                      },
-                                                  )}
-                                              </button>
-                                          ) : (
-                                              <span className="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 font-medium">
-                                                  <MessageSquareText className="size-3" />
-                                                  {i18n(
-                                                      "Corrected from remarks",
-                                                  )}
-                                              </span>
-                                          ))}
-                                      {summaryData?.provider && (
-                                          <span className="rounded bg-muted px-2 py-0.5">
-                                              {summaryData?.provider}
-                                          </span>
-                                      )}
-                                      {summaryData?.model && (
-                                          <span className="rounded bg-muted px-2 py-0.5 font-mono">
-                                              {summaryData?.model}
-                                          </span>
-                                      )}
-                                      {multiPassBadge && (
-                                          <span
-                                              className={
-                                                  multiPassBadge.degraded
-                                                      ? "rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400"
-                                                      : "rounded bg-muted px-2 py-0.5"
-                                              }
-                                              title={multiPassBadge.title}
-                                          >
-                                              {multiPassBadge.label}
-                                          </span>
-                                      )}
-                                      {contentNote && source === "riffado" && (
-                                          <span className="flex items-center gap-2 rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400">
-                                              {contentNote}
-                                              {canChange && (
-                                                  <button
-                                                      type="button"
-                                                      className="font-medium underline-offset-2 hover:underline"
-                                                      onClick={runSummary}
-                                                  >
-                                                      {i18n("Regenerate")}
-                                                  </button>
-                                              )}
-                                          </span>
-                                      )}
-                                      {summaryData?.scopeChanged &&
-                                          source === "riffado" && (
-                                              <span className="flex items-center gap-1 rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400">
-                                                  {i18n(
-                                                      "Folders changed since this summary:",
-                                                  )}
-                                                  {canChange && (
-                                                      <button
-                                                          type="button"
-                                                          className="font-medium underline-offset-2 hover:underline"
-                                                          onClick={runSummary}
-                                                      >
-                                                          {i18n(
-                                                              "Match tasks again",
-                                                          )}
-                                                      </button>
-                                                  )}
-                                              </span>
-                                          )}
-
+                                  <div className="flex flex-col gap-2">
                                       {source === "riffado" &&
-                                          displayedProfileName && (
-                                              <span className="inline-flex items-center gap-1">
-                                                  {i18n("Profile")}
-                                                  {profileEditing &&
-                                                  canChange ? (
-                                                      <Select
-                                                          open
-                                                          onOpenChange={(
-                                                              next,
-                                                          ) => {
-                                                              if (!next)
-                                                                  setProfileEditing(
-                                                                      false,
-                                                                  );
-                                                          }}
-                                                          value={
-                                                              summaryData?.profileId ??
-                                                              summaryProfileId
-                                                          }
-                                                          onValueChange={(
-                                                              next,
-                                                          ) => {
-                                                              setProfileEditing(
-                                                                  false,
-                                                              );
-                                                              if (
-                                                                  next ===
-                                                                  (summaryData?.profileId ??
-                                                                      summaryProfileId)
-                                                              )
-                                                                  return;
-                                                              setSummaryProfileId(
-                                                                  next,
-                                                              );
-                                                              if (hasSummary)
-                                                                  requestSummary(
-                                                                      next,
-                                                                  );
-                                                          }}
-                                                      >
-                                                          <SelectTrigger
-                                                              className="h-7 w-auto text-xs"
-                                                              aria-label={i18n(
-                                                                  "Processing profile",
-                                                              )}
-                                                          >
-                                                              <SelectValue />
-                                                          </SelectTrigger>
-                                                          <SelectContent>
-                                                              {summaryProfileOptions.map(
-                                                                  (profile) => (
-                                                                      <SelectItem
-                                                                          key={
-                                                                              profile.id
-                                                                          }
-                                                                          value={
-                                                                              profile.id
-                                                                          }
-                                                                      >
-                                                                          {
-                                                                              profile.name
-                                                                          }
-                                                                      </SelectItem>
-                                                                  ),
-                                                              )}
-                                                          </SelectContent>
-                                                      </Select>
-                                                  ) : (
-                                                      <>
-                                                          {displayedProfileName && (
-                                                              <span>
-                                                                  {
-                                                                      displayedProfileName
-                                                                  }
-                                                              </span>
-                                                          )}
-                                                          {canChange &&
-                                                              summaryProfileOptions.length >
-                                                                  0 && (
-                                                                  <ActionTooltip
-                                                                      label={i18n(
-                                                                          "Change summary profile",
-                                                                      )}
+                                          (contentNote ||
+                                              summaryData?.scopeChanged) && (
+                                              <div
+                                                  data-testid="summary-attention"
+                                                  className="space-y-1 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400"
+                                              >
+                                                  {contentNote && (
+                                                      <div className="flex items-start gap-2">
+                                                          <TriangleAlert
+                                                              className="size-3.5 shrink-0"
+                                                              aria-hidden="true"
+                                                          />
+                                                          <span>
+                                                              {contentNote}{" "}
+                                                              {canChange && (
+                                                                  <button
+                                                                      type="button"
+                                                                      className="font-semibold underline decoration-current/40 underline-offset-2 hover:decoration-current focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                                                                      onClick={
+                                                                          runSummary
+                                                                      }
                                                                   >
-                                                                      <Button
-                                                                          type="button"
-                                                                          variant="ghost"
-                                                                          size="icon-sm"
-                                                                          className="size-6"
-                                                                          disabled={
-                                                                              working ||
-                                                                              summaryProfilesLoading
-                                                                          }
-                                                                          aria-label={i18n(
-                                                                              "Change summary profile",
-                                                                          )}
-                                                                          onClick={() =>
-                                                                              setProfileEditing(
-                                                                                  true,
-                                                                              )
-                                                                          }
-                                                                      >
-                                                                          <Pencil className="size-3" />
-                                                                      </Button>
-                                                                  </ActionTooltip>
+                                                                      {i18n(
+                                                                          "Regenerate",
+                                                                      )}
+                                                                  </button>
                                                               )}
-                                                      </>
+                                                          </span>
+                                                      </div>
                                                   )}
-                                              </span>
+                                                  {summaryData?.scopeChanged && (
+                                                      <div className="flex items-start gap-2">
+                                                          <TriangleAlert
+                                                              className="size-3.5 shrink-0"
+                                                              aria-hidden="true"
+                                                          />
+                                                          <span>
+                                                              {i18n(
+                                                                  "Folders changed since this summary:",
+                                                              )}{" "}
+                                                              {canChange && (
+                                                                  <button
+                                                                      type="button"
+                                                                      className="font-semibold underline decoration-current/40 underline-offset-2 hover:decoration-current focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                                                                      onClick={
+                                                                          runSummary
+                                                                      }
+                                                                  >
+                                                                      {i18n(
+                                                                          "Match tasks again",
+                                                                      )}
+                                                                  </button>
+                                                              )}
+                                                          </span>
+                                                      </div>
+                                                  )}
+                                              </div>
                                           )}
+                                      <ProvenanceLine
+                                          data-testid="summary-provenance"
+                                          items={provenanceItems}
+                                      />
                                   </div>
                               ),
                               actions: null,

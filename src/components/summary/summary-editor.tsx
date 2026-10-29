@@ -3,8 +3,10 @@
 import { useExtracted } from "next-intl";
 import { useId, useState } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { EditorActions } from "@/components/ui/editor-actions";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { parseKeyPoints } from "@/lib/summary/key-points";
 
 /** Edit summary prose and key points inside either item's shared summary card. */
 export function SummaryEditor({
@@ -24,7 +26,9 @@ export function SummaryEditor({
     const i18n = useExtracted();
     const id = useId();
     const [text, setText] = useState(summary);
-    const [points, setPoints] = useState(keyPoints.join("\n"));
+    const [points, setPoints] = useState(() =>
+        keyPoints.map((point) => `- ${point}`).join("\n"),
+    );
     const [saving, setSaving] = useState(false);
     return (
         <form
@@ -32,13 +36,7 @@ export function SummaryEditor({
             onSubmit={async (event) => {
                 event.preventDefault();
                 setSaving(true);
-                const saved = await onSave(
-                    text,
-                    points
-                        .split(/\r?\n/)
-                        .map((point) => point.trim())
-                        .filter(Boolean),
-                );
+                const saved = await onSave(text, parseKeyPoints(points));
                 setSaving(false);
                 if (saved === true) {
                     toast.success(i18n("Summary saved"));
@@ -65,9 +63,10 @@ export function SummaryEditor({
                             {i18n("Markdown")}
                         </span>
                     </Label>
-                    <textarea
+                    <Textarea
+                        autoGrow
                         id={`${id}-text`}
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 min-h-80 font-mono text-sm"
+                        className="min-h-64 max-h-[70vh]"
                         value={text}
                         onChange={(event) => setText(event.target.value)}
                         disabled={saving}
@@ -83,38 +82,30 @@ export function SummaryEditor({
                     <Label htmlFor={`${id}-points`}>
                         {i18n("Key Points")}{" "}
                         <span className="text-muted-foreground">
-                            {i18n("one per line")}
+                            {i18n("one per line, starting with -")}
                         </span>
                     </Label>
-                    <textarea
+                    <Textarea
+                        autoGrow
                         id={`${id}-points`}
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 min-h-24 font-mono text-sm"
+                        className="min-h-36 max-h-[50vh]"
                         value={points}
                         onChange={(event) => setPoints(event.target.value)}
                         disabled={saving}
                     />
                 </div>
             </div>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="max-w-md text-xs text-muted-foreground">
-                    {i18n(
-                        "The saved summary is marked as hand-edited. Automatic processing will keep your edits.",
-                    )}
-                </p>
-                <div className="flex gap-2">
-                    <Button
-                        type="button"
-                        variant="outline"
-                        disabled={saving}
-                        onClick={onCancel}
-                    >
-                        {i18n("Cancel")}
-                    </Button>
-                    <Button type="submit" disabled={saving || !text.trim()}>
-                        {saving ? i18n("Saving…") : i18n("Save")}
-                    </Button>
-                </div>
-            </div>
+            <EditorActions
+                hint={i18n(
+                    "The saved summary is marked as hand-edited. Automatic processing will keep your edits.",
+                )}
+                cancelLabel={i18n("Cancel")}
+                saveLabel={saving ? i18n("Saving…") : i18n("Save")}
+                onCancel={onCancel}
+                type="submit"
+                saving={saving}
+                saveDisabled={!text.trim()}
+            />
             <p className="border-t pt-3 text-xs text-muted-foreground">
                 {i18n("Edit tasks in the task list below the summary.")}
             </p>

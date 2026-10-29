@@ -45,6 +45,7 @@ beforeEach(() => {
 });
 afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
 });
 
@@ -52,6 +53,32 @@ describe.each([
     "private",
     "org",
 ] as const)("summary remarks dialog in %s", (view) => {
+    it("uses the shared auto-growing field with its label and size limits", async () => {
+        const height = vi
+            .spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get")
+            .mockReturnValue(120);
+        render(
+            <SummaryRemarksDialog
+                itemId="item"
+                profileId="profile"
+                view={view}
+                onClose={close}
+                onRun={run}
+            />,
+        );
+        const field = await screen.findByRole<HTMLTextAreaElement>("textbox", {
+            name: "New remark",
+        });
+        expect(field.dataset.slot).toBe("textarea");
+        expect(field.maxLength).toBe(20_000);
+        expect(field.disabled).toBe(false);
+        for (const className of ["min-h-24", "max-h-[40vh]", "resize-none"])
+            expect(field.classList.contains(className)).toBe(true);
+        expect(field.style.height).toBe("120px");
+        height.mockReturnValue(300);
+        fireEvent.change(field, { target: { value: "A longer correction." } });
+        expect(field.style.height).toBe("300px");
+    });
     it.each([
         [
             "profile-unavailable",
@@ -132,7 +159,12 @@ describe.each([
         expect(screen.getByText("JD")).toBeTruthy();
         expect(screen.getByText(remark.authorName)).toBeTruthy();
         expect(document.querySelector("time")?.dateTime).toBe(remark.createdAt);
-        expect(screen.getByText("local-model")).toBeTruthy();
+        const nextRun = screen.getByText(/local-model/);
+        expect(nextRun.textContent).toBe(
+            "Profile Meeting notes · Local provider · local-model",
+        );
+        expect(nextRun.closest(".font-mono")).toBeNull();
+        expect(nextRun.querySelector(".font-mono")).toBeNull();
         expect(fetchMock).toHaveBeenCalledWith(
             `/api/recordings/item/summary/remarks?profileId=profile${view === "org" ? "&view=org" : ""}`,
             expect.any(Object),

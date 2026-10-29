@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { HeadingCount } from "@/components/ui/heading-count";
 import {
     billingOverview,
     listGraceUsers,
@@ -144,8 +145,9 @@ export default async function AdminBillingPage({
             {/* Grace users */}
             {graceUsers.length > 0 && (
                 <div>
-                    <h2 className="text-sm font-semibold mb-2">
-                        Accounts in grace ({graceUsers.length})
+                    <h2 className="mb-2 flex items-baseline gap-2 text-sm font-semibold">
+                        Accounts in grace{" "}
+                        <HeadingCount>{graceUsers.length}</HeadingCount>
                     </h2>
                     <div className="overflow-x-auto rounded border">
                         <table className="w-full text-sm">
@@ -188,8 +190,8 @@ export default async function AdminBillingPage({
             {/* Subscriptions */}
             <div>
                 <div className="flex items-baseline justify-between mb-2">
-                    <h2 className="text-sm font-semibold">
-                        Subscriptions ({subs.total})
+                    <h2 className="flex items-baseline gap-2 text-sm font-semibold">
+                        Subscriptions <HeadingCount>{subs.total}</HeadingCount>
                     </h2>
                     <div className="flex gap-2 text-xs">
                         {["all", "active", "past_due", "canceled"].map((s) => (

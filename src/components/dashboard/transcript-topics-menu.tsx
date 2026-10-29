@@ -154,11 +154,11 @@ export function TranscriptTopicsMenu({
                         type="button"
                         className="flex min-h-7 min-w-0 flex-1 items-center gap-2 rounded-sm text-sm font-medium hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
+                        <span className="min-w-0 flex-1 truncate text-left">
+                            {topics[activeIndex]?.title ?? topics[0].title}
+                        </span>{" "}
                         <span className="shrink-0 font-semibold tabular-nums text-primary">
                             {activeIndex + 1} / {topics.length}
-                        </span>{" "}
-                        <span className="min-w-0 truncate">
-                            {topics[activeIndex]?.title ?? topics[0].title}
                         </span>
                         <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
                     </button>

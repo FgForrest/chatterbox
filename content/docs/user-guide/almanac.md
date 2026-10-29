@@ -11,13 +11,13 @@ It has **People**, **Things**, **Vocabulary** and **Review** tabs. Organization 
 
 ![People](images/almanac-people.png)
 
-Everyone you have named as a speaker is here, with how many recordings they are heard in. **Add person** adds someone before they speak. People marked **Organization** come from recordings shared with the Organization (see [The Organization](organization.md)).
+Everyone you have named as a speaker is here, with how many recordings they are heard in. **Add person** adds someone before they speak. While its form is open, the launcher is inactive; use **Add person** or **Cancel** inside the form. People marked **Organization** come from recordings shared with the Organization (see [The Organization](organization.md)).
 
 Click a person to open their page:
 
 ![A person](images/almanac-person.png)
 
-- **Also known as**: nicknames and other spellings. Search finds a person by any of them, and Learn recognizes them in transcripts.
+- **Also known as**: nicknames and other spellings. While the **Add a nickname** editor is open, its launcher is inactive; use the form’s **Add** or **Cancel**. Search finds a person by any of them, and Learn recognizes them in transcripts.
 - **Notes**: anything you want to remember. On Organization people, your notes are your own.
 - **What is known**: facts such as *works for Bluefin Logistics* or *has the role Operations director*. **Add a fact** picks a relation and the other side from the Almanac, or takes plain text. Chatterbox refuses facts about health, family, personality, performance or demographics.
 - **Recordings**: where this person speaks.
@@ -28,7 +28,7 @@ Click a person to open their page:
 
 ![Things](images/almanac-things.png)
 
-Things are organizations, teams, projects, products, terms, locations and documents. Search them, filter by type, or click **Add thing**.
+Things are organizations, teams, projects, products, terms, locations and documents. Search them, filter by type, or click **Add thing**. While its form is open, the launcher is inactive; use **Add thing** or **Cancel** inside the form.
 
 ![A thing](images/almanac-thing.png)
 
@@ -83,7 +83,7 @@ Restore requests to `/api/knowledge/care/restore` accept at most 32 MiB of UTF-8
 
 ## Folder knowledge
 
-Open a folder on the dashboard and choose **Knowledge** beside its name. Everyone who can see the folder can read this view. It covers items in that folder and all its subfolders, without counting parent folders. People come from confirmed speakers, corrections and fact evidence; things from corrections and evidence. Corrections show heard-as forms used in those items and their use counts. Facts show supported evidence with the item and date, including mail.
+Open a folder on the dashboard and choose **Knowledge** (the book) in the icon row below its name; click it again to return to the item. Everyone who can see an owned or Organization folder can read its knowledge. It covers items in that folder and all its subfolders, without counting parent folders. People come from confirmed speakers, corrections and fact evidence; things from corrections and evidence. Corrections show heard-as forms used in those items and their use counts. Facts show supported evidence with the item and date, including mail.
 
 Curators also see open-problem flags on Organization records, corrections and facts. Expand a flag to apply the same fixes as in Care, directly in the folder. Other viewers keep the read-only view.
 

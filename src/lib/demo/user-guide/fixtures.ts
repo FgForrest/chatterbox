@@ -393,6 +393,7 @@ export interface DemoRecording {
         keyPoints: string[];
         actionItems: string[];
         multiPass?: { rounds: number; used: number; merged: boolean };
+        remarks?: string[];
     };
     tasks?: DemoTask[];
     taskUpdates?: DemoTaskUpdate[];
@@ -656,27 +657,27 @@ const LECTURE: DemoTurn[] = [
 
 const PILOT_CALL: DemoTurn[] = [
     {
-        speaker: "S1",
+        speaker: "speaker_1",
         text: "Hi Lena, thanks for picking up. I wanted to check the pilot scope with you before I send the proposal.",
     },
     {
-        speaker: "S2",
+        speaker: "speaker_2",
         text: "Of course. I talked to our board chair yesterday, and the main question was cost. They want to see what the pilot costs before they agree to anything after it.",
     },
     {
-        speaker: "S1",
+        speaker: "speaker_1",
         text: "That is fair. The proposal has a fixed price for the pilot and a separate estimate for the rollout, so they can decide one at a time.",
     },
     {
-        speaker: "S2",
+        speaker: "speaker_2",
         text: "Good. And the pilot is only Rotterdam, right? Antwerp is in the middle of a system migration and would not cope.",
     },
     {
-        speaker: "S1",
+        speaker: "speaker_1",
         text: "Only Rotterdam. Antwerp would be the first site after the pilot, at the earliest in the summer.",
     },
     {
-        speaker: "S2",
+        speaker: "speaker_2",
         text: "Then I think we are aligned. Send it over and I will put it on the agenda.",
     },
 ];
@@ -1143,20 +1144,23 @@ export const DEMO_RECORDINGS: readonly DemoRecording[] = [
             language: "en",
             turns: PILOT_CALL,
             speakers: {
-                S1: { person: "alex", status: "confirmed" },
-                S2: { person: "lena", status: "confirmed" },
+                speaker_1: { person: "alex", status: "confirmed" },
+                speaker_2: { person: "lena", status: "confirmed" },
             },
         },
         summary: {
             provider: "Claude Code",
             model: "claude-sonnet-5",
             markdown:
-                "## Overview\n\nAlex and Lena checked the Harbor pilot scope before the proposal goes out.\n\n## Points\n\n- Bluefin's board wants to see the **pilot cost** before agreeing to a rollout. The proposal prices the pilot and the rollout separately.\n- The pilot runs **only in Rotterdam**. Antwerp is migrating systems and comes after the pilot, in the summer at the earliest.",
+                "## Overview\n\n[Speaker 1](#speaker-1) and [Speaker 2](#speaker-2) checked the Harbor pilot scope before the proposal goes out.\n\n## Points\n\n- Bluefin's board wants to see the **pilot cost** before agreeing to a rollout. The proposal prices the pilot and the rollout separately.\n- The pilot runs **only in Rotterdam**. Antwerp is migrating systems and comes after the pilot, in the summer at the earliest.",
             keyPoints: [
                 "Pilot priced separately from rollout",
                 "Rotterdam only",
             ],
             actionItems: ["Alex: send the proposal to Lena"],
+            remarks: [
+                "Keep the pilot and rollout costs separate. Rotterdam is the only pilot site; Antwerp comes after the pilot, in the summer at the earliest.",
+            ],
         },
         tasks: [
             {

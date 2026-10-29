@@ -143,7 +143,8 @@ select_recording() {
 section_onboarding() {
     open "/dashboard"
     click_button "Account menu"
-    click_text "Run setup again" 1500
+    ab find role menuitem click --name "Re-run setup" >/dev/null
+    ab wait 1500 >/dev/null
     page onboarding-welcome
     click_button "Next"
     page onboarding-plaud
@@ -162,13 +163,13 @@ section_dashboard() {
     needs_review
     tag row "Weekly product sync" "button"
     crop recording-list-needs-review "css:[aria-label='Current location']" "css:[role=menu]" row
-    ab find role menuitemcheckbox click --name "Needs review (1)" >/dev/null
+    ab find role menuitemcheckbox click --name "Needs review 1" >/dev/null
     escape
 }
 
 needs_review() {
     click_button "All · Newest"
-    ab find role menuitemcheckbox click --name "Needs review (1)" >/dev/null
+    ab find role menuitemcheckbox click --name "Needs review 1" >/dev/null
     ab wait 900 >/dev/null
 }
 
@@ -313,6 +314,9 @@ section_folders() {
     open "/dashboard"
     click_button "Clients, 4 recordings" 1500
     page folders
+    click_button "Folder tasks" 2000
+    page folder-tasks
+    click_button "Folder tasks" 1200
     click_button "Bluefin Logistics, 4 recordings" 1500
     click_button "Folder settings" 1200
     dialog folder-pane
@@ -432,27 +436,47 @@ section_palette() {
 # Last: finishing the review changes the demo data.
 section_learn_finish() {
     select_recording "Weekly product sync"
-    click_button "Review Learn" 1500
-    js "(() => {
-        for (const group of ['Speakers', 'New facts']) {
-            let e = [...document.querySelectorAll('[role=dialog] *')].find((el) =>
-                [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim() === group));
-            const box = 'input[type=checkbox], button[role=checkbox]';
-            while (e && !e.querySelector(box)) e = e.parentElement;
-            e.querySelector(box).click();
-        }
-        return 'ok';
-    })()" >/dev/null
-    ab wait 500 >/dev/null
-    click_button "Finish review" 3000
+    ab click "[data-testid='profile-chip']" >/dev/null
+    ab wait 900 >/dev/null
+    ab find role menuitemradio click --name "Nothing automatic" >/dev/null
+    ab wait 1200 >/dev/null
     click_button "Knowledge" 1500
-    shot "css:section[aria-label='Item knowledge']" learn-results
+    click_button "Review" 1500
+    ab find role checkbox click --name "Tick all: Speakers" >/dev/null
+    ab wait 900 >/dev/null
+    ab find role checkbox click --name "Tick all: New facts" >/dev/null
+    ab wait 900 >/dev/null
+    click_button "Finish review" 3000
     click_button "Back"
+    click_button "Knowledge" 1500
+    shot "css:section[aria-label='Item knowledge']" item-knowledge
+    click_button "Back"
+}
+
+# After the read-only sections: saving the edit changes the summary.
+section_summary_corrections() {
+    ab set viewport 1440 1200 >/dev/null
+    select_recording "Call with Lena about pilot scope"
+    tag summary "Summary" ".bg-card"
+    scroll_to summary
+    click_button "Edit summary" 1200
+    ab fill "textarea[id$='-points']" $'- Pilot priced separately from rollout\n- Rotterdam only; Antwerp after the pilot, in summer at the earliest' >/dev/null
+    blur
+    scroll_to summary
+    crop summary-edit summary
+    click_button "Save" 6000
+    blur
+    scroll_to summary
+    crop summary-edited summary
+    click_button "Summary remarks" 1200
+    dialog summary-remarks
+    escape
+    ab set viewport 1440 900 >/dev/null
 }
 
 sections=(onboarding dashboard recording filing workflow transcript learn summary
     task_review tasks folders organization almanac profiles settings help palette
-    learn_finish routed_inbox)
+    summary_corrections learn_finish routed_inbox)
 if [[ $# -gt 0 ]]; then sections=("$@"); fi
 
 sign_in alex@example.com demo-password-123

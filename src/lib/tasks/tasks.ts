@@ -3153,7 +3153,7 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
         }));
 }
 
-export type TaskTab = "mine" | "followed" | "tracked";
+export type TaskTab = "mine" | "followed" | "tracked" | "all";
 export type TaskStateFilter = "open" | "done" | "dropped" | "all";
 export type TaskDueFilter = "overdue" | "week" | "none" | null;
 export type TaskSort = "created" | "due";
@@ -3163,7 +3163,7 @@ export interface TaskListQuery {
     organization?: boolean;
     state: TaskStateFilter;
     folderId: string | null;
-    /** Tracked only: a person id, or `none` for unassigned tasks. */
+    /** Followed and All: a person id, or `none` for unassigned tasks. */
     assignee?: string | null;
     due: TaskDueFilter;
     /** The viewer's today, `YYYY-MM-DD`, for the due filters. */
@@ -3220,6 +3220,8 @@ function taskTabScope(
     tab: TaskTab,
     organization: boolean,
 ): SQL {
+    // All narrows nothing: taskTabConditions always applies taskVisible.
+    if (tab === "all") return sql`true`;
     if (tab === "mine") return assignedToViewer(viewer);
     if (organization && viewer.isCurator) {
         return taskRecordingShared(viewer, ANY_TASK_ITEM);
@@ -3234,13 +3236,14 @@ export type TaskAssignee = NonNullable<TaskView["assignee"]>;
 export async function listTrackedAssignees(
     viewer: TaskViewer,
     organization = false,
+    tab: "followed" | "all" = "followed",
 ): Promise<TaskAssignee[]> {
     const rows = await db
         .selectDistinct({ personId: people.id, name: people.displayName })
         .from(recordingTasks)
         .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
         .innerJoin(people, assigneeJoin())
-        .where(and(...taskTabConditions(viewer, "followed", organization)));
+        .where(and(...taskTabConditions(viewer, tab, organization)));
     return rows.map((row) => ({ ...row, name: decryptText(row.name) }));
 }
 
@@ -3274,7 +3277,7 @@ export async function listTasks(
             await taskFolderCondition(
                 viewer,
                 query.folderId,
-                query.tab === "mine",
+                query.tab === "mine" || query.tab === "all",
             ),
         );
     }

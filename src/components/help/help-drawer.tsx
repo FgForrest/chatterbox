@@ -89,7 +89,7 @@ export function HelpDrawer({ target, onClose }: HelpDrawerProps) {
                         >
                             {i18n("Open full guide")}
                             <ExternalLink
-                                className="size-3.5"
+                                className="size-3.5 text-muted-foreground"
                                 aria-hidden="true"
                             />
                         </a>

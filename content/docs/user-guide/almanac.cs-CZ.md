@@ -13,13 +13,13 @@ Obsahuje karty **Lidé**, **Věci**, **Slovník** a **Kontrola**. Kurátoři Org
 
 ![Lidé](images/almanac-people.png)
 
-Každý, koho jste pojmenovali jako řečníka, je zde, včetně počtu nahrávek, ve kterých je slyšet. **Přidat osobu** umožní přidat někoho ještě před tím, než promluví. Lidé označení jako **Organizace** pocházejí z nahrávek sdílených s Organizací (viz [Organizace](organization.md)).
+Každý, koho jste pojmenovali jako řečníka, je zde, včetně počtu nahrávek, ve kterých je slyšet. **Přidat osobu** umožní přidat někoho ještě před tím, než promluví. Dokud je formulář otevřený, spouštěcí tlačítko je neaktivní; použijte **Přidat osobu** nebo **Zrušit** uvnitř formuláře. Lidé označení jako **Organizace** pocházejí z nahrávek sdílených s Organizací (viz [Organizace](organization.md)).
 
 Kliknutím na osobu otevřete její stránku:
 
 ![Osoba](images/almanac-person.png)
 
-- **Také známý jako**: přezdívky a jiné varianty jmen. Vyhledávání podle nich osobu najde a Učení je rozpoznává v přepisech.
+- **Také známý jako**: přezdívky a jiné varianty jmen. Dokud je editor **Přidat přezdívku** otevřený, spouštěcí tlačítko je neaktivní; použijte **Přidat** nebo **Zrušit** ve formuláři. Vyhledávání podle nich osobu najde a Učení je rozpoznává v přepisech.
 - **Poznámky**: cokoli si chcete zapamatovat. U organizačních osob jsou poznámky Vaše vlastní.
 - **Co je známo**: fakta jako *pracuje pro Bluefin Logistics* nebo *má roli provozního ředitele*. **Přidat faktum** umožní zvolit vztah a druhou stranu z Almanachu, nebo použít prostý text. Klepna odmítá fakta o zdraví, rodině, osobnosti, výkonnosti nebo demografii.
 - **Nahrávky**: kde tato osoba mluví.
@@ -32,7 +32,7 @@ Kliknutím na osobu otevřete její stránku:
 
 ![Věci](images/almanac-things.png)
 
-Almanach používá základní typy **Osoba**, **Organizace**, **Tým**, **Projekt**, **Produkt nebo systém**, **Pojem**, **Místo** a **Dokument**. Věci můžete vyhledat, filtrovat podle typu, nebo kliknout na **Přidat věc**.
+Almanach používá základní typy **Osoba**, **Organizace**, **Tým**, **Projekt**, **Produkt nebo systém**, **Pojem**, **Místo** a **Dokument**. Věci můžete vyhledat, filtrovat podle typu, nebo kliknout na **Přidat věc**. Dokud je formulář otevřený, spouštěcí tlačítko je neaktivní; použijte **Přidat věc** nebo **Zrušit** uvnitř formuláře.
 
 ![Věc](images/almanac-thing.png)
 
@@ -101,7 +101,7 @@ Požadavek na obnovu přes `/api/knowledge/care/restore` přijímá nejvýše 32
 
 ## Znalosti složky
 
-Na hlavní stránce otevřete složku a vedle jejího názvu zvolte **Znalosti**. Pohled může číst každý, kdo složku vidí. Zahrnuje položky složky a všech jejích podsložek, bez nadřazených složek. Lidé pocházejí z potvrzených mluvčích, oprav a dokladů faktů; věci z oprav a dokladů. Opravy ukazují přeslechnuté podoby použité v těchto položkách a počty použití. Fakta ukazují podpořené doklady s položkou a datem včetně pošty.
+Na hlavní stránce otevřete složku a v řádku ikon pod jejím názvem zvolte **Znalosti** (knihu); dalším kliknutím se vrátíte k položce. Znalosti vlastní složky nebo složky Organizace může číst každý, kdo složku vidí. Zahrnují položky složky a všech jejích podsložek, bez nadřazených složek. Lidé pocházejí z potvrzených mluvčích, oprav a dokladů faktů; věci z oprav a dokladů. Opravy ukazují přeslechnuté podoby použité v těchto položkách a počty použití. Fakta ukazují podpořené doklady s položkou a datem včetně pošty.
 
 Kurátoři navíc u záznamů Organizace, oprav a faktů vidí označení otevřených problémů. Rozbalením lze přímo ve složce použít stejné opravy jako v Péči. Ostatní čtenáři mají nadále pohled pouze pro čtení.
 

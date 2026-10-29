@@ -13,7 +13,9 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { HeadingCount } from "@/components/ui/heading-count";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { ActionTooltip } from "@/components/ui/tooltip";
 import { type RecordingView, withRecordingView } from "@/lib/sharing/view";
 import type { SummaryRemark } from "@/lib/summary/edits";
@@ -124,10 +126,11 @@ export function SummaryRemarksDialog({
                             className="space-y-3"
                             aria-label={i18n("Stored remarks")}
                         >
-                            <h3 className="text-sm font-medium">
-                                {i18n("Stored remarks ({count})", {
-                                    count: String(data.remarks.length),
-                                })}
+                            <h3 className="flex items-baseline gap-2 text-sm font-medium">
+                                {i18n("Stored remarks")}{" "}
+                                <HeadingCount>
+                                    {data.remarks.length}
+                                </HeadingCount>
                             </h3>
                             <ul className="space-y-2">
                                 {data.remarks.map((remark) => (
@@ -193,10 +196,10 @@ export function SummaryRemarksDialog({
                         </section>
                         <div className="space-y-2">
                             <Label htmlFor={id}>{i18n("New remark")}</Label>
-                            <textarea
-                                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            <Textarea
+                                autoGrow
+                                className="min-h-24 max-h-[40vh]"
                                 id={id}
-                                rows={4}
                                 maxLength={20_000}
                                 value={text}
                                 onChange={(event) =>
@@ -208,9 +211,7 @@ export function SummaryRemarksDialog({
                                 <p className="text-xs text-muted-foreground">
                                     {i18n("Profile")} {data.preview.profileName}{" "}
                                     · {data.preview.provider} ·{" "}
-                                    <span className="font-mono">
-                                        {data.preview.model}
-                                    </span>
+                                    {data.preview.model}
                                 </p>
                             ) : (
                                 <output className="block text-xs text-muted-foreground">

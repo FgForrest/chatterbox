@@ -12,13 +12,14 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useExtracted, useLocale } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import {
     FactDialog,
     type FactRelation,
 } from "@/components/almanac/fact-dialog";
 import { Button } from "@/components/ui/button";
+import { InlineEditorTrigger } from "@/components/ui/inline-editor-trigger";
 import { Input } from "@/components/ui/input";
 import { useDateTimeFormatter } from "@/hooks/use-date-time-formatter";
 import { getApiErrorMessage } from "@/lib/api-errors";
@@ -351,9 +352,9 @@ export function KnownFacts({
                                                     >
                                                         {evidence.kind ===
                                                         "mail" ? (
-                                                            <Mail className="size-3" />
+                                                            <Mail className="size-3 text-muted-foreground" />
                                                         ) : (
-                                                            <ArrowUpRight className="size-3" />
+                                                            <ArrowUpRight className="size-3 text-muted-foreground" />
                                                         )}
                                                         {evidence.title}
                                                         {evidence.startMs !==
@@ -408,6 +409,11 @@ export function OtherNames({
     const i18n = useExtracted();
     const router = useRouter();
     const [adding, setAdding] = useState(false);
+    const addTrigger = useRef<HTMLButtonElement>(null);
+    const closeEditor = () => {
+        setAdding(false);
+        addTrigger.current?.focus();
+    };
     const [text, setText] = useState("");
     const [saving, setSaving] = useState(false);
     if (names.length === 0 && !editing) return null;
@@ -436,7 +442,7 @@ export function OtherNames({
                 return;
             }
             setText("");
-            setAdding(false);
+            closeEditor();
             router.refresh();
         } finally {
             setSaving(false);
@@ -503,40 +509,53 @@ export function OtherNames({
                         })}
                     </span>
                 )}
-                {editing &&
-                    (adding ? (
-                        <form
-                            className="inline-flex items-center gap-1"
-                            onSubmit={(event) => {
-                                event.preventDefault();
-                                void add();
-                            }}
-                        >
-                            <Input
-                                autoFocus
-                                value={text}
-                                maxLength={200}
-                                onChange={(event) =>
-                                    setText(event.target.value)
-                                }
-                                onKeyDown={(event) => {
-                                    if (event.key === "Escape")
-                                        setAdding(false);
+                {editing && (
+                    <>
+                        {adding && (
+                            <form
+                                className="inline-flex items-center gap-1"
+                                onSubmit={(event) => {
+                                    event.preventDefault();
+                                    void add();
                                 }}
-                                aria-label={i18n("New nickname")}
-                                className="h-7 w-40"
-                            />
-                            <Button
-                                type="submit"
-                                size="sm"
-                                className="h-7"
-                                disabled={saving || !text.trim()}
                             >
-                                {i18n("Add")}
-                            </Button>
-                        </form>
-                    ) : (
-                        <Button
+                                <Input
+                                    autoFocus
+                                    value={text}
+                                    maxLength={200}
+                                    onChange={(event) =>
+                                        setText(event.target.value)
+                                    }
+                                    onKeyDown={(event) => {
+                                        if (event.key === "Escape" && !saving)
+                                            closeEditor();
+                                    }}
+                                    aria-label={i18n("New nickname")}
+                                    className="h-7 w-40"
+                                />
+                                <Button
+                                    type="submit"
+                                    size="sm"
+                                    className="h-7"
+                                    disabled={saving || !text.trim()}
+                                >
+                                    {i18n("Add")}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7"
+                                    disabled={saving}
+                                    onClick={closeEditor}
+                                >
+                                    {i18n("Cancel")}
+                                </Button>
+                            </form>
+                        )}
+                        <InlineEditorTrigger
+                            ref={addTrigger}
+                            open={adding}
                             size="sm"
                             variant="ghost"
                             className="h-7"
@@ -544,8 +563,9 @@ export function OtherNames({
                         >
                             <Plus className="size-3.5" />{" "}
                             {i18n("Add a nickname")}
-                        </Button>
-                    ))}
+                        </InlineEditorTrigger>
+                    </>
+                )}
             </div>
         </section>
     );

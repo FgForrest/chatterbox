@@ -47,7 +47,7 @@ At the top:
 
 ![Changing the profile from the folder row](images/profile-chip-menu.png)
 
-Below that are the player and the workflow widgets. The [transcript](transcripts.md), Learn review, [summary](summaries-and-tasks.md), and Task review appear in that order as the workflow reaches them. Finished widgets fold to one line while later work continues.
+Below that are the player and the workflow widgets. The [transcript](transcripts.md), Learn review, [summary](summaries-and-tasks.md), and Task review appear in that order as the workflow reaches them. Finished transcript and summary widgets fold to one line while later work continues. Completed Learn results move to **Knowledge**, the book icon in the item header; **Back** returns to the detail.
 
 ### The player
 
@@ -96,17 +96,23 @@ The picker focuses its search field. Before typing, it shows recently used folde
 
 A recording can sit in several folders at once. Click the **×** on a folder chip to take it out of that folder. An intended Organization folder also appears here; a **Nothing automatic** item offers **Share now** beside it until you share or cancel the placement.
 
-To manage folders, use **⋯ → Folder settings** next to a folder. Choose **New subfolder** from the folder’s **⋯** menu to create a child folder, or right-click the folder row to open the same menu. The panel contains **New subfolder**, **Rename**, **Move to…** and **Delete folder**. You can also drag folders to reorder or nest them. Deleting a folder never deletes the recordings in it.
+To manage a folder, use the row of icons below its name; the item count sits at the right end of the name. The row offers **Prepare an agenda** (calendar), **Folder tasks** (checklist), **Knowledge** (book), **New subfolder**, **Move to…** and, at the far right, **Folder settings** (**⋯**), as far as your permissions allow. An open view's icon is highlighted; click it again to return to the item. Received folders offer agenda preparation, **Folder tasks** and their own menu.
 
-Click a folder to show its items in the list. Use the current folder name in the breadcrumb or the **⋯** beside the list count to rename it, manage its mail addresses, change defaults, create a subfolder, move it, or delete it:
+Click a folder to show its items in the list. **New subfolder** and **Move to…** each open a small dialog; the folder tree's **⋯** menu and right-click menu also offer **New subfolder**. Drag folders to reorder or nest them. The current folder's name or the **⋯** at the end of the icon row opens its settings: rename, sharing, mail addresses, defaults, export and deletion. Deleting a folder never deletes its recordings:
 
 ![A folder](images/folder-pane.png)
 
 Folder settings shows **Name** as text; **Rename** opens an inline field. **Mail to folder** shows the address, a copy button and when mail last arrived, when mail is enabled. **Default processing profile** shows the current recording and mail profiles, including inherited settings; **Change** edits them. **Export** shows its targets or **Not configured**, with **Change** or **Configure** to manage exports to disk or Google Drive. See [Processing and profiles](processing-and-profiles.md#folder-default-profiles) and [Exports, backups and retention](exports-backups-retention.md#folder-exports).
 
+### Folder tasks
+
+**Folder tasks** shows the tasks of this folder and its subfolders in the right pane, grouped by folder. It starts on **All**; **Mine** and **Followed** narrow it, and the state and assignee filters work as on the Tasks page. **Add task** opens the form as the first row, with this folder preselected when it is a private folder; the button stays inactive until you add the task or cancel. **Open in Tasks** opens the Tasks page with the same folder and list. The Organization account has no **Mine** and cannot add own tasks.
+
+![Tasks of a folder](images/folder-tasks.png)
+
 ### Folder knowledge
 
-**Knowledge** beside the current folder's name opens a read-only view in place of the item detail. On a phone it opens its own view; **Back** returns to the list. It is available in every Private and Organization folder, for every viewer.
+**Knowledge** in the folder's icon row opens a read-only view in place of the item detail; it replaces **Folder tasks** if that is open. Click it again to return to the item; on a phone, **Back** returns to the list. It is available in every Private and Organization folder, for every viewer.
 
 **People**, **Things**, **Corrections** and **Facts** show what the folder's items and subfolders mention, with counts, last use, and evidence items. A person’s e-mail status is information, not a problem to fix. Private folders show your own and Organization knowledge; Organization folders show only Organization knowledge. Tabs load separately and have Previous/Next controls for longer lists.
 
