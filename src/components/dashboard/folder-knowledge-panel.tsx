@@ -182,7 +182,7 @@ export function KnowledgePanel({
                     {i18n("Back")}
                 </Button>
                 <h2 className="flex items-center gap-2 text-base font-semibold">
-                    <BookOpen className="size-4" />
+                    <BookOpen className="size-4 text-knowledge" />
                     {scope.kind === "folder"
                         ? i18n("Knowledge of folder {folder}", {
                               folder: label(scope.folder),
@@ -321,7 +321,7 @@ export function KnowledgePanel({
                         aria-selected={tab === entry.id}
                         aria-controls="folder-knowledge-content"
                         tabIndex={tab === entry.id ? 0 : -1}
-                        className="border-b-2 border-transparent px-2 py-3 text-sm text-muted-foreground aria-selected:border-primary aria-selected:font-semibold aria-selected:text-foreground"
+                        className="border-b-2 border-transparent px-2 py-3 text-sm text-muted-foreground aria-selected:border-knowledge aria-selected:font-semibold aria-selected:text-knowledge"
                         onClick={() => {
                             setTab(entry.id);
                             setOffset(0);

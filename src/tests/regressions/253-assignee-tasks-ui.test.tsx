@@ -27,7 +27,8 @@ const { navigation, translate } = vi.hoisted(() => ({
         push: vi.fn(),
         replace: vi.fn(),
     },
-    translate: (text: string) => text,
+    translate: (text: string | { message: string }) =>
+        typeof text === "string" ? text : text.message,
 }));
 vi.mock("next/navigation", () => ({
     useRouter: () => navigation,
@@ -983,8 +984,11 @@ describe("#253 task desk UI", () => {
         expect(text.closest("li")).toBe(list?.firstElementChild);
         expect(add.getAttribute("aria-expanded")).toBe("true");
         act(() => add.focus());
+        expect(add.getAttribute("aria-disabled")).toBe("true");
+        expect(add.classList.contains("aria-disabled:opacity-50")).toBe(true);
         fireEvent.click(add);
-        expect(document.activeElement).toBe(text);
+        expect(document.activeElement).toBe(add);
+        expect(screen.getByRole("textbox", { name: "Task text" })).toBe(text);
         await act(async () => {});
     });
     it.each([

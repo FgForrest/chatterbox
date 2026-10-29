@@ -90,8 +90,6 @@ describe("folder settings export", () => {
                             open
                             onOpenChange={setOpen}
                             onRename={vi.fn()}
-                            onCreate={vi.fn()}
-                            onMove={vi.fn()}
                             onDelete={vi.fn()}
                             exportProviders={{
                                 filesystem: false,
@@ -166,8 +164,6 @@ describe("folder settings export", () => {
                     open
                     onOpenChange={vi.fn()}
                     onRename={vi.fn()}
-                    onCreate={vi.fn()}
-                    onMove={vi.fn()}
                     onDelete={vi.fn()}
                     exportProviders={{
                         filesystem: true,
@@ -213,8 +209,6 @@ describe("folder settings export", () => {
                     open
                     onOpenChange={vi.fn()}
                     onRename={vi.fn()}
-                    onCreate={vi.fn()}
-                    onMove={vi.fn()}
                     onDelete={vi.fn()}
                     exportProviders={{
                         filesystem: true,
@@ -283,8 +277,6 @@ describe("folder settings export", () => {
                     open
                     onOpenChange={vi.fn()}
                     onRename={vi.fn()}
-                    onCreate={vi.fn()}
-                    onMove={vi.fn()}
                     onDelete={vi.fn()}
                     exportProviders={{
                         filesystem: false,
@@ -334,8 +326,6 @@ describe("folder settings export", () => {
                     open
                     onOpenChange={vi.fn()}
                     onRename={vi.fn()}
-                    onCreate={vi.fn()}
-                    onMove={vi.fn()}
                     onDelete={vi.fn()}
                     exportProviders={{
                         filesystem: true,
@@ -373,8 +363,6 @@ describe("folder settings export", () => {
                     open
                     onOpenChange={vi.fn()}
                     onRename={vi.fn()}
-                    onCreate={vi.fn()}
-                    onMove={vi.fn()}
                     onDelete={vi.fn()}
                     exportProviders={{
                         filesystem: true,
@@ -425,8 +413,6 @@ describe("folder settings export", () => {
                     open
                     onOpenChange={vi.fn()}
                     onRename={vi.fn()}
-                    onCreate={vi.fn()}
-                    onMove={vi.fn()}
                     onDelete={vi.fn()}
                     exportProviders={{
                         filesystem: true,
@@ -463,8 +449,6 @@ describe("folder settings export", () => {
                     open
                     onOpenChange={vi.fn()}
                     onRename={vi.fn()}
-                    onCreate={vi.fn()}
-                    onMove={vi.fn()}
                     onDelete={vi.fn()}
                     isOrgAccount={isOrgAccount}
                     exportProviders={{
@@ -538,8 +522,6 @@ describe("folder settings export", () => {
                     open
                     onOpenChange={vi.fn()}
                     onRename={vi.fn()}
-                    onCreate={vi.fn()}
-                    onMove={vi.fn()}
                     onDelete={vi.fn()}
                     exportProviders={{
                         filesystem: false,

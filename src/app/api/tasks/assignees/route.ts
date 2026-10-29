@@ -6,9 +6,11 @@ import { listTrackedAssignees } from "@/lib/tasks/tasks";
 /** Assignees of all the caller's Tracked tasks, across states and filters. */
 export const GET = apiHandler(async (request) => {
     const viewer = await requireTaskViewer(request);
+    const params = new URL(request.url).searchParams;
     const assignees = await listTrackedAssignees(
         viewer,
-        new URL(request.url).searchParams.get("organization") === "true",
+        params.get("organization") === "true",
+        params.get("tab") === "all" ? "all" : "followed",
     );
     return NextResponse.json({ assignees });
 });

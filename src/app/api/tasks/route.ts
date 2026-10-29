@@ -21,7 +21,7 @@ const STATES = new Set<TaskStateFilter>(["open", "done", "dropped", "all"]);
 const DUES = new Set<string>(["overdue", "week", "none"]);
 
 /**
- * The caller's tasks: `?tab=mine|tracked&state=&folder=&assignee=&due=&today=&sort=`.
+ * The caller's tasks: `?tab=mine|followed|all&state=&folder=&assignee=&due=&today=&sort=`.
  * `assignee` is a person id or `none` for unassigned; ignored on Mine.
  * Unknown values fall back to the defaults (mine, open, newest first).
  */
@@ -31,9 +31,11 @@ export const GET = apiHandler(async (request) => {
     const state = params.get("state") as TaskStateFilter | null;
     const due = params.get("due");
     const tasks = await listTasks(viewer, {
-        tab: (["tracked", "followed"].includes(params.get("tab") ?? "")
-            ? "followed"
-            : "mine") as TaskTab,
+        tab: (params.get("tab") === "all"
+            ? "all"
+            : ["tracked", "followed"].includes(params.get("tab") ?? "")
+              ? "followed"
+              : "mine") as TaskTab,
         organization: params.get("organization") === "true",
         state: state && STATES.has(state) ? state : "open",
         folderId: params.get("folder") || null,

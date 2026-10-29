@@ -57,8 +57,6 @@ const nested: RecordingFolder = {
     name: "Nested",
 };
 const rename = vi.fn().mockResolvedValue(undefined);
-const create = vi.fn().mockResolvedValue(undefined);
-const move = vi.fn().mockResolvedValue(undefined);
 const remove = vi.fn().mockResolvedValue(undefined);
 const close = vi.fn();
 
@@ -103,8 +101,6 @@ function panel(organization = false, canCurate = false, isRoot = false) {
                 open
                 onOpenChange={close}
                 onRename={rename}
-                onCreate={create}
-                onMove={move}
                 onDelete={remove}
                 exportProviders={{
                     filesystem: false,
@@ -134,7 +130,7 @@ describe("folder settings panel", () => {
         expect(document.activeElement?.tagName).not.toBe("INPUT");
         expect(window.getSelection()?.toString()).toBe("");
     });
-    it("renames, creates a child and moves without offering itself or descendants", async () => {
+    it("renames and keeps create and move out of settings", async () => {
         panel();
         fireEvent.click(screen.getByRole("button", { name: "Rename" }));
         fireEvent.change(screen.getByRole("textbox", { name: "Folder name" }), {
@@ -144,26 +140,10 @@ describe("folder settings panel", () => {
         await waitFor(() =>
             expect(rename).toHaveBeenCalledWith("meetings", "Renamed"),
         );
-        fireEvent.click(screen.getByRole("button", { name: "New subfolder" }));
-        fireEvent.change(
-            screen.getByRole("textbox", { name: "New subfolder name" }),
-            { target: { value: "Invented child" } },
-        );
-        fireEvent.click(screen.getByRole("button", { name: "New subfolder" }));
-        await waitFor(() =>
-            expect(create).toHaveBeenCalledWith("meetings", "Invented child"),
-        );
-        fireEvent.click(screen.getByRole("button", { name: "Move to…" }));
-        const parents = screen.getByRole("combobox", {
-            name: "Destination folder",
-        });
-        expect(parents.textContent).not.toContain("Nested");
-        expect(parents.textContent).not.toContain("Meetings");
-        fireEvent.change(parents, { target: { value: "other" } });
-        fireEvent.click(screen.getByRole("button", { name: "Move to…" }));
-        await waitFor(() =>
-            expect(move).toHaveBeenCalledWith("meetings", "other"),
-        );
+        expect(
+            screen.queryByRole("button", { name: "New subfolder" }),
+        ).toBeNull();
+        expect(screen.queryByRole("button", { name: "Move to…" })).toBeNull();
     });
     it("confirms deletion with affected mail addresses", async () => {
         panel();
@@ -191,18 +171,9 @@ describe("folder settings panel", () => {
             screen.getByRole("button", { name: "Processing" }),
         ).toHaveProperty("disabled", true);
         expect(screen.queryByRole("button", { name: "Rename" })).toBeNull();
-        fireEvent.click(screen.getByRole("button", { name: "New subfolder" }));
-        fireEvent.change(
-            screen.getByRole("textbox", { name: "New subfolder name" }),
-            { target: { value: "Invented member child" } },
-        );
-        fireEvent.click(screen.getByRole("button", { name: "New subfolder" }));
-        await waitFor(() =>
-            expect(create).toHaveBeenCalledWith(
-                "meetings",
-                "Invented member child",
-            ),
-        );
+        expect(
+            screen.queryByRole("button", { name: "New subfolder" }),
+        ).toBeNull();
         expect(screen.queryByRole("button", { name: "Move to…" })).toBeNull();
         expect(screen.queryByRole("button", { name: "Configure" })).toBeNull();
         expect(

@@ -399,7 +399,7 @@ it("keeps Calendar export accessible to a non-manager organizer", async () => {
 it.each([
     "personal",
     "org",
-] as const)("renders three plain folder action icons for %s", (scope) => {
+] as const)("renders neutral action icons and a purple open Knowledge toggle for %s", (scope) => {
     const current = { ...folder, scope };
     render(
         <LibraryLocationHeader
@@ -427,9 +427,13 @@ it.each([
     expect(knowledge.getAttribute("aria-pressed")).toBe("true");
     expect(knowledge.className).toContain("bg-accent");
     expect(knowledge.className).not.toContain("border-organization");
-    expect(Boolean(knowledge.querySelector("svg.text-organization"))).toBe(
-        scope === "org",
-    );
+    expect(knowledge.querySelector("svg.text-organization")).toBeNull();
+    expect(knowledge.querySelector("svg.text-knowledge")).toBeTruthy();
+    expect(
+        screen
+            .getByRole("button", { name: "Prepare an agenda" })
+            .querySelector("svg.text-meeting"),
+    ).toBeNull();
 });
 
 it("uses the per-deployment English name and cancellation never deletes", () => {

@@ -101,7 +101,7 @@ Požadavek na obnovu přes `/api/knowledge/care/restore` přijímá nejvýše 32
 
 ## Znalosti složky
 
-Na hlavní stránce otevřete složku a vedle jejího názvu zvolte **Znalosti**. Pohled může číst každý, kdo složku vidí. Zahrnuje položky složky a všech jejích podsložek, bez nadřazených složek. Lidé pocházejí z potvrzených mluvčích, oprav a dokladů faktů; věci z oprav a dokladů. Opravy ukazují přeslechnuté podoby použité v těchto položkách a počty použití. Fakta ukazují podpořené doklady s položkou a datem včetně pošty.
+Na hlavní stránce otevřete složku a v řádku ikon pod jejím názvem zvolte **Znalosti** (knihu); dalším kliknutím se vrátíte k položce. Znalosti vlastní složky nebo složky Organizace může číst každý, kdo složku vidí. Zahrnují položky složky a všech jejích podsložek, bez nadřazených složek. Lidé pocházejí z potvrzených mluvčích, oprav a dokladů faktů; věci z oprav a dokladů. Opravy ukazují přeslechnuté podoby použité v těchto položkách a počty použití. Fakta ukazují podpořené doklady s položkou a datem včetně pošty.
 
 Kurátoři navíc u záznamů Organizace, oprav a faktů vidí označení otevřených problémů. Rozbalením lze přímo ve složce použít stejné opravy jako v Péči. Ostatní čtenáři mají nadále pohled pouze pro čtení.
 

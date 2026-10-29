@@ -1,8 +1,8 @@
 "use client";
 
-import { FolderInput, FolderPlus, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { type ComponentProps, useMemo, useRef, useState } from "react";
+import { type ComponentProps, useMemo, useState } from "react";
 import { useConfirm } from "@/components/confirm-dialog";
 import { FolderDefaultProfiles } from "@/components/dashboard/folder-default-profiles";
 import {
@@ -26,17 +26,12 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { NativeSelect } from "@/components/ui/native-select";
 import { useFolderExportLabel } from "@/hooks/use-folder-export-label";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import type { ExportProvidersAvailability } from "@/lib/folder-exports/types";
 import { canManageOrganization } from "@/lib/folders/drag";
-import {
-    ancestorFolderIds,
-    descendantFolderIds,
-} from "@/lib/folders/hierarchy";
+import { ancestorFolderIds } from "@/lib/folders/hierarchy";
 import { joinFolderPath, matchFolders } from "@/lib/folders/navigation";
-import { canCreateSubfolder } from "@/lib/folders/permissions";
 import type { RecordingFolder } from "@/types/folder";
 
 /** Settings for a folder the viewer owns or curates; received attachments have none. */
@@ -54,14 +49,11 @@ function OwnedFolderSettingsPanel({
     open,
     onOpenChange,
     onRename,
-    onCreate,
-    onMove,
     onDelete,
     exportProviders,
     mailEnabled = false,
     canCurate = false,
     isOrgAccount = false,
-    initialAction,
     reopenExport,
     onReopenHandled,
 }: {
@@ -71,14 +63,11 @@ function OwnedFolderSettingsPanel({
     open: boolean;
     onOpenChange: (open: boolean) => void;
     onRename: (id: string, name: string) => Promise<void>;
-    onCreate: (parentId: string, name: string) => Promise<void>;
-    onMove: (id: string, parentId: string) => Promise<void>;
     onDelete: (id: string) => Promise<void>;
     exportProviders: ExportProvidersAvailability;
     mailEnabled?: boolean;
     canCurate?: boolean;
     isOrgAccount?: boolean;
-    initialAction?: "create";
     reopenExport?: "form" | "list";
     onReopenHandled?: () => void;
 }) {
@@ -88,8 +77,6 @@ function OwnedFolderSettingsPanel({
     const confirm = useConfirm();
     const [name, setName] = useState(folder.name);
     const [renaming, setRenaming] = useState(false);
-    const [creating, setCreating] = useState(initialAction === "create");
-    const [moving, setMoving] = useState(false);
     const [exportStatus, setExportStatus] = useState<FolderExportStatus>({
         configured: [],
         loading: true,
@@ -98,9 +85,6 @@ function OwnedFolderSettingsPanel({
     });
     const exports = exportStatus.configured;
     const exportLabel = useFolderExportLabel();
-    const [subfolder, setSubfolder] = useState("");
-    const subfolderInput = useRef<HTMLInputElement>(null);
-    const [parentId, setParentId] = useState(folder.parentId ?? "");
     const [saving, setSaving] = useState(false);
     const [exportOpen, setExportOpen] = useState(false);
     const [exportPicking, setExportPicking] = useState(false);
@@ -120,8 +104,6 @@ function OwnedFolderSettingsPanel({
     const inheritedExportFolder = folders.find(
         (item) => item.id === exportStatus.inheritedFolderId,
     );
-    const canCreate = canCreateSubfolder(folder, canCurate, isOrgAccount);
-    const subtree = descendantFolderIds(folders, folder.id);
     const entries = matchFolders(folders, "", label);
     const path = joinFolderPath(
         entries.find((entry) => entry.folder.id === folder.id)?.path,
@@ -144,11 +126,7 @@ function OwnedFolderSettingsPanel({
             >
                 <DialogContent
                     className="max-h-[85dvh] overflow-y-auto sm:max-w-xl"
-                    onOpenAutoFocus={(event) => {
-                        event.preventDefault();
-                        if (initialAction === "create")
-                            subfolderInput.current?.focus();
-                    }}
+                    onOpenAutoFocus={(event) => event.preventDefault()}
                 >
                     <DialogHeader>
                         <DialogTitle>{label(folder)}</DialogTitle>
@@ -271,151 +249,48 @@ function OwnedFolderSettingsPanel({
                             </Button>
                         )}
                     </section>
-                    {canCreate && !creating && (
-                        <Button
-                            variant="outline"
-                            onClick={() => setCreating(true)}
-                        >
-                            <FolderPlus className="size-4" />
-                            {i18n("New subfolder")}
-                        </Button>
-                    )}
-                    {canCreate && creating && (
-                        <div className="flex items-center gap-2 border-t pt-3">
-                            <Input
-                                ref={subfolderInput}
-                                aria-label={i18n("New subfolder name")}
-                                placeholder={i18n("Folder name")}
-                                maxLength={100}
-                                value={subfolder}
-                                onChange={(event) =>
-                                    setSubfolder(event.target.value)
-                                }
-                                disabled={saving}
-                            />
+                    {folder.kind === "custom" && canManage && (
+                        <div className="border-t pt-3">
                             <Button
-                                variant="outline"
-                                disabled={saving || !subfolder.trim()}
-                                onClick={() =>
-                                    void save(async () => {
-                                        await onCreate(
-                                            folder.id,
-                                            subfolder.trim(),
-                                        );
-                                        setSubfolder("");
-                                        setCreating(false);
-                                    })
-                                }
+                                variant="destructive"
+                                disabled={saving}
+                                onClick={() => {
+                                    void confirm({
+                                        title: i18n("Delete “{name}”?", {
+                                            name: folder.name,
+                                        }),
+                                        description: (
+                                            <>
+                                                <p>
+                                                    {folder.scope === "org"
+                                                        ? i18n(
+                                                              "This folder and all its subfolders will be deleted for everyone. Their recordings stay shared and move to the Organization folder.",
+                                                          )
+                                                        : i18n(
+                                                              "This folder and all its subfolders will be deleted. Recordings stay intact; only their folder assignments are removed.",
+                                                          )}
+                                                </p>
+                                                {mailEnabled && (
+                                                    <FolderDeletionAddresses
+                                                        folderId={folder.id}
+                                                    />
+                                                )}
+                                            </>
+                                        ),
+                                        confirmLabel: i18n("Delete folder"),
+                                        pendingLabel: i18n("Deleting…"),
+                                        destructive: true,
+                                        onConfirm: async () => {
+                                            await onDelete(folder.id);
+                                            onOpenChange(false);
+                                        },
+                                    });
+                                }}
                             >
-                                <FolderPlus className="size-4" />
-                                {i18n("New subfolder")}
+                                <Trash2 className="size-4" />
+                                {i18n("Delete folder")}
                             </Button>
                         </div>
-                    )}
-                    {folder.kind === "custom" && canManage && (
-                        <>
-                            {!moving && (
-                                <Button
-                                    variant="outline"
-                                    onClick={() => setMoving(true)}
-                                >
-                                    <FolderInput className="size-4" />
-                                    {i18n("Move to…")}
-                                </Button>
-                            )}
-                            {moving && (
-                                <div className="flex items-center gap-2 border-t pt-3">
-                                    <NativeSelect
-                                        aria-label={i18n("Destination folder")}
-                                        value={parentId}
-                                        onChange={(event) =>
-                                            setParentId(event.target.value)
-                                        }
-                                        className="min-w-0 flex-1"
-                                    >
-                                        {entries
-                                            .filter(
-                                                (entry) =>
-                                                    !entry.folder
-                                                        .receivedFolder &&
-                                                    entry.folder.scope ===
-                                                        folder.scope &&
-                                                    !subtree.has(
-                                                        entry.folder.id,
-                                                    ),
-                                            )
-                                            .map((entry) => (
-                                                <option
-                                                    key={entry.folder.id}
-                                                    value={entry.folder.id}
-                                                >
-                                                    {joinFolderPath(
-                                                        entry.path,
-                                                        label(entry.folder),
-                                                    )}
-                                                </option>
-                                            ))}
-                                    </NativeSelect>
-                                    <Button
-                                        variant="outline"
-                                        disabled={
-                                            saving ||
-                                            !parentId ||
-                                            parentId === folder.parentId
-                                        }
-                                        onClick={() =>
-                                            void save(() =>
-                                                onMove(folder.id, parentId),
-                                            )
-                                        }
-                                    >
-                                        <FolderInput className="size-4" />
-                                        {i18n("Move to…")}
-                                    </Button>
-                                </div>
-                            )}
-                            <div className="border-t pt-3">
-                                <Button
-                                    variant="destructive"
-                                    disabled={saving}
-                                    onClick={() => {
-                                        void confirm({
-                                            title: i18n("Delete “{name}”?", {
-                                                name: folder.name,
-                                            }),
-                                            description: (
-                                                <>
-                                                    <p>
-                                                        {folder.scope === "org"
-                                                            ? i18n(
-                                                                  "This folder and all its subfolders will be deleted for everyone. Their recordings stay shared and move to the Organization folder.",
-                                                              )
-                                                            : i18n(
-                                                                  "This folder and all its subfolders will be deleted. Recordings stay intact; only their folder assignments are removed.",
-                                                              )}
-                                                    </p>
-                                                    {mailEnabled && (
-                                                        <FolderDeletionAddresses
-                                                            folderId={folder.id}
-                                                        />
-                                                    )}
-                                                </>
-                                            ),
-                                            confirmLabel: i18n("Delete folder"),
-                                            pendingLabel: i18n("Deleting…"),
-                                            destructive: true,
-                                            onConfirm: async () => {
-                                                await onDelete(folder.id);
-                                                onOpenChange(false);
-                                            },
-                                        });
-                                    }}
-                                >
-                                    <Trash2 className="size-4" />
-                                    {i18n("Delete folder")}
-                                </Button>
-                            </div>
-                        </>
                     )}
                 </DialogContent>
             </Dialog>

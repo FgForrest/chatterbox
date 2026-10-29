@@ -63,7 +63,47 @@ describe("task assignee routes", () => {
         expect(response.status).toBe(200);
         expect(await response.json()).toEqual({ assignees });
         expect(requireTaskViewer).toHaveBeenCalledWith(request);
-        expect(listTrackedAssignees).toHaveBeenCalledWith(viewer, false);
+        expect(listTrackedAssignees).toHaveBeenCalledWith(
+            viewer,
+            false,
+            "followed",
+        );
+    });
+
+    it.each([
+        "mine",
+        "followed",
+        "tracked",
+        "all",
+        "unknown",
+    ])("parses tab=%s with a folder and assignee", async (tab) => {
+        const response = await getTasks(
+            new Request(
+                `http://localhost/api/tasks?tab=${tab}&folder=folder-1&assignee=person-1`,
+            ),
+        );
+        expect(response.status).toBe(200);
+        expect(listTasks).toHaveBeenCalledWith(
+            viewer,
+            expect.objectContaining({
+                tab:
+                    tab === "all"
+                        ? "all"
+                        : tab === "followed" || tab === "tracked"
+                          ? "followed"
+                          : "mine",
+                folderId: "folder-1",
+                assignee: "person-1",
+            }),
+        );
+    });
+
+    it("loads All assignees without losing the authenticated viewer", async () => {
+        const response = await getAssignees(
+            new Request("http://localhost/api/tasks/assignees?tab=all"),
+        );
+        expect(response.status).toBe(200);
+        expect(listTrackedAssignees).toHaveBeenCalledWith(viewer, false, "all");
     });
 
     it.each([
