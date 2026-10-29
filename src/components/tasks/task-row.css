@@ -5,7 +5,8 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-    .task-row .task-row-actions > :not(.task-following),
+    .task-row .task-row-hover-actions,
+    .task-row .task-row-actions > button:not(.task-following),
     .task-row .task-row-folder-action {
         opacity: 0;
         transition: opacity 120ms ease;
