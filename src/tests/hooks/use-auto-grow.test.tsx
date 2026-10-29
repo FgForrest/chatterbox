@@ -1,12 +1,31 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, screen } from "@testing-library/react";
+import {
+    act,
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+} from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoGrow } from "@/hooks/use-auto-grow";
 
 function Field({ value }: { value: string }) {
     const ref = useAutoGrow(value);
     return <textarea ref={ref} value={value} readOnly />;
+}
+
+function TypedField() {
+    const [value, setValue] = useState("Draft");
+    const ref = useAutoGrow(value);
+    return (
+        <textarea
+            ref={ref}
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+        />
+    );
 }
 
 afterEach(() => {
@@ -69,6 +88,31 @@ describe("useAutoGrow", () => {
         expect(field.style.height).toBe("600px");
         view.rerender(<Field value={"x".repeat(12)} />);
         expect(field.style.height).toBe("120px");
+    });
+
+    it("measures a controlled field once per keystroke and keeps one observer", () => {
+        let observers = 0;
+        vi.stubGlobal(
+            "ResizeObserver",
+            class {
+                observe = vi.fn();
+                disconnect = vi.fn();
+                constructor() {
+                    observers++;
+                }
+            },
+        );
+        const height = vi
+            .spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get")
+            .mockReturnValue(120);
+        render(<TypedField />);
+        const field = screen.getByRole("textbox");
+        height.mockClear();
+        fireEvent.input(field, { target: { value: "Draft, longer" } });
+        fireEvent.input(field, { target: { value: "Draft, longer still" } });
+        expect(field).toHaveProperty("value", "Draft, longer still");
+        expect(height).toHaveBeenCalledTimes(2);
+        expect(observers).toBe(1);
     });
 
     it("remeasures a hidden mount when its width becomes visible", () => {

@@ -242,7 +242,10 @@ beforeEach(() => {
     resetState();
 });
 
-afterEach(cleanup);
+afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+});
 
 describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
     it("edits summary prose and key points in place and cancels without a write", () => {
@@ -752,16 +755,26 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         }
     });
 
-    it("keeps degraded multi-pass provenance amber with its explanation", () => {
+    it("keeps degraded multi-pass provenance amber with its explanation", async () => {
         state.summaryData = summary({
             multiPass: { roundsRequested: 3, passesUsed: 1, merged: false },
         });
+        vi.stubGlobal(
+            "ResizeObserver",
+            class {
+                observe() {}
+                unobserve() {}
+                disconnect() {}
+            },
+        );
         renderWidget(kind);
         const label = within(
             screen.getByTestId("summary-provenance"),
         ).getByText("multi-pass · {passes}");
         expect(label.classList.contains("text-amber-600")).toBe(true);
-        expect(label.getAttribute("title")).toBe(
+        expect(label.tabIndex).toBe(0);
+        act(() => label.focus());
+        expect((await screen.findByRole("tooltip")).textContent).toBe(
             "Only 1 of {requested} passes succeeded, so it is shown unmerged.",
         );
     });

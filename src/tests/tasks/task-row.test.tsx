@@ -188,6 +188,16 @@ describe.each([
     });
 });
 
+it("opens the reason when the status mark is tapped", async () => {
+    const { mark } = renderTask(task({ assignee: null }));
+    if (!mark) throw new Error("Missing status mark");
+    fireEvent.pointerDown(mark, { pointerType: "touch" });
+    fireEvent.click(mark);
+    expect((await screen.findByRole("tooltip")).textContent).toBe(
+        "Nobody is assigned yet. Only the recording's owner or a curator can mark it done.",
+    );
+});
+
 it("keeps a status mark without a reason out of the tab order", () => {
     const { mark } = renderTask(
         task({ canEdit: true, canClose: true, status: "dropped" }),
@@ -266,6 +276,45 @@ it("keeps a disabled done checkbox in place while a save is pending", () => {
     expect(screen.queryByRole("checkbox")).toBeNull();
     expect(screen.getByRole("img", { name: "Open" })).toBeTruthy();
 });
+it("opens and focuses the note editor while ticking done is still saving", () => {
+    const onChange = vi.fn();
+    const editable = task({ canEdit: true, canClose: true });
+    const { rerender } = render(
+        <TaskRow task={editable} organizationOnly onChange={onChange} />,
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "Done" }));
+    expect(onChange).toHaveBeenCalledWith(
+        { status: "done" },
+        { status: "done" },
+    );
+    rerender(
+        <TaskRow
+            task={{ ...editable, status: "done" }}
+            pending
+            organizationOnly
+            onChange={onChange}
+        />,
+    );
+    const note = screen.getByRole("textbox", { name: "Note" });
+    expect(document.activeElement).toBe(note);
+    expect(screen.getByRole("button", { name: "Save note" })).toHaveProperty(
+        "disabled",
+        true,
+    );
+    rerender(
+        <TaskRow
+            task={{ ...editable, status: "done" }}
+            organizationOnly
+            onChange={onChange}
+        />,
+    );
+    expect(document.activeElement).toBe(note);
+    expect(screen.getByRole("button", { name: "Save note" })).toHaveProperty(
+        "disabled",
+        false,
+    );
+});
+
 describe.each([true, false])("task action line with editing=%s", (canEdit) => {
     it.each([
         true,

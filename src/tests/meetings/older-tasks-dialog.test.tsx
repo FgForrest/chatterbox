@@ -243,7 +243,7 @@ it("selects real checkboxes, updates the footer and adds each task in selection 
     expect(screen.getByText("Nothing selected")).toBeTruthy();
 });
 
-it("keeps failed tasks selected and the dialog open, continues the batch, and retries only failures", async () => {
+it("stops the batch at a failure, keeps the rest selected and the dialog open, and retries them", async () => {
     const base = fetchMock.getMockImplementation();
     let fail = true;
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
@@ -275,22 +275,29 @@ it("keeps failed tasks selected and the dialog open, continues the batch, and re
     expect(
         screen.getByRole("checkbox", { name: "Review dates" }),
     ).toHaveProperty("checked", true);
-    expect(screen.getByText("Selected: 1")).toBeTruthy();
-    expect(screen.queryByRole("checkbox", { name: "Check agenda" })).toBeNull();
-    expect(toastError).toHaveBeenCalledWith("Could not save the agenda");
+    expect(
+        screen.getByRole("checkbox", { name: "Check agenda" }),
+    ).toHaveProperty("checked", true);
+    expect(
+        screen.queryByRole("checkbox", { name: "Prepare Žluťoučký report" }),
+    ).toBeNull();
+    expect(screen.getByText("Selected: 2")).toBeTruthy();
+    expect(toastError).toHaveBeenCalledExactlyOnceWith(
+        "Could not save the agenda",
+    );
     expect(
         fetchMock.mock.calls.filter(([, init]) => init.method === "POST"),
-    ).toHaveLength(3);
+    ).toHaveLength(2);
     fail = false;
     fetchMock.mockClear();
     await act(async () =>
-        fireEvent.click(screen.getByRole("button", { name: "Add 1 task" })),
+        fireEvent.click(screen.getByRole("button", { name: "Add 2 tasks" })),
     );
     expect(
         fetchMock.mock.calls
             .filter(([, init]) => init.method === "POST")
             .map(([, init]) => JSON.parse(String(init.body))),
-    ).toEqual([{ taskId: "Review dates" }]);
+    ).toEqual([{ taskId: "Review dates" }, { taskId: "Check agenda" }]);
     expect(screen.queryByRole("dialog")).toBeNull();
 });
 

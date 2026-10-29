@@ -2,8 +2,7 @@
 
 import { Plus, Search } from "lucide-react";
 import { useExtracted, useFormatter } from "next-intl";
-import { useEffect, useState } from "react";
-import { toast } from "sonner";
+import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -44,6 +43,7 @@ export function OlderTasksDialog({
     const [query, setQuery] = useState("");
     const [selected, setSelected] = useState(new Map<string, OlderTask>());
     const [adding, setAdding] = useState(false);
+    const rowId = useId();
     const loadError = i18n("Could not load tasks");
     useEffect(() => {
         if (!open) {
@@ -87,38 +87,34 @@ export function OlderTasksDialog({
         setAdding(true);
         let failed = false;
         for (const task of selection) {
-            try {
-                const saved = await mutate(
-                    "/tasks",
-                    "POST",
-                    { taskId: task.id },
-                    (value) => ({
-                        ...value,
-                        tasks: [
-                            ...value.tasks.filter(
-                                (entry) => entry.id !== task.id,
-                            ),
-                            {
-                                ...task,
-                                removedAt: null,
-                                agendaNote: null,
-                                agendaOrigin: "older",
-                                position: 100000,
-                            },
-                        ],
-                    }),
-                );
-                if (saved) {
-                    setSelected((current) => {
-                        const next = new Map(current);
-                        next.delete(task.id);
-                        return next;
-                    });
-                } else failed = true;
-            } catch {
+            // mutate reports its own failure; stop there so an outage shows one error and the rest stay selected.
+            const saved = await mutate(
+                "/tasks",
+                "POST",
+                { taskId: task.id },
+                (value) => ({
+                    ...value,
+                    tasks: [
+                        ...value.tasks.filter((entry) => entry.id !== task.id),
+                        {
+                            ...task,
+                            removedAt: null,
+                            agendaNote: null,
+                            agendaOrigin: "older",
+                            position: 100000,
+                        },
+                    ],
+                }),
+            ).catch(() => false);
+            if (!saved) {
                 failed = true;
-                toast.error(i18n("Could not save the agenda"));
+                break;
             }
+            setSelected((current) => {
+                const next = new Map(current);
+                next.delete(task.id);
+                return next;
+            });
         }
         setAdding(false);
         if (!failed) {
@@ -197,7 +193,7 @@ export function OlderTasksDialog({
                             {i18n("Nothing matches the search.")}
                         </p>
                     ) : (
-                        groups.map((group) => (
+                        groups.map((group, groupIndex) => (
                             <section
                                 key={group.name ?? "unassigned"}
                                 className="space-y-2"
@@ -211,7 +207,7 @@ export function OlderTasksDialog({
                                     )}
                                 </h3>
                                 <ul className="divide-y rounded-lg border">
-                                    {group.tasks.map((task) => {
+                                    {group.tasks.map((task, taskIndex) => {
                                         const source =
                                             task.evidence ?? task.recording;
                                         return (
@@ -226,7 +222,8 @@ export function OlderTasksDialog({
                                                     <input
                                                         type="checkbox"
                                                         className="mt-1 size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-ring"
-                                                        aria-label={task.text}
+                                                        aria-labelledby={`${rowId}-${groupIndex}-${taskIndex}`}
+                                                        aria-describedby={`${rowId}-${groupIndex}-${taskIndex}-meta`}
                                                         checked={selected.has(
                                                             task.id,
                                                         )}
@@ -256,10 +253,16 @@ export function OlderTasksDialog({
                                                         }}
                                                     />
                                                     <span className="min-w-0">
-                                                        <span className="block whitespace-pre-wrap">
+                                                        <span
+                                                            id={`${rowId}-${groupIndex}-${taskIndex}`}
+                                                            className="block whitespace-pre-wrap"
+                                                        >
                                                             {task.text}
                                                         </span>
-                                                        <span className="block text-xs text-muted-foreground">
+                                                        <span
+                                                            id={`${rowId}-${groupIndex}-${taskIndex}-meta`}
+                                                            className="block text-xs text-muted-foreground"
+                                                        >
                                                             {source?.title ??
                                                                 i18n(
                                                                     "Own task",

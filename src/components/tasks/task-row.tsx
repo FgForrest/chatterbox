@@ -114,6 +114,9 @@ export function TaskRow({
     const i18n = useExtracted();
     const format = useFormatter();
     const [noteOpen, setNoteOpen] = useState(false);
+    // The permission, not the pending-adjusted copy: ticking done opens the editor while that save is in flight.
+    const canNote = suppliedTask.canClose && !readOnly && !notesReadOnly;
+    const [reasonOpen, setReasonOpen] = useState(false);
     const noteInput = useRef<HTMLTextAreaElement>(null);
     useEffect(() => {
         if (noteOpen) noteInput.current?.focus();
@@ -192,8 +195,17 @@ export function TaskRow({
         <li className="task-row group flex items-start gap-3 p-3 text-sm">
             {closeReason ? (
                 <TooltipProvider>
-                    <Tooltip>
-                        <TooltipTrigger asChild>{statusMark}</TooltipTrigger>
+                    <Tooltip open={reasonOpen} onOpenChange={setReasonOpen}>
+                        <TooltipTrigger
+                            asChild
+                            onClick={(event) => {
+                                // A tap opens the reason too; touch has no hover and Radix closes on click.
+                                event.preventDefault();
+                                setReasonOpen(true);
+                            }}
+                        >
+                            {statusMark}
+                        </TooltipTrigger>
                         <TooltipContent className="max-w-72">
                             {closeReason}
                         </TooltipContent>
@@ -320,7 +332,7 @@ export function TaskRow({
                         </div>
                     </div>
                 )}
-                {noteOpen && task.canClose && !notesReadOnly && (
+                {noteOpen && canNote && (
                     <div className="space-y-2">
                         <Textarea
                             autoGrow
@@ -340,6 +352,7 @@ export function TaskRow({
                             cancelLabel={i18n("Skip")}
                             saveLabel={i18n("Save note")}
                             onCancel={() => setNoteOpen(false)}
+                            saveDisabled={pending}
                             onSave={() => {
                                 const note = noteDraft.trim() || null;
                                 onChange({ note }, { note });
