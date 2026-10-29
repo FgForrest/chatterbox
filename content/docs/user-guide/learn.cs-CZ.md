@@ -57,7 +57,7 @@ Přehled nemusíte otevírat: návrhy se zobrazují i přímo v přepisu. Návrh
 
 ## Po kontrole
 
-![Co kontrola provedla](images/learn-results.png)
+![Panel Znalosti položky po kontrole](images/item-knowledge.png)
 
 Dokončené stavy Učení z detailu zmizí. Výsledky otevřete ikonou knihy **Znalosti** v záhlaví položky. Panel nahradí obsah detailu, **Zpět** jej vrátí. Je stejný jako Znalosti složky, omezený na tuto položku: **Mluvčí** (jen nahrávky), **Lidé**, **Věci**, **Opravy**, **Fakta** a **Co dostanou modely**, s počty. Nové záznamy jsou označené, opravy uvádějí počet výskytů a fakta z poslední kontroly rozlišují nové a znovu zmíněné poznatky. Kontrolující v příslušných záložkách vidí použité, zamítnuté i přeskočené návrhy. Podnadpis ukazuje čas dokončení a známý počet použitých změn. **Učit se znovu** spustí další běh; volba **Znovu navrhnout odmítnuté položky** nejprve smaže odmítnutí této položky. Průběh, čekající kontrola, chyba a zastavení zůstávají v detailu.
 

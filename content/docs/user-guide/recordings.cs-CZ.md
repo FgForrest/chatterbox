@@ -54,7 +54,7 @@ Nahoře naleznete:
 
 ![Změna profilu z řádku složek](images/profile-chip-menu.png)
 
-Pod tím jsou přehrávač a prvky pracovního postupu. [Přepis](transcripts.md), kontrola Učení, [Shrnutí](summaries-and-tasks.md) a Kontrola úkolů se zobrazují v tomto pořadí, jak k nim postup dospěje. Hotové prvky se během další práce složí do jednoho řádku.
+Pod tím jsou přehrávač a prvky pracovního postupu. [Přepis](transcripts.md), kontrola Učení, [Shrnutí](summaries-and-tasks.md) a Kontrola úkolů se zobrazují v tomto pořadí, jak k nim postup dospěje. Hotový přepis a shrnutí se během další práce složí do jednoho řádku. Dokončené výsledky Učení najdete pod ikonou knihy **Znalosti** v záhlaví položky; **Zpět** vrátí detail.
 
 <span id="the-player" />
 

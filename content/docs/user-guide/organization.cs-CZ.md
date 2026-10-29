@@ -22,7 +22,7 @@ Kontrola úkolů sdílení nezdržuje. Kolegové uvidí navržený úkol až po 
 
 Řádek složek ukazuje zamýšlenou složku Organizace a pruh pracovního postupu přidá krok **Sdílet**, na kterém je vidět čekající kontrola. Sdílení zruší otevřený soukromý běh [Učení](learn.md). Jeho zjištění zůstanou soukromá. Pokud profil Organizace zapíná automatické Učení, spustí se nový běh v rozsahu Organizace a shrnutí počká na jeho kontrolu.
 
-Pokud jste dokončili soukromou kontrolu Učení pro aktuální obsah položky, Klepna při sdílení předá potvrzené poznatky Organizaci bez dalšího potvrzení. Učení uvádí **Naučeno z kontroly vlastníka**, ukazuje počty použitých a přeskočených návrhů a v pracovním postupu je dokončené. Totéž platí pro e-maily. Kurátoři mohou spustit **Učit se znovu** a osoby i věci Organizace slučovat nebo mazat.
+Pokud jste dokončili soukromou kontrolu Učení pro aktuální obsah položky, Klepna při sdílení předá potvrzené poznatky Organizaci bez dalšího potvrzení. Panel **Znalosti** otevřený ze záhlaví položky ukazuje Učení jako dokončené s počtem použitých změn a pracovní postup ho počítá jako hotové. Totéž platí pro e-maily. Kurátoři mohou spustit **Učit se znovu** a osoby i věci Organizace slučovat nebo mazat.
 
 Položka zařazená s volbou **Bez automatického zpracování** se sama nenasdílí. U zamýšlené složky jsou v řádku akce **Sdílet nyní** a zrušení. Pruh uvádí **Na vás.** a čeká, dokud položku nenasdílíte nebo umístění nezrušíte.
 
@@ -34,7 +34,7 @@ Pošta poslaná přímo na adresu složky Organizace také začíná jako soukro
 
 Každý může sdílenou položku otevřít a číst, přehrát nebo stáhnout sdílený zvuk a zařadit položku do dalších složek Organizace. V záhlaví je uvedeno, kdo ji sdílel, a u mluvčích nahrávky jen pro čtení je uvedeno **Spravuje Organizace**.
 
-Během sdílení mohou název, přepis, mluvčí, shrnutí, témata a kontrolu Učení měnit vlastník položky a kurátoři Organizace. Ostatní členové mají obsah jen pro čtení. Změny z obou pohledů upravují jednu společnou verzi v rozsahu Organizace. Zpracování používá nastavení a šablony Organizace; mluvčí lze vybírat jen z osob Organizace a nové jméno se stane osobou Organizace. Sdílení nechá automatické zpracování vlastníka pokračovat a neoznačí dokončené kroky jako zastaralé.
+Během sdílení mohou název, přepis, mluvčí, shrnutí, témata a kontrolu Učení měnit vlastník položky a kurátoři Organizace. Ostatní členové mají obsah jen pro čtení. Vygenerované shrnutí smí ručně upravit a jeho soukromé připomínky spravovat pouze vlastník položky; kurátoři je mohou znovu vygenerovat, po potvrzení nahrazení ručních úprav. Viz [Úpravy shrnutí a připomínky](summaries-and-tasks.md#edit-a-summary). Změny z obou pohledů upravují jednu společnou verzi v rozsahu Organizace. Zpracování používá nastavení a šablony Organizace; mluvčí lze vybírat jen z osob Organizace a nové jméno se stane osobou Organizace. Sdílení nechá automatické zpracování vlastníka pokračovat a neoznačí dokončené kroky jako zastaralé.
 
 Úkoly mají vlastní oprávnění. Vlastník domovské položky a kurátoři mohou sdílený úkol upravit, zrušit, uzavřít a sloučit. Jeho řešitel jej může také uzavřít nebo znovu otevřít. Úkol může shromažďovat zmínky z několika sdílených nahrávek a zpráv; viz [Úkoly napříč položkami](summaries-and-tasks.md#tasks-across-items).
 

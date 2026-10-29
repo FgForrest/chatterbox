@@ -105,4 +105,6 @@ Calendar and Meet access is optional and read-only. When connected, every manual
 
 An **agenda** is the item you prepare in Chatterbox for an **event** or meeting. **Prepare an agenda**, **Agenda settings** and **Delete agenda** act on that item. Deleting an agenda removes its points and notes; the Google Calendar event and any agenda already exported into it stay as they are. Task changes made during the meeting remain. Writing an agenda into Calendar is a separate organizer action with explicit write consent.
 
+An agenda can be filed in several folders with **Add to folder**, moved, or removed from a folder with the **×** on its chip, like a recording. Preparation combines activity from all its folders. Removing the last placement keeps the agenda in your library. An agenda already absorbed into a recording is read-only.
+
 Next: [Chatterbox in Claude](claude.md)

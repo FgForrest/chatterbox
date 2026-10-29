@@ -1,8 +1,8 @@
 ---
 title: Hand-edited summaries survive automatic processing and owner remarks replay on later runs
 date: 2026-10-28
-updated: 2026-10-28 19:31
-status: proposed
+updated: 2026-10-28 22:54
+status: accepted
 kind: feature
 issues: [299]
 prs: [303, 304]

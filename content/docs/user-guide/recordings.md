@@ -47,7 +47,7 @@ At the top:
 
 ![Changing the profile from the folder row](images/profile-chip-menu.png)
 
-Below that are the player and the workflow widgets. The [transcript](transcripts.md), Learn review, [summary](summaries-and-tasks.md), and Task review appear in that order as the workflow reaches them. Finished widgets fold to one line while later work continues.
+Below that are the player and the workflow widgets. The [transcript](transcripts.md), Learn review, [summary](summaries-and-tasks.md), and Task review appear in that order as the workflow reaches them. Finished transcript and summary widgets fold to one line while later work continues. Completed Learn results move to **Knowledge**, the book icon in the item header; **Back** returns to the detail.
 
 ### The player
 
