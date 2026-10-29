@@ -5,12 +5,12 @@ description: Shrnutí, profily zpracování a úkoly sledované napříč nahrá
 
 ## Shrnutí
 
-Jakmile má nahrávka přepis a pracovní postup dospěje ke kroku **Shrnout**, objeví se pod přepisem prvek **Shrnutí**. Stejný prvek má i pošta. Během pracovního postupu je vložený v položce a hotové předchozí prvky se skládají do jednoho řádku. Po dokončení vypadá položka jako dříve.
+Jakmile má nahrávka přepis a pracovní postup dospěje ke kroku **Shrnout**, objeví se pod přepisem prvek **Shrnutí**. Stejný prvek má i pošta. Během pracovního postupu je vložený v položce a hotové předchozí prvky se skládají do jednoho řádku. Po dokončení zůstávají přepis a shrnutí dostupné; dokončené výsledky Učení najdete v panelu **Znalosti** otevřeném ze záhlaví.
 
-![Shrnutí s úkoly čekajícími na kontrolu](images/summary.png)
+![Karta shrnutí s profilem zpracování v zápatí](images/summary.png)
 
-1. **Profil** s názvem v zápatí pod úkoly ukazuje profil, kterým vzniklo zobrazené shrnutí. Tužka otevře výběr. U existujícího shrnutí volba jiného profilu rovnou spustí nové shrnutí; před prvním shrnutím jen nastaví profil pro příští spuštění. Čtenář bez práva úprav tužku nevidí. Pokud původní profil nelze dohledat, zobrazí se profil pro příští spuštění.
-2. Před prvním shrnutím použijte tlačítko **Shrnout** v těle karty nebo ikonu jisker v záhlaví. Existující shrnutí nahradí kruhová šipka **Shrnout znovu**. Šipka vlevo od nadpisu kartu sbalí nebo rozbalí. Ikony vpravo jsou v pořadí: znovu shrnout, stáhnout, kopírovat.
+1. **Profil** s názvem v zápatí pod úkoly ukazuje profil, kterým vzniklo zobrazené shrnutí. Tužka otevře výběr. U existujícího shrnutí volba jiného profilu spustí nové shrnutí, u ručně upraveného textu až po potvrzení; před prvním shrnutím jen nastaví profil pro příští spuštění. Čtenář bez práva úprav tužku nevidí. Pokud původní profil nelze dohledat, zobrazí se profil pro příští spuštění.
+2. Před prvním shrnutím použijte tlačítko **Shrnout** v těle karty nebo ikonu jisker v záhlaví. Existující shrnutí nahradí kruhová šipka **Shrnout znovu**. Šipka vlevo od nadpisu kartu sbalí nebo rozbalí. Záhlaví vlastníkovi nabízí také **Upravit shrnutí** a **Připomínky ke shrnutí**, za nimi stažení a kopírování.
 
 Ruční výběr může použít libovolný dostupný profil pro daný druh položky. Když shrnutí spustíte sami, karta zůstane na místě a přepne se do průběhového stavu. Profil dodává instrukce shrnutí, jazyk a formát výstupu, poskytovatele, hledání úkolů a nastavení funkce **Vícenásobné shrnování**. Viz [Zpracování a profily](processing-and-profiles.md).
 
@@ -21,6 +21,34 @@ Během zpracování karta ukazuje, jak dlouho už operace trvá a u funkce **Ví
 Shrnutí jsou psána ve formátu Markdown, takže nadpisy, seznamy a tabulky se tak i zobrazují. **Klíčové body** jsou poslední částí uvnitř stejného rámečku jako text shrnutí. Stažený i zkopírovaný Markdown zachovává pořadí text, potom klíčové body. Poskytovatel, model, odznak vícenásobného shrnování a upozornění s akcemi jsou v zápatí pod úkoly.
 
 Pokud opravíte jména v přepisu po vytvoření shrnutí, u shrnutí se objeví upozornění **Mohou obsahovat neaktuální jména nebo pojmy** s odkazem na **Znovu vygenerovat**. Pruh pracovního postupu označí práci vytvořenou ze starších vstupů jako **Zastaralé**.
+
+<span id="edit-a-summary" />
+
+### Ruční úprava shrnutí
+
+Vlastník položky může u vygenerovaného shrnutí použít **Upravit shrnutí** (tužku v záhlaví karty), a to i u vlastní nahrávky sdílené s Organizací, z obou pohledů. U cizí položky tyto ovládací prvky oprav nemají kurátoři, ostatní členové ani příjemci. Účet Organizace ovládání oprav nemá. Importovaná shrnutí **Plaud** nelze ručně upravovat ani opravovat připomínkami.
+
+![Úprava textu shrnutí a klíčových bodů](images/summary-edit.png)
+
+Upravte **Text shrnutí** ve formátu Markdown a **Klíčové body**, každý na samostatném řádku, a zvolte **Uložit** nebo **Zrušit**. Odkazy na mluvčí zobrazují aktuální jména, například `[Alex Morgan](#speaker-1)`. Zachovejte odkaz `#speaker-N`, aby jméno sledovalo pozdější přejmenování mluvčího. Úprava shrnutí nemění úkoly; ty upravujte v seznamu pod ním.
+
+Uložený text má v zápatí štítek **Upraveno ručně**; po najetí myší se zobrazí autor a čas úpravy. Automatické zpracování ho nikdy nepřepíše, ani po novém přepisu nebo opravách Učení. Může proto popisovat starší vstup. Ruční **Shrnout znovu**, změna profilu nebo **Znovu vygenerovat** vyžaduje před nahrazením ručních úprav potvrzení. Vlastník zde může místo toho zvolit **Napsat připomínku**. Potvrzené nahrazení štítek ruční úpravy odstraní.
+
+<span id="correct-a-summary-with-remarks" />
+
+### Oprava shrnutí pomocí připomínek
+
+Otevřete **Připomínky ke shrnutí** (ikonu bubliny). Dialog uvádí **Uložené připomínky** s autorem a časem, u každé tlačítko **Smazat připomínku** a dále profil, poskytovatele a model, které se použijí.
+
+![Uložené připomínky a model pro opravu](images/summary-remarks.png)
+
+Do pole **Nová připomínka** napište, co shrnutí zkreslilo, a klikněte na **Opravit shrnutí**. Připomínka se uloží a spustí se jeden běh opravy nad původním obsahem, současným shrnutím a všemi uloženými připomínkami. Opravu lze spustit i jen s dosavadními připomínkami. Oprava ručně upraveného textu zachová štítek **Upraveno ručně**. Pokud běh modelu selže, připomínka zůstane uložená pro další pokus.
+
+Připomínky patří k položce a použijí se při každém dalším shrnutí, které spustíte Vy, včetně automatických běhů a běhů po výslovném novém vygenerování, v soukromém pohledu i v Organizaci. Ruční běh jiného uživatele, například kurátora, Vaše připomínky nepoužije. **Smazat připomínku** ovlivní příští běhy; nepřepíše současné shrnutí ani neodstraní jeho štítek původu.
+
+![Ručně upravené shrnutí opravené podle uložené připomínky](images/summary-edited.png)
+
+Vlastník v zápatí vidí **Podle připomínek · 1** (počet použitých připomínek) a kliknutím znovu otevře dialog. Čtenáři vidí výsledný sdílený text, případný štítek **Upraveno ručně** s autorem a časem a **Opraveno podle připomínek**, bez soukromého textu připomínek a ovládání oprav. Běh jiného uživatele odstraní štítek připomínek u daného výsledku, ale uložené připomínky vlastníka zachová pro jeho příští běh.
 
 ### Instrukce shrnutí a Vícenásobné shrnování
 
@@ -51,7 +79,7 @@ Jakmile jsou změny úkolů připravené, otevře se za shrnutím vložený prve
 
 Kontrola zobrazuje jednu kartu pro každý úkol. Shoda je hlavní rozhodnutí; změny termínu, dokončení, **Už není potřeba** a **Předáno někomu jinému** pro tento úkol jsou uvedeny pod ní. Tlačítko **Kde to zaznělo** ukazuje čas a během přehrávání pasáže se změní na pozastavení. Pokud citaci nelze v přepisu najít, kontrola to napíše místo nefunkčního odkazu.
 
-![Změny úkolu a dřívější zmínka v kontrole](images/task-review-changes.png)
+![Změny úkolu v kontrole](images/task-review-changes.png)
 
 ![Výběr dřívějšího úkolu ke sloučení](images/task-merge-earlier.png)
 

@@ -12,7 +12,7 @@ Nahrávka bez přepisu nabízí dvě tlačítka:
 - **Přepsat** odešle zvuk k poskytovateli přepisů Vašeho účtu (Nastavení → Přepis). Funguje i tehdy, když nahrávka ještě čeká na zařazení.
 - **Přepsat v prohlížeči** spustí Whisper ve vašem prohlížeči. Je to zdarma a nic neopustí váš počítač, ale je to pomalejší.
 
-**Znovu přepsat** u nahrávky, která už má přepis, nejprve požádá o potvrzení a pak spustí přepis s vaším aktuálním poskytovatelem. Jde o placené volání poskytovatele. Nahradí přepis a znovu vytvoří shrnutí, název, témata i poznatky z Učení. Jména mluvčích, která jste zadali, jsou předána do nového přepisu jako návrhy, které potvrdíte jedním kliknutím.
+**Znovu přepsat** u nahrávky, která už má přepis, nejprve požádá o potvrzení a pak spustí přepis s vaším aktuálním poskytovatelem. Jde o placené volání poskytovatele. Nahradí přepis a obnoví vygenerované výsledky podle profilu zpracování. Ručně upravené shrnutí zůstane zachováno a existující název se automaticky nenahradí. Viz [Úpravy shrnutí](summaries-and-tasks.md#edit-a-summary). Jména mluvčích, která jste zadali, jsou předána do nového přepisu jako návrhy, které potvrdíte jedním kliknutím.
 
 Nahrávka se přepíše automaticky až po zařazení a pouze tehdy, když má její [profil zpracování](processing-and-profiles.md) u přepisu zapnuté **Spouštět automaticky**. Profil může zvolit jiného poskytovatele a jazyk než výchozí hodnoty účtu používané tlačítkem **Přepsat**.
 
@@ -89,7 +89,7 @@ Přednáška nebo dlouhý monolog se rozdělí do odstavců zhruba po půl minut
 
 ## Přehrávání z přepisu
 
-![Abyste viděli větu přehrávanou a zvýrazněnou](images/sentence-playback.png)
+![Zvýrazněná věta s tlačítkem přehrání](images/sentence-playback.png)
 
 - **Klikněte na větu** a nahrávka se od ní přehraje. Opětovným kliknutím přehrávání pozastavíte.
 - **Klikněte na časový údaj,** čímž přesunete přehrávač na danou pozici bez spuštění přehrávání.

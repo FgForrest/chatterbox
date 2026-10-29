@@ -5,12 +5,12 @@ description: Summaries, processing profiles, and tasks followed across recording
 
 ## Summaries
 
-Once a recording has a transcript and the workflow reaches **Summarize**, the **Summary** widget appears below it. Mail has the same widget. During the workflow it is inline; finished earlier widgets fold to one line. Once the workflow is done, the item looks as before.
+Once a recording has a transcript and the workflow reaches **Summarize**, the **Summary** widget appears below it. Mail has the same widget. During the workflow it is inline; finished earlier widgets fold to one line. When the workflow is done, the transcript and summary remain available; completed Learn results are in the header's **Knowledge** panel.
 
-![A summary with tasks waiting for review](images/summary.png)
+![A summary card with its processing profile in the footer](images/summary.png)
 
-1. **Profile** followed by its name in the footer below the tasks shows the profile that produced the displayed summary. Its pencil opens the profile list. Choosing a different profile immediately replaces an existing summary; before the first summary, it only selects the next profile. Read-only viewers see no pencil. If the producing profile cannot be resolved, the next run's profile is shown.
-2. For the first summary, use **Summarize** in the body or the sparkles icon in the header. The circular arrow **Re-summarize** replaces an existing summary. The chevron left of the title collapses or expands the card. The right-hand icons are ordered: re-run, download, copy.
+1. **Profile** followed by its name in the footer below the tasks shows the profile that produced the displayed summary. Its pencil opens the profile list. Choosing a different profile starts a replacement run, with confirmation if the summary was hand-edited; before the first summary, it only selects the next profile. Read-only viewers see no pencil. If the producing profile cannot be resolved, the next run's profile is shown.
+2. For the first summary, use **Summarize** in the body or the sparkles icon in the header. The circular arrow **Re-summarize** replaces an existing summary. The chevron left of the title collapses or expands the card. The header also offers **Edit summary** and **Summary remarks** to the owner, followed by download and copy.
 
 The manual picker can use any available profile for that kind of item. Starting a summary yourself keeps the card in place and changes it to its running state. The profile supplies the summary instructions, output language and format, provider, task detection, and multi-pass settings. See [Processing and profiles](processing-and-profiles.md).
 
@@ -21,6 +21,30 @@ While it runs, the card shows how long it has taken and, for a multi-pass summar
 Summaries are written in Markdown, so headings, lists and tables show as such. **Key Points** are the last section inside the same summary box. Copied and downloaded Markdown keeps that order: summary text, then key points. Provider, model, multi-pass badge and warnings with their actions are in the footer below the tasks.
 
 If you correct names in the transcript after the summary was written, the summary shows **May contain stale names or terms** with a **Regenerate** link. The workflow strip also marks work made from older inputs as **Outdated**.
+
+### Edit a summary
+
+The item's owner can use **Edit summary** (the pencil in the card header) on a generated summary, including on their own recording shared with the Organization, from either view. On someone else's item, curators, other members and recipients do not get these correction controls. The Organization account has no correction controls. Imported **Plaud** summaries cannot be edited or corrected with remarks.
+
+![Editing summary text and key points](images/summary-edit.png)
+
+Edit **Summary text** as Markdown and **Key Points**, one per line, then **Save** or **Cancel**. Speaker links show the current names, for example `[Alex Morgan](#speaker-1)`. Keep the `#speaker-N` link so the name follows later speaker renames. Editing the summary does not edit tasks; change those in the task list below it.
+
+Saved text has a **Hand-edited** footer marker; hover over it to see who edited it and when. Automatic processing never overwrites it, including after re-transcription or Learn corrections. It may therefore describe older input. A manual **Re-summarize**, profile change or **Regenerate** asks for confirmation before replacing hand edits. The owner can choose **Write a remark** there instead. Confirming a replacement clears the hand-edited marker.
+
+### Correct a summary with remarks
+
+Open **Summary remarks** (the speech-bubble icon). The dialog lists **Stored remarks** with their author and time, a **Delete remark** button for each, and the profile, provider and model that will run.
+
+![Stored remarks and the model used for correction](images/summary-remarks.png)
+
+Write a **New remark** describing what the summary got wrong and click **Correct summary**. This saves the remark and starts one correction run using the source, current summary and all stored remarks. You can also run it with only the existing remarks. A correction of hand-edited text keeps the **Hand-edited** marker. If the model run fails, the remark stays saved for retrying.
+
+Stored remarks belong to the item and apply to every later summary run by you, including automatic runs and runs after explicit regeneration, in either your private or Organization view. Another actor's manual run, such as a curator's, does not use your remarks. **Delete remark** affects future runs; it does not rewrite the current summary or remove its provenance marker.
+
+![A hand-edited summary corrected from a stored remark](images/summary-edited.png)
+
+The owner sees **From remarks · 1** (with the applied count) in the footer and can click it to reopen the dialog. Readers see the resulting shared text, **Hand-edited** with its author and time when present, and **Corrected from remarks**, without the private remark text or correction controls. Another actor's run clears the remarks marker for that output but keeps the owner's stored remarks for a later owner run.
 
 ### Summary instructions and multi-pass
 
@@ -51,7 +75,7 @@ When task changes are ready, the inline **Task review** widget opens after the s
 
 The review shows one card per task. A match is the main decision; deadline, completion, **No longer needed**, and **Handed to someone else** changes for that task appear beneath it. An audio evidence button shows its time and changes to pause while that passage is playing. If the quote cannot be placed in the transcript, the review says so instead of opening an unhelpful link.
 
-![Task changes and an earlier mention in the review](images/task-review-changes.png)
+![Task changes in the review](images/task-review-changes.png)
 
 ![Choosing an earlier task to merge into](images/task-merge-earlier.png)
 
