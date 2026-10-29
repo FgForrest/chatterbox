@@ -429,8 +429,9 @@ describe("inline editors", () => {
         expect(trigger.classList.contains("aria-disabled:opacity-50")).toBe(
             true,
         );
+        // No hover state at all while open: neither background nor text.
         expect(
-            trigger.classList.contains("aria-disabled:hover:bg-transparent"),
+            trigger.classList.contains("aria-disabled:pointer-events-none"),
         ).toBe(true);
         fireEvent.change(screen.getByRole("textbox"), {
             target: { value: "Keep this" },
@@ -530,21 +531,10 @@ describe("inline editors", () => {
             expect(trigger.classList.contains("text-primary-foreground")).toBe(
                 true,
             );
-            expect(
-                trigger.classList.contains("aria-disabled:hover:bg-primary"),
-            ).toBe(true);
-            expect(
-                trigger.classList.contains(
-                    "aria-disabled:hover:bg-transparent",
-                ),
-            ).toBe(false);
-        } else {
-            expect(
-                trigger.classList.contains(
-                    "aria-disabled:hover:bg-transparent",
-                ),
-            ).toBe(true);
         }
+        expect(
+            trigger.classList.contains("aria-disabled:pointer-events-none"),
+        ).toBe(true);
         fireEvent.change(
             screen.getByRole("textbox", { name: "Name of the person to add" }),
             { target: { value: "Robin Fern" } },
