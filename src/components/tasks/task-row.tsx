@@ -32,9 +32,11 @@ import { TaskEvidenceLink } from "@/components/tasks/task-evidence-link";
 import { DueDateField, TaskTextInput } from "@/components/tasks/task-fields";
 import { TaskFolderPicker } from "@/components/tasks/task-folder-picker";
 import type { TaskRowChange } from "@/components/tasks/use-recording-tasks";
+import { Button } from "@/components/ui/button";
 import { EditorActions } from "@/components/ui/editor-actions";
 import { Textarea } from "@/components/ui/textarea";
 import {
+    ActionTooltip,
     Tooltip,
     TooltipContent,
     TooltipProvider,
@@ -351,95 +353,130 @@ export function TaskRow({
                             {i18n("Dropped")}
                         </span>
                     )}
-                    <div className="task-row-actions ml-auto flex flex-wrap items-center justify-end gap-3">
-                        {actions}
-                        {task.canClose && !notesReadOnly && (
-                            <button
-                                type="button"
-                                className="inline-flex items-center gap-1 hover:text-foreground"
-                                onClick={() => setNoteOpen(true)}
-                            >
-                                <MessageSquare className="size-3" />
-                                {i18n("Note")}
-                            </button>
-                        )}
-                        {(task.canMerge || task.canEdit) &&
-                            task.status === "open" &&
-                            onMerge && (
-                                <MergeTaskPicker
-                                    itemId={task.recordingId}
-                                    sourceTaskId={task.id}
-                                    taskVersion={task.version}
-                                    inlineTrigger
-                                    onMerge={onMerge}
-                                />
+                    <TooltipProvider>
+                        <div className="task-row-actions ml-auto flex flex-wrap items-center justify-end gap-3">
+                            <div className="task-row-hover-actions flex flex-wrap items-center justify-end gap-1">
+                                {actions && (
+                                    <div className="flex flex-wrap items-center gap-3">
+                                        {actions}
+                                    </div>
+                                )}
+                                {task.canClose && !notesReadOnly && (
+                                    <ActionTooltip label={i18n("Note")}>
+                                        <Button
+                                            type="button"
+                                            size="icon-xs"
+                                            variant="ghost"
+                                            aria-label={i18n("Note")}
+                                            className="text-muted-foreground hover:text-foreground"
+                                            onClick={() => setNoteOpen(true)}
+                                        >
+                                            <MessageSquare className="size-3" />
+                                        </Button>
+                                    </ActionTooltip>
+                                )}
+                                {(task.canMerge || task.canEdit) &&
+                                    task.status === "open" &&
+                                    onMerge && (
+                                        <MergeTaskPicker
+                                            itemId={task.recordingId}
+                                            sourceTaskId={task.id}
+                                            taskVersion={task.version}
+                                            inlineTrigger
+                                            onMerge={onMerge}
+                                        />
+                                    )}
+                                {task.canUndoMatch && onUndoMatch && (
+                                    <ActionTooltip label={i18n("Undo match")}>
+                                        <Button
+                                            type="button"
+                                            size="icon-xs"
+                                            variant="ghost"
+                                            aria-label={i18n("Undo match")}
+                                            className="text-muted-foreground hover:text-foreground"
+                                            onClick={onUndoMatch}
+                                        >
+                                            <Unlink className="size-3" />
+                                        </Button>
+                                    </ActionTooltip>
+                                )}
+                                {task.canEdit && (
+                                    <ActionTooltip
+                                        label={
+                                            dropped
+                                                ? i18n("Restore")
+                                                : i18n("Drop")
+                                        }
+                                    >
+                                        <Button
+                                            type="button"
+                                            size="icon-xs"
+                                            variant="ghost"
+                                            aria-label={
+                                                dropped
+                                                    ? i18n("Restore")
+                                                    : i18n("Drop")
+                                            }
+                                            className="text-muted-foreground hover:text-foreground"
+                                            onClick={() => {
+                                                const status = dropped
+                                                    ? "open"
+                                                    : "dropped";
+                                                onChange(
+                                                    { status },
+                                                    { status },
+                                                );
+                                            }}
+                                        >
+                                            {dropped ? (
+                                                <RotateCcw className="size-3" />
+                                            ) : (
+                                                <Trash2 className="size-3" />
+                                            )}
+                                        </Button>
+                                    </ActionTooltip>
+                                )}
+                            </div>
+                            {task.canFollow && !own && (
+                                <button
+                                    type="button"
+                                    aria-pressed={following}
+                                    title={
+                                        following
+                                            ? i18n("Stop following")
+                                            : i18n("Follow")
+                                    }
+                                    className={cn(
+                                        "inline-flex items-center gap-1 hover:text-foreground",
+                                        following &&
+                                            "task-following text-primary",
+                                    )}
+                                    onClick={() => {
+                                        const next = !following;
+                                        setFollowing(next);
+                                        void setTaskFollow(task.id, next)
+                                            .then(() => {
+                                                announceTasksChanged();
+                                                onFollow?.();
+                                            })
+                                            .catch(() => {
+                                                setFollowing(!next);
+                                                toast.error(
+                                                    i18n(
+                                                        "Could not save the task",
+                                                    ),
+                                                );
+                                            });
+                                    }}
+                                >
+                                    <Eye className="size-3" />
+                                    {following
+                                        ? i18n("Following")
+                                        : i18n("Follow")}
+                                </button>
                             )}
-                        {task.canFollow && !own && (
-                            <button
-                                type="button"
-                                aria-pressed={following}
-                                title={
-                                    following
-                                        ? i18n("Stop following")
-                                        : i18n("Follow")
-                                }
-                                className={cn(
-                                    "inline-flex items-center gap-1 hover:text-foreground",
-                                    following && "task-following text-primary",
-                                )}
-                                onClick={() => {
-                                    const next = !following;
-                                    setFollowing(next);
-                                    void setTaskFollow(task.id, next)
-                                        .then(() => {
-                                            announceTasksChanged();
-                                            onFollow?.();
-                                        })
-                                        .catch(() => {
-                                            setFollowing(!next);
-                                            toast.error(
-                                                i18n("Could not save the task"),
-                                            );
-                                        });
-                                }}
-                            >
-                                <Eye className="size-3" />
-                                {following ? i18n("Following") : i18n("Follow")}
-                            </button>
-                        )}
-                        {task.canUndoMatch && onUndoMatch && (
-                            <button
-                                type="button"
-                                className="inline-flex items-center gap-1 hover:text-foreground"
-                                onClick={onUndoMatch}
-                            >
-                                <Unlink className="size-3" />
-                                {i18n("Undo match")}
-                            </button>
-                        )}
-                        {task.canEdit && (
-                            <button
-                                type="button"
-                                className="ml-auto inline-flex items-center gap-1 hover:text-foreground"
-                                onClick={() => {
-                                    const status = dropped ? "open" : "dropped";
-                                    onChange({ status }, { status });
-                                }}
-                            >
-                                {dropped ? (
-                                    <>
-                                        <RotateCcw className="size-3" />
-                                        {i18n("Restore")}
-                                    </>
-                                ) : (
-                                    <>
-                                        <Trash2 className="size-3" />
-                                        {i18n("Drop")}
-                                    </>
-                                )}
-                            </button>
-                        )}
-                    </div>
+                        </div>
+                    </TooltipProvider>
                 </div>
                 {task.note && !noteOpen && (
                     <div className="flex gap-2 border-l-2 border-primary/30 pl-3">

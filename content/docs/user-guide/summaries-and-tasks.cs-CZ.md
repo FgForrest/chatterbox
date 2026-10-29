@@ -18,9 +18,9 @@ Ruční výběr může použít libovolný dostupný profil pro daný druh polo�
 
 Během zpracování karta ukazuje, jak dlouho už operace trvá a u funkce **Vícenásobné shrnování** také postup: `Probíhá shrnutí — 1/3 průchodů`, poté `Slučování 3 průchodů…`. Můžete stránku opustit; shrnutí se nezastaví a po návratu bude připravené.
 
-Shrnutí jsou psána ve formátu Markdown, takže nadpisy, seznamy a tabulky se tak i zobrazují. **Klíčové body** jsou poslední částí uvnitř stejného rámečku jako text shrnutí. Stažený i zkopírovaný Markdown zachovává pořadí text, potom klíčové body. Poskytovatel, model, odznak vícenásobného shrnování a upozornění s akcemi jsou v zápatí pod úkoly.
+Shrnutí jsou psána ve formátu Markdown, takže nadpisy, seznamy a tabulky se tak i zobrazují. **Klíčové body** jsou poslední částí uvnitř stejného rámečku jako text shrnutí. Stažený i zkopírovaný Markdown zachovává pořadí text, potom klíčové body. Zápatí pod úkoly ukazuje upozornění s akcemi ve žlutém pruhu a pod ním jeden řádek s profilem, poskytovatelem, modelem a označeními, například vícenásobným shrnováním nebo **Upraveno ručně**.
 
-Pokud opravíte jména v přepisu po vytvoření shrnutí, u shrnutí se objeví upozornění **Mohou obsahovat neaktuální jména nebo pojmy** s odkazem na **Znovu vygenerovat**. Pruh pracovního postupu označí práci vytvořenou ze starších vstupů jako **Zastaralé**.
+Pokud opravíte jména v přepisu po vytvoření shrnutí, u shrnutí se objeví upozornění **Může obsahovat zastaralá jména nebo pojmy** s odkazem **Vygenerovat znovu**. Pruh pracovního postupu označí práci vytvořenou ze starších vstupů jako **Zastaralé**.
 
 <span id="edit-a-summary" />
 
@@ -32,7 +32,7 @@ Vlastník položky může u vygenerovaného shrnutí použít **Upravit shrnutí
 
 Upravte **Text shrnutí** ve formátu Markdown a **Klíčové body**, každý na samostatném řádku začínajícím `- `, a zvolte **Uložit** nebo **Zrušit**. Odkazy na mluvčí zobrazují aktuální jména, například `[Alex Morgan](#speaker-1)`. Zachovejte odkaz `#speaker-N`, aby jméno sledovalo pozdější přejmenování mluvčího. Úprava shrnutí nemění úkoly; ty upravujte v seznamu pod ním.
 
-Uložený text má v zápatí štítek **Upraveno ručně**; po najetí myší se zobrazí autor a čas úpravy. Automatické zpracování ho nikdy nepřepíše, ani po novém přepisu nebo opravách Učení. Může proto popisovat starší vstup. Ruční **Shrnout znovu**, změna profilu nebo **Znovu vygenerovat** vyžaduje před nahrazením ručních úprav potvrzení. Vlastník zde může místo toho zvolit **Napsat připomínku**. Potvrzené nahrazení štítek ruční úpravy odstraní.
+Uložený text má v zápatí štítek **Upraveno ručně**; po najetí myší se zobrazí autor a čas úpravy. Automatické zpracování ho nikdy nepřepíše, ani po novém přepisu nebo opravách Učení. Může proto popisovat starší vstup. Ruční **Shrnout znovu**, změna profilu nebo **Vygenerovat znovu** vyžaduje před nahrazením ručních úprav potvrzení. Vlastník zde může místo toho zvolit **Napsat připomínku**. Potvrzené nahrazení štítek ruční úpravy odstraní.
 
 <span id="correct-a-summary-with-remarks" />
 
@@ -52,11 +52,11 @@ Vlastník v zápatí vidí **Podle připomínek · 1** (počet použitých přip
 
 ### Instrukce shrnutí a Vícenásobné shrnování
 
-Klepna obsahuje instrukce shrnutí, například **Obecné shrnutí**, **Zápis z jednání**, **Klíčové body** a **Akční body**. Nyní jsou součástí profilů zpracování, nikoli výběru u shrnutí. V profilu můžete změnit zaměření, instrukce, jazyk nebo formát výstupu.
+Klepna obsahuje instrukce shrnutí, například **Obecné shrnutí**, **Poznámky ze schůzky**, **Klíčové body** a **Úkoly**. Nyní jsou součástí profilů zpracování, nikoli výběru u shrnutí. V profilu můžete změnit zaměření, instrukce, jazyk nebo formát výstupu.
 
 ![Shrnutí vytvořené dvěma ze tří kroků](images/summary-multi-pass.png)
 
-Profil může shrnout přepis 2krát až 5krát a výsledky sloučit, takže i bod zachycený jen jedním během se objeví ve shrnutí. Cena procesu je přibližně tolikrát vyšší, kolik běhů nastavíte. Zápatí uvádí **Vícenásobné shrnování · 3**. Pokud některý běh selže a shrnutí vznikne z menšího počtu, odznak zežloutne, například **Vícenásobné shrnování · 2/3**; najeďte na něj kurzorem a zobrazí se důvod.
+Profil může shrnout přepis 2krát až 5krát a výsledky sloučit, takže i bod zachycený jen jedním během se objeví ve shrnutí. Cena procesu je přibližně tolikrát vyšší, kolik běhů nastavíte. Zápatí uvádí **více průchodů · 3**. Pokud některý běh selže a shrnutí vznikne z menšího počtu, údaj zežloutne, například **více průchodů · 2/3**; najeďte na něj kurzorem a zobrazí se důvod.
 
 <span id="tasks-from-a-summary" />
 <span id="tasks-across-items" />
@@ -67,7 +67,7 @@ Profil může shrnout přepis 2krát až 5krát a výsledky sloučit, takže i b
 
 Shrnutí hledá věci, které někdo slíbil udělat. Úkol již nepatří jednomu shrnutí: shromažďuje zmínky z nahrávek a pošty zařazených do jeho rozsahu složek. **Kde to zaznělo** otevře zvukovou pasáž nebo zvýrazní odpovídající text pošty. **Dřívější zmínka** ukazuje starší důkaz bez změny úkolu.
 
-Jakmile jsou změny úkolů připravené, otevře se za shrnutím vložený prvek **Kontrola úkolů**. Pruh pracovního postupu uvádí **Ke kontrole** a akce **Zkontrolovat úkoly** k němu přeskočí. Pokud úkoly vznikly ze shrnutí, které jste po pracovním postupu spustili sami, kompaktní řádek **Kontrola úkolů** nabídne akci **Zkontrolovat**; teprve toto výslovné kliknutí otevře kontrolu v okně.
+Jakmile jsou změny úkolů připravené, otevře se za shrnutím vložený prvek **Kontrola úkolů**. Pruh pracovního postupu uvádí **Ke kontrole** a akce **Zkontrolovat úkoly** k němu přeskočí. Pokud úkoly vznikly ze shrnutí, které jste po pracovním postupu spustili sami, kompaktní řádek **Kontrola úkolů** nabídne akci **Kontrola**; teprve toto výslovné kliknutí otevře kontrolu v okně.
 
 ![Kontrola navržených úkolů](images/task-review.png)
 
@@ -107,12 +107,12 @@ Po smazání domovské položky se domovem stane nejnovější přeživší zmí
 
 ![Úkoly přiřazené Vám](images/tasks-mine.png)
 
-- **Moje**: úkoly přiřazené Vám a Vaše vlastní soukromé úkoly. Klepna určí Váš záznam v Almanachu podle e-mailové adresy; otevřete svůj záznam v Almanachu a zvolte **Toto jsem já**, pokud se Vám zde úkoly nezobrazují.
+- **Moje**: úkoly přiřazené Vám a Vaše vlastní soukromé úkoly. Klepna určí Váš záznam v Almanachu podle e-mailové adresy; otevřete svůj záznam v Almanachu a zvolte **To jsem já**, pokud se Vám zde úkoly nezobrazují.
 - **Sledované**: úkoly, které výslovně sledujete, a úkoly z Vašich položek přiřazené jiným osobám nebo nikomu. **Přestat sledovat** odebere oba druhy. Kurátoři mohou přepnout na **Všechny úkoly Organizace**; účet Organizace nadále vidí všechny sdílené úkoly. Staré odkazy `tab=tracked` otevírají tuto záložku.
 
 ![Úkoly, které sledujete](images/tasks-tracked.png)
 
-Filtry zobrazí otevřené, hotové nebo zrušené úkoly, úkoly z jedné složky i úkoly po termínu, splatné tento týden nebo zatím bez termínu. Seznam lze třídit podle novosti nebo termínu splnění. U každého úkolu najdete akce, ke kterým máte oprávnění, a **Kde bylo řečeno** pro každou zmínku.
+Filtry zobrazí otevřené, hotové nebo zrušené úkoly, úkoly z jedné složky i úkoly po termínu, splatné tento týden nebo zatím bez termínu. Seznam lze třídit podle novosti nebo termínu splnění. U každého úkolu najdete akce, ke kterým máte oprávnění, a **Kde to zaznělo** pro každou zmínku.
 
 ### Vlastní úkoly
 

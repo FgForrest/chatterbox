@@ -209,9 +209,7 @@ export function SummaryRemarksDialog({
                                 <p className="text-xs text-muted-foreground">
                                     {i18n("Profile")} {data.preview.profileName}{" "}
                                     · {data.preview.provider} ·{" "}
-                                    <span className="font-mono">
-                                        {data.preview.model}
-                                    </span>
+                                    {data.preview.model}
                                 </p>
                             ) : (
                                 <output className="block text-xs text-muted-foreground">
