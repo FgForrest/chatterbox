@@ -5,6 +5,7 @@ import { useId, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { useAutoGrow } from "@/hooks/use-auto-grow";
 
 /** Edit summary prose and key points inside either item's shared summary card. */
 export function SummaryEditor({
@@ -26,6 +27,8 @@ export function SummaryEditor({
     const [text, setText] = useState(summary);
     const [points, setPoints] = useState(keyPoints.join("\n"));
     const [saving, setSaving] = useState(false);
+    const textRef = useAutoGrow(text);
+    const pointsRef = useAutoGrow(points);
     return (
         <form
             className="space-y-4"
@@ -66,8 +69,9 @@ export function SummaryEditor({
                         </span>
                     </Label>
                     <textarea
+                        ref={textRef}
                         id={`${id}-text`}
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 min-h-80 font-mono text-sm"
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 min-h-64 max-h-[70vh] resize-none overflow-y-auto text-sm leading-6"
                         value={text}
                         onChange={(event) => setText(event.target.value)}
                         disabled={saving}
@@ -87,8 +91,9 @@ export function SummaryEditor({
                         </span>
                     </Label>
                     <textarea
+                        ref={pointsRef}
                         id={`${id}-points`}
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 min-h-24 font-mono text-sm"
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 min-h-36 max-h-[50vh] resize-none overflow-y-auto text-sm leading-6"
                         value={points}
                         onChange={(event) => setPoints(event.target.value)}
                         disabled={saving}
