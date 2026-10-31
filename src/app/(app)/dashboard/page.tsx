@@ -447,14 +447,17 @@ export default async function DashboardPage() {
     const receivedByItem = new Map(
         receivedShares.map((share) => [share.itemId, share]),
     );
-    const attachmentIds = new Set(
+    const personalFolderIds = new Set(
         folderOrganization.folders
-            .filter((folder) => folder.receivedFolder)
+            .filter(
+                (folder) =>
+                    folder.scope === "personal" && folder.kind === "custom",
+            )
             .map((folder) => folder.id),
     );
     const receivedFoldersByItem = new Map<string, string[]>();
     for (const assignment of folderOrganization.assignments) {
-        if (!attachmentIds.has(assignment.folderId)) continue;
+        if (!personalFolderIds.has(assignment.folderId)) continue;
         const ids = receivedFoldersByItem.get(assignment.recordingId) ?? [];
         ids.push(assignment.folderId);
         receivedFoldersByItem.set(assignment.recordingId, ids);

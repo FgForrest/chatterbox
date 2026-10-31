@@ -114,6 +114,12 @@ export function RecordingRow({
     const [shareOpen, setShareOpen] = useState(false);
     const [removed, setRemoved] = useState(false);
     const received = recording.view === "received";
+    const remainingFolders = (recording.receivedFolderIds ?? []).flatMap(
+        (id) => {
+            const folder = folders.find((folder) => folder.id === id);
+            return folder ? [folder.name] : [];
+        },
+    );
     const label = useFolderLabel();
     const [pickerOpen, setPickerOpen] = useState(false);
     const source =
@@ -337,15 +343,25 @@ export function RecordingRow({
                                     if (!share) return;
                                     void confirm({
                                         title: i18n("Remove and end sharing?"),
-                                        description: i18n(
-                                            "You will lose access to this item. The owner's item is kept.",
-                                        ),
+                                        description: remainingFolders.length
+                                            ? i18n(
+                                                  "You will still see it in {folder}.",
+                                                  {
+                                                      folder: remainingFolders.join(
+                                                          ", ",
+                                                      ),
+                                                  },
+                                              )
+                                            : i18n(
+                                                  "You will lose access to this item. The owner's item is kept.",
+                                              ),
                                         confirmLabel: i18n(
                                             "Remove and end sharing",
                                         ),
                                         destructive: true,
                                         onConfirm: async () => {
-                                            setRemoved(true);
+                                            if (!remainingFolders.length)
+                                                setRemoved(true);
                                             try {
                                                 await changeShare(
                                                     share.id,

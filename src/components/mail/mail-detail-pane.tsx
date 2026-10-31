@@ -389,6 +389,7 @@ export function MailDetailPane({
                         <ReceivedItemBanner
                             recording={mail}
                             folders={folders}
+                            onFolderCreated={onFolderCreated}
                             shared={shared}
                         />
                         <RecordingFolderTags

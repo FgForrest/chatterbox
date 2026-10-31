@@ -1,6 +1,10 @@
 import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { activeShareRecipientCondition } from "@/db/queries/item-shares";
+import { queryItemFolderAudience } from "@/db/queries/item-folder-audience";
+import {
+    activeShareRecipientCondition,
+    queryVisibleItemFolders,
+} from "@/db/queries/item-shares";
 import { chatterItems, itemShares, recordingFolders, users } from "@/db/schema";
 import { contentKindColumn } from "@/lib/content/item-kinds";
 import { decryptText } from "@/lib/encryption/fields";
@@ -75,6 +79,38 @@ export async function listItemShares(userId: string, itemId: string) {
         .orderBy(asc(itemShares.createdAt));
 }
 
+/** Folder participants and names visible to this item's owner, never receiver placements. */
+export async function listItemFolderAudience(userId: string, itemId: string) {
+    await requireOwner(userId, itemId);
+    const rows = await queryItemFolderAudience(db, userId, itemId);
+    const names = rows.map((row) => decryptText(row.folder_name ?? ""));
+    const mask = await secretAddressMasker(names);
+    return rows.map((row, index) => ({
+        folderId: row.folder_id,
+        folderName: mask(names[index]),
+        canManage: row.can_manage,
+        receiverUserId: row.receiver_user_id,
+        name: row.name,
+        email: row.email,
+        state: row.state,
+    }));
+}
+
+/** Receiver-only folder labels for accepted live paths to these items. */
+export async function listVisibleItemFolders(
+    userId: string,
+    itemIds: string[],
+) {
+    const rows = await queryVisibleItemFolders(db, userId, itemIds);
+    const names = rows.map((row) => decryptText(row.name));
+    const mask = await secretAddressMasker(names);
+    return rows.map((row, index) => ({
+        itemId: row.item_id,
+        id: row.id,
+        name: mask(names[index]),
+    }));
+}
+
 /** Invite members without publishing the item or changing its processing folders. */
 export async function inviteToItem(
     userId: string,
@@ -122,7 +158,13 @@ export async function inviteToItem(
                 ),
             );
         if (receivers.length !== ids.length) throw missing();
+        const folderAudience = new Set(
+            (await queryItemFolderAudience(tx, userId, itemId)).map(
+                (row) => row.receiver_user_id,
+            ),
+        );
         for (const receiverUserId of ids) {
+            if (folderAudience.has(receiverUserId)) continue;
             const [existing] = await tx
                 .select()
                 .from(itemShares)
@@ -209,6 +251,10 @@ export async function listMyInvitations(userId: string) {
             .filter((row) => row.kind === "mail")
             .map((row) => decryptText(row.title)),
     );
+    const visibleFolders = await listVisibleItemFolders(
+        userId,
+        rows.map((row) => row.itemId),
+    );
     return rows
         .filter(
             (row): row is typeof row & { kind: "audio" | "mail" } =>
@@ -221,6 +267,9 @@ export async function listMyInvitations(userId: string) {
                     ? mask(decryptText(row.title))
                     : decryptText(row.title),
             ownerName: row.ownerName || row.ownerEmail,
+            visibleInFolders: visibleFolders
+                .filter((folder) => folder.itemId === row.itemId)
+                .map(({ id, name }) => ({ id, name })),
         }));
 }
 
@@ -305,25 +354,32 @@ export async function changePersonShare(
             throw conflict();
         let filingFolderId = share.filingFolderId;
         if (input.action === "accept" || input.action === "file") {
-            if (!input.folderId)
-                throw new AppError(
-                    ErrorCode.INVALID_INPUT,
-                    "Choose a private folder",
-                    400,
-                );
-            const [folder] = await tx
-                .select({ id: recordingFolders.id })
-                .from(recordingFolders)
-                .where(
-                    and(
-                        eq(recordingFolders.id, input.folderId),
-                        eq(recordingFolders.userId, userId),
-                        ne(recordingFolders.kind, "public"),
-                    ),
-                )
-                .for("share");
-            if (!folder) throw missing();
-            filingFolderId = folder.id;
+            if (!input.folderId) {
+                const paths = await queryVisibleItemFolders(tx, userId, [
+                    share.itemId,
+                ]);
+                if (!paths.length)
+                    throw new AppError(
+                        ErrorCode.INVALID_INPUT,
+                        "Choose a private folder",
+                        400,
+                    );
+                filingFolderId = null;
+            } else {
+                const [folder] = await tx
+                    .select({ id: recordingFolders.id })
+                    .from(recordingFolders)
+                    .where(
+                        and(
+                            eq(recordingFolders.id, input.folderId),
+                            eq(recordingFolders.userId, userId),
+                            ne(recordingFolders.kind, "public"),
+                        ),
+                    )
+                    .for("share");
+                if (!folder) throw missing();
+                filingFolderId = folder.id;
+            }
         }
         await tx
             .update(itemShares)

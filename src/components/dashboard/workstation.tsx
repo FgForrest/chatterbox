@@ -2041,6 +2041,7 @@ export function Workstation({
                             <PersonInvitations
                                 initialInvitations={initialInvitations}
                                 folders={navigationFolders}
+                                onFolderCreated={handleFolderCreated}
                             />
                             <FolderTree
                                 folders={navigationFolders}
@@ -2127,6 +2128,9 @@ export function Workstation({
                                                     initialInvitations
                                                 }
                                                 folders={navigationFolders}
+                                                onFolderCreated={
+                                                    handleFolderCreated
+                                                }
                                                 notifications={false}
                                             />
                                         </div>
