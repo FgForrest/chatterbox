@@ -40,6 +40,7 @@ field, a filename date disagrees with `date:`, a value is not one of the allowed
 
 | Date | Record | Kind | Status | Refs |
 |------|--------|------|--------|------|
+| 2026-10-31 | [Item invitations acknowledge existing folder access and require extra filing only by choice](2026-10-31-share-acceptance-with-existing-folder-access.md) | fix | accepted |  |
 | 2026-10-28 | [Agenda filing uses recording transactions and every placement contributes audience and preparation context](2026-10-28-agendas-use-all-folder-placements.md) | feature | proposed | [PR #293](https://github.com/FgForrest/chatterbox/pull/293), [PR #302](https://github.com/FgForrest/chatterbox/pull/302) |
 | 2026-10-28 | [Curators export Organization folder subtrees through their own connections](2026-10-28-curator-organization-folder-exports.md) | feature | accepted |  |
 | 2026-10-28 | [Item knowledge uses the folder knowledge panel and replaces finished Learn cards](2026-10-28-item-knowledge-uses-folder-panel.md) | refactor | proposed | [PR #300](https://github.com/FgForrest/chatterbox/pull/300) |

@@ -460,8 +460,8 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
         ).toEqual([]);
     });
     it("keeps one row for direct and inherited access and revokes each independently", async () => {
-        await accept();
         const [direct] = await inviteToItem("owner", "audio", ["receiver"]);
+        await accept();
         await changePersonShare("receiver", direct.id, {
             action: "accept",
             version: direct.version,
@@ -1406,8 +1406,8 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
             .update(recordingFolders)
             .set({ name: encryptText(title) })
             .where(eq(recordingFolders.id, "source"));
-        const share = await invite();
         await inviteToItem("owner", "mail", ["receiver"]);
+        const share = await invite();
         const pending = await invitationsRoute(request("shares", "GET"));
         expect(pending.status).toBe(200);
         const invitations = (await pending.json()).invitations as {
@@ -1771,7 +1771,6 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
         expect(JSON.stringify(folders)).not.toContain("My research");
     });
     it("keeps search and mail lists distinct when direct and folder shares overlap", async () => {
-        await accept();
         for (const itemId of ["audio", "mail"]) {
             const [share] = await inviteToItem("owner", itemId, ["receiver"]);
             await changePersonShare("receiver", share.id, {
@@ -1780,6 +1779,7 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
                 folderId: "my-folder",
             });
         }
+        await accept();
         const result = await searchApp(
             await taskViewer({ id: "receiver", email: "lena@example.com" }),
             "chatter",
@@ -2262,7 +2262,7 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
         "owner",
         "receiver",
         "delete",
-    ])("unfiles a leaving participant's items on %s removal and preserves independent access", async (actor) => {
+    ])("unfiles a leaving participant's items on %s removal and preserves legacy independent access", async (actor) => {
         const share = await accept();
         await acceptOther();
         const id = await contribute();
@@ -2270,7 +2270,15 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
             folderId: "source",
             title: "Acme agenda",
         });
-        const [direct] = await inviteToItem("receiver", id, ["owner"]);
+        const [direct] = await database.db
+            .insert(itemShares)
+            .values({
+                userId: "receiver",
+                itemId: id,
+                receiverUserId: "owner",
+                invitedByUserId: "receiver",
+            })
+            .returning();
         await changePersonShare("owner", direct.id, {
             action: "accept",
             version: direct.version,

@@ -301,6 +301,7 @@ export function WorkstationDetailPane({
                                     <ReceivedItemBanner
                                         recording={currentRecording}
                                         folders={folders}
+                                        onFolderCreated={onFolderCreated}
                                         shared={recordingShared}
                                     />
                                     <RecordingFolderTags

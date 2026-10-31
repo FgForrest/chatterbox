@@ -1,6 +1,7 @@
 import { type AnyColumn, and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { folderParticipantCondition } from "@/db/queries/folder-participants";
+import { ownerItemFolderAudienceRows } from "@/db/queries/item-folder-audience";
 import { activeShareRecipientCondition } from "@/db/queries/share-recipients";
 
 export {
@@ -85,7 +86,15 @@ function receivedFolderItemIds(
     attachmentId?: string,
     since?: Date,
 ) {
-    return sql`select ${recordingFolderAssignments.itemId} from (
+    return sql`select placement.item_id from (${receivedFolderPlacements(receiverUserId, attachmentId, since)}) placement`;
+}
+
+function receivedFolderPlacements(
+    receiverUserId: string,
+    attachmentId?: string,
+    since?: Date,
+) {
+    return sql`select ${recordingFolderAssignments.itemId} as item_id, ${recordingFolders.id} as source_folder_id from (
         select ${recordingFolders.id} from ${recordingFolders}
         where ${recordingFolders.userId} = ${receiverUserId}
             and ${recordingFolders.kind} = 'custom'
@@ -127,6 +136,38 @@ function receivedFolderItemIds(
             }`;
 }
 
+/** Only folders through which this receiver currently reads the requested items. */
+export async function queryVisibleItemFolders(
+    executor: Pick<typeof db, "execute">,
+    receiverUserId: string,
+    itemIds: string[],
+) {
+    if (!isOrgScopeVisible() || !itemIds.length) return [];
+    const rows = await executor.execute<{
+        item_id: string;
+        id: string;
+        name: string;
+    }>(sql`select placement.item_id,
+        case when ${recordingFolders.userId} = ${receiverUserId}
+            then ${recordingFolders.id} else ${receivedFolderAttachments.id} end as id,
+        case when ${recordingFolders.userId} = ${receiverUserId}
+            then ${recordingFolders.name} else ${receivedFolderAttachments.name} end as name
+        from (${receivedFolderPlacements(receiverUserId)}) placement
+        inner join ${recordingFolders} on ${recordingFolders.id} = placement.source_folder_id
+        left join ${folderShares} on ${folderShares.folderId} = placement.source_folder_id
+            and ${folderShares.userId} = ${recordingFolders.userId}
+            and ${folderShares.receiverUserId} = ${receiverUserId} and ${folderShares.state} = 'accepted'
+        left join ${receivedFolderAttachments} on ${receivedFolderAttachments.shareId} = ${folderShares.id}
+            and ${receivedFolderAttachments.userId} = ${receiverUserId}
+        where placement.item_id in (${sql.join(
+            itemIds.map((id) => sql`${id}`),
+            sql`, `,
+        )})
+            and (${recordingFolders.userId} = ${receiverUserId} or ${receivedFolderAttachments.id} is not null)
+        order by id`);
+    return [...rows];
+}
+
 /** Whether an owner's item has a current direct or direct-folder person invitation. */
 export function outgoingItemShareCondition(ownerUserId: string) {
     if (!isOrgScopeVisible()) return sql<boolean>`false`;
@@ -135,16 +176,7 @@ export function outgoingItemShareCondition(ownerUserId: string) {
         where ${itemShares.userId} = ${ownerUserId}
             and ${itemShares.state} in ('pending', 'accepted')
         union all
-        select ${recordingFolderAssignments.itemId} from ${folderShares}
-        inner join ${recordingFolders} on ${recordingFolders.id} = ${folderShares.folderId}
-            and ${recordingFolders.userId} = ${folderShares.userId}
-        inner join ${recordingFolderAssignments} on ${recordingFolderAssignments.folderId} = ${folderShares.folderId}
-            and ${folderParticipantCondition(folderShares.userId, recordingFolderAssignments.userId, folderShares.folderId)}
-        inner join ${chatterItems} on ${chatterItems.id} = ${recordingFolderAssignments.itemId}
-            and ${chatterItems.userId} = ${recordingFolderAssignments.userId}
-        where ${chatterItems.userId} = ${ownerUserId}
-            and ${folderShares.state} in ('pending', 'accepted')
-            and ${recordingFolders.kind} = 'custom'
+        select audience.item_id from (${ownerItemFolderAudienceRows(ownerUserId)}) audience
     )`;
 }
 
