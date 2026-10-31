@@ -1,7 +1,7 @@
 ---
 title: Person-shared folders accept every participant's own items while processing and exports follow ownership
 date: 2026-10-27
-updated: 2026-10-28 13:25
+updated: 2026-10-31 18:00
 status: superseded
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [293]
 areas: [src/db/queries/folder-participants.ts, src/db/queries/item-shares.ts, src/lib/folders, src/lib/sharing/folder-shares.ts, src/lib/meetings, src/lib/pipeline, src/lib/profiles, src/lib/export, src/components/recordings, src/app/api/v1/recorder/folders, extensions/recorder/popup]
 supersedes: [2026-10-22-person-to-person-sharing]
 superseded-by: [2026-10-28-agendas-use-all-folder-placements]
-relates: [2026-10-27-meeting-agendas, 2026-10-07-backup-scope]
+relates: [2026-10-27-meeting-agendas, 2026-10-07-backup-scope, 2026-10-31-share-acceptance-with-existing-folder-access]
 ---
 
 # Person-shared folders accept every participant's own items while processing and exports follow ownership
@@ -130,6 +130,8 @@ inventory includes meeting folder mutations. The existing meeting and person-sha
   to roll back either deployment mode.
 
 ## Related work
+
+- [Share acceptance with existing folder access](2026-10-31-share-acceptance-with-existing-folder-access.md) adds explicit acceptance without extra filing and discloses folder audiences; existing participation and ownership rules remain.
 
 - [Person-to-person sharing](2026-10-22-person-to-person-sharing.md) is superseded only for receivers'
   read-only folder role and the rule tying assignments to the folder owner. Acceptance, private-tree

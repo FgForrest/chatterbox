@@ -213,6 +213,75 @@ function tree(enabled = true, items = [recording]) {
     return { ...result, assign, move, select };
 }
 describe("folder person sharing UI", () => {
+    it.each([
+        { receivedFolderIds: [], throughFolder: false },
+        { receivedFolderIds: [attached.id], throughFolder: true },
+        { receivedFolderIds: ["missing-folder"], throughFolder: false },
+    ])("confirms removal with remaining folder access=$throughFolder and ids=$receivedFolderIds", async ({
+        receivedFolderIds,
+        throughFolder,
+    }) => {
+        render(
+            <ConfirmDialogProvider>
+                <PersonSharingProvider value>
+                    <RecordingRow
+                        recording={{
+                            ...recording,
+                            receivedShare: {
+                                id: "direct",
+                                version: 2,
+                                filingFolderId: privateFolder.id,
+                            },
+                            receivedFolderIds,
+                        }}
+                        folders={folders}
+                        isSelected={false}
+                        inFlight={undefined}
+                        snippet={null}
+                        isCompact={false}
+                        rowPadding="p-2"
+                        dateTimeFormat="relative"
+                        onSelect={vi.fn()}
+                        onDelete={vi.fn()}
+                        registerRef={vi.fn()}
+                    />
+                </PersonSharingProvider>
+            </ConfirmDialogProvider>,
+        );
+        fireEvent.pointerDown(
+            screen.getByRole("button", { name: "Row actions" }),
+            { button: 0, ctrlKey: false },
+        );
+        fireEvent.click(
+            screen.getByRole("menuitem", { name: "Remove and end sharing" }),
+        );
+        const dialog = await screen.findByRole("alertdialog");
+        expect(
+            within(dialog).getByText(
+                throughFolder
+                    ? "You will still see it in Local research."
+                    : "You will lose access to this item. The owner's item is kept.",
+            ),
+        ).toBeTruthy();
+        fireEvent.click(
+            within(dialog).getByRole("button", {
+                name: "Remove and end sharing",
+            }),
+        );
+        await waitFor(() =>
+            expect(requests).toHaveBeenCalledWith(
+                "/api/shares/direct",
+                expect.objectContaining({
+                    body: JSON.stringify({ action: "remove", version: 2 }),
+                }),
+            ),
+        );
+        await waitFor(() =>
+            expect(Boolean(screen.queryByText("Interview"))).toBe(
+                throughFolder,
+            ),
+        );
+    });
     it("shows owner sharing next to creation and settings and uses the outgoing mark", async () => {
         tree();
         const row = screen.getByRole("button", {
@@ -345,13 +414,34 @@ describe("folder person sharing UI", () => {
         fireEvent.click(
             screen.getByRole("button", { name: "Invitations (1)" }),
         );
-        fireEvent.click(
-            await screen.findByRole("button", { name: "Accept and attach…" }),
-        );
+        fireEvent.click(await screen.findByRole("button", { name: "Accept…" }));
         expect(
             screen.getByRole("dialog", { name: "Attach shared folder" }),
         ).toBeTruthy();
         const name = screen.getByRole("textbox", { name: "Name in your tree" });
+        expect(
+            screen.getByText(
+                "A new folder appears in your tree. You do not need to prepare an empty one.",
+            ),
+        ).toBeTruthy();
+        expect(
+            screen.getByText(
+                "You see everything directly in it, including what is added later. Subfolders are not shared.",
+            ),
+        ).toBeTruthy();
+        expect(
+            screen.getByText(
+                "You can add your own recordings and mail too. Alex Morgan and everyone who accepted the folder see them.",
+            ),
+        ).toBeTruthy();
+        expect(
+            screen.getByText(
+                "The name and position are yours only. Removing the folder ends sharing for you.",
+            ),
+        ).toBeTruthy();
+        expect(screen.getByText("Preview")).toBeTruthy();
+        expect(screen.getByText("new")).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
         expect((name as HTMLInputElement).value).toBe("Owner research");
         fireEvent.change(name, { target: { value: "My research" } });
         expect(
@@ -442,6 +532,12 @@ describe("folder person sharing UI", () => {
                 onOpenChange={vi.fn()}
             />,
         );
+        expect(
+            screen.queryByText(
+                "A new folder appears in your tree. You do not need to prepare an empty one.",
+            ),
+        ).toBeNull();
+        expect(screen.queryByText("Preview")).toBeNull();
         if (action === "rename")
             fireEvent.change(
                 screen.getByRole("textbox", { name: "Name in your tree" }),
