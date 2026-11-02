@@ -5,6 +5,7 @@ import { useExtracted } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/api-errors";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import {
     MAX_RECORDING_TITLE_LENGTH,
     normalizeRecordingTitle,
@@ -141,6 +142,7 @@ export function RecordingTitle({
     if (editing) {
         return (
             <input
+                {...getPasswordManagerAttributes()}
                 ref={inputRef}
                 value={draft}
                 disabled={saving}

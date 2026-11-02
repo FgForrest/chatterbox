@@ -17,6 +17,7 @@ import {
 import { getApiErrorMessage } from "@/lib/api-errors";
 import type { ImportResult } from "@/lib/knowledge/import-list";
 import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 
 const EXAMPLE = `product: Alpha, Beta (Béta, B2)
 organization: Acme
@@ -211,6 +212,7 @@ export function ImportDialog({
                     </div>
                 ) : (
                     <textarea
+                        {...getPasswordManagerAttributes()}
                         value={text}
                         onChange={(event) => setText(event.target.value)}
                         placeholder={EXAMPLE}

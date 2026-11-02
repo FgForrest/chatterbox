@@ -388,7 +388,7 @@ describe("library rail", () => {
         );
         expect(screen.queryByRole("button", { name: /Nested,/ })).toBeNull();
         fireEvent.change(
-            screen.getByRole("textbox", { name: "Search folders" }),
+            screen.getByRole("searchbox", { name: "Search folders" }),
             { target: { value: "nested" } },
         );
         expect(screen.getByRole("button", { name: /Nested,/ })).toBeTruthy();
@@ -533,7 +533,7 @@ describe("walk-in navigation", () => {
         expect(
             screen.getAllByRole("button", { name: /^Folder \d+/ }),
         ).toHaveLength(12);
-        expect(screen.queryByRole("textbox")).toBeNull();
+        expect(screen.queryByRole("searchbox")).toBeNull();
     });
     it("moves a row dragged from a folder onto a walk-in subfolder tile", () => {
         render(
@@ -844,7 +844,7 @@ describe("library item list", () => {
         );
         expect(
             scroller.contains(
-                screen.getByRole("textbox", { name: "Search recordings" }),
+                screen.getByRole("searchbox", { name: "Search recordings" }),
             ),
         ).toBe(false);
         expect(scroller.contains(screen.getByText("Folder tiles"))).toBe(true);

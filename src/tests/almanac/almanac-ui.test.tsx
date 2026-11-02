@@ -128,7 +128,7 @@ describe("ThingsList", () => {
         );
         expect(screen.getAllByRole("link")).toHaveLength(2);
         fireEvent.change(
-            screen.getByRole("textbox", { name: "Search things" }),
+            screen.getByRole("searchbox", { name: "Search things" }),
             {
                 target: { value: "billing" },
             },
@@ -138,7 +138,7 @@ describe("ThingsList", () => {
             screen.getByRole("link", { name: /Orion/ }).getAttribute("href"),
         ).toBe("/almanac/things/e-orion");
         fireEvent.change(
-            screen.getByRole("textbox", { name: "Search things" }),
+            screen.getByRole("searchbox", { name: "Search things" }),
             {
                 target: { value: "akmeh" },
             },
@@ -147,7 +147,7 @@ describe("ThingsList", () => {
             screen.getByRole("link", { name: /Acme/ }).getAttribute("href"),
         ).toBe("/almanac/things/e-acme");
         fireEvent.change(
-            screen.getByRole("textbox", { name: "Search things" }),
+            screen.getByRole("searchbox", { name: "Search things" }),
             {
                 target: { value: "" },
             },
@@ -226,7 +226,7 @@ describe("PeopleList", () => {
                 ]}
             />,
         );
-        const search = screen.getByRole("textbox", { name: "Search people" });
+        const search = screen.getByRole("searchbox", { name: "Search people" });
         fireEvent.change(search, { target: { value: "vild" } });
         expect(screen.getByText("Vilém Brázda")).toBeTruthy();
         expect(screen.queryByText("Jana Malá")).toBeNull();

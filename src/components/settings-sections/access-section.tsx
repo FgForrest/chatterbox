@@ -486,6 +486,7 @@ export function AccessSection() {
                 }}
             >
                 <Input
+                    type="search"
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
                     placeholder={i18n("Search by name, email or username")}

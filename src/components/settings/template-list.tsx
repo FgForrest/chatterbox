@@ -40,6 +40,7 @@ import {
     type TemplateKind,
     templatePrompt,
 } from "@/lib/ai/prompt-templates";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 
 const PAGE_SIZE = 10;
 
@@ -452,6 +453,7 @@ export function TemplateList({
                                     {i18n("Prompt")}
                                 </Label>
                                 <textarea
+                                    {...getPasswordManagerAttributes()}
                                     id={`${field}-template-prompt`}
                                     className="w-full min-h-[360px] px-3 py-2 text-sm border rounded-md resize-y font-mono"
                                     value={draft.prompt}

@@ -264,7 +264,7 @@ describe("recording row folder metadata", () => {
             ],
             assignments: [{ recordingId: recording.id, folderId: orgChild.id }],
         });
-        const search = screen.getByRole("textbox", {
+        const search = screen.getByRole("searchbox", {
             name: "Search recordings",
         });
         fireEvent.change(search, { target: { value: "Talvori" } });
@@ -295,7 +295,7 @@ describe("recording row folder metadata", () => {
             ]),
         });
         fireEvent.change(
-            screen.getByRole("textbox", { name: "Search recordings" }),
+            screen.getByRole("searchbox", { name: "Search recordings" }),
             { target: { value: "Talvori" } },
         );
         expect(
@@ -316,7 +316,7 @@ describe("recording row folder metadata", () => {
             ]),
         });
         fireEvent.change(
-            screen.getByRole("textbox", { name: "Search recordings" }),
+            screen.getByRole("searchbox", { name: "Search recordings" }),
             { target: { value: "Talvori" } },
         );
         const excerpt = within(row()).getByText(/The Talvori plan/);

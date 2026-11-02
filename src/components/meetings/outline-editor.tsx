@@ -5,6 +5,7 @@ import { useExtracted, useFormatter } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { TreePoint } from "@/lib/meetings/model";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import { cn } from "@/lib/utils";
 import { outlineMove, outlineRows } from "./outline";
 import type { MeetingDetail, MeetingPoint } from "./types";
@@ -113,6 +114,7 @@ function PointField({
     return (
         <>
             <textarea
+                {...getPasswordManagerAttributes()}
                 ref={input}
                 rows={1}
                 aria-label={i18n("Discussion point")}
@@ -202,6 +204,7 @@ function PointNote({
             )}
             {editable ? (
                 <input
+                    {...getPasswordManagerAttributes()}
                     ref={input}
                     aria-label={i18n("Point note")}
                     placeholder={i18n("Note")}
@@ -356,6 +359,7 @@ export function OutlineEditor({
         >
             <span aria-hidden="true">•</span>
             <input
+                {...getPasswordManagerAttributes()}
                 ref={newInput}
                 aria-label={i18n("New discussion point")}
                 placeholder={i18n("Add a point…")}
