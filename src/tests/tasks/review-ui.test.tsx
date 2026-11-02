@@ -415,6 +415,90 @@ describe.each([
         );
     });
 
+    it.each([
+        [false, false],
+        [false, true],
+        [true, false],
+        [true, true],
+    ])("group selection ignores non-editable proposals (editable %s, read-only %s)", async (editableTicked, readOnlyTicked) => {
+        const editable = task({ ticked: editableTicked });
+        const current = state({
+            canEdit: true,
+            reviewed: false,
+            tasks: [],
+            proposals: [
+                editable,
+                task({
+                    id: "read-only",
+                    text: "Read-only proposal",
+                    canEdit: false,
+                    ticked: readOnlyTicked,
+                }),
+            ],
+            updates: [],
+            matches: [],
+        });
+        await openFrame(current);
+        const group = screen.getByRole("checkbox", {
+            name: `${editableTicked ? "Untick" : "Tick"} all: Tasks`,
+        });
+        expect(group).toHaveProperty("checked", editableTicked);
+        expect(group).toHaveProperty("indeterminate", false);
+        expect(
+            screen.getByText(`${Number(editableTicked)} of 1 selected`),
+        ).toBeTruthy();
+        fireEvent.click(group);
+        expect(current.update).toHaveBeenCalledExactlyOnceWith(
+            editable,
+            { ticked: !editableTicked },
+            { ticked: !editableTicked },
+        );
+    });
+
+    it("disables group selection when no proposal is editable", async () => {
+        const current = state({
+            canEdit: true,
+            reviewed: false,
+            tasks: [],
+            proposals: [task({ canEdit: false })],
+            updates: [],
+            matches: [],
+        });
+        await openFrame(current);
+        const group = screen.getByRole("checkbox", { name: /all: Tasks/ });
+        expect(group).toHaveProperty("disabled", true);
+        expect(group).toHaveProperty("checked", false);
+        expect(screen.getByText("0 of 0 selected")).toBeTruthy();
+        fireEvent.click(group);
+        expect(current.update).not.toHaveBeenCalled();
+    });
+
+    it("shows indeterminate selection across editable proposals only", async () => {
+        const unticked = task({ id: "unticked", ticked: false });
+        const current = state({
+            canEdit: true,
+            reviewed: false,
+            tasks: [],
+            proposals: [
+                task(),
+                unticked,
+                task({ id: "read-only", canEdit: false }),
+            ],
+            updates: [],
+            matches: [],
+        });
+        await openFrame(current);
+        const group = screen.getByRole("checkbox", { name: "Tick all: Tasks" });
+        expect(group).toHaveProperty("indeterminate", true);
+        expect(screen.getByText("1 of 2 selected")).toBeTruthy();
+        fireEvent.click(group);
+        expect(current.update).toHaveBeenCalledExactlyOnceWith(
+            unticked,
+            { ticked: true },
+            { ticked: true },
+        );
+    });
+
     it("keeps the proposal when a merge fails", async () => {
         const current = state({
             canEdit: true,

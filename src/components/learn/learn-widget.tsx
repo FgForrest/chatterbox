@@ -1544,6 +1544,7 @@ export function LearnWidget({
                 <WorkflowWidget
                     id={resolvedWidgetId}
                     frame={frame}
+                    stickyFooter={frame === "inline"}
                     tone={working ? "working" : "review"}
                     open={open}
                     onOpenChange={setOpen}

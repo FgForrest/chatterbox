@@ -2080,7 +2080,11 @@ function finishInTx(
         const rejected = items.filter((item) => !item.accepted);
         if (transcript) {
             for (const item of rejected) {
-                if (item.kind !== "speaker") continue;
+                if (
+                    item.kind !== "speaker" ||
+                    (quick && !item.rejectedOutright)
+                )
+                    continue;
                 const payload = item.payload as Extract<
                     ReviewCandidate,
                     { kind: "speaker" }
@@ -2317,7 +2321,7 @@ export async function finishKnownFactsOnly(
             { kinds: ["audio", "mail"] },
         );
         if (access.ownerUserId !== run.userId) return false;
-        await finishReview(access, actorUserId, {
+        const result = await finishReview(access, actorUserId, {
             runId,
             versions: Object.fromEntries(
                 rows.map((row) => [row.id, row.version]),
@@ -2326,12 +2330,11 @@ export async function finishKnownFactsOnly(
                 run.view === "org" &&
                 (await userCuratesOrganizationNow(actorUserId)),
         });
+        return result.status === "finished";
     } catch (error) {
-        if (error instanceof AppError && [403, 404].includes(error.statusCode))
-            return false;
+        if (error instanceof AppError) return false;
         throw error;
     }
-    return true;
 }
 
 /** Persist the first local field edit without changing the item's draft version. */

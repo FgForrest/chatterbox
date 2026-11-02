@@ -212,6 +212,13 @@ export function TaskReviewLink({
     const visibleProposals = data.proposals.filter(
         (proposal) => !pairedProposalIds.has(proposal.id),
     );
+    const editableProposals = visibleProposals.filter((task) => task.canEdit);
+    const selectedProposals = editableProposals.filter(
+        (task) => task.ticked,
+    ).length;
+    const allProposalsSelected =
+        editableProposals.length > 0 &&
+        selectedProposals === editableProposals.length;
     const matchedTaskIds = new Set(
         data.matches.map((match) => match.candidate.id),
     );
@@ -246,6 +253,7 @@ export function TaskReviewLink({
             <WorkflowWidget
                 id={resolvedWidgetId}
                 frame={frame}
+                stickyFooter={frame === "inline"}
                 tone="review"
                 open={open}
                 onOpenChange={(next) => {
@@ -456,26 +464,19 @@ export function TaskReviewLink({
                                     {visibleProposals.length > 0 && (
                                         <GroupCheckbox
                                             state={
-                                                visibleProposals.every(
-                                                    (task) => task.ticked,
-                                                ) && visibleProposals.length > 0
+                                                allProposalsSelected
                                                     ? "all"
-                                                    : visibleProposals.some(
-                                                            (task) =>
-                                                                task.ticked,
-                                                        )
+                                                    : selectedProposals > 0
                                                       ? "some"
                                                       : "none"
                                             }
                                             disabled={
                                                 state.accepting ||
                                                 merging !== null ||
-                                                visibleProposals.length === 0
+                                                editableProposals.length === 0
                                             }
                                             label={
-                                                visibleProposals.every(
-                                                    (task) => task.ticked,
-                                                )
+                                                allProposalsSelected
                                                     ? i18n(
                                                           "Untick all: {group}",
                                                           {
@@ -495,10 +496,8 @@ export function TaskReviewLink({
                                             }
                                             onToggle={() => {
                                                 const next =
-                                                    !visibleProposals.every(
-                                                        (task) => task.ticked,
-                                                    );
-                                                for (const task of visibleProposals)
+                                                    !allProposalsSelected;
+                                                for (const task of editableProposals)
                                                     if (task.ticked !== next)
                                                         state.update(
                                                             task,
@@ -516,13 +515,10 @@ export function TaskReviewLink({
                                         {i18n(
                                             "{selected} of {total} selected",
                                             {
-                                                selected: String(
-                                                    visibleProposals.filter(
-                                                        (task) => task.ticked,
-                                                    ).length,
-                                                ),
+                                                selected:
+                                                    String(selectedProposals),
                                                 total: String(
-                                                    visibleProposals.length,
+                                                    editableProposals.length,
                                                 ),
                                             },
                                         )}

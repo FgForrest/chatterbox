@@ -34,6 +34,41 @@ describe.each([
     kind,
     frame,
 }) => {
+    it("uses a sticky footer only for the inline review", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () =>
+                Response.json({
+                    run: { id: "older-run", status: "ready" },
+                    available: true,
+                    items: [],
+                    names: {},
+                    types: {},
+                    relations: {},
+                }),
+            ),
+        );
+        render(
+            <LearnWidget
+                kind={kind}
+                frame={frame}
+                recordingId="older-item"
+                showTrigger={false}
+                initialOpen
+            />,
+        );
+        await screen.findByRole("heading", { name: "Review what Learn found" });
+        const footer = screen.getByRole("contentinfo");
+        expect(footer.classList.contains("sticky")).toBe(frame === "inline");
+        const body = document.querySelector("[data-widget-body]");
+        expect(body?.classList.contains("overflow-x-clip")).toBe(
+            frame === "inline",
+        );
+        expect(body?.classList.contains("overflow-y-auto")).toBe(
+            frame === "dialog",
+        );
+    });
+
     it("finishes directly from the collapsed card without claiming suggestions wait", async () => {
         let finished = false;
         const fetch = vi.fn(async (_url: string, init?: RequestInit) => {

@@ -28,6 +28,7 @@ import {
     transcriptCorrectionPasses,
     transcriptCorrections,
     transcriptions,
+    transcriptSpeakerRejections,
     transcriptSpeakers,
     users,
 } from "@/db/schema";
@@ -89,6 +90,7 @@ import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { createEntity } from "@/lib/knowledge/entities";
 import { confirmManualFact } from "@/lib/knowledge/facts";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
+import { learnGuessRowId } from "@/lib/knowledge/speaker-label-rules";
 import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
 import { learnJobHandler } from "@/lib/learn/learn-job-handler";
 import {
@@ -858,6 +860,30 @@ const turns = [
         expect(await finishKnownFactsOnly(run.id, OWNER)).toBe(true);
         expect(await held()).toBeNull();
     });
+    it("leaves a known-only run ready on a writer conflict without retrying the successful job", async () => {
+        await share();
+        const { run, access, versions } = await knownReady();
+        await expect(
+            finishReview(access, OWNER, { versions }),
+        ).rejects.toMatchObject({
+            statusCode: 409,
+        });
+        await expect(runReadyJob(run.id, OWNER)).resolves.toMatchObject({
+            skipped: "ready",
+        });
+        expect((await loadReview(access)).run?.status).toBe("ready");
+        expect(await db().select().from(knowledgeFactEvidence)).toEqual([]);
+    });
+    it("does not report a superseded known-only run as finished", async () => {
+        const { run, access } = await knownReady();
+        await db()
+            .update(transcriptions)
+            .set({ revision: 1 })
+            .where(eq(transcriptions.id, transcriptId));
+        expect(await finishKnownFactsOnly(run.id, OWNER)).toBe(false);
+        expect((await loadReview(access)).run?.status).toBe("superseded");
+        expect(await db().select().from(knowledgeFactEvidence)).toEqual([]);
+    });
     it("keeps the correction pass and hold for a known-only run", async () => {
         const { run } = await knownReady();
         expect(await finishKnownFactsOnly(run.id, OWNER)).toBe(true);
@@ -1096,6 +1122,72 @@ const turns = [
         expect(
             (await waitingTaskDecisions(db(), ITEM, OWNER, "private")).total,
         ).toBe(0);
+    });
+    it.each([
+        { quick: true, decision: undefined, source: "calendar" },
+        { quick: true, decision: undefined, source: "meet" },
+        { quick: true, decision: "rejected", source: "calendar" },
+        { quick: false, decision: undefined, source: "calendar" },
+    ] as const)("preserves only deferred speaker hints (quick $quick, decision $decision, source $source)", async ({
+        quick,
+        decision,
+        source,
+    }) => {
+        await db()
+            .insert(people)
+            .values({
+                id: "suggested-person",
+                userId: OWNER,
+                displayName: encryptText("Ada Example"),
+            });
+        const { run, access, versions } = await ready([
+            {
+                kind: "speaker",
+                decision,
+                payload: {
+                    label: "speaker_0",
+                    personId: "suggested-person",
+                    source,
+                    guess: { confidence: 0.4 },
+                    reason: "Roster guess",
+                    evidenceMs: [0],
+                },
+            },
+        ]);
+        const id = learnGuessRowId(run.id, "speaker_0");
+        const at = new Date();
+        await db().insert(transcriptSpeakers).values({
+            id,
+            userId: OWNER,
+            transcriptionId: transcriptId,
+            label: "speaker_0",
+            personId: "suggested-person",
+            source,
+            status: "suggested",
+            createdAt: at,
+            updatedAt: at,
+        });
+        await finishReview(access, OWNER, { versions, quick });
+        const hints = await db()
+            .select()
+            .from(transcriptSpeakers)
+            .where(eq(transcriptSpeakers.id, id));
+        if (quick) {
+            expect(await db().select().from(learnDismissals)).toEqual([]);
+            expect(
+                await db().select().from(transcriptSpeakerRejections),
+            ).toEqual([]);
+            expect((await loadReview(access)).items).toMatchObject([
+                { outcome: "not_now" },
+            ]);
+        }
+        if (quick && decision !== "rejected") {
+            expect(hints).toMatchObject([
+                { id, status: "suggested", personId: "suggested-person" },
+            ]);
+        } else {
+            expect(hints).toEqual([]);
+        }
     });
     it.each([
         "manual",

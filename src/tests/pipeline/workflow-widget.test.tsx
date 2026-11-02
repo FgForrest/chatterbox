@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { WorkflowWidgetProps } from "@/components/pipeline/workflow-widget";
 import {
     OPEN_WORKFLOW_WIDGET_EVENT,
     openWidget,
@@ -21,7 +22,10 @@ import type {
     WorkflowWidgetTone,
 } from "@/lib/pipeline/workflow-widgets";
 
-function ExampleWidget({ frame }: { frame: WorkflowWidgetFrame }) {
+function ExampleWidget({
+    frame,
+    ...props
+}: Pick<WorkflowWidgetProps, "frame" | "stickyFooter">) {
     const [open, setOpen] = useState(false);
     return (
         <WorkflowWidget
@@ -38,6 +42,7 @@ function ExampleWidget({ frame }: { frame: WorkflowWidgetFrame }) {
                 actions: <Button>Primary action</Button>,
             }}
             closeLabel="Save for later"
+            {...props}
         >
             <p>Shared body</p>
         </WorkflowWidget>
@@ -70,6 +75,31 @@ beforeEach(() => {
         callback(0);
         return 1;
     });
+});
+
+it.each([
+    { frame: "inline", stickyFooter: false },
+    { frame: "inline", stickyFooter: true },
+    { frame: "dialog", stickyFooter: false },
+    { frame: "dialog", stickyFooter: true },
+] as const)("scopes sticky layout to an opted-in inline frame ($frame, $stickyFooter)", async (props) => {
+    render(<ExampleWidget {...props} />);
+    openWidget(`example-${props.frame}`);
+    const body = (await screen.findByText("Shared body")).closest(
+        "[data-widget-body]",
+    );
+    const footer = screen.getByText("Shared footer").closest("footer");
+    const sticky = props.frame === "inline" && props.stickyFooter;
+    expect(footer?.classList.contains("sticky")).toBe(sticky);
+    expect(footer?.classList.contains("bg-card")).toBe(sticky);
+    expect(body?.classList.contains("overflow-y-auto")).toBe(!sticky);
+    expect(body?.classList.contains("overflow-x-clip")).toBe(sticky);
+    if (props.frame === "inline") {
+        const card = body?.closest('[data-slot="card"]');
+        expect(card?.classList.contains("overflow-hidden")).toBe(!sticky);
+        expect(card?.classList.contains("overflow-clip")).toBe(sticky);
+        expect(card?.classList.contains("rounded-xl")).toBe(true);
+    }
 });
 
 afterEach(() => {
