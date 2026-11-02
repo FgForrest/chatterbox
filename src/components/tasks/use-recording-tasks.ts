@@ -12,10 +12,13 @@ import {
     fetchRecordingTasks,
     mergeProposalIntoTarget,
     mergeTaskProposals,
+    skipTaskReview,
     TaskRequestError,
     tickTaskUpdate,
+    touchTaskReview,
     undoTaskMatch,
 } from "@/components/tasks/task-api";
+import { useDeferredReviewCommit } from "@/hooks/use-deferred-review-commit";
 import type {
     RecordingTasks,
     TaskChange,
@@ -65,6 +68,8 @@ export interface RecordingTasksState {
     /** How many wait: proposals and follow-ups. */
     waiting: number;
     accepting: boolean;
+    skip?: () => void;
+    touch?: () => void;
     update: (
         task: TaskView,
         change: Omit<TaskChange, "version">,
@@ -90,6 +95,7 @@ export function useRecordingTasks(
     reloadKey: string | number,
 ): RecordingTasksState {
     const i18n = useExtracted();
+    const deferred = useDeferredReviewCommit();
     const [data, setData] = useState<RecordingTasks | null>(null);
     const [failed, setFailed] = useState(false);
     const [accepting, setAccepting] = useState(false);
@@ -126,6 +132,10 @@ export function useRecordingTasks(
         void reload();
     }, [reload, reloadKey]);
 
+    const markChanged = () =>
+        setData((current) =>
+            current ? { ...current, taskReviewChanged: true } : current,
+        );
     const patchRow = (id: string, patch: Partial<TaskView>) =>
         setData((current) =>
             current
@@ -173,6 +183,7 @@ export function useRecordingTasks(
         change,
         optimistic,
     ) => {
+        if (task.status === "proposed") markChanged();
         patchRow(task.id, optimistic);
         void enqueue(task.id, async () => {
             const saved = await changeTask(task.id, {
@@ -195,6 +206,7 @@ export function useRecordingTasks(
     };
 
     const add = async (status: "proposed" | "open") => {
+        if (status === "proposed") markChanged();
         try {
             const task = await addRecordingTask(recordingId, {
                 text: i18n("New task"),
@@ -220,6 +232,7 @@ export function useRecordingTasks(
 
     const merge = async (ids: readonly string[]) => {
         if (ids.length < 2) return false;
+        markChanged();
         try {
             await Promise.all(pending.current.values());
             const kept = await mergeTaskProposals(recordingId, [...ids]);
@@ -247,6 +260,7 @@ export function useRecordingTasks(
     };
 
     const tickUpdate = (update: TaskUpdateView, ticked: boolean) => {
+        markChanged();
         const key = `update:${update.id}`;
         setData((current) =>
             current
@@ -265,6 +279,7 @@ export function useRecordingTasks(
     };
 
     const tickMatch = (match: TaskMatchView, ticked: boolean) => {
+        markChanged();
         const key = `match:${match.id}`;
         setData((current) =>
             current
@@ -287,6 +302,7 @@ export function useRecordingTasks(
     };
 
     const mergeInto = async (sourceTaskId: string, targetTaskId: string) => {
+        markChanged();
         const snapshot = dataRef.current;
         setData((current) =>
             current
@@ -383,9 +399,34 @@ export function useRecordingTasks(
         data,
         failed,
         refresh: reload,
-        reviewing: Boolean(data?.canEdit) && waiting > 0,
+        reviewing:
+            Boolean(data?.canEdit) &&
+            waiting > 0 &&
+            !data?.taskReviewSkipped &&
+            !deferred.hidden,
+        skip: () =>
+            deferred.defer(
+                i18n("Task review skipped"),
+                i18n("Undo"),
+                async (keepalive) => {
+                    try {
+                        await skipTaskReview(recordingId, keepalive);
+                        announceTasksChanged();
+                        announceLearnReviewsChanged();
+                        await reload();
+                    } catch (error) {
+                        await failure(error);
+                        throw error;
+                    }
+                },
+            ),
         waiting,
         accepting,
+        touch: () => {
+            if (dataRef.current?.taskReviewChanged) return;
+            markChanged();
+            void enqueue("review", () => touchTaskReview(recordingId));
+        },
         update,
         add,
         merge,

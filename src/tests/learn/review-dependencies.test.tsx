@@ -78,6 +78,8 @@ function fact() {
 function serve(items: Item[]) {
     const applied: string[][] = [];
     const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+        if (init?.method === "PATCH" && !url.includes("/items/"))
+            return Response.json({ changed: true });
         if (init?.method === "PATCH") {
             const target = items.find((candidate) =>
                 url.includes(`/items/${candidate.id}`),

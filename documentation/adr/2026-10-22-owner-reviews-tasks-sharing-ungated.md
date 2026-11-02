@@ -1,14 +1,14 @@
 ---
 title: The owner reviews a summary's tasks, the assignee never has to accept anything, and sharing does not wait for the review
 date: 2026-10-22
-updated: 2026-10-22 22:30
-status: accepted
+updated: 2026-11-02 19:53
+status: superseded
 kind: fix
 issues: []
 prs: [238]
 areas: [src/lib/tasks, src/lib/sharing/share-gate.ts, src/lib/pipeline/plan.ts]
 supersedes: [2026-10-21-tasks-accepted-automatically, 2026-10-07-tasks-from-summaries, 2026-10-19-processing-profiles-and-workflow]
-superseded-by: []
+superseded-by: [2026-11-02-quick-finish-of-reviews]
 relates: []
 ---
 
@@ -20,6 +20,8 @@ from quoted mail and suggested matches to earlier tasks unticked; ambiguous matc
 choices with "Keep as new". What the previous day's change got right stays: sharing does not wait
 for the task review, and an accepted task reaches its assignee directly. Nobody but the owner
 accepts anything; there is no acceptance step for the person a task is assigned to.
+
+**Superseded in part** by [quick finish of reviews](2026-11-02-quick-finish-of-reviews.md): Task review may now optionally be skipped without rejecting proposals. Finish still drops untouched assignee checks without remembering a rejection. Sharing remains ungated and assignees still accept nothing.
 
 ## Why
 

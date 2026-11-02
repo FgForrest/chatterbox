@@ -632,7 +632,6 @@ it("renders every suggestion kind produced by mail Learn", async () => {
 
     for (const title of [
         "New in the Almanac",
-        "Known facts mentioned again",
         "New facts",
         "New kind of relation",
     ]) {

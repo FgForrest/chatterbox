@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, GraduationCap, Loader2 } from "lucide-react";
+import { AlertTriangle, GraduationCap, Loader2, Zap } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import {
     type ReactNode,
@@ -72,9 +72,14 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import {
+    GroupCheckbox,
+    type GroupToggle,
+} from "@/components/ui/group-checkbox";
 import { HeadingCount } from "@/components/ui/heading-count";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
+import { useDeferredReviewCommit } from "@/hooks/use-deferred-review-commit";
 import { followJob } from "@/lib/jobs/client";
 import {
     labelsFromTurns,
@@ -119,14 +124,6 @@ function speakerPayload(item: ItemView): SpeakerPayload {
     return item.payload as unknown as SpeakerPayload;
 }
 
-/** A group's tick-all checkbox: whether all, some or none are ticked. */
-interface GroupToggle {
-    state: "all" | "some" | "none";
-    disabled: boolean;
-    label: string;
-    onToggle: () => void;
-}
-
 interface ItemView {
     id: string;
     kind:
@@ -153,6 +150,7 @@ interface ReviewState {
         id: string;
         status: string;
         errorCode?: string | null;
+        reviewChanged?: boolean;
         /** Counts carried from the owner’s finished private review on share. */
         sharedReview?: {
             applied: number | null;
@@ -169,15 +167,16 @@ interface ReviewState {
     /** The types a new thing may take. */
     entityTypes?: { key: string; label: string }[];
     available: boolean;
+    quickFinish?: { automaticSummary: boolean; skipTasks: boolean };
 }
 
 const POLL_MS = 3_000;
 
 /**
  * Learn on a transcript or message, and review what it proposed: the button
- * that starts a run, and once it is ready the review with its two
- * defaults (pre-ticked: corrections a person confirmed before, known facts
- * mentioned again; everything else unticked). Drafts are kept on the server
+ * that starts a run, and once it is ready the review with previously
+ * confirmed corrections pre-ticked. Repeated known facts apply at Finish
+ * without review. Drafts are kept on the server
  * as they are ticked; "Finish review" applies what is ticked and remembers
  * the rest. Once a run is over the button shows how it went (learned,
  * nothing new, failed) and opens what it did, with Re-learn. Only whoever
@@ -223,6 +222,8 @@ export function LearnWidget({
     initialOpen?: boolean;
 }) {
     const i18n = useExtracted();
+    const deferred = useDeferredReviewCommit();
+    const [nonSpeakerChanged, setNonSpeakerChanged] = useState(false);
     const locale = useLocale();
     const timeZone = useTimeZone();
     const getApiErrorMessage = useLearnApiErrorMessage();
@@ -276,10 +277,15 @@ export function LearnWidget({
     );
 
     const observedRun = useRef<string | null>(null);
+    const reviewRunId = useRef<string | null>(null);
     const load = useCallback(async (): Promise<ReviewState | null> => {
         const response = await fetch(url("review"));
         if (!response.ok) return null;
         const next = (await response.json()) as ReviewState;
+        if (reviewRunId.current !== next.run?.id) {
+            reviewRunId.current = next.run?.id ?? null;
+            setNonSpeakerChanged(false);
+        }
         versions.current = new Map(
             (next.items ?? []).map((item) => [item.id, item.version]),
         );
@@ -403,7 +409,11 @@ export function LearnWidget({
                 toast.success(
                     i18n(
                         "Learn found {count, plural, one {# suggestion} other {# suggestions}} to review",
-                        { count: next?.items.length ?? 0 },
+                        {
+                            count: (next?.items ?? []).filter(
+                                (item) => item.kind !== "known_fact",
+                            ).length,
+                        },
                     ),
                 );
             } else if (status === "finished") {
@@ -442,7 +452,9 @@ export function LearnWidget({
         item: ItemView,
         decision: "accepted" | "rejected" | null,
         choice: Record<string, unknown> | null = draftChoice(item),
+        speakerOnly = false,
     ): Promise<void> => {
+        if (item.kind !== "speaker" && !speakerOnly) setNonSpeakerChanged(true);
         draftChoices.current.set(item.id, choice);
         setSaving((count) => count + 1);
         const before = queues.current.get(item.id) ?? Promise.resolve();
@@ -450,7 +462,7 @@ export function LearnWidget({
         // not swallow the edits made after it.
         const sent = before
             .catch(() => undefined)
-            .then(() => keep(item, decision, choice))
+            .then(() => keep(item, decision, choice, speakerOnly))
             .finally(() => setSaving((count) => count - 1));
         queues.current.set(item.id, sent);
         drafts.current.add(sent);
@@ -485,7 +497,14 @@ export function LearnWidget({
                     !acceptedRecords.has(record.id)
                 ) {
                     acceptedRecords.add(record.id);
-                    changes.push(saveDecision(record, "accepted"));
+                    changes.push(
+                        saveDecision(
+                            record,
+                            "accepted",
+                            undefined,
+                            item.kind === "speaker",
+                        ),
+                    );
                 }
             }
         }
@@ -511,6 +530,7 @@ export function LearnWidget({
         item: ItemView,
         decision: "accepted" | "rejected" | null,
         choice: Record<string, unknown> | null,
+        speakerOnly: boolean,
     ) => {
         let response: Response;
         try {
@@ -519,6 +539,7 @@ export function LearnWidget({
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     decision,
+                    ...(speakerOnly ? { speakerOnly: true } : {}),
                     version: versions.current.get(item.id) ?? item.version,
                     choice,
                 }),
@@ -834,7 +855,6 @@ export function LearnWidget({
             records: items.filter((item) => item.kind === "new_record"),
             speakers: items.filter((item) => item.kind === "speaker"),
             corrections: items.filter((item) => item.kind === "correction"),
-            known: items.filter((item) => item.kind === "known_fact"),
             facts: items.filter((item) => item.kind === "fact"),
             phrases: items.filter((item) => item.kind === "relation_phrase"),
         };
@@ -855,12 +875,14 @@ export function LearnWidget({
         speakerAccent(speakingOrder.indexOf(speakerKey(label)));
 
     const status = state?.run?.status;
-    const ready = status === "ready";
+    const ready = status === "ready" && !deferred.hidden;
     const finished = status === "finished";
     const sharedReview = finished ? state?.run?.sharedReview : undefined;
     const stopped = status === "cancelled" || status === "superseded";
     const failed = status === "failed" || (stopped && !showTrigger);
-    const count = state?.items?.length ?? 0;
+    const count = (state?.items ?? []).filter(
+        (item) => item.kind !== "known_fact",
+    ).length;
     const learned = finished ? learnedCount(state?.items ?? []) : 0;
     const pending = status === "queued" || status === "running";
     const working = running || pending;
@@ -1082,6 +1104,7 @@ export function LearnWidget({
 
     const selected = (state?.items ?? []).filter(
         (item) =>
+            item.kind !== "known_fact" &&
             ticked(item) &&
             (item.kind === "relation_phrase" ||
                 (!blockedItem(item) && waitingFor(item).length === 0)),
@@ -1105,7 +1128,124 @@ export function LearnWidget({
         if (targetSource && targetSource !== source) return;
         setOpen(true);
     });
-    if (!state?.available && !ready && !finished && !failed) return null;
+    const quickFinish = async () => {
+        if (!state) return;
+        setFinishing(true);
+        try {
+            const refusedBefore = refused.current;
+            await Promise.allSettled([...drafts.current]);
+            if (refused.current !== refusedBefore) return;
+            const seen = await load();
+            if (!seen || seen.run?.status !== "ready" || seen.run.reviewChanged)
+                return;
+            const message = seen.quickFinish?.skipTasks
+                ? i18n("Writing the summary; the task review will be skipped")
+                : seen.quickFinish?.automaticSummary
+                  ? i18n("Writing the summary")
+                  : i18n("Learn review skipped");
+            deferred.defer(message, i18n("Undo"), async (keepalive) => {
+                try {
+                    const response = await fetch(url("review/finish"), {
+                        method: "POST",
+                        keepalive,
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            quick: true,
+                            runId: seen.run?.id,
+                            versions: Object.fromEntries(
+                                seen.items.map((item) => [
+                                    item.id,
+                                    item.version,
+                                ]),
+                            ),
+                        }),
+                    });
+                    if (!response.ok) {
+                        await handleLearnReviewFailure(
+                            response,
+                            i18n("Could not finish the review"),
+                            load,
+                            getApiErrorMessage,
+                        );
+                        return;
+                    }
+                    invalidateItemProcessing(recordingId);
+                    setOpen(false);
+                    await load();
+                    announceLearnReviewsChanged();
+                    onFinished?.();
+                } catch (error) {
+                    toast.error(i18n("Could not finish the review"));
+                    await load();
+                    throw error;
+                }
+            });
+        } finally {
+            setFinishing(false);
+        }
+    };
+    const touchNonSpeaker = () => {
+        if (nonSpeakerChanged || state?.run?.reviewChanged) return;
+        setNonSpeakerChanged(true);
+        void track(
+            fetch(url("review"), { method: "PATCH" })
+                .then(async (response) => {
+                    if (!response.ok)
+                        await handleLearnReviewFailure(
+                            response,
+                            i18n("Could not keep that decision"),
+                            load,
+                            getApiErrorMessage,
+                        );
+                })
+                .catch(() => {
+                    toast.error(i18n("Could not keep that decision"));
+                }),
+        );
+    };
+    const quickAvailable = !nonSpeakerChanged && !state?.run?.reviewChanged;
+    const automaticSummary = state?.quickFinish?.automaticSummary ?? false;
+    const skipTasks = state?.quickFinish?.skipTasks ?? false;
+    const quickTitle = automaticSummary
+        ? kind === "mail"
+            ? i18n("In a hurry? Summary only")
+            : i18n("In a hurry? Speakers and summary only")
+        : kind === "mail"
+          ? i18n("In a hurry? Finish Learn now")
+          : i18n("In a hurry? Speakers only");
+    const quickLabel = automaticSummary
+        ? kind === "mail"
+            ? i18n("Summary only")
+            : i18n("Speakers and summary only")
+        : kind === "mail"
+          ? i18n("Skip Learn")
+          : i18n("Speakers only");
+    const quickSentence = automaticSummary
+        ? skipTasks
+            ? kind === "mail"
+                ? i18n(
+                      "Skips the rest of Learn, starts the summary now and skips its task proposals; you will find them under the summary.",
+                  )
+                : i18n(
+                      "Uses the speakers you confirm below and the corrections you confirmed before. Skips the rest of Learn, starts the summary now and skips its task proposals; you will find them under the summary.",
+                  )
+            : kind === "mail"
+              ? i18n("Skips the rest of Learn and starts the summary now.")
+              : i18n(
+                    "Uses the speakers you confirm below and the corrections you confirmed before. Skips the rest of Learn and starts the summary now.",
+                )
+        : kind === "mail"
+          ? i18n(
+                "Skips the rest of Learn without rejecting its suggestions. You can run Learn again later.",
+            )
+          : i18n(
+                "Uses the speakers you confirm below and the corrections you confirmed before. Skips the rest of Learn without rejecting its suggestions. You can run Learn again later.",
+            );
+    if (
+        deferred.hidden ||
+        (!state?.available && !ready && !finished && !failed)
+    )
+        return null;
 
     const startLearn = () => {
         void learn();
@@ -1273,13 +1413,22 @@ export function LearnWidget({
         dialogLine = (
             <LearnWorkflowLine
                 title={i18n("Learn")}
-                facts={i18n(
-                    "{count, plural, one {# suggestion waits for your review} other {# suggestions wait for your review}}",
-                    { count },
-                )}
+                facts={
+                    count === 0
+                        ? i18n("Learn found nothing new")
+                        : i18n(
+                              "{count, plural, one {# suggestion waits for your review} other {# suggestions wait for your review}}",
+                              { count },
+                          )
+                }
                 tone="review"
-                actionLabel={i18n("Review")}
-                onAction={() => setOpen(true)}
+                actionLabel={
+                    count === 0 ? i18n("Finish review") : i18n("Review")
+                }
+                actionDisabled={finishing || saving > 0}
+                onAction={
+                    count === 0 ? () => void finish() : () => setOpen(true)
+                }
             />
         );
     }
@@ -1304,11 +1453,6 @@ export function LearnWidget({
             key: "corrections",
             title: i18n("Corrections"),
             items: kind === "audio" ? groups.corrections : [],
-        },
-        {
-            key: "known",
-            title: i18n("Known facts mentioned again"),
-            items: groups.known,
         },
         { key: "facts", title: i18n("New facts"), items: groups.facts },
         {
@@ -1473,6 +1617,57 @@ export function LearnWidget({
                         </p>
                     ) : (
                         <>
+                            {quickAvailable && (
+                                <aside className="flex flex-col gap-3 rounded-lg bg-muted/50 p-4 @min-[560px]/learn:flex-row @min-[560px]/learn:items-center">
+                                    <div className="flex min-w-0 flex-1 items-start gap-3">
+                                        <Zap className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                                        <div>
+                                            <p className="text-sm font-semibold">
+                                                {quickTitle}
+                                            </p>
+                                            <p className="mt-1 text-sm text-muted-foreground">
+                                                {quickSentence}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-col gap-1 @min-[560px]/learn:items-end">
+                                        <Button
+                                            variant="outline"
+                                            className="min-h-11 w-full @min-[560px]/learn:w-auto"
+                                            disabled={finishing || saving > 0}
+                                            onClick={() => void quickFinish()}
+                                        >
+                                            {quickLabel}
+                                        </Button>
+                                        {kind === "audio" && (
+                                            <p className="text-xs tabular-nums text-muted-foreground">
+                                                {i18n(
+                                                    "{confirmed} of {total} speakers confirmed",
+                                                    {
+                                                        confirmed: String(
+                                                            groups.speakers.filter(
+                                                                (item) =>
+                                                                    item.decision ===
+                                                                        "accepted" &&
+                                                                    !item.choice
+                                                                        ?.unknown &&
+                                                                    waitingFor(
+                                                                        item,
+                                                                    ).length ===
+                                                                        0,
+                                                            ).length,
+                                                        ),
+                                                        total: String(
+                                                            groups.speakers
+                                                                .length,
+                                                        ),
+                                                    },
+                                                )}
+                                            </p>
+                                        )}
+                                    </div>
+                                </aside>
+                            )}
                             {sections.length >= 2 && (
                                 <nav
                                     aria-label={i18n("Review sections")}
@@ -1627,6 +1822,7 @@ export function LearnWidget({
                                         >
                                             <NewRecordItem
                                                 payload={newRecordView(item)}
+                                                onEdit={touchNonSpeaker}
                                                 choice={item.choice}
                                                 ticked={ticked(item)}
                                                 rejected={
@@ -1764,10 +1960,6 @@ export function LearnWidget({
                                 )}
                             {[
                                 {
-                                    items: groups.known,
-                                    title: i18n("Known facts mentioned again"),
-                                },
-                                {
                                     items: groups.facts,
                                     title: i18n("New facts"),
                                 },
@@ -1775,11 +1967,7 @@ export function LearnWidget({
                                 (group) =>
                                     group.items.length > 0 && (
                                         <ReviewSection
-                                            {...sectionProps(
-                                                group.items === groups.known
-                                                    ? "known"
-                                                    : "facts",
-                                            )}
+                                            {...sectionProps("facts")}
                                             key={group.title}
                                         >
                                             {group.items.map((item) => {
@@ -1955,6 +2143,7 @@ export function LearnWidget({
                                                 )
                                             }
                                             onDecide={decide}
+                                            onTouch={touchNonSpeaker}
                                         />
                                     ))}
                                 </ReviewSection>
@@ -2061,26 +2250,6 @@ function ReviewSection({
     );
 }
 
-/** Ticks or unticks a whole section; half-ticked when only some are. */
-function GroupCheckbox({ state, disabled, label, onToggle }: GroupToggle) {
-    const ref = useRef<HTMLInputElement>(null);
-    useEffect(() => {
-        if (ref.current) ref.current.indeterminate = state === "some";
-    }, [state]);
-    return (
-        <input
-            ref={ref}
-            type="checkbox"
-            className="size-4 shrink-0"
-            checked={state === "all"}
-            disabled={disabled}
-            aria-label={label}
-            title={label}
-            onChange={onToggle}
-        />
-    );
-}
-
 /** A relation phrase: create it as the reviewer's own, suggest it, or dismiss it. */
 function PhraseItem({
     item,
@@ -2091,7 +2260,9 @@ function PhraseItem({
     describe,
     evidence,
     onDecide,
+    onTouch,
 }: {
+    onTouch: () => void;
     item: ItemView;
     /** The type of a new record the review proposes, by its ref. */
     recordType: (ref: string) => string | null;
@@ -2154,17 +2325,21 @@ function PhraseItem({
                         className="h-8 w-56"
                         value={label}
                         aria-label={i18n("Name of the relation")}
-                        onChange={(event) => setLabel(event.target.value)}
+                        onChange={(event) => {
+                            onTouch();
+                            setLabel(event.target.value);
+                        }}
                     />
                     <NativeSelect
                         className="h-8"
                         aria-label={i18n("How many values")}
                         value={cardinality}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                            onTouch();
                             setCardinality(
                                 event.target.value === "one" ? "one" : "many",
-                            )
-                        }
+                            );
+                        }}
                     >
                         <option value="many">{i18n("Many values")}</option>
                         <option value="one">

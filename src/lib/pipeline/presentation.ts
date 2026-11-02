@@ -6,6 +6,7 @@ import {
     inArray,
     isNotNull,
     isNull,
+    ne,
     sql,
 } from "drizzle-orm";
 import { db } from "@/db";
@@ -502,6 +503,7 @@ export async function loadPrivateItemProcessing(
                     learnRunCurrentScope(orgUserId),
                     eq(learnRuns.status, "ready"),
                     eq(learnReviewItems.userId, learnRuns.scopeUserId),
+                    ne(learnReviewItems.kind, "known_fact"),
                 ),
             ),
         item.kind === "audio"

@@ -25,6 +25,8 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     }
     const body = (read.body ?? null) as {
         versions?: unknown;
+        quick?: unknown;
+        runId?: unknown;
     } | null;
     const versions =
         body?.versions && typeof body.versions === "object"
@@ -40,6 +42,8 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     const finished = await finishReview(access, actorUserId, {
         actsForOrganization: curates,
         versions,
+        quick: body?.quick === true,
+        runId: typeof body?.runId === "string" ? body.runId : undefined,
         source: requestedReviewSource(request),
     });
     // What it applied, and what it left out that a waiting review had

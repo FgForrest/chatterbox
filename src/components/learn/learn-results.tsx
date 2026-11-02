@@ -50,6 +50,8 @@ export function useSkipReason(): (code: string | undefined) => string {
     const i18n = useExtracted();
     return (code) => {
         switch (code) {
+            case "not_now":
+                return i18n("left for later");
             case "nobody_chosen":
                 return i18n("nobody was chosen");
             case "answered_since":
@@ -162,7 +164,6 @@ export function LearnResults({
         { kind: "new_record", title: i18n("New in the Almanac") },
         { kind: "speaker", title: i18n("Speakers") },
         { kind: "correction", title: i18n("Corrections") },
-        { kind: "known_fact", title: i18n("Known facts mentioned again") },
         { kind: "fact", title: i18n("New facts") },
         { kind: "relation_phrase", title: i18n("New kind of relation") },
     ];

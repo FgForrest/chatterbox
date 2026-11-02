@@ -38,6 +38,7 @@ import {
     transcriptions,
     transcriptSpeakers,
 } from "@/db/schema";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import {
     decryptJsonField,
     decryptText,
@@ -109,19 +110,26 @@ import type { ReviewCandidate } from "@/lib/learn/validate";
 import type { NewRecordPayload } from "@/lib/learn/validate-new-records";
 import { isInternalMailAddress } from "@/lib/mail/internal-address";
 import { assertOwnScopeWritable, getOrgUserId } from "@/lib/org/config";
+import { gatherFacts } from "@/lib/pipeline/facts";
+import { planAdvance } from "@/lib/pipeline/plan";
+import { markLearnReleasedInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import {
     loadItemProfileRevision,
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
 import { recordingLanguage } from "@/lib/recordings/language";
-import type { RecordingViewContext } from "@/lib/sharing/access";
+import {
+    type RecordingViewContext,
+    requireRecordingView,
+} from "@/lib/sharing/access";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import {
     contentWriterScope,
     sharingOrgUserId,
     writerRefusalError,
 } from "@/lib/sharing/writer";
+import { markTaskReviewInTx } from "@/lib/tasks/review-state";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import { emitEvent } from "@/lib/webhooks/emit";
 
@@ -163,6 +171,7 @@ export interface ReviewView {
         finishedAt: string | null;
         /** Why a failed run failed (`ErrorCode`). */
         errorCode: string | null;
+        reviewChanged?: boolean;
         /** Counts carried from the owner’s finished private review on share. */
         sharedReview?: {
             applied: number | null;
@@ -233,6 +242,7 @@ async function latestRun(access: RecordingViewContext, source?: ReviewSource) {
             .where(
                 and(
                     eq(learnRuns.itemId, access.recordingId),
+                    eq(learnRuns.userId, access.ownerUserId),
                     eq(learnRuns.view, access.view),
                     isNull(learnRuns.transcriptionId),
                 ),
@@ -251,6 +261,7 @@ async function latestRun(access: RecordingViewContext, source?: ReviewSource) {
         .where(
             and(
                 eq(learnRuns.itemId, access.recordingId),
+                eq(learnRuns.userId, access.ownerUserId),
                 eq(learnRuns.view, access.view),
                 source ? eq(transcriptions.source, source) : undefined,
             ),
@@ -300,6 +311,7 @@ export async function loadReview(
         createdAt: run.createdAt.toISOString(),
         finishedAt: run.finishedAt?.toISOString() ?? null,
         errorCode: run.errorCode,
+        reviewChanged: run.inputs?.reviewChanged === true,
         ...(run.view === "org" &&
         typeof run.inputs?.promotedFromRunId === "string"
             ? {
@@ -319,19 +331,23 @@ export async function loadReview(
         .from(learnReviewItems)
         .where(eq(learnReviewItems.runId, run.id))
         .orderBy(learnReviewItems.createdAt, learnReviewItems.id);
-    const items: ReviewItemView[] = rows.map((row) => ({
-        id: row.id,
-        kind: row.kind,
-        preTicked: row.preTicked,
-        decision: row.decision ?? null,
-        choice: row.choice ? decryptJsonField<ReviewChoice>(row.choice) : null,
-        version: row.version,
-        dependsOnLabel: row.dependsOnLabel,
-        outcome: (row.outcome as ItemOutcome | null) ?? null,
-        payload: decryptJsonField<ReviewCandidate["payload"]>(
-            row.payload,
-        ) as ReviewCandidate["payload"],
-    }));
+    const items: ReviewItemView[] = rows
+        .filter((row) => row.kind !== "known_fact")
+        .map((row) => ({
+            id: row.id,
+            kind: row.kind,
+            preTicked: row.preTicked,
+            decision: row.decision ?? null,
+            choice: row.choice
+                ? decryptJsonField<ReviewChoice>(row.choice)
+                : null,
+            version: row.version,
+            dependsOnLabel: row.dependsOnLabel,
+            outcome: (row.outcome as ItemOutcome | null) ?? null,
+            payload: decryptJsonField<ReviewCandidate["payload"]>(
+                row.payload,
+            ) as ReviewCandidate["payload"],
+        }));
     if (items.length === 0) {
         return {
             run: summary,
@@ -652,6 +668,7 @@ export async function decideReviewItem(
         decision: "accepted" | "rejected" | null;
         version: number;
         choice?: unknown;
+        speakerOnly?: boolean;
     },
     source?: ReviewSource,
 ): Promise<{ version: number }> {
@@ -664,7 +681,7 @@ export async function decideReviewItem(
             .select({ status: learnRuns.status })
             .from(learnRuns)
             .where(eq(learnRuns.id, latest.id))
-            .for("share");
+            .for("update");
         if (run?.status !== "ready") throw reviewNotFound();
         return keepDraft(tx, latest.id, itemId, input);
     });
@@ -678,6 +695,7 @@ async function keepDraft(
         decision: "accepted" | "rejected" | null;
         version: number;
         choice?: unknown;
+        speakerOnly?: boolean;
     },
 ): Promise<{ version: number }> {
     const [item] = await tx
@@ -722,11 +740,20 @@ async function keepDraft(
             409,
         );
     }
+    if (item.kind !== "speaker" && !input.speakerOnly) {
+        await tx
+            .update(learnRuns)
+            .set({
+                inputs: sql`coalesce(${learnRuns.inputs}, '{}'::jsonb) || ${JSON.stringify({ reviewChanged: true })}::jsonb`,
+            })
+            .where(eq(learnRuns.id, runId));
+    }
     return updated;
 }
 
 /** Why an item ticked was not applied, for the reader's words. */
 export type SkipCode =
+    | "not_now"
     | "nobody_chosen"
     | "answered_since"
     | "speaker_not_named"
@@ -766,16 +793,41 @@ export async function finishReview(
         versions = {},
         source,
         actsForOrganization,
+        quick = false,
+        runId,
     }: {
+        quick?: boolean;
+        runId?: string;
         versions?: Record<string, number>;
         source?: ReviewSource;
         /** Whether the actor acts for the Organization; see `writerRefusal`. */
         actsForOrganization?: boolean;
     } = {},
 ): Promise<FinishedReview> {
+    if (
+        actorUserId !== access.ownerUserId &&
+        !(
+            access.shared &&
+            (actsForOrganization || actorUserId === access.orgUserId)
+        )
+    )
+        throw new AppError(
+            ErrorCode.FORBIDDEN,
+            "You may not finish this review",
+            403,
+        );
     const orgUserId = await sharingOrgUserId();
     const latest = await latestRun(access, source);
-    if (!latest || latest.status !== "ready") throw reviewNotFound();
+    if (!latest || (runId && latest.id !== runId)) throw reviewNotFound();
+    if (quick && latest.status === "finished")
+        return {
+            status: "finished",
+            applied: latest.stats?.applied ?? 0,
+            dismissed: 0,
+            skipped: [],
+            correcting: false,
+        };
+    if (latest.status !== "ready") throw reviewNotFound();
     const profile = latest.profileRevisionId
         ? await loadItemProfileRevision({
               itemId: latest.itemId,
@@ -803,7 +855,9 @@ export async function finishReview(
         { actorUserId, orgUserId, actsForOrganization },
         versions,
         readScopes,
-        profile.settings.steps.learn.correctAfterLearn,
+        quick ? false : profile.settings.steps.learn.correctAfterLearn,
+        quick,
+        quick ? await learnQuickFinishPolicy(access) : undefined,
     );
     nudge();
     // The last review done releases what automatic Learn held back, unless
@@ -1123,6 +1177,8 @@ function finishInTx(
     versions: Record<string, number>,
     readScopes: readonly string[],
     correctAfterLearn: boolean,
+    quick = false,
+    quickPolicy?: { automaticSummary: boolean; skipTasks: boolean },
 ): Promise<FinishedReview> {
     const { actorUserId, orgUserId } = writer;
     return db.transaction(async (tx) => {
@@ -1161,6 +1217,14 @@ function finishInTx(
             .from(learnRuns)
             .where(eq(learnRuns.id, latest.id))
             .for("update");
+        if (quick && run?.status === "finished")
+            return {
+                status: "finished",
+                applied: run.stats?.applied ?? 0,
+                dismissed: 0,
+                skipped: [],
+                correcting: false,
+            };
         if (!run || run.status !== "ready") throw reviewNotFound();
         // Shared or withdrawn since the run began: its records and its
         // facts would land in different scopes.
@@ -1197,8 +1261,12 @@ function finishInTx(
         // applied to an item they never loaded is no decision of theirs.
         const shown = Object.keys(versions);
         if (
-            shown.length !== rows.length ||
-            rows.some((row) => versions[row.id] !== row.version)
+            shown.some((id) => !rows.some((row) => row.id === id)) ||
+            rows.some(
+                (row) =>
+                    row.kind !== "known_fact" &&
+                    versions[row.id] !== row.version,
+            )
         ) {
             throw new AppError(
                 ErrorCode.CONFLICT,
@@ -1213,8 +1281,20 @@ function finishInTx(
             /** Rejected by the reviewer, not merely left unticked. */
             rejectedOutright: row.decision === "rejected",
             accepted:
-                (row.decision ?? (row.preTicked ? "accepted" : "rejected")) ===
-                "accepted",
+                row.kind === "known_fact" ||
+                (quick
+                    ? row.kind === "speaker"
+                        ? row.decision === "accepted"
+                        : row.kind === "correction"
+                          ? row.preTicked && row.decision !== "rejected"
+                          : row.kind === "language"
+                            ? (row.decision ??
+                                  (row.preTicked ? "accepted" : "rejected")) ===
+                              "accepted"
+                            : false
+                    : (row.decision ??
+                          (row.preTicked ? "accepted" : "rejected")) ===
+                      "accepted"),
             choice: row.choice
                 ? decryptJsonField<ReviewChoice>(row.choice)
                 : null,
@@ -1222,6 +1302,30 @@ function finishInTx(
                 ReviewCandidate["payload"] | MailReviewCandidate["payload"]
             >(row.payload),
         }));
+
+        if (quick) {
+            const speakerRefs = new Set(
+                items.flatMap((item) => {
+                    if (
+                        item.kind !== "speaker" ||
+                        !item.accepted ||
+                        item.choice
+                    )
+                        return [];
+                    const payload = item.payload as Extract<
+                        ReviewCandidate,
+                        { kind: "speaker" }
+                    >["payload"];
+                    return payload.newRef ? [payload.newRef] : [];
+                }),
+            );
+            for (const item of items)
+                if (
+                    item.kind === "new_record" &&
+                    speakerRefs.has((item.payload as NewRecordPayload).ref)
+                )
+                    item.accepted = true;
+        }
 
         // Written into the run's scope (the owner's, or the Organization's
         // on the Organization view); the actor is the author.
@@ -2009,7 +2113,11 @@ function finishInTx(
                     );
             }
         }
-        if (rejected.length > 0) {
+        if (quick) {
+            for (const item of items)
+                if (!item.accepted) skip(item.id, "not_now", "Left for later");
+        }
+        if (!quick && rejected.length > 0) {
             await tx
                 .insert(learnDismissals)
                 .values(
@@ -2034,7 +2142,9 @@ function finishInTx(
         const byOutcome = new Map<ItemOutcome, string[]>();
         for (const item of items) {
             const outcome: ItemOutcome = !item.accepted
-                ? "rejected"
+                ? quick
+                    ? "not_now"
+                    : "rejected"
                 : (skippedCode.get(item.id) ?? "applied");
             byOutcome.set(outcome, [
                 ...(byOutcome.get(outcome) ?? []),
@@ -2059,7 +2169,7 @@ function finishInTx(
                     ...run.stats,
                     applied,
                     skipped: skipped.length,
-                    dismissed: rejected.length,
+                    dismissed: quick ? 0 : rejected.length,
                 },
                 finishedAt: new Date(),
                 updatedAt: new Date(),
@@ -2070,26 +2180,51 @@ function finishInTx(
         // Once, after every type the finish made (`createOwnTypeInTx`).
         if (typesCreated) await bumpVocabularyVersionInTx(tx);
         await bumpScopeInTx(tx, scopes);
-        const correcting = isRecordingRun(latest)
-            ? await queueCorrectionPassInTx(
-                  tx,
-                  {
-                      ...run,
-                      transcriptionId: latest.transcriptionId,
-                  },
-                  correctAfterLearn,
-              )
-            : false;
-        await requestAdvanceInTx(tx, {
+        const correcting =
+            isRecordingRun(latest) && !quick
+                ? await queueCorrectionPassInTx(
+                      tx,
+                      {
+                          ...run,
+                          transcriptionId: latest.transcriptionId,
+                      },
+                      correctAfterLearn,
+                  )
+                : false;
+        if (quick) {
+            if (quickPolicy?.skipTasks)
+                await markTaskReviewInTx(
+                    tx,
+                    { itemId: run.itemId, userId: run.userId, view: run.view },
+                    "skipped",
+                );
+            await tx
+                .update(chatterItems)
+                .set({ summaryDueAt: null })
+                .where(
+                    and(
+                        eq(chatterItems.id, run.itemId),
+                        eq(chatterItems.userId, run.userId),
+                    ),
+                );
+        }
+        const advance = await requestAdvanceInTx(tx, {
             itemId: run.itemId,
             userId: run.userId,
             view: run.view,
             reason: "review-finished",
         });
+        if (quick && advance) {
+            await markLearnReleasedInTx(tx, {
+                itemId: run.itemId,
+                userId: run.userId,
+                generation: advance.requestedGeneration,
+            });
+        }
         return {
             status: "finished",
             applied,
-            dismissed: rejected.length,
+            dismissed: quick ? 0 : rejected.length,
             skipped,
             correcting,
             ...(confirmedLanguageChanged
@@ -2097,4 +2232,125 @@ function finishInTx(
                 : {}),
         };
     });
+}
+
+/** The current item profile determines what a quick exit can promise. */
+export async function learnQuickFinishPolicy(
+    access: RecordingViewContext,
+): Promise<{ automaticSummary: boolean; skipTasks: boolean }> {
+    const facts = await gatherFacts(
+        access.recordingId,
+        "private",
+        access.ownerUserId,
+    );
+    const content =
+        facts.content ??
+        (facts.profile?.transcribe?.plaudTranscript === "use"
+            ? facts.transcription?.plaud
+            : null);
+    const input = facts.phases.learn?.inputs ?? content;
+    const generation = facts.generation + 1;
+    const automaticSummary = planAdvance({
+        ...facts,
+        generation,
+        summaryDueAt: null,
+        learnRunOpen: false,
+        learnRunInFlight: false,
+        learnRunReadyForReview: false,
+        phases: {
+            ...facts.phases,
+            ...(input && facts.phases.learn?.state !== "failed"
+                ? {
+                      learn: {
+                          state: "done" as const,
+                          reason: "released",
+                          generation,
+                          inputs: input,
+                          at: facts.at,
+                      },
+                  }
+                : {}),
+        },
+    }).actions.some((action) => action.type === "queueSummary");
+    return {
+        automaticSummary,
+        skipTasks: automaticSummary && facts.profile?.tasksEnabled === true,
+    };
+}
+
+/** Apply repeated known facts without opening a review; authorization is rechecked under the finish locks. */
+export async function finishKnownFactsOnly(
+    runId: string,
+    actorUserId: string,
+): Promise<boolean> {
+    const [run] = await db
+        .select()
+        .from(learnRuns)
+        .where(eq(learnRuns.id, runId))
+        .limit(1);
+    if (
+        !run ||
+        run.status !== "ready" ||
+        (run.actorUserId ?? run.userId) !== actorUserId
+    )
+        return false;
+    const rows = await db
+        .select({
+            id: learnReviewItems.id,
+            kind: learnReviewItems.kind,
+            version: learnReviewItems.version,
+        })
+        .from(learnReviewItems)
+        .where(
+            and(
+                eq(learnReviewItems.runId, runId),
+                eq(learnReviewItems.userId, run.scopeUserId),
+            ),
+        );
+    if (!rows.length || rows.some((row) => row.kind !== "known_fact"))
+        return false;
+    try {
+        const access = await requireRecordingView(
+            actorUserId,
+            run.itemId,
+            run.view,
+            { kinds: ["audio", "mail"] },
+        );
+        if (access.ownerUserId !== run.userId) return false;
+        await finishReview(access, actorUserId, {
+            runId,
+            versions: Object.fromEntries(
+                rows.map((row) => [row.id, row.version]),
+            ),
+            actsForOrganization:
+                run.view === "org" &&
+                (await userCuratesOrganizationNow(actorUserId)),
+        });
+    } catch (error) {
+        if (error instanceof AppError && [403, 404].includes(error.statusCode))
+            return false;
+        throw error;
+    }
+    return true;
+}
+
+/** Persist the first local field edit without changing the item's draft version. */
+export async function touchLearnReview(
+    access: RecordingViewContext,
+    source?: ReviewSource,
+): Promise<void> {
+    const run = await latestRun(access, source);
+    if (!run || run.status !== "ready") throw reviewNotFound();
+    await db
+        .update(learnRuns)
+        .set({
+            inputs: sql`coalesce(${learnRuns.inputs}, '{}'::jsonb) || ${JSON.stringify({ reviewChanged: true })}::jsonb`,
+        })
+        .where(
+            and(
+                eq(learnRuns.id, run.id),
+                eq(learnRuns.userId, access.ownerUserId),
+                eq(learnRuns.status, "ready"),
+            ),
+        );
 }

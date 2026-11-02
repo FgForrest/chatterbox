@@ -21,6 +21,7 @@ import { POST as handler16POST } from "@/app/api/recordings/[id]/process-again/r
 import { DELETE as handler17DELETE } from "@/app/api/recordings/[id]/review/dismissals/route";
 import { POST as handler18POST } from "@/app/api/recordings/[id]/review/finish/route";
 import { PATCH as handler19PATCH } from "@/app/api/recordings/[id]/review/items/[itemId]/route";
+import { PATCH as touchLearnReviewRoute } from "@/app/api/recordings/[id]/review/route";
 import {
     DELETE as handler21DELETE,
     PATCH as handler21PATCH,
@@ -39,6 +40,10 @@ import { DELETE as handler24DELETE } from "@/app/api/recordings/[id]/tasks/[task
 import { POST as handler25POST } from "@/app/api/recordings/[id]/tasks/accept/route";
 import { POST as handler26POST } from "@/app/api/recordings/[id]/tasks/merge/route";
 import { POST as handler27POST } from "@/app/api/recordings/[id]/tasks/route";
+import {
+    POST as skipTaskReviewRoute,
+    PATCH as touchTaskReviewRoute,
+} from "@/app/api/recordings/[id]/tasks/skip/route";
 import { PATCH as handler28PATCH } from "@/app/api/recordings/[id]/tasks/updates/[updateId]/route";
 import { POST as handler29POST } from "@/app/api/recordings/[id]/title/route";
 import { POST as handler30POST } from "@/app/api/recordings/[id]/topics/route";
@@ -132,6 +137,11 @@ export const personWriteRoutes = [
         handler: handler18POST,
     },
     {
+        path: "recordings/[id]/review/route.ts",
+        method: "PATCH",
+        handler: touchLearnReviewRoute,
+    },
+    {
         path: "recordings/[id]/review/items/[itemId]/route.ts",
         method: "PATCH",
         handler: handler19PATCH,
@@ -195,6 +205,16 @@ export const personWriteRoutes = [
         path: "recordings/[id]/tasks/route.ts",
         method: "POST",
         handler: handler27POST,
+    },
+    {
+        path: "recordings/[id]/tasks/skip/route.ts",
+        method: "POST",
+        handler: skipTaskReviewRoute,
+    },
+    {
+        path: "recordings/[id]/tasks/skip/route.ts",
+        method: "PATCH",
+        handler: touchTaskReviewRoute,
     },
     {
         path: "recordings/[id]/tasks/updates/[updateId]/route.ts",

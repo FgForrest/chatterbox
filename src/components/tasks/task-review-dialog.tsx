@@ -29,6 +29,7 @@ import type {
     TaskRowChange,
 } from "@/components/tasks/use-recording-tasks";
 import { Button } from "@/components/ui/button";
+import { GroupCheckbox } from "@/components/ui/group-checkbox";
 import { HeadingCount } from "@/components/ui/heading-count";
 import type { WorkflowWidgetFrame } from "@/lib/pipeline/workflow-widgets";
 import type {
@@ -70,6 +71,7 @@ export function TaskReviewLink({
     frame = "dialog",
     widgetId,
     showTrigger = true,
+    skipped = false,
 }: {
     state: RecordingTasksState;
     /** People attributed to the recording's speakers, offered first. */
@@ -81,21 +83,25 @@ export function TaskReviewLink({
     frame?: WorkflowWidgetFrame;
     widgetId?: string;
     showTrigger?: boolean;
+    skipped?: boolean;
 }) {
     const i18n = useExtracted();
     const [open, setOpen] = useState(false);
     const [merging, setMerging] = useState<string[] | null>(null);
     const [focusTaskId, setFocusTaskId] = useState<string | null>(null);
-    const { data, reviewing, waiting } = state;
+    const { data, waiting } = state;
+    const reviewing = skipped
+        ? Boolean(data?.canEdit && data.taskReviewSkipped && waiting > 0)
+        : state.reviewing;
     const resolvedWidgetId = widgetId ?? `task-review-${state.itemId}`;
 
     // Nothing left to review: the dialog has done its job.
     useEffect(() => {
-        if (!reviewing) {
+        if (waiting === 0 || (!skipped && data?.taskReviewSkipped)) {
             setOpen(false);
             setMerging(null);
         }
-    }, [reviewing]);
+    }, [waiting, skipped, data?.taskReviewSkipped]);
 
     useEffect(() => {
         if (!focusTaskId) return;
@@ -220,13 +226,21 @@ export function TaskReviewLink({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="h-auto gap-1 px-0 text-sm font-medium hover:bg-transparent hover:text-primary"
+                    className={
+                        skipped
+                            ? "h-auto rounded px-1 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground"
+                            : "h-auto gap-1 px-0 text-sm font-medium hover:bg-transparent hover:text-primary"
+                    }
                     onClick={() => setOpen(true)}
                 >
-                    <ListChecks className="size-4" />
-                    {i18n("Review tasks ({count})", {
-                        count: String(waiting),
-                    })}
+                    {!skipped && <ListChecks className="size-4" />}
+                    {skipped
+                        ? i18n("Skipped proposals ({count})", {
+                              count: String(waiting),
+                          })
+                        : i18n("Review tasks ({count})", {
+                              count: String(waiting),
+                          })}
                 </Button>
             )}
             <WorkflowWidget
@@ -243,6 +257,22 @@ export function TaskReviewLink({
                         <ListChecks className="size-4" />
                         {i18n("Task review")}
                     </>
+                }
+                headerAction={
+                    !skipped &&
+                    data.canEdit &&
+                    !data.taskReviewChanged &&
+                    merging === null &&
+                    state.skip ? (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={state.accepting}
+                            onClick={state.skip}
+                        >
+                            {i18n("Skip")}
+                        </Button>
+                    ) : undefined
                 }
                 helpLink={
                     <HelpLink
@@ -272,7 +302,9 @@ export function TaskReviewLink({
                             {state.accepting && (
                                 <Loader2 className="size-4 animate-spin" />
                             )}
-                            {i18n("Apply selected changes")}
+                            {ticked === 0
+                                ? i18n("Finish without tasks")
+                                : i18n("Apply selected changes")}
                         </Button>
                     ),
                 }}
@@ -420,10 +452,82 @@ export function TaskReviewLink({
                     {(visibleProposals.length > 0 || allowAdd) && (
                         <section className="space-y-2">
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                                <SectionTitle
-                                    title={i18n("Tasks")}
-                                    count={visibleProposals.length}
-                                />
+                                <div className="flex flex-wrap items-center gap-2">
+                                    {visibleProposals.length > 0 && (
+                                        <GroupCheckbox
+                                            state={
+                                                visibleProposals.every(
+                                                    (task) => task.ticked,
+                                                ) && visibleProposals.length > 0
+                                                    ? "all"
+                                                    : visibleProposals.some(
+                                                            (task) =>
+                                                                task.ticked,
+                                                        )
+                                                      ? "some"
+                                                      : "none"
+                                            }
+                                            disabled={
+                                                state.accepting ||
+                                                merging !== null ||
+                                                visibleProposals.length === 0
+                                            }
+                                            label={
+                                                visibleProposals.every(
+                                                    (task) => task.ticked,
+                                                )
+                                                    ? i18n(
+                                                          "Untick all: {group}",
+                                                          {
+                                                              group: i18n(
+                                                                  "Tasks",
+                                                              ),
+                                                          },
+                                                      )
+                                                    : i18n(
+                                                          "Tick all: {group}",
+                                                          {
+                                                              group: i18n(
+                                                                  "Tasks",
+                                                              ),
+                                                          },
+                                                      )
+                                            }
+                                            onToggle={() => {
+                                                const next =
+                                                    !visibleProposals.every(
+                                                        (task) => task.ticked,
+                                                    );
+                                                for (const task of visibleProposals)
+                                                    if (task.ticked !== next)
+                                                        state.update(
+                                                            task,
+                                                            { ticked: next },
+                                                            { ticked: next },
+                                                        );
+                                            }}
+                                        />
+                                    )}
+                                    <SectionTitle
+                                        title={i18n("Tasks")}
+                                        count={visibleProposals.length}
+                                    />
+                                    <span className="text-xs tabular-nums text-muted-foreground">
+                                        {i18n(
+                                            "{selected} of {total} selected",
+                                            {
+                                                selected: String(
+                                                    visibleProposals.filter(
+                                                        (task) => task.ticked,
+                                                    ).length,
+                                                ),
+                                                total: String(
+                                                    visibleProposals.length,
+                                                ),
+                                            },
+                                        )}
+                                    </span>
+                                </div>
                                 <div className="flex items-center gap-2">
                                     {merging ? (
                                         <>
@@ -495,6 +599,7 @@ export function TaskReviewLink({
                                                       }
                                                     : null
                                             }
+                                            onTouch={state.touch}
                                             onChange={(change, optimistic) =>
                                                 state.update(
                                                     task,
@@ -569,7 +674,9 @@ function ProposalRow({
     selection,
     onChange,
     onMerge,
+    onTouch,
 }: {
+    onTouch?: () => void;
     task: TaskView;
     speakers: readonly SpeakerChoice[];
     organizationOnly: boolean;
@@ -616,6 +723,7 @@ function ProposalRow({
                 {task.canEdit ? (
                     <TaskTextInput
                         text={task.text}
+                        onEdit={onTouch}
                         onSave={(text) => onChange({ text }, { text })}
                         className="w-full py-0.5"
                     />

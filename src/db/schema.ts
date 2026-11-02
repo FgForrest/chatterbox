@@ -697,6 +697,8 @@ export const itemProcessing = pgTable(
         profileRevisionId: text("profile_revision_id"),
         manualOnly: boolean("manual_only").notNull().default(false),
         phases: jsonb("phases").$type<PipelinePhases>().notNull().default({}),
+        taskReviewSkippedAt: timestamp("task_review_skipped_at"),
+        taskReviewChangedAt: timestamp("task_review_changed_at"),
         requestedGeneration: integer("requested_generation")
             .notNull()
             .default(0),

@@ -431,7 +431,10 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
                 ["one", "two"].map((fingerprintHmac) => ({
                     runId: run?.id ?? "",
                     userId: ALICE,
-                    kind: "known_fact" as const,
+                    kind:
+                        fingerprintHmac === "one"
+                            ? ("known_fact" as const)
+                            : ("fact" as const),
                     fingerprintHmac,
                     payload: {},
                 })),
@@ -466,7 +469,7 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
 
         const waiting = await loadPrivateItemProcessing(ALICE, itemId);
         expect(waiting).toMatchObject({
-            learnFindingsWaiting: 2,
+            learnFindingsWaiting: 1,
             taskReviewWaiting: 1,
             jobs: { transcription: "queued", summary: "running" },
             intents: [
@@ -530,7 +533,10 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
                 ["one", "two", "three"].map((fingerprintHmac) => ({
                     runId: run?.id ?? "",
                     userId: ORG,
-                    kind: "known_fact" as const,
+                    kind:
+                        fingerprintHmac === "one"
+                            ? ("known_fact" as const)
+                            : ("fact" as const),
                     fingerprintHmac,
                     payload: {},
                 })),
@@ -538,7 +544,7 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
 
         await expect(
             loadPrivateItemProcessing(ALICE, itemId),
-        ).resolves.toMatchObject({ learnFindingsWaiting: 3 });
+        ).resolves.toMatchObject({ learnFindingsWaiting: 2 });
         await expect(
             loadPrivateItemProcessing(BOB, itemId),
         ).resolves.toBeNull();

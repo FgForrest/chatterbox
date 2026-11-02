@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { lockPrivateFolderTree } from "@/db/queries/private-folder-tree";
 import {
     chatterItems,
+    itemProcessing,
     people,
     recordingTasks,
     taskMentions,
@@ -76,6 +77,16 @@ const archivedTask = z.object({
 });
 
 const bundleSchema = z.object({
+    reviews: z
+        .array(
+            z.object({
+                itemId: z.string().min(1),
+                view: z.enum(["private", "org"]),
+                taskReviewSkipped: z.boolean().default(false),
+                taskReviewChanged: z.boolean().default(false),
+            }),
+        )
+        .default([]),
     folders: z
         .array(
             z.object({ id: z.string().min(1), restoredId: z.string().min(1) }),
@@ -163,7 +174,12 @@ export async function restoreTaskArchive(
                 );
             folderMap.set(folder.id, folder.restoredId);
         }
-        const itemIds = bundle.items.map((item) => item.itemId);
+        const itemIds = [
+            ...new Set([
+                ...bundle.items.map((item) => item.itemId),
+                ...bundle.reviews.map((review) => review.itemId),
+            ]),
+        ];
         const items = itemIds.length
             ? await tx
                   .select({
@@ -361,6 +377,39 @@ export async function restoreTaskArchive(
                     quote: task.quote ? encryptText(task.quote) : null,
                 });
             count++;
+        }
+        for (const review of bundle.reviews) {
+            if (viewer.isOrg && review.view !== "org")
+                throw new AppError(
+                    ErrorCode.FORBIDDEN,
+                    "Organization archives restore only Organization reviews",
+                    403,
+                );
+            const now = new Date();
+            await tx
+                .insert(itemProcessing)
+                .values({
+                    itemId: review.itemId,
+                    userId: owners.get(review.itemId) as string,
+                    view: review.view,
+                    taskReviewSkippedAt: review.taskReviewSkipped ? now : null,
+                    taskReviewChangedAt: review.taskReviewChanged ? now : null,
+                })
+                .onConflictDoUpdate({
+                    target: [itemProcessing.itemId, itemProcessing.view],
+                    set: {
+                        taskReviewSkippedAt: review.taskReviewSkipped
+                            ? now
+                            : null,
+                        taskReviewChangedAt: review.taskReviewChanged
+                            ? now
+                            : null,
+                    },
+                    setWhere: eq(
+                        itemProcessing.userId,
+                        owners.get(review.itemId) as string,
+                    ),
+                });
         }
         let follows = 0;
         for (const follow of bundle.follows) {

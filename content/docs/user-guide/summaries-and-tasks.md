@@ -73,7 +73,13 @@ When task changes are ready, the inline **Task review** widget opens after the s
 - When several candidates are plausible, choose the right one or **Keep as new**. **Merge into an earlier task** searches all open tasks in the folder scope, not only the suggested candidates.
 - A deadline change shows the **Current deadline** and **Proposed deadline**. A completion is marked **Needs confirmation**. An older statement than the task's latest edit appears as **Earlier mention** and needs no decision.
 - A summary can also propose **No longer needed** or **Handed to someone else**. These are never preselected. An unknown assignee is shown for checking, not silently created.
-- Untick a new task that is not real. Correct its text, assignee, or deadline before accepting it. In the footer, **Add task** adds and focuses a task the summary missed, and **Apply selected changes** applies everything still ticked; **Save and continue later** preserves the review without applying it.
+- Untick a new task that is not real. Correct its text, assignee, or deadline before accepting it. Below the Tasks list, **Add task** adds and focuses a task the summary missed. In the sticky footer, **Apply selected changes** applies everything still ticked; **Save and continue later** preserves the review without applying it.
+
+The Tasks heading has a checkbox to tick or untick the whole group and a selected count. With nothing selected the primary action reads **Finish without tasks**. Finish is final: all unticked proposals are rejected, including when none is selected.
+
+While you have changed nothing, **Skip** in the review header means “not now”. It records no rejections. After the first tick, edit, merge or added task, Skip disappears and stays hidden after a reload. Skipping hides the card and offers **Undo** for about eight seconds; leaving the page commits immediately. Finished and skipped reviews leave no extra line.
+
+The owner or another authorized reviewer can reopen **Skipped proposals (n)** under the summary, next to **Add task** or in the task list header. Closing that window keeps them skipped; finishing there is final. Later summaries keep this item’s review skipped until you finish it. **Speakers and summary only** in Learn can skip the subsequent task review in the same way.
 
 The review shows one card per task. A match is the main decision; deadline, completion, **No longer needed**, and **Handed to someone else** changes for that task appear beneath it. An audio evidence button shows its time and changes to pause while that passage is playing. If the quote cannot be placed in the transcript, the review says so instead of opening an unhelpful link.
 
@@ -142,6 +148,8 @@ An Organization task always remains. Adding a private task to it requires confir
 ### Task backups and restore
 
 Personal backups include `tasks/personal.json`, `tasks/follows.json` and notes in the existing item task files. Organization backups exclude own tasks and members' follow preferences. To import extracted task data after restoring its items and people, an authenticated session may POST to `/api/tasks/restore` with `{personal, items, follows}`: `personal` is the own-task array, `items` contains `{itemId, tasks}` from each recording's `tasks.json` or mail's task array, and `follows` is the preference array. Existing task IDs are kept unchanged; IDs belonging to another owner are refused. Follow references to tasks absent from the installation are skipped. This imports tasks; the app has no general archive restore screen.
+
+Skipped reviews and their changed markers are in `tasks/reviews.json`, one entry per item and view. Pass that array as `reviews` to `/api/tasks/restore` after restoring its items. Old archives without it restore without a skip marker.
 
 Each own task carries `folderId`. After restoring the private folders from `organization/folders.json`, add `folders: [{id, restoredId}]` to the import request to map each archived folder ID to its restored private folder ID. References without a mapping become null, including folders omitted from the archive. Organization and other users' target folders are refused. Organization archives are unchanged.
 

@@ -282,7 +282,13 @@ function WidgetFooter({
     frame: WorkflowWidgetFrame;
 }) {
     return (
-        <footer className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <footer
+            className={cn(
+                "flex flex-col gap-3 border-t bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6",
+                frame === "inline" &&
+                    "sticky bottom-0 z-20 rounded-b-xl shadow-[0_-4px_12px_-6px_rgba(0,0,0,0.2)]",
+            )}
+        >
             <div className="min-w-0 flex-1 text-sm text-muted-foreground">
                 {footer.status}
             </div>
@@ -314,7 +320,8 @@ function WidgetContents(props: WorkflowWidgetProps) {
                 {props.children && (
                     <div
                         className={cn(
-                            "min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6",
+                            "min-h-0 flex-1 px-4 py-4 sm:px-6",
+                            props.frame === "dialog" && "overflow-y-auto",
                             props.bodyClassName,
                         )}
                         data-widget-body
@@ -369,7 +376,7 @@ export function WorkflowWidget(props: WorkflowWidgetProps) {
                     id={inlineLine ? undefined : id}
                     hasNoPadding
                     className={cn(
-                        "@container/workflow gap-0 border-l-2 shadow-none",
+                        "@container/workflow gap-0 overflow-visible border-l-2 shadow-none",
                         toneClasses[tone],
                         inlineLine && "hidden",
                     )}
