@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
+import { loadAgendaSourceVisibility } from "@/db/queries/agenda-source-visibility";
 import { meetingVisibility } from "@/db/queries/meetings";
 import {
     ANY_TASK_ITEM,
@@ -164,6 +165,8 @@ async function folderSuggestionInputs(input: {
             .where(
                 and(
                     eq(recordingTasks.status, "open"),
+                    isNull(chatterItems.deletedAt),
+                    sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
                     taskVisible(input.viewer, ANY_TASK_ITEM, true),
                     sql`exists (select 1 from ${recordingFolderAssignments} where ${recordingFolderAssignments.folderId} = ${input.folderId} and (${recordingFolderAssignments.itemId} = ${recordingTasks.itemId} or exists (select 1 from ${taskMentions} inner join ${chatterItems} as agenda_mention_item on ${mentionItem.id} = ${taskMentions.itemId} where ${taskMentions.taskId} = ${recordingTasks.id} and ${taskMentions.itemId} = ${recordingFolderAssignments.itemId} and ${taskMentions.matchDecision} in ('home', 'accepted', 'kept_new') and ${taskMentionVisible(input.viewer, { itemId: taskMentions.itemId, userId: taskMentions.userId, view: taskMentions.view }, { id: mentionItem.id, userId: mentionItem.userId, deletedAt: mentionItem.deletedAt })})))`,
                 ),
@@ -175,6 +178,7 @@ async function folderSuggestionInputs(input: {
                 id: agendaPoints.id,
                 parentId: agendaPoints.parentId,
                 text: agendaPoints.text,
+                sources: agendaPoints.sources,
             })
             .from(agendaPoints)
             .where(
@@ -188,6 +192,7 @@ async function folderSuggestionInputs(input: {
             .select({
                 text: agendaSuggestions.text,
                 state: agendaSuggestions.state,
+                sources: agendaSuggestions.sources,
             })
             .from(agendaSuggestions)
             .where(
@@ -215,6 +220,10 @@ export async function agendaSuggestionInputs(input: {
             folderSuggestionInputs({ ...input, folderId }),
         ),
     );
+    const visibleSources = await loadAgendaSourceVisibility(input.viewer, [
+        ...results[0].points.map((point) => point.sources),
+        ...results[0].suggestions.map((suggestion) => suggestion.sources),
+    ]);
     return {
         summaries: [
             ...new Map(
@@ -230,7 +239,11 @@ export async function agendaSuggestionInputs(input: {
                     .map((row) => [row.id, row]),
             ).values(),
         ],
-        points: results[0].points,
-        suggestions: results[0].suggestions,
+        points: results[0].points.filter((point) =>
+            visibleSources(point.sources),
+        ),
+        suggestions: results[0].suggestions.filter((suggestion) =>
+            visibleSources(suggestion.sources),
+        ),
     };
 }

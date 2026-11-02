@@ -906,6 +906,7 @@ suite("meeting planning server (PostgreSQL)", () => {
             title: encryptText("Private mail"),
             occurredAt: start,
         });
+        await direct("mail", "other", "owner");
         await recording("audio");
         await db.insert(recordingTasks).values([
             {

@@ -3,20 +3,17 @@
  * starts the sign-in, the test fills in Keycloak's login form over HTTP, and
  * better-auth takes the callback, exchanging the code at Keycloak.
  *
- * Opt-in. Needs `TEST_DATABASE_URL` (see the other integration tests) and
- * `KEYCLOAK_TEST_ISSUER`, the realm of `docker-compose.e2e.sso.yml`:
- *
- *   docker compose -f docker-compose.e2e.yml -f docker-compose.e2e.sso.yml up -d --wait keycloak
- *   KEYCLOAK_TEST_ISSUER=http://localhost:8180/realms/riffado-e2e \
- *   TEST_DATABASE_URL=... vitest run src/tests/sso/keycloak.integration.test.ts
- *
- * Keycloak's issuer is its KC_HOSTNAME (`RIFFADO_E2E_KEYCLOAK_URL`, default
- * `http://localhost:8180`), so start it with the URL this test reaches it at.
+ * Opt-in: `TEST_DATABASE_URL` and `KEYCLOAK_TEST_ISSUER` pointing at a
+ * disposable local Keycloak. The suite imports and removes its E2E realm.
  */
 
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { accounts, people, users } from "@/db/schema";
+import {
+    keycloakTestBase,
+    provisionE2eTestRealm,
+} from "@/tests/identity/keycloak-fixture";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -54,10 +51,9 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
             ORG_ACCOUNT_EMAIL: "org@example.com" as string | undefined,
             ORG_ACCOUNT_PASSWORD: undefined as string | undefined,
             ORG_ACCOUNT_NAME: undefined as string | undefined,
-            OIDC_ISSUER_URL: process.env.KEYCLOAK_TEST_ISSUER?.replace(
-                /\/+$/,
-                "",
-            ),
+            OIDC_ISSUER_URL: process.env.KEYCLOAK_TEST_ISSUER
+                ? `${new URL(process.env.KEYCLOAK_TEST_ISSUER).origin}/realms/chb-sso-local-it`
+                : undefined,
             OIDC_CLIENT_ID: "riffado",
             OIDC_CLIENT_SECRET: "riffado-e2e-client-secret",
             OIDC_PROVIDER_NAME: "Keycloak",
@@ -102,7 +98,7 @@ function required<T>(value: T | null | undefined): T {
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithKeycloak =
-    testDatabaseUrl && mockEnv.OIDC_ISSUER_URL ? describe : describe.skip;
+    testDatabaseUrl && keycloakTestBase() ? describe : describe.skip;
 
 /** Cookie jar of one browser, per origin. */
 class Browser {
@@ -150,11 +146,13 @@ async function keycloakLogin(username: string): Promise<string> {
             }),
         }),
     );
+    expect(start.status).toBe(200);
     browser.store(startUrl, start);
     const { url: authorizationUrl } = (await start.json()) as { url: string };
 
     const loginPage = await fetch(authorizationUrl, { redirect: "manual" });
     browser.store(authorizationUrl, loginPage);
+    expect(loginPage.status).toBe(200);
     const html = await loginPage.text();
     const action = /<form[^>]*id="kc-form-login"[^>]*action="([^"]+)"/.exec(
         html,
@@ -192,6 +190,7 @@ async function keycloakLogin(username: string): Promise<string> {
 
 describeWithKeycloak("single sign-on with Keycloak", () => {
     let database: TestPostgresDatabase | null = null;
+    let realm: Awaited<ReturnType<typeof provisionE2eTestRealm>> | undefined;
 
     function db() {
         if (!database) throw new Error("test database was not initialized");
@@ -237,6 +236,7 @@ describeWithKeycloak("single sign-on with Keycloak", () => {
     }
 
     beforeAll(async () => {
+        realm = await provisionE2eTestRealm("chb-sso-local-it");
         database = await createMigratedTestDatabase(
             testDatabaseUrl ?? "",
             "keycloak",
@@ -248,6 +248,7 @@ describeWithKeycloak("single sign-on with Keycloak", () => {
     afterAll(async () => {
         dbRef.current = null;
         await database?.dispose();
+        await realm?.dispose();
     });
 
     it("signs a new user in and records them in the Organization Almanac", async () => {
