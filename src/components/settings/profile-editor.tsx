@@ -27,6 +27,7 @@ import {
     SUMMARY_PROMPT_PARTS,
     type SummaryPreset,
 } from "@/lib/ai/summary-presets";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import {
     defaultProfileSettings,
     type ProfileChannel,
@@ -306,6 +307,7 @@ function LocaleTextEditor({
                 ))}
             </div>
             <textarea
+                {...getPasswordManagerAttributes()}
                 id={`${kind}-${activeLocale}`}
                 aria-label={label}
                 className="min-h-28 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm"
@@ -700,6 +702,7 @@ export function ProfileEditor({
                                     )}
                                 </p>
                                 <textarea
+                                    {...getPasswordManagerAttributes()}
                                     aria-label={i18n("Unsaved profile changes")}
                                     className="max-h-28 w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-xs"
                                     readOnly
@@ -1422,6 +1425,7 @@ function SummarySettings({
             <div className="space-y-2">
                 <Label htmlFor="full-prompt">{i18n("Full prompt")}</Label>
                 <textarea
+                    {...getPasswordManagerAttributes()}
                     id="full-prompt"
                     aria-label={i18n("Full prompt")}
                     className="min-h-32 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm"
@@ -1530,6 +1534,7 @@ function SummarySettings({
                                 {i18n("Merge prompt")}
                             </Label>
                             <textarea
+                                {...getPasswordManagerAttributes()}
                                 id="multi-pass-merge-prompt"
                                 className="min-h-24 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm"
                                 value={step.multiPass.mergePrompt ?? ""}

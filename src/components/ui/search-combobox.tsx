@@ -13,6 +13,7 @@ import {
     useRef,
     useState,
 } from "react";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import { cn } from "@/lib/utils";
 
 /** Shared searchable popup frame, including viewport placement and keyboard focus. */
@@ -312,6 +313,8 @@ export function SearchCombobox({
                         }}
                     >
                         <Command.Input
+                            asChild
+                            {...getPasswordManagerAttributes()}
                             autoFocus
                             value={query}
                             onValueChange={(query) => {
@@ -321,7 +324,9 @@ export function SearchCombobox({
                             aria-label={label}
                             placeholder={i18n("Search…")}
                             className="mb-2 w-full shrink-0 rounded border bg-background px-3 py-2 text-sm"
-                        />
+                        >
+                            <input type="search" />
+                        </Command.Input>
                         <Command.List
                             ref={listRef}
                             className="min-h-0 max-h-[60vh] overflow-y-auto overscroll-contain"

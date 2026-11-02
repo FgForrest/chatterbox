@@ -126,7 +126,7 @@ describe("the list, as people read the transcript", () => {
         );
         expect(screen.queryByText(/Tavesi joined\./)).toBeNull();
         expect(screen.queryByText(/Sanesi joined\./)).toBeNull();
-        const search = screen.getByRole("textbox", {
+        const search = screen.getByRole("searchbox", {
             name: "Search recordings",
         });
         for (const words of ["tavesi", "sanesi"]) {
@@ -167,7 +167,7 @@ describe("the list's search, on the server", () => {
         vi.stubGlobal("fetch", fetch);
         list([recording("r1", "Weekly"), recording("m1", "Re: Order")]);
         fireEvent.change(
-            screen.getByRole("textbox", { name: "Search recordings" }),
+            screen.getByRole("searchbox", { name: "Search recordings" }),
             { target: { value: "invoice" } },
         );
         // The browser holds no mail text: only the server finds it.

@@ -260,6 +260,7 @@ export function PersonShareDialog({
             <p className="text-sm text-muted-foreground">{title}</p>
             {allowInvite && (
                 <Input
+                    type="search"
                     aria-label={i18n("Colleague's name or email")}
                     placeholder={i18n("Colleague's name or email")}
                     value={query}

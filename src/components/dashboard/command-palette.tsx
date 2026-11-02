@@ -26,6 +26,7 @@ import {
     matchFolders,
 } from "@/lib/folders/navigation";
 import type { DateTimeFormat } from "@/lib/format-date";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import type {
     AppSearchResults,
     AppSearchScope,
@@ -254,6 +255,8 @@ export function CommandPalette({
                             aria-hidden="true"
                         />
                         <Command.Input
+                            asChild
+                            {...getPasswordManagerAttributes()}
                             value={query}
                             onValueChange={setQuery}
                             maxLength={200}
@@ -269,7 +272,9 @@ export function CommandPalette({
                                               "Search recordings, transcripts, or actions…",
                                           )
                             }
-                        />
+                        >
+                            <input type="search" />
+                        </Command.Input>
                         <Kbd>{i18n("⌘K")}</Kbd>
                     </div>
 

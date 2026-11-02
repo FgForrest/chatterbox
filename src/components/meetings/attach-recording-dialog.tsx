@@ -12,6 +12,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 import { meetingRequest, meetingUrl, recordingAudienceConflict } from "./api";
@@ -86,6 +87,8 @@ export function AttachRecordingDialog({
                     </DialogDescription>
                 </DialogHeader>
                 <input
+                    type="search"
+                    {...getPasswordManagerAttributes()}
                     aria-label={i18n("Search recordings")}
                     placeholder={i18n("Search recordings")}
                     className="rounded border bg-background p-2"

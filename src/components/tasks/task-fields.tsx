@@ -3,6 +3,7 @@
 import { CalendarDays, X } from "lucide-react";
 import { useExtracted, useFormatter } from "next-intl";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import { cn } from "@/lib/utils";
 
 /** Today in the viewer's time zone, `YYYY-MM-DD`. */
@@ -47,6 +48,7 @@ export function TaskTextInput({
 
     return (
         <textarea
+            {...getPasswordManagerAttributes()}
             ref={input}
             rows={1}
             maxLength={2000}
@@ -123,6 +125,7 @@ export function DueDateField({
                 </span>
                 {!disabled && (
                     <input
+                        {...getPasswordManagerAttributes()}
                         type="date"
                         value={value ?? ""}
                         onChange={(event) =>

@@ -16,6 +16,11 @@ paths:
   patterns and link prewarm on hover, no JS or data waterfalls.
 - User-facing strings and the product name follow `.claude/rules/i18n.md`.
 - No generic arrow functions (`<T,>(x) =>`) in `.tsx` (`AGENTS.md`, Code quality).
+- Text fields use `Input` / `Textarea`, which keep password managers out by default; a raw
+  `<input>` or `<textarea>` spreads `getPasswordManagerAttributes()` (`src/lib/password-manager.ts`).
+  Search fields are `type="search"`. Only real sign-in fields carry a credential `autoComplete`
+  token (`username`, `email`, `current-password`, `new-password`, `one-time-code`); secrets that
+  are not a login here (API keys, tokens) pass `secret`.
 
 ## Target UX comparisons
 

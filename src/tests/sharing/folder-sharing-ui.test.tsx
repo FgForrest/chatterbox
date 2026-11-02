@@ -737,7 +737,7 @@ describe("folder person sharing UI", () => {
         cleanup();
         tree();
         fireEvent.change(
-            screen.getByRole("textbox", { name: "Search folders" }),
+            screen.getByRole("searchbox", { name: "Search folders" }),
             { target: { value: "local research" } },
         );
         expect(

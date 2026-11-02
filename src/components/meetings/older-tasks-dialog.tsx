@@ -14,6 +14,7 @@ import {
     DialogTrigger,
 } from "@/components/ui/dialog";
 import { groupAgendaTasks } from "@/lib/meetings/task-groups";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import { cn } from "@/lib/utils";
 import { meetingRequest, meetingUrl } from "./api";
 import type { MeetingDetail, OlderTask } from "./types";
@@ -153,6 +154,7 @@ export function OlderTasksDialog({
                         aria-hidden="true"
                     />
                     <input
+                        {...getPasswordManagerAttributes()}
                         type="search"
                         value={query}
                         onChange={(event) => setQuery(event.target.value)}

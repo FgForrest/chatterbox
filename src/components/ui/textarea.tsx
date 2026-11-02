@@ -2,6 +2,7 @@
 
 import { type ComponentProps, useCallback } from "react";
 import { useAutoGrow } from "@/hooks/use-auto-grow";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import { cn } from "@/lib/utils";
 
 /** A shared textarea with optional content sizing within caller-supplied CSS bounds. */
@@ -10,6 +11,7 @@ export function Textarea({
     autoGrow = false,
     value,
     ref,
+    autoComplete,
     ...props
 }: ComponentProps<"textarea"> & { autoGrow?: boolean }) {
     const autoGrowRef = useAutoGrow(String(value ?? ""), autoGrow);
@@ -41,6 +43,7 @@ export function Textarea({
             )}
             value={value}
             {...props}
+            {...getPasswordManagerAttributes(autoComplete)}
         />
     );
 }

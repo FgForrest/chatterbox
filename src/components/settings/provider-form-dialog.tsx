@@ -382,7 +382,7 @@ export function ProviderFormDialog({
                         <Input
                             id={`${scope}-provider-key`}
                             type="password"
-                            autoComplete="new-password"
+                            secret
                             value={apiKey}
                             disabled={saving}
                             placeholder={keyPlaceholder}

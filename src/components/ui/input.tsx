@@ -1,13 +1,16 @@
 import type * as React from "react";
 
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import { cn } from "@/lib/utils";
 
 function Input({
     className,
     type,
     ref,
+    autoComplete,
+    secret = false,
     ...props
-}: React.ComponentProps<"input">) {
+}: React.ComponentProps<"input"> & { secret?: boolean }) {
     return (
         <input
             ref={ref}
@@ -20,6 +23,7 @@ function Input({
                 className,
             )}
             {...props}
+            {...getPasswordManagerAttributes(autoComplete, { secret })}
         />
     );
 }

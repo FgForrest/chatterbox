@@ -5,6 +5,7 @@ import { useExtracted, useLocale } from "next-intl";
 import { type FormEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 
 type Status =
     | { kind: "idle" }
@@ -125,6 +126,7 @@ export function NewsletterForm({
                     {i18n("Leave this field empty")}
                 </label>
                 <input
+                    {...getPasswordManagerAttributes()}
                     id="newsletter-hp"
                     name="hp_check"
                     type="text"

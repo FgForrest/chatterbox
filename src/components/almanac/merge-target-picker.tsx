@@ -8,6 +8,7 @@ import {
     type DuplicateRecord,
     scoreDuplicate,
 } from "@/lib/knowledge/duplicate-score";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 
 interface MergeTarget {
     id: string;
@@ -93,12 +94,16 @@ export function MergeTargetPicker({
             }
         >
             <Command.Input
+                asChild
+                {...getPasswordManagerAttributes()}
                 autoFocus
                 onValueChange={() => onChange("")}
                 aria-label={i18n("Merge target")}
                 placeholder={i18n("Search by name or email")}
                 className="h-9 w-full border-b bg-transparent px-3 text-sm outline-none"
-            />
+            >
+                <input type="search" />
+            </Command.Input>
             <Command.List className="max-h-56 overflow-y-auto p-1">
                 <Command.Empty className="px-2 py-3 text-sm text-muted-foreground">
                     {i18n("No matches.")}

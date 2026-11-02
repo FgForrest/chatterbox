@@ -278,6 +278,17 @@
         @apply border-border;
     }
 
+    input[type="search"] {
+        -webkit-appearance: none;
+        appearance: none;
+    }
+
+    input[type="search"]::-webkit-search-cancel-button,
+    input[type="search"]::-webkit-search-decoration {
+        -webkit-appearance: none;
+        appearance: none;
+    }
+
     body {
         @apply text-foreground antialiased;
         background: var(--app-background);

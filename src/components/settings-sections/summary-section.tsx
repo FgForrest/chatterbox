@@ -37,6 +37,7 @@ import {
     normalizeSummaryPromptConfig,
     SUMMARY_TEMPLATE_KIND,
 } from "@/lib/ai/summary-presets";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import { defaultProfileSettings } from "@/lib/profiles/settings";
 import {
     DEFAULT_MERGE_PROMPT,
@@ -367,6 +368,7 @@ export function SummarySection() {
                             )}
                         </DialogDescription>
                         <textarea
+                            {...getPasswordManagerAttributes()}
                             aria-label={i18n("Merge prompt")}
                             className="min-h-[360px] w-full resize-y rounded-md border px-3 py-2 font-mono text-sm"
                             value={mergePromptDraft}
