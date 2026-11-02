@@ -133,7 +133,7 @@ async function authorizedTaskActor(
     return closable ? actor.id : null;
 }
 
-/** Restore task files and optional status history after items and people. Unknown or unauthorized historical actors become null. Older archives retain the legacy statistics fallback; existing tasks and their history stay unchanged. */
+/** Restore task files and optional status history after items and people. Unknown or unauthorized historical actors become null. Older archives retain the legacy statistics fallback; existing tasks and their history stay unchanged. Task-review markers are only added, never cleared, and only for items whose proposals this restore brings back or that have no tasks yet, so a review settled since the export stays settled. */
 export async function restoreTaskArchive(
     viewer: TaskViewer,
     input: unknown,
@@ -251,6 +251,17 @@ export async function restoreTaskArchive(
                 409,
             );
         const known = new Set(existing.map((row) => row.id));
+        const itemsWithTasks = new Set(
+            itemIds.length
+                ? (
+                      await tx
+                          .selectDistinct({ itemId: recordingTasks.itemId })
+                          .from(recordingTasks)
+                          .where(inArray(recordingTasks.itemId, itemIds))
+                  ).map((row) => row.itemId)
+                : [],
+        );
+        const restoredProposalItems = new Set<string>();
         let count = 0;
         for (const { task, itemId, owner } of rows) {
             if (
@@ -376,6 +387,8 @@ export async function restoreTaskArchive(
                     statementAt: new Date(task.createdAt),
                     quote: task.quote ? encryptText(task.quote) : null,
                 });
+            if (itemId && task.status === "proposed")
+                restoredProposalItems.add(itemId);
             count++;
         }
         for (const review of bundle.reviews) {
@@ -385,26 +398,32 @@ export async function restoreTaskArchive(
                     "Organization archives restore only Organization reviews",
                     403,
                 );
+            if (
+                (!review.taskReviewSkipped && !review.taskReviewChanged) ||
+                (itemsWithTasks.has(review.itemId) &&
+                    !restoredProposalItems.has(review.itemId))
+            )
+                continue;
             const now = new Date();
+            const set = {
+                ...(review.taskReviewSkipped
+                    ? { taskReviewSkippedAt: now }
+                    : {}),
+                ...(review.taskReviewChanged
+                    ? { taskReviewChangedAt: now }
+                    : {}),
+            };
             await tx
                 .insert(itemProcessing)
                 .values({
                     itemId: review.itemId,
                     userId: owners.get(review.itemId) as string,
                     view: review.view,
-                    taskReviewSkippedAt: review.taskReviewSkipped ? now : null,
-                    taskReviewChangedAt: review.taskReviewChanged ? now : null,
+                    ...set,
                 })
                 .onConflictDoUpdate({
                     target: [itemProcessing.itemId, itemProcessing.view],
-                    set: {
-                        taskReviewSkippedAt: review.taskReviewSkipped
-                            ? now
-                            : null,
-                        taskReviewChangedAt: review.taskReviewChanged
-                            ? now
-                            : null,
-                    },
+                    set,
                     setWhere: eq(
                         itemProcessing.userId,
                         owners.get(review.itemId) as string,

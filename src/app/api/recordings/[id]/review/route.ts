@@ -41,12 +41,11 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             profile.settings.steps.learn.provider,
         );
     }
-    const [review, quickFinish] = await Promise.all([
-        loadReview(access, requestedReviewSource(request)),
-        profile
-            ? learnQuickFinishPolicy(access)
-            : Promise.resolve({ automaticSummary: false, skipTasks: false }),
-    ]);
+    const review = await loadReview(access, requestedReviewSource(request));
+    const quickFinish =
+        profile && review.run?.status === "ready"
+            ? await learnQuickFinishPolicy(access)
+            : { automaticSummary: false, skipTasks: false };
     return NextResponse.json({
         ...review,
         available,

@@ -426,6 +426,9 @@ const turns = [
             },
         ]);
         await db()
+            .delete(recordingTasks)
+            .where(eq(recordingTasks.itemId, ITEM));
+        await db()
             .update(itemProcessing)
             .set({ taskReviewSkippedAt: null, taskReviewChangedAt: null })
             .where(eq(itemProcessing.itemId, ITEM));
@@ -436,14 +439,28 @@ const turns = [
         expect(
             (await listRecordingTasks(viewer, ITEM))?.taskReviewChanged,
         ).toBe(true);
-        await db()
-            .delete(recordingTasks)
-            .where(eq(recordingTasks.itemId, ITEM));
         expect(
             await taskReviewsForArchive({ kind: "personal", userId: OWNER }, [
                 ITEM,
             ]),
         ).toHaveLength(1);
+    });
+    it("keeps a review finished since the export settled on restore", async () => {
+        await store([proposal("Draft")]);
+        await skipTaskReview(viewer, ITEM);
+        const reviews = await taskReviewsForArchive(
+            { kind: "personal", userId: OWNER },
+            [ITEM],
+        );
+        await acceptReview(viewer, ITEM);
+        await restoreTaskArchive(viewer, { reviews });
+        expect(await state()).toMatchObject({
+            taskReviewSkippedAt: null,
+            taskReviewChangedAt: null,
+        });
+        expect(
+            (await listRecordingTasks(viewer, ITEM))?.taskReviewSkipped,
+        ).toBe(false);
     });
     it("refuses another user's skip, touch and restore", async () => {
         await store([proposal("Private")]);
