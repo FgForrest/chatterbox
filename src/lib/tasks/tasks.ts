@@ -2484,7 +2484,19 @@ export async function tickUpdateProposal(
     ticked: boolean,
     version: number,
 ): Promise<void> {
-    await db.transaction(async (tx) => {
+    await retryOnDeadlock(() =>
+        tickUpdateProposalOnce(viewer, recordingId, updateId, ticked, version),
+    );
+}
+
+function tickUpdateProposalOnce(
+    viewer: TaskViewer,
+    recordingId: string,
+    updateId: string,
+    ticked: boolean,
+    version: number,
+): Promise<void> {
+    return db.transaction(async (tx) => {
         const recording = await lockRecordingForEdit(tx, viewer, recordingId);
         await markTaskReviewInTx(
             tx,
@@ -3861,16 +3873,18 @@ export async function touchTaskReview(
     viewer: TaskViewer,
     itemId: string,
 ): Promise<void> {
-    await db.transaction(async (tx) => {
-        const item = await lockRecordingForEdit(tx, viewer, itemId);
-        await markTaskReviewInTx(
-            tx,
-            {
-                itemId,
-                userId: item.ownerUserId,
-                view: item.shared ? "org" : "private",
-            },
-            "changed",
-        );
-    });
+    await retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            const item = await lockRecordingForEdit(tx, viewer, itemId);
+            await markTaskReviewInTx(
+                tx,
+                {
+                    itemId,
+                    userId: item.ownerUserId,
+                    view: item.shared ? "org" : "private",
+                },
+                "changed",
+            );
+        }),
+    );
 }
