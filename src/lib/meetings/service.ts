@@ -69,6 +69,7 @@ import {
 } from "@/lib/meetings/calendar-snapshot";
 import { meetingInvitees } from "@/lib/meetings/meeting-roster";
 import {
+    agendaTaskIdsInput,
     createMeetingInput,
     createPointInput,
     groupAgendaTasks,
@@ -78,7 +79,7 @@ import {
 } from "@/lib/meetings/model";
 import { agendaSuggestionsAvailability } from "@/lib/meetings/suggestions-provider";
 import { taskViewerById } from "@/lib/tasks/access";
-import { getVisibleTask, getVisibleTasks } from "@/lib/tasks/tasks";
+import { getVisibleTasks } from "@/lib/tasks/tasks";
 
 type Agenda = typeof meetingAgendas.$inferSelect;
 type Access = Awaited<ReturnType<typeof requireMeetingAccess>>;
@@ -1398,33 +1399,83 @@ export async function addAgendaTask(
     id: string,
     taskId: string,
 ) {
+    return addAgendaTasks(userId, id, [taskId]);
+}
+
+/** Add older tasks atomically in selection order under the agenda lock. */
+export async function addAgendaTasks(
+    userId: string,
+    id: string,
+    rawTaskIds: readonly string[],
+) {
+    const taskIds = agendaTaskIdsInput.parse(rawTaskIds);
     const viewer = { ...(await taskViewerById(userId)), includeReceived: true };
-    const task = await getVisibleTask(viewer, taskId);
-    if (
-        !task ||
-        task.own ||
-        !(await olderTasks(userId, id, "all")).some(
-            (candidate) => candidate?.id === taskId,
-        )
-    )
-        throw new AppError(
-            ErrorCode.NOT_FOUND,
-            "Open task in this folder not found",
-            404,
-        );
     await editMeeting(userId, id, "edit", async (tx, { agenda }) => {
+        const folders = agenda.meetingItemId
+            ? await meetingFolders(tx, agenda.meetingItemId, agenda.userId)
+            : [];
+        const candidates = folders.length
+            ? await tx
+                  .select({ id: recordingTasks.id })
+                  .from(recordingTasks)
+                  .leftJoin(
+                      chatterItems,
+                      eq(chatterItems.id, recordingTasks.itemId),
+                  )
+                  .where(
+                      and(
+                          inArray(recordingTasks.id, taskIds),
+                          olderTaskCondition(
+                              viewer,
+                              folders.map((folder) => folder.id),
+                          ),
+                      ),
+                  )
+            : [];
+        const links = await tx
+            .select()
+            .from(agendaTasks)
+            .where(
+                and(
+                    eq(agendaTasks.agendaId, agenda.id),
+                    eq(agendaTasks.userId, agenda.userId),
+                ),
+            );
+        const eligible = new Set(candidates.map((task) => task.id));
+        const current = new Set(
+            links.filter((link) => !link.removedAt).map((link) => link.taskId),
+        );
+        const refusedTaskIds = taskIds.filter(
+            (taskId) => !eligible.has(taskId),
+        );
+        if (refusedTaskIds.length)
+            throw new AppError(
+                ErrorCode.NOT_FOUND,
+                "Open task in this folder not found",
+                404,
+                { refusedTaskIds },
+            );
+        const addedTaskIds = taskIds.filter((taskId) => !current.has(taskId));
+        if (!addedTaskIds.length) return false;
+        const lastPosition = Math.max(
+            -1,
+            ...links.map((link) => link.position),
+        );
         await tx
             .insert(agendaTasks)
-            .values({
-                agendaId: agenda.id,
-                userId: agenda.userId,
-                taskId,
-                origin: "older",
-                position: 100000,
-            })
+            .values(
+                addedTaskIds.map((taskId, index) => ({
+                    agendaId: agenda.id,
+                    userId: agenda.userId,
+                    taskId,
+                    origin: "older" as const,
+                    position: lastPosition + index + 1,
+                })),
+            )
             .onConflictDoUpdate({
                 target: [agendaTasks.agendaId, agendaTasks.taskId],
-                set: { removedAt: null },
+                set: { removedAt: null, position: sql`excluded.position` },
+                setWhere: eq(agendaTasks.userId, agenda.userId),
             });
     });
 }
@@ -1550,6 +1601,23 @@ export async function decideSuggestion(
     });
 }
 
+function olderTaskCondition(viewer: TaskViewer, folderIds: string[]) {
+    return and(
+        eq(recordingTasks.status, "open"),
+        ne(recordingTasks.source, "personal"),
+        isNull(chatterItems.deletedAt),
+        or(
+            isNull(chatterItems.id),
+            inArray(chatterItems.kind, ["audio", "mail"]),
+        ),
+        or(
+            sql`exists (select 1 from ${recordingFolderAssignments} where ${recordingFolderAssignments.itemId} = ${recordingTasks.itemId} and ${inArray(recordingFolderAssignments.folderId, folderIds)})`,
+            sql`exists (select 1 from ${taskMentions} inner join ${recordingFolderAssignments} on ${recordingFolderAssignments.itemId} = ${taskMentions.itemId} where ${taskMentions.taskId} = ${recordingTasks.id} and ${taskMentions.matchDecision} in ('home', 'accepted', 'kept_new') and ${inArray(recordingFolderAssignments.folderId, folderIds)})`,
+        ),
+        taskVisible(viewer, ANY_TASK_ITEM, true),
+    );
+}
+
 /** Open tasks in the meeting's folder, optionally limited to its invitees; never pre-added. */
 export async function olderTasks(
     userId: string,
@@ -1565,16 +1633,7 @@ export async function olderTasks(
         .select({ id: recordingTasks.id })
         .from(recordingTasks)
         .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
-        .where(
-            and(
-                eq(recordingTasks.status, "open"),
-                or(
-                    sql`exists (select 1 from ${recordingFolderAssignments} where ${recordingFolderAssignments.itemId} = ${recordingTasks.itemId} and ${inArray(recordingFolderAssignments.folderId, folderIds)})`,
-                    sql`exists (select 1 from ${taskMentions} inner join ${recordingFolderAssignments} on ${recordingFolderAssignments.itemId} = ${taskMentions.itemId} where ${taskMentions.taskId} = ${recordingTasks.id} and ${taskMentions.matchDecision} in ('home', 'accepted', 'kept_new') and ${inArray(recordingFolderAssignments.folderId, folderIds)})`,
-                ),
-                taskVisible(viewer, ANY_TASK_ITEM, true),
-            ),
-        )
+        .where(olderTaskCondition(viewer, folderIds))
         .limit(500);
     const current = new Set(
         detail.tasks.filter((task) => !task.removedAt).map((task) => task.id),

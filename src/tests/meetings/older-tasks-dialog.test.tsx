@@ -18,10 +18,14 @@ import { useAgenda } from "@/components/meetings/use-agenda";
 import { translatedSourceMessage } from "@/lib/i18n/messages";
 import { at, detail, task } from "./ui-fixtures";
 
-const { toastError, onOpenChange } = vi.hoisted(() => ({
-    toastError: vi.fn(),
-    onOpenChange: vi.fn(),
-}));
+const { toastError, onOpenChange, mutateCall, optimisticUpdate } = vi.hoisted(
+    () => ({
+        toastError: vi.fn(),
+        mutateCall: vi.fn(),
+        optimisticUpdate: vi.fn(),
+        onOpenChange: vi.fn(),
+    }),
+);
 vi.mock("sonner", () => ({ toast: { error: toastError } }));
 vi.mock("next-intl", () => ({
     useExtracted: () => (text: string, values?: TranslationValues) =>
@@ -61,7 +65,14 @@ function Harness() {
                         onOpenChange(value);
                         setOpen(value);
                     }}
-                    mutate={agenda.mutate}
+                    mutate={(path, method, body, optimistic) => {
+                        mutateCall(path, method, body);
+                        return agenda.mutate(path, method, body, (value) => {
+                            const next = optimistic(value);
+                            optimisticUpdate(next);
+                            return next;
+                        });
+                    }}
                 />
             )}
         </>
@@ -94,25 +105,33 @@ beforeEach(() => {
             if (url.includes("/older-tasks"))
                 return Response.json({ tasks: older });
             if (init?.method === "POST") {
-                const { taskId } = JSON.parse(String(init.body)) as {
-                    taskId: string;
+                const { taskIds } = JSON.parse(String(init.body)) as {
+                    taskIds: string[];
                 };
-                const entry = older.find(
-                    (candidate) => candidate.id === taskId,
+                const lastPosition = Math.max(
+                    -1,
+                    ...server.tasks.map((entry) => entry.position),
                 );
-                if (!entry) throw new Error("Unknown test task");
                 server = {
                     ...server,
                     version: server.version + 1,
                     tasks: [
-                        ...server.tasks,
-                        {
-                            ...entry,
-                            agendaOrigin: "older",
-                            agendaNote: null,
-                            removedAt: null,
-                            position: 100000,
-                        },
+                        ...server.tasks.filter(
+                            (entry) => !taskIds.includes(entry.id),
+                        ),
+                        ...taskIds.map((id, index) => {
+                            const entry = older.find(
+                                (candidate) => candidate.id === id,
+                            );
+                            if (!entry) throw new Error("Unknown test task");
+                            return {
+                                ...entry,
+                                agendaOrigin: "older" as const,
+                                agendaNote: null,
+                                removedAt: null,
+                                position: lastPosition + index + 1,
+                            };
+                        }),
                     ],
                 };
                 return Response.json({ success: true });
@@ -161,7 +180,7 @@ it("searches task text without case or diacritics and preserves selections while
     fireEvent.click(screen.getByRole("checkbox", { name: "Review dates" }));
     const search = screen.getByRole("searchbox", { name: "Search tasks" });
     fireEvent.change(search, { target: { value: "ZLUTOUCKY" } });
-    expect(screen.getAllByRole("checkbox")).toHaveLength(1);
+    expect(screen.getAllByRole("checkbox")).toHaveLength(2);
     expect(
         screen.getByRole("checkbox", { name: "Prepare Žluťoučký report" }),
     ).toBeTruthy();
@@ -202,7 +221,7 @@ it("switches scope through the segmented control and refetches", async () => {
     );
 });
 
-it("selects real checkboxes, updates the footer and adds each task in selection order", async () => {
+it("adds the selection in one request, one optimistic update and one refresh", async () => {
     await mount();
     expect(screen.getByText("Nothing selected")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Add tasks" })).toHaveProperty(
@@ -230,20 +249,43 @@ it("selects real checkboxes, updates the footer and adds each task in selection 
     expect(
         posts.map(([url, init]) => [url, JSON.parse(String(init.body))]),
     ).toEqual([
-        ["/api/meetings/agenda/tasks", { taskId: "Review dates" }],
-        ["/api/meetings/agenda/tasks", { taskId: "Prepare Žluťoučký report" }],
+        [
+            "/api/meetings/agenda/tasks",
+            { taskIds: ["Review dates", "Prepare Žluťoučký report"] },
+        ],
     ]);
+    expect(mutateCall).toHaveBeenCalledExactlyOnceWith("/tasks", "POST", {
+        taskIds: ["Review dates", "Prepare Žluťoučký report"],
+    });
+    expect(optimisticUpdate).toHaveBeenCalledTimes(1);
+    expect(
+        optimisticUpdate.mock.calls[0][0].tasks.map(
+            (entry: { id: string; position: number }) => [
+                entry.id,
+                entry.position,
+            ],
+        ),
+    ).toEqual([
+        ["already-added", 0],
+        ["Review dates", 1],
+        ["Prepare Žluťoučký report", 2],
+    ]);
+    expect(
+        fetchMock.mock.calls.filter(([url]) =>
+            url.startsWith("/api/meetings/agenda?since="),
+        ),
+    ).toHaveLength(1);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(screen.getByTestId("agenda-tasks").textContent).toContain(
-        "Review dates:older:100000",
+        "Review dates:older:1",
     );
     fireEvent.click(screen.getByRole("button", { name: "Open picker" }));
     await screen.findByRole("checkbox", { name: "Check agenda" });
     expect(screen.getByText("Nothing selected")).toBeTruthy();
 });
 
-it("stops the batch at a failure, keeps the rest selected and the dialog open, and retries them", async () => {
+it("keeps the entire selection and dialog open on failure, rolls back and retries once", async () => {
     const base = fetchMock.getMockImplementation();
     let fail = true;
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
@@ -279,29 +321,40 @@ it("stops the batch at a failure, keeps the rest selected and the dialog open, a
         screen.getByRole("checkbox", { name: "Check agenda" }),
     ).toHaveProperty("checked", true);
     expect(
-        screen.queryByRole("checkbox", { name: "Prepare Žluťoučký report" }),
-    ).toBeNull();
-    expect(screen.getByText("Selected: 2")).toBeTruthy();
+        screen.getByRole("checkbox", { name: "Prepare Žluťoučký report" }),
+    ).toHaveProperty("checked", true);
+    expect(screen.getByText("Selected: 3")).toBeTruthy();
+    expect(screen.getByTestId("agenda-tasks").textContent).toBe(
+        "already-added:last_meeting:0",
+    );
     expect(toastError).toHaveBeenCalledExactlyOnceWith(
         "Could not save the agenda",
     );
     expect(
         fetchMock.mock.calls.filter(([, init]) => init.method === "POST"),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
     fail = false;
     fetchMock.mockClear();
     await act(async () =>
-        fireEvent.click(screen.getByRole("button", { name: "Add 2 tasks" })),
+        fireEvent.click(screen.getByRole("button", { name: "Add 3 tasks" })),
     );
     expect(
         fetchMock.mock.calls
             .filter(([, init]) => init.method === "POST")
             .map(([, init]) => JSON.parse(String(init.body))),
-    ).toEqual([{ taskId: "Review dates" }, { taskId: "Check agenda" }]);
+    ).toEqual([
+        {
+            taskIds: [
+                "Prepare Žluťoučký report",
+                "Review dates",
+                "Check agenda",
+            ],
+        },
+    ]);
     expect(screen.queryByRole("dialog")).toBeNull();
 });
 
-it("optimistically adds a task before its POST completes", async () => {
+it("optimistically adds the whole batch before its POST completes", async () => {
     const base = fetchMock.getMockImplementation();
     let finish = () => {};
     fetchMock.mockImplementation((url: string, init?: RequestInit) =>
@@ -315,12 +368,18 @@ it("optimistically adds a task before its POST completes", async () => {
     );
     await mount();
     fireEvent.click(screen.getByRole("checkbox", { name: "Review dates" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add 1 task" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Check agenda" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add 2 tasks" }));
     await waitFor(() =>
         expect(screen.getByTestId("agenda-tasks").textContent).toContain(
-            "Review dates:older:100000",
+            "Review dates:older:1",
         ),
     );
+    expect(screen.getByTestId("agenda-tasks").textContent).toContain(
+        "Check agenda:older:2",
+    );
+    expect(mutateCall).toHaveBeenCalledTimes(1);
+    expect(optimisticUpdate).toHaveBeenCalledTimes(1);
     await act(async () => finish());
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
@@ -416,4 +475,59 @@ it("traps keyboard focus inside the dialog", async () => {
     expect(screen.getByRole("dialog").contains(document.activeElement)).toBe(
         true,
     );
+});
+
+it("selects and clears visible group tasks with mixed state while preserving hidden selections", async () => {
+    older.push(task("Review budget", other));
+    older.push(task("already-added", other));
+    await mount();
+    const group = () =>
+        screen.getByRole("checkbox", { name: `Select all tasks: ${other}` });
+    expect(group()).toHaveProperty("checked", false);
+    expect(group()).toHaveProperty("indeterminate", false);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Review dates" }));
+    expect(group()).toHaveProperty("indeterminate", true);
+    expect(group().getAttribute("aria-checked")).toBe("mixed");
+    fireEvent.click(group());
+    expect(group()).toHaveProperty("checked", true);
+    expect(group()).toHaveProperty("indeterminate", false);
+    expect(screen.getByText("Selected: 2")).toBeTruthy();
+    expect(
+        screen.getByRole("checkbox", { name: "Prepare Žluťoučký report" }),
+    ).toHaveProperty("checked", false);
+    expect(
+        screen.getByRole("checkbox", { name: "Check agenda" }),
+    ).toHaveProperty("checked", false);
+    const search = screen.getByRole("searchbox", { name: "Search tasks" });
+    fireEvent.change(search, { target: { value: "dates" } });
+    fireEvent.click(group());
+    expect(screen.getByText("Selected: 1")).toBeTruthy();
+    fireEvent.change(search, { target: { value: "" } });
+    expect(
+        screen.getByRole("checkbox", { name: "Review budget" }),
+    ).toHaveProperty("checked", true);
+    expect(group()).toHaveProperty("indeterminate", true);
+    fireEvent.click(group());
+    fireEvent.click(group());
+    expect(screen.getByText("Nothing selected")).toBeTruthy();
+    fireEvent.change(search, { target: { value: "dates" } });
+    fireEvent.click(group());
+    fireEvent.change(search, { target: { value: "" } });
+    expect(
+        screen.getByRole("checkbox", { name: "Review budget" }),
+    ).toHaveProperty("checked", false);
+    expect(
+        screen.getByRole("checkbox", { name: "Review dates" }),
+    ).toHaveProperty("checked", true);
+});
+
+it("selects unassigned tasks as a group", async () => {
+    await mount();
+    fireEvent.click(
+        screen.getByRole("checkbox", { name: "Select all tasks: No assignee" }),
+    );
+    expect(
+        screen.getByRole("checkbox", { name: "Check agenda" }),
+    ).toHaveProperty("checked", true);
+    expect(screen.getByText("Selected: 1")).toBeTruthy();
 });

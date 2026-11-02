@@ -2,6 +2,15 @@ import { z } from "zod";
 import { AppError, ErrorCode } from "@/lib/errors";
 
 const id = z.string().min(1).max(255);
+export const agendaTaskIdsInput = z
+    .array(id)
+    .min(1)
+    .max(500)
+    .transform((ids) => [...new Set(ids)]);
+export const addAgendaTasksInput = z.union([
+    z.object({ taskIds: agendaTaskIdsInput, taskId: z.never().optional() }),
+    z.object({ taskId: id, taskIds: z.never().optional() }),
+]);
 const line = z
     .string()
     .trim()
