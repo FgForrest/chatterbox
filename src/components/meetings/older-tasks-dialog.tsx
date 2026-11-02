@@ -13,6 +13,7 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog";
+import { OLDER_TASK_POSITION_BASE } from "@/lib/meetings/positions";
 import { groupAgendaTasks } from "@/lib/meetings/task-groups";
 import { cn } from "@/lib/utils";
 import { meetingRequest, meetingUrl } from "./api";
@@ -220,6 +221,10 @@ export function OlderTasksDialog({
                     -1,
                     ...value.tasks.map((task) => task.position),
                 );
+                const firstPosition = Math.max(
+                    lastPosition + 1,
+                    OLDER_TASK_POSITION_BASE,
+                );
                 return {
                     ...value,
                     tasks: [
@@ -235,7 +240,7 @@ export function OlderTasksDialog({
                                 agendaOrigin:
                                     previous?.agendaOrigin ??
                                     ("older" as const),
-                                position: lastPosition + index + 1,
+                                position: firstPosition + index,
                             };
                         }),
                     ],

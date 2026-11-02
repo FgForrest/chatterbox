@@ -77,6 +77,7 @@ import {
     patchPointInput,
     validatePointTree,
 } from "@/lib/meetings/model";
+import { OLDER_TASK_POSITION_BASE } from "@/lib/meetings/positions";
 import { agendaSuggestionsAvailability } from "@/lib/meetings/suggestions-provider";
 import { taskViewerById } from "@/lib/tasks/access";
 import { getVisibleTasks } from "@/lib/tasks/tasks";
@@ -739,7 +740,7 @@ export async function getMeeting(
                         eq(agendaTasks.userId, agenda.userId),
                     ),
                 )
-                .orderBy(asc(agendaTasks.position)),
+                .orderBy(asc(agendaTasks.position), asc(agendaTasks.taskId)),
             db
                 .select()
                 .from(agendaSuggestions)
@@ -1461,6 +1462,10 @@ export async function addAgendaTasks(
             -1,
             ...links.map((link) => link.position),
         );
+        const firstPosition = Math.max(
+            lastPosition + 1,
+            OLDER_TASK_POSITION_BASE,
+        );
         await tx
             .insert(agendaTasks)
             .values(
@@ -1469,7 +1474,7 @@ export async function addAgendaTasks(
                     userId: agenda.userId,
                     taskId,
                     origin: "older" as const,
-                    position: lastPosition + index + 1,
+                    position: firstPosition + index,
                 })),
             )
             .onConflictDoUpdate({

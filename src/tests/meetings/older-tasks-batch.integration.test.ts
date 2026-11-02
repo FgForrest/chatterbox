@@ -68,7 +68,12 @@ vi.mock("@/lib/auth-server", () => ({
 vi.mock("@/lib/posthog-server", () => ({ captureServerException: vi.fn() }));
 
 import { POST } from "@/app/api/meetings/[id]/tasks/route";
-import { addAgendaTask, addAgendaTasks } from "@/lib/meetings/service";
+import {
+    addAgendaTask,
+    addAgendaTasks,
+    getMeeting,
+    patchMeeting,
+} from "@/lib/meetings/service";
 
 const url = getTestDatabaseUrl();
 describe.skipIf(!url)("older agenda task batches (PostgreSQL)", () => {
@@ -194,11 +199,73 @@ describe.skipIf(!url)("older agenda task batches (PostgreSQL)", () => {
             (await links()).map((row) => [row.taskId, row.position]),
         ).toEqual([
             ["existing", 7],
-            ["two", 8],
-            ["one", 9],
-            ["three", 10],
+            ["two", 100000],
+            ["one", 100001],
+            ["three", 100002],
         ]);
         expect(await version()).toBe(1);
+    });
+    it("keeps a larger replacement snapshot before older tasks in selection order", async () => {
+        await addAgendaTasks("owner", "agenda", ["two", "one"]);
+        await database.db.insert(chatterItems).values({
+            id: "replacement-source",
+            userId: "owner",
+            kind: "audio",
+            title: encryptText("Next planning session"),
+            occurredAt: new Date(),
+        });
+        const snapshotIds = Array.from(
+            { length: 10 },
+            (_, position) => `snapshot-${position}`,
+        );
+        await database.db.insert(recordingTasks).values(
+            snapshotIds.map((id, position) => ({
+                id,
+                itemId: "replacement-source",
+                userId: "owner",
+                status: "open" as const,
+                source: "manual" as const,
+                text: encryptText("Review milestone"),
+                position,
+            })),
+        );
+
+        const detail = await patchMeeting("owner", "agenda", {
+            taskSourceItemId: "replacement-source",
+        });
+        if (detail.unchanged) throw new Error("Expected meeting detail");
+        expect(detail.snapshotSourceItemId).toBe("replacement-source");
+        expect(detail.tasks.map((task) => task.agendaOrigin)).toEqual([
+            ...snapshotIds.map(() => "last_meeting"),
+            "older",
+            "older",
+        ]);
+        expect(detail.tasks.map((task) => task.id)).toEqual([
+            ...snapshotIds,
+            "two",
+            "one",
+        ]);
+        expect(detail.tasks.slice(-2).map((task) => task.position)).toEqual([
+            100000, 100001,
+        ]);
+    });
+    it("orders equal agenda positions by task id", async () => {
+        await database.db.insert(agendaTasks).values(
+            ["two", "one"].map((taskId) => ({
+                agendaId: "agenda",
+                userId: "owner",
+                taskId,
+                origin: "older" as const,
+                position: 7,
+            })),
+        );
+        const detail = await getMeeting("owner", "agenda");
+        if (detail.unchanged) throw new Error("Expected meeting detail");
+        expect(detail.tasks.map((task) => task.id)).toEqual([
+            "existing",
+            "one",
+            "two",
+        ]);
     });
     it("refuses all invisible or missing ids without adding valid tasks or bumping the agenda", async () => {
         await database.db.insert(taskMentions).values({
@@ -233,8 +300,8 @@ describe.skipIf(!url)("older agenda task batches (PostgreSQL)", () => {
         const rows = await links();
         expect(rows.map((row) => [row.taskId, row.position])).toEqual([
             ["existing", 7],
-            ["two", 8],
-            ["one", 9],
+            ["two", 100000],
+            ["one", 100001],
         ]);
         expect(rows[2].removedAt).toBeNull();
         expect(rows[2].origin).toBe("last_meeting");
@@ -248,8 +315,8 @@ describe.skipIf(!url)("older agenda task batches (PostgreSQL)", () => {
             (await links()).map((row) => [row.taskId, row.position]),
         ).toEqual([
             ["existing", 7],
-            ["two", 8],
-            ["one", 9],
+            ["two", 100000],
+            ["one", 100001],
         ]);
         expect(await version()).toBe(1);
     });
@@ -266,8 +333,8 @@ describe.skipIf(!url)("older agenda task batches (PostgreSQL)", () => {
         expect(rows[0]).toEqual(existing);
         expect(rows.map((row) => [row.taskId, row.position])).toEqual([
             ["existing", 7],
-            ["two", 8],
-            ["one", 9],
+            ["two", 100000],
+            ["one", 100001],
         ]);
         expect(await version()).toBe(1);
     });
@@ -382,7 +449,9 @@ describe.skipIf(!url)("older agenda task batches (PostgreSQL)", () => {
             addAgendaTasks("owner", "agenda", ["three"]),
         ]);
         const rows = await links();
-        expect(rows.map((row) => row.position)).toEqual([7, 8, 9, 10]);
+        expect(rows.map((row) => row.position)).toEqual([
+            7, 100000, 100001, 100002,
+        ]);
         const ids = rows.map((row) => row.taskId);
         expect(ids.indexOf("one")).toBe(ids.indexOf("two") + 1);
         expect(await version()).toBe(2);
@@ -393,7 +462,9 @@ describe.skipIf(!url)("older agenda task batches (PostgreSQL)", () => {
             addAgendaTasks("owner", "agenda", ["two", "three"]),
         ]);
         const rows = await links();
-        expect(rows.map((row) => row.position)).toEqual([7, 8, 9, 10]);
+        expect(rows.map((row) => row.position)).toEqual([
+            7, 100000, 100001, 100002,
+        ]);
         expect(rows.map((row) => row.taskId).sort()).toEqual([
             "existing",
             "one",

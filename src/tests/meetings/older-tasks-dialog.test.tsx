@@ -112,6 +112,7 @@ beforeEach(() => {
                     -1,
                     ...server.tasks.map((entry) => entry.position),
                 );
+                const firstPosition = Math.max(lastPosition + 1, 100000);
                 server = {
                     ...server,
                     version: server.version + 1,
@@ -129,7 +130,7 @@ beforeEach(() => {
                                 agendaOrigin: "older" as const,
                                 agendaNote: null,
                                 removedAt: null,
-                                position: lastPosition + index + 1,
+                                position: firstPosition + index,
                             };
                         }),
                     ],
@@ -221,7 +222,14 @@ it("switches scope through the segmented control and refetches", async () => {
     );
 });
 
-it("adds the selection in one request, one optimistic update and one refresh", async () => {
+it.each([
+    { lastPosition: 0, firstPosition: 100000 },
+    { lastPosition: 100005, firstPosition: 100006 },
+])("adds the selection after $lastPosition in one request, one optimistic update and one refresh", async ({
+    lastPosition,
+    firstPosition,
+}) => {
+    server.tasks[0].position = lastPosition;
     await mount();
     expect(screen.getByText("Nothing selected")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Add tasks" })).toHaveProperty(
@@ -266,9 +274,9 @@ it("adds the selection in one request, one optimistic update and one refresh", a
             ],
         ),
     ).toEqual([
-        ["already-added", 0],
-        ["Review dates", 1],
-        ["Prepare Žluťoučký report", 2],
+        ["already-added", lastPosition],
+        ["Review dates", firstPosition],
+        ["Prepare Žluťoučký report", firstPosition + 1],
     ]);
     expect(
         fetchMock.mock.calls.filter(([url]) =>
@@ -278,7 +286,7 @@ it("adds the selection in one request, one optimistic update and one refresh", a
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(screen.getByTestId("agenda-tasks").textContent).toContain(
-        "Review dates:older:1",
+        `Review dates:older:${firstPosition}`,
     );
     fireEvent.click(screen.getByRole("button", { name: "Open picker" }));
     await screen.findByRole("checkbox", { name: "Check agenda" });
@@ -372,11 +380,11 @@ it("optimistically adds the whole batch before its POST completes", async () => 
     fireEvent.click(screen.getByRole("button", { name: "Add 2 tasks" }));
     await waitFor(() =>
         expect(screen.getByTestId("agenda-tasks").textContent).toContain(
-            "Review dates:older:1",
+            "Review dates:older:100000",
         ),
     );
     expect(screen.getByTestId("agenda-tasks").textContent).toContain(
-        "Check agenda:older:2",
+        "Check agenda:older:100001",
     );
     expect(mutateCall).toHaveBeenCalledTimes(1);
     expect(optimisticUpdate).toHaveBeenCalledTimes(1);
