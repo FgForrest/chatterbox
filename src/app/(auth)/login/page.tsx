@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { getExtracted, getLocale } from "next-intl/server";
 import {
     HostedAuthChrome,
@@ -5,14 +6,18 @@ import {
 } from "@/components/auth/auth-chrome";
 import { LoginForm } from "@/components/auth/login-form";
 import { SsoLogin } from "@/components/auth/sso-login";
-import { redirectIfAuthenticated } from "@/lib/auth-server";
+import { loginReturnPath } from "@/lib/auth/return-path";
+import { getSession } from "@/lib/auth-server";
 import { deploymentProductName } from "@/lib/deployment-brand";
 import { env } from "@/lib/env";
 import { isSmtpConfigured } from "@/lib/smtp";
 import { isSsoEnabled } from "@/lib/sso/config";
 
 interface LoginPageProps {
-    searchParams: Promise<{ error?: string | string[] }>;
+    searchParams: Promise<{
+        error?: string | string[];
+        returnTo?: string | string[];
+    }>;
 }
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
@@ -22,10 +27,13 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     const instanceSubtitle = i18n("Sign in to your {name} instance.", {
         name,
     });
-    await redirectIfAuthenticated();
+    const { error, returnTo } = await searchParams;
+    const destination = loginReturnPath(
+        Array.isArray(returnTo) ? returnTo[0] : returnTo,
+    );
+    if ((await getSession())?.user) redirect(destination);
 
     if (isSsoEnabled()) {
-        const { error } = await searchParams;
         return (
             <SelfHostAuthChrome
                 title={i18n("Sign in")}
@@ -34,12 +42,14 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                 <SsoLogin
                     providerName={env.OIDC_PROVIDER_NAME}
                     error={Array.isArray(error) ? error[0] : error}
+                    returnTo={destination}
                 />
             </SelfHostAuthChrome>
         );
     }
 
     const formProps = {
+        returnTo: destination,
         registrationEnabled: !env.DISABLE_REGISTRATION,
         smtpConfigured: isSmtpConfigured(),
     };

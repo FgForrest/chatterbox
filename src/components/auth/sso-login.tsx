@@ -5,6 +5,11 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { MetalButton } from "@/components/metal-button";
 import { useProductName } from "@/components/product-name-provider";
+import {
+    loginReturnPath,
+    recalledSsoReturnPath,
+    rememberSsoReturnPath,
+} from "@/lib/auth/return-path";
 import { signIn } from "@/lib/auth-client";
 import {
     SSO_ACCESS_DENIED_ERROR,
@@ -17,6 +22,7 @@ import {
 } from "@/lib/sso/constants";
 
 interface SsoLoginProps {
+    returnTo?: string;
     /** The identity provider's name, as the operator configured it. */
     providerName: string;
     /** The `error` code the sign-in callback redirected back with, if any. */
@@ -27,7 +33,7 @@ interface SsoLoginProps {
  * Sign-in through the instance's OpenID Connect provider: the only way in
  * when single sign-on is configured.
  */
-export function SsoLogin({ providerName, error }: SsoLoginProps) {
+export function SsoLogin({ providerName, error, returnTo }: SsoLoginProps) {
     const i18n = useExtracted();
     const name = useProductName();
     const [isLoading, setIsLoading] = useState(false);
@@ -82,11 +88,20 @@ export function SsoLogin({ providerName, error }: SsoLoginProps) {
 
     const handleClick = async () => {
         setIsLoading(true);
+        const destination = loginReturnPath(
+            returnTo ?? (error ? recalledSsoReturnPath() : undefined),
+        );
+        const callbackURL = new URL(destination, window.location.origin).href;
+        const errorCallbackURL = new URL("/login", window.location.origin);
+        if (destination !== "/dashboard") {
+            errorCallbackURL.searchParams.set("returnTo", destination);
+        }
+        rememberSsoReturnPath(destination);
         try {
             const result = await signIn.oauth2({
                 providerId: SSO_PROVIDER_ID,
-                callbackURL: "/dashboard",
-                errorCallbackURL: "/login",
+                callbackURL,
+                errorCallbackURL: errorCallbackURL.href,
             });
             if (result.error) {
                 toast.error(i18n("Sign-in failed. Please try again."));
