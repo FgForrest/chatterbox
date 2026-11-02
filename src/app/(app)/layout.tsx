@@ -1,7 +1,9 @@
 import { AppChromeProvider } from "@/components/app-chrome-provider";
+import { SessionWatcher } from "@/components/auth/session-watcher";
 import { Footer } from "@/components/footer";
 import { HelpProvider } from "@/components/help/help-provider";
 import { RebrandBanner } from "@/components/rebrand-banner";
+import { getSession } from "@/lib/auth-server";
 import { env } from "@/lib/env";
 import { appChromeConfig } from "@/lib/settings/app-chrome";
 
@@ -10,10 +12,18 @@ export default async function AppLayout({
 }: {
     children: React.ReactNode;
 }) {
-    const config = await appChromeConfig();
+    const [config, session] = await Promise.all([
+        appChromeConfig(),
+        getSession(),
+    ]);
     return (
         <HelpProvider>
             <AppChromeProvider {...config}>
+                {session ? (
+                    <SessionWatcher
+                        expiresAt={session.session.expiresAt.toISOString()}
+                    />
+                ) : null}
                 <div className="flex flex-col min-h-[100vh]">
                     {/* In-app rebrand banner. Hosted-only: existing OpenPlaud
                     users land here directly (auth redirect from `/`) and

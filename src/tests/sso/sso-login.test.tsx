@@ -23,8 +23,8 @@ describe("SsoLogin", () => {
         );
         expect(oauth2).toHaveBeenCalledWith({
             providerId: "oidc",
-            callbackURL: "/dashboard",
-            errorCallbackURL: "/login",
+            callbackURL: `${window.location.origin}/dashboard`,
+            errorCallbackURL: `${window.location.origin}/login`,
         });
         expect(screen.queryByRole("alert")).toBeNull();
     });
