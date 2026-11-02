@@ -228,11 +228,12 @@ describe("credential and non-credential forms", () => {
         );
     });
 
-    it("opts newsletter email and honeypot fields out", () => {
+    it("keeps the newsletter email autofillable and the honeypot out", () => {
         const { container } = render(<NewsletterForm />);
-        for (const field of container.querySelectorAll("input")) {
-            expectOptOut(field);
-        }
+        expectCredential(screen.getByLabelText("Email address"), "email");
+        const honeypot = container.querySelector("#newsletter-hp");
+        expect(honeypot).not.toBeNull();
+        if (honeypot) expectOptOut(honeypot);
     });
 
     it("opts the Plaud access-token paste box out with new-password", () => {

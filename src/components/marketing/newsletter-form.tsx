@@ -142,7 +142,7 @@ export function NewsletterForm({
                     id="newsletter-email"
                     type="email"
                     placeholder={placeholder ?? i18n("you@example.com")}
-                    autoComplete="off"
+                    autoComplete="email"
                     inputMode="email"
                     required
                     value={email}
