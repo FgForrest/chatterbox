@@ -66,7 +66,6 @@ export function observeSessionExpiry(onExpired: () => void): () => void {
         const listeners = new Set<Listener>();
         const cancellations = new Set<() => void>();
         const observedFetch: typeof fetch = async (input, init) => {
-            const recipients = [...listeners];
             const response = await originalFetch.call(window, input, init);
             if (listeners.size === 0 || response.status !== 401)
                 return response;
@@ -85,9 +84,8 @@ export function observeSessionExpiry(onExpired: () => void): () => void {
                     void inspectResponse(
                         response,
                         () => {
-                            for (const listener of recipients) {
-                                if (listeners.has(listener))
-                                    listener.onExpired();
+                            for (const listener of [...listeners]) {
+                                listener.onExpired();
                             }
                         },
                         cancellations,

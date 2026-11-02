@@ -99,6 +99,32 @@ describe("session expiry fetch observer", () => {
         expect(expired).not.toHaveBeenCalled();
     });
 
+    it("signals a watcher that subscribed while the request was in flight", async () => {
+        let resolve: (response: Response) => void = () => {};
+        window.fetch = vi.fn().mockReturnValue(
+            new Promise<Response>((done) => {
+                resolve = done;
+            }),
+        );
+        const first = vi.fn();
+        const late = vi.fn();
+        const stopFirst = observeSessionExpiry(first);
+        const pending = window.fetch("/api/x");
+        const stopLate = observeSessionExpiry(late);
+        stop = () => {
+            stopFirst();
+            stopLate();
+        };
+        resolve(
+            Response.json({ code: "AUTH_SESSION_MISSING" }, { status: 401 }),
+        );
+        await pending;
+        await vi.waitFor(() => {
+            expect(first).toHaveBeenCalledOnce();
+            expect(late).toHaveBeenCalledOnce();
+        });
+    });
+
     it("suppresses only this response's missing-session error", async () => {
         await toastApiError(
             Response.json(
