@@ -10,11 +10,14 @@ import {
     type SQL,
     sql,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
     receivedItemCondition,
     receivedThroughFolderCondition,
 } from "@/db/queries/item-shares";
+import { meetingFolderVisibility } from "@/db/queries/meeting-folder-visibility";
+import { taskVisible } from "@/db/queries/task-visibility";
 import {
     agendaPoints,
     agendaTasks,
@@ -23,6 +26,8 @@ import {
     meetingAgendas,
     receivedFolderAttachments,
     recordingFolderAssignments,
+    recordingFolders,
+    recordingTasks,
     users,
 } from "@/db/schema";
 import { sharedItemCondition } from "@/lib/sharing/shared";
@@ -141,6 +146,15 @@ export async function listMeetingRows(
     } = {},
     executor: MeetingExecutor = db,
 ) {
+    const taskItem = alias(chatterItems, "agenda_task_item");
+    const taskViewer = {
+        userId,
+        orgUserId,
+        isOrg: userId === orgUserId,
+        isCurator: false,
+        emailHash: "",
+        includeReceived: true,
+    };
     return executor
         .select({
             agenda: meetingAgendas,
@@ -148,7 +162,13 @@ export async function listMeetingRows(
             authorName: users.name,
             counts: {
                 points: sql<number>`(select count(*)::int from ${agendaPoints} where ${agendaPoints.agendaId} = ${meetingAgendas.id} and ${agendaPoints.userId} = ${meetingAgendas.userId})`,
-                tasks: sql<number>`(select count(*)::int from ${agendaTasks} where ${agendaTasks.agendaId} = ${meetingAgendas.id} and ${agendaTasks.userId} = ${meetingAgendas.userId} and ${agendaTasks.removedAt} is null)`,
+                tasks: sql<number>`(select count(*)::int from ${agendaTasks}
+                    inner join ${recordingTasks} on ${recordingTasks.id} = ${agendaTasks.taskId}
+                    left join ${chatterItems} as agenda_task_item on ${taskItem.id} = ${recordingTasks.itemId}
+                    where ${agendaTasks.agendaId} = ${meetingAgendas.id} and ${agendaTasks.userId} = ${meetingAgendas.userId}
+                      and ${agendaTasks.removedAt} is null and ${recordingTasks.status} <> 'proposed'
+                      and ${taskItem.deletedAt} is null and (${taskItem.id} is null or ${taskItem.kind} in ('audio', 'mail'))
+                      and ${taskVisible(taskViewer, taskItem, true)})`,
             },
         })
         .from(meetingAgendas)
@@ -169,7 +189,10 @@ export async function listMeetingRows(
                     ? undefined
                     : isNull(meetingAgendas.recordingItemId),
                 input.folderId
-                    ? sql`exists (select 1 from ${recordingFolderAssignments} where ${recordingFolderAssignments.itemId} = ${chatterItems.id} and (${recordingFolderAssignments.folderId} = ${input.folderId}
+                    ? sql`exists (select 1 from ${recordingFolderAssignments}
+                        inner join ${recordingFolders} on ${recordingFolders.id} = ${recordingFolderAssignments.folderId}
+                        where ${recordingFolderAssignments.itemId} = ${chatterItems.id}
+                        and ${meetingFolderVisibility(userId, orgUserId)} and (${recordingFolderAssignments.folderId} = ${input.folderId}
                         or ${recordingFolderAssignments.folderId} in (select ${folderShares.folderId} from ${receivedFolderAttachments}
                             inner join ${folderShares} on ${folderShares.id} = ${receivedFolderAttachments.shareId}
                             where ${receivedFolderAttachments.id} = ${input.folderId} and ${receivedFolderAttachments.userId} = ${userId}

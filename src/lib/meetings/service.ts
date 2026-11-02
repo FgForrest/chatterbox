@@ -13,6 +13,7 @@ import {
 import { nanoid } from "nanoid";
 import type { z } from "zod";
 import { db } from "@/db";
+import { hasVisibleAgendaSources } from "@/db/queries/agenda-source-visibility";
 import { notifyFolderReceiversInTx } from "@/db/queries/item-shares";
 import {
     listMeetingRows,
@@ -21,7 +22,6 @@ import {
     meetingFolders,
     meetingVisibility,
 } from "@/db/queries/meetings";
-import { receivedMeetingFolderNodes } from "@/db/queries/received-meeting-folders";
 import {
     ANY_TASK_ITEM,
     type TaskViewer,
@@ -67,6 +67,7 @@ import {
     encryptCalendarSnapshot,
     readMeetingCalendarSnapshot,
 } from "@/lib/meetings/calendar-snapshot";
+import { meetingFolderNavigation } from "@/lib/meetings/folders";
 import { meetingInvitees } from "@/lib/meetings/meeting-roster";
 import {
     agendaTaskIdsInput,
@@ -496,13 +497,10 @@ export async function listMeetings(
     input: Parameters<typeof listMeetingRows>[2] = {},
 ) {
     const viewer = await meetingViewer(userId);
-    const [rows, receivedFolders] = await Promise.all([
+    const [rows, navigation] = await Promise.all([
         listMeetingRows(userId, viewer.orgUserId, input),
-        receivedMeetingFolderNodes(db, userId),
+        meetingFolderNavigation(userId, viewer.orgUserId),
     ]);
-    const navigation = new Map(
-        receivedFolders.map((folder) => [folder.sourceId, folder]),
-    );
     const attachedIds = rows.flatMap(({ agenda }) =>
         agenda.recordingItemId ? [agenda.recordingItemId] : [],
     );
@@ -619,14 +617,9 @@ export async function listMeetings(
         folders: folders
             .filter((folder) => folder.itemId === agenda.meetingItemId)
             .sort((a, b) => a.id.localeCompare(b.id))
-            .map(({ itemId: _itemId, ...folder }) => {
-                const visible = navigation.get(folder.id);
-                return {
-                    ...folder,
-                    id: visible?.id ?? folder.id,
-                    name: decryptText(visible?.name ?? folder.name),
-                    parentId: visible ? visible.parentId : folder.parentId,
-                };
+            .flatMap((folder) => {
+                const visible = navigation.project(folder);
+                return visible ? [visible] : [];
             }),
         counts,
         version: agenda.version,
@@ -724,7 +717,7 @@ export async function getMeeting(
             .returning();
         agenda = refreshed;
     }
-    const [points, links, suggestions, folders, viewer, event, sourceRows] =
+    const [points, links, suggestions, folders, viewer, event, navigation] =
         await Promise.all([
             db
                 .select()
@@ -759,47 +752,61 @@ export async function getMeeting(
                 includeReceived: true,
             })),
             readMeetingCalendarSnapshot(agenda),
-            agenda.snapshotSourceItemId
-                ? db
-                      .select({
-                          id: chatterItems.id,
-                          title: chatterItems.title,
-                          occurredAt: chatterItems.occurredAt,
-                      })
-                      .from(chatterItems)
-                      .where(
-                          and(
-                              eq(chatterItems.id, agenda.snapshotSourceItemId),
-                              meetingVisibility(
-                                  userId,
-                                  access.viewer.orgUserId,
-                              ),
-                          ),
-                      )
-                      .limit(1)
-                : [],
+            meetingFolderNavigation(userId, access.viewer.orgUserId),
         ]);
-    const suggestionTaskIds = webContext
-        ? [
-              ...new Set(
-                  suggestions
-                      .filter((suggestion) => suggestion.state === "open")
-                      .flatMap(
-                          (suggestion) => suggestion.sources?.taskIds ?? [],
+    const suggestionTaskIds = [
+        ...new Set(
+            suggestions.flatMap(
+                (suggestion) => suggestion.sources?.taskIds ?? [],
+            ),
+        ),
+    ];
+    const sourceItemIds = [
+        ...new Set([
+            ...suggestions.flatMap(
+                (suggestion) => suggestion.sources?.itemIds ?? [],
+            ),
+            ...[agenda.taskSourceItemId, agenda.snapshotSourceItemId].filter(
+                (id): id is string => id !== null,
+            ),
+        ]),
+    ];
+    const [sourceRows, taskRows] = await Promise.all([
+        sourceItemIds.length
+            ? db
+                  .select({
+                      id: chatterItems.id,
+                      title: chatterItems.title,
+                      occurredAt: chatterItems.occurredAt,
+                  })
+                  .from(chatterItems)
+                  .where(
+                      and(
+                          inArray(chatterItems.id, sourceItemIds),
+                          meetingVisibility(userId, access.viewer.orgUserId),
                       ),
-              ),
-          ]
-        : [];
-    const visibleTasks = new Map(
-        (
-            await getVisibleTasks(viewer, [
-                ...new Set([
-                    ...links.map((link) => link.taskId),
-                    ...suggestionTaskIds,
-                ]),
-            ])
-        ).map((task) => [task.id, task]),
+                  )
+            : [],
+        getVisibleTasks(viewer, [
+            ...new Set([
+                ...links.map((link) => link.taskId),
+                ...suggestionTaskIds,
+            ]),
+        ]),
+    ]);
+    const visibleItems = new Map(sourceRows.map((row) => [row.id, row]));
+    const visibleTasks = new Map(taskRows.map((task) => [task.id, task]));
+    const visibleSuggestions = suggestions.filter((suggestion) =>
+        hasVisibleAgendaSources(suggestion.sources, visibleItems, visibleTasks),
     );
+    const visibleSuggestionTaskIds = new Set(
+        visibleSuggestions
+            .filter((suggestion) => suggestion.state === "open")
+            .flatMap((suggestion) => suggestion.sources?.taskIds ?? []),
+    );
+    const taskSource = agenda.snapshotSourceItemId
+        ? visibleItems.get(agenda.snapshotSourceItemId)
+        : undefined;
     const tasks = links.flatMap((link) => {
         const task = visibleTasks.get(link.taskId);
         return task
@@ -901,11 +908,17 @@ export async function getMeeting(
         taskSourceItemId:
             agenda.recordingItemId && !access.recordingVisible
                 ? null
-                : agenda.taskSourceItemId,
+                : agenda.taskSourceItemId &&
+                    visibleItems.has(agenda.taskSourceItemId)
+                  ? agenda.taskSourceItemId
+                  : null,
         snapshotSourceItemId:
             agenda.recordingItemId && !access.recordingVisible
                 ? null
-                : agenda.snapshotSourceItemId,
+                : agenda.snapshotSourceItemId &&
+                    visibleItems.has(agenda.snapshotSourceItemId)
+                  ? agenda.snapshotSourceItemId
+                  : null,
         cursor: `${agenda.version}:${agenda.recordingItemId ? (access.recordingVisible ? "visible" : "hidden") : "standalone"}:${job.state ?? "idle"}`,
         attachedRecording: agenda.recordingItemId
             ? { visible: access.recordingVisible }
@@ -915,10 +928,10 @@ export async function getMeeting(
         authors,
         canExportCalendar,
         redirectTo: await meetingRecordingRedirect(userId, access),
-        folders: folders.map((folder) => ({
-            ...folder,
-            name: decryptText(folder.name),
-        })),
+        folders: folders.flatMap((folder) => {
+            const visible = navigation.project(folder);
+            return visible ? [visible] : [];
+        }),
         ...(attachmentAudience ? { attachmentAudience } : {}),
         invitees,
         ...(webContext
@@ -927,16 +940,15 @@ export async function getMeeting(
                       (recording) => recording.id,
                   ),
                   suggestionTasks: [...visibleTasks.values()]
-                      .filter((task) => suggestionTaskIds.includes(task.id))
+                      .filter((task) => visibleSuggestionTaskIds.has(task.id))
                       .map(({ id, text }) => ({ id, text })),
               }
             : {}),
         taskSource:
-            sourceRows[0] &&
-            (!agenda.recordingItemId || access.recordingVisible)
+            taskSource && (!agenda.recordingItemId || access.recordingVisible)
                 ? {
-                      ...sourceRows[0],
-                      title: decryptText(sourceRows[0].title),
+                      ...taskSource,
+                      title: decryptText(taskSource.title),
                       automatic: agenda.taskSourceItemId === null,
                   }
                 : null,
@@ -947,7 +959,7 @@ export async function getMeeting(
             tasks.filter((task) => !task.removedAt),
             invitees,
         ),
-        suggestions: suggestions.map((suggestion) => ({
+        suggestions: visibleSuggestions.map((suggestion) => ({
             ...suggestion,
             text: decryptText(suggestion.text),
         })),
@@ -1631,7 +1643,10 @@ export async function olderTasks(
 ) {
     const detail = await getMeeting(userId, id);
     if (detail.unchanged) return [];
-    const folderIds = detail.folders.map((folder) => folder.id);
+    const folders = detail.meetingItemId
+        ? await meetingFolders(db, detail.meetingItemId, detail.userId)
+        : [];
+    const folderIds = folders.map((folder) => folder.id);
     if (!folderIds.length) return [];
     const viewer = { ...(await taskViewerById(userId)), includeReceived: true };
     const rows = await db
@@ -1669,53 +1684,14 @@ export async function olderTasks(
 /** Resolve reminder paths in one batch, using the receiver's filing instead of private owner ancestors. */
 export async function meetingFolderPaths(userId: string) {
     const viewer = await meetingViewer(userId);
-    const [tree, received] = await Promise.all([
-        db
-            .select({
-                id: recordingFolders.id,
-                name: recordingFolders.name,
-                parentId: recordingFolders.parentId,
-            })
-            .from(recordingFolders)
-            .where(
-                inArray(recordingFolders.userId, [
-                    userId,
-                    ...(viewer.orgUserId ? [viewer.orgUserId] : []),
-                ]),
-            ),
-        receivedMeetingFolderNodes(db, userId),
-    ]);
-    const nodes = new Map(
-        [...tree, ...received].map((row) => [
-            row.id,
-            { ...row, name: decryptText(row.name) },
-        ]),
-    );
-    const receivedBySource = new Map(
-        received.map((row) => [row.sourceId, row.id]),
-    );
+    const navigation = await meetingFolderNavigation(userId, viewer.orgUserId);
     return (
         folders: readonly {
             id: string;
             name: string;
             parentId: string | null;
         }[],
-    ) => {
-        const first = [...folders].sort((a, b) => a.id.localeCompare(b.id))[0];
-        if (!first) return "";
-        let current = nodes.get(receivedBySource.get(first.id) ?? first.id);
-        if (!current) return first.name;
-        const names: string[] = [];
-        const seen = new Set<string>();
-        while (current && !seen.has(current.id)) {
-            seen.add(current.id);
-            names.unshift(current.name);
-            current = current.parentId
-                ? nodes.get(current.parentId)
-                : undefined;
-        }
-        return names.join(" / ");
-    };
+    ) => navigation.path(folders);
 }
 
 /** Restrict recorder reminders to authors, point editors and invitees in stored Calendar snapshots. */

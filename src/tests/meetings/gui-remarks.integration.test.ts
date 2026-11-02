@@ -174,22 +174,36 @@ suite("meeting GUI visibility and source languages (PostgreSQL)", () => {
                 status: "open" as const,
             })),
         );
-        await db.insert(agendaSuggestions).values({
-            id: "suggestion",
-            userId: "owner",
-            agendaId: "agenda",
-            text: encryptText("Review tasks"),
-            kind: "ai",
-            sources: {
-                itemIds: [],
-                taskIds: ["visible-task", "hidden-task"],
+        await db.insert(agendaSuggestions).values([
+            {
+                id: "suggestion",
+                userId: "owner",
+                agendaId: "agenda",
+                text: encryptText("Review tasks"),
+                kind: "ai",
+                sources: {
+                    itemIds: [],
+                    taskIds: ["visible-task", "hidden-task"],
+                },
             },
-        });
+            {
+                id: "visible-suggestion",
+                userId: "owner",
+                agendaId: "agenda",
+                text: encryptText("Review visible task"),
+                kind: "ai",
+                sources: { itemIds: [], taskIds: ["visible-task"] },
+            },
+        ]);
         const web = await getMeeting("owner", "agenda", undefined, true);
         if (web.unchanged) throw new Error("Expected detail");
         expect(web.suggestionTasks).toEqual([
             { id: "visible-task", text: "visible task text" },
         ]);
+        expect(web.suggestions.map((suggestion) => suggestion.id)).toEqual([
+            "visible-suggestion",
+        ]);
+        expect(JSON.stringify(web)).not.toContain("hidden-task");
         expect(web.folderRecordingIds).toEqual(["visible"]);
         expect(web.tasks).toEqual([]);
         expect(

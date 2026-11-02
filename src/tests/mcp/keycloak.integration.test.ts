@@ -11,24 +11,19 @@
  *   way Claude does: authorization code with PKCE, `openid offline_access`,
  *   `resource` naming the MCP endpoint, then refresh.
  *
- * Opt-in. Needs `TEST_DATABASE_URL` (see the other integration tests) and
- * `KEYCLOAK_TEST_ISSUER`, the realm of `docker-compose.e2e.sso.yml`:
- *
- *   docker compose -f docker-compose.e2e.yml -f docker-compose.e2e.sso.yml up -d --wait keycloak
- *   KEYCLOAK_TEST_ISSUER=http://localhost:8180/realms/riffado-e2e \
- *   TEST_DATABASE_URL=... vitest run src/tests/mcp/keycloak.integration.test.ts
- *
- * Keycloak's issuer is its KC_HOSTNAME, so start it with the URL this test
- * reaches it at. With `docker-compose.e2e.sso-resource-indicators.yml` added,
- * set `KEYCLOAK_TEST_RESOURCE_INDICATORS=true` as well. The admin password
- * (`KEYCLOAK_TEST_ADMIN_PASSWORD`, default `admin`) lets the test take a role
- * away and give it back.
+ * Opt-in: `TEST_DATABASE_URL` and `KEYCLOAK_TEST_ISSUER` pointing at a
+ * disposable local Keycloak. The file imports and removes its E2E realm.
+ * Set `KEYCLOAK_TEST_RESOURCE_INDICATORS=true` when the server enables that feature.
  */
 
 import { createHash, randomBytes } from "node:crypto";
 import { decodeJwt } from "jose";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { accounts, users } from "@/db/schema";
+import {
+    keycloakTestBase,
+    provisionE2eTestRealm,
+} from "@/tests/identity/keycloak-fixture";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -69,10 +64,9 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
             KNOWLEDGE_MEMORY_MB: 64,
             APP_URL: "https://riffado.example.com",
             RATE_LIMIT_TRUST_PROXY_HEADERS: true,
-            OIDC_ISSUER_URL: process.env.KEYCLOAK_TEST_ISSUER?.replace(
-                /\/+$/,
-                "",
-            ),
+            OIDC_ISSUER_URL: process.env.KEYCLOAK_TEST_ISSUER
+                ? `${new URL(process.env.KEYCLOAK_TEST_ISSUER).origin}/realms/chb-mcp-local-it`
+                : undefined,
             OIDC_CLIENT_ID: "riffado",
             OIDC_CLIENT_SECRET: "riffado-e2e-client-secret",
             MCP_AUDIENCE: "riffado-mcp",
@@ -101,11 +95,24 @@ import { POST } from "@/app/api/mcp/route";
 import { ensureRootFolders } from "@/lib/folders/folders";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { SSO_PROVIDER_ID } from "@/lib/sso/constants";
-import { insertRecording, shareRecording } from "@/tests/mcp/fixtures";
+import {
+    insertRecording,
+    insertTask,
+    shareRecording,
+} from "@/tests/mcp/fixtures";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithKeycloak =
-    testDatabaseUrl && mockEnv.OIDC_ISSUER_URL ? describe : describe.skip;
+    testDatabaseUrl && keycloakTestBase() ? describe : describe.skip;
+
+let realm: Awaited<ReturnType<typeof provisionE2eTestRealm>> | undefined;
+beforeAll(async () => {
+    if (testDatabaseUrl && keycloakTestBase())
+        realm = await provisionE2eTestRealm("chb-mcp-local-it");
+}, 60_000);
+afterAll(async () => {
+    await realm?.dispose();
+}, 30_000);
 
 const ALICE = "user-alice";
 
@@ -127,13 +134,22 @@ const RECORDING_TOOLS = ["list_folders", "list_recordings"];
 const TRANSCRIPT_TOOLS = ["get_transcript", "search_transcripts"];
 const SUMMARY_TOOLS = ["get_summary", "search_summaries"];
 const TASK_READ_TOOLS = ["list_tasks", "search_tasks"];
-const TASK_TOOLS = [...TASK_READ_TOOLS, "update_task"];
+const TASK_TOOLS = [
+    ...TASK_READ_TOOLS,
+    "update_task",
+    "create_task",
+    "follow_task",
+    "merge_tasks",
+];
+const MEETING_READ_TOOLS = ["list_meetings", "get_meeting"];
+const MEETING_TOOLS = [...MEETING_READ_TOOLS, "prepare_meeting", "edit_agenda"];
 const ALICE_TOOLS = [
     ...KNOWLEDGE_TOOLS,
     ...RECORDING_TOOLS,
     ...TRANSCRIPT_TOOLS,
     ...SUMMARY_TOOLS,
     ...TASK_READ_TOOLS,
+    ...MEETING_READ_TOOLS,
 ].sort();
 
 /** A token from the realm's token endpoint. */
@@ -231,6 +247,8 @@ describeWithKeycloak("MCP with Keycloak", () => {
     let database: TestPostgresDatabase | null = null;
     let aliceToken = "";
     let botToken = "";
+    let privateTask = "";
+    let sharedTask = "";
 
     function db() {
         if (!database) throw new Error("test database was not initialized");
@@ -284,6 +302,16 @@ describeWithKeycloak("MCP with Keycloak", () => {
             startTime: new Date("2026-09-06T10:00:00Z"),
         });
         await shareRecording(db(), "alice-shared", orgUserId);
+        privateTask = await insertTask(db(), {
+            userId: ALICE,
+            recordingId: "alice-private",
+            text: "Private action",
+        });
+        sharedTask = await insertTask(db(), {
+            userId: ALICE,
+            recordingId: "alice-shared",
+            text: "Shared action",
+        });
     }, 120_000);
 
     afterAll(async () => {
@@ -337,7 +365,12 @@ describeWithKeycloak("MCP with Keycloak", () => {
 
     it("lists the bot's knowledge, task and recording tools", async () => {
         expect(await toolNames(botToken)).toEqual(
-            [...KNOWLEDGE_TOOLS, ...RECORDING_TOOLS, ...TASK_TOOLS].sort(),
+            [
+                ...KNOWLEDGE_TOOLS,
+                ...RECORDING_TOOLS,
+                ...TASK_TOOLS,
+                ...MEETING_TOOLS,
+            ].sort(),
         );
     });
 
@@ -350,6 +383,90 @@ describeWithKeycloak("MCP with Keycloak", () => {
                 owner_is_me,
             })),
         ).toEqual([{ id: "alice-shared", view: "org", owner_is_me: false }]);
+    });
+
+    it("keeps newly offered task and agenda writes within service-client rights", async () => {
+        const refused = [
+            {
+                name: "create_task",
+                arguments: { text: "Own task" },
+                error: "Service clients cannot create own tasks",
+            },
+            {
+                name: "prepare_meeting",
+                arguments: {
+                    folderId: "private-folder",
+                    title: "Private meeting",
+                },
+                error: "Service accounts cannot prepare agendas",
+            },
+            {
+                name: "edit_agenda",
+                arguments: {
+                    meetingId: "private-agenda",
+                    operations: [
+                        { action: "add_point", text: "Private point" },
+                    ],
+                },
+                error: "Service accounts cannot edit agendas",
+            },
+        ];
+        for (const { name, arguments: args, error } of refused) {
+            const response = await POST(
+                post(botToken, {
+                    jsonrpc: "2.0",
+                    id: 3,
+                    method: "tools/call",
+                    params: { name, arguments: args },
+                }),
+            );
+            expect(response.status).toBe(200);
+            expect((await response.json()).result).toMatchObject({
+                isError: true,
+                content: [{ type: "text", text: JSON.stringify({ error }) }],
+            });
+        }
+        for (const [name, args] of [
+            ["follow_task", { task: privateTask, follow: true }],
+            [
+                "merge_tasks",
+                {
+                    keep: sharedTask,
+                    merge: privateTask,
+                    keep_version: 0,
+                    merge_version: 0,
+                    confirm_private_to_shared: true,
+                },
+            ],
+            [
+                "update_task",
+                { task: privateTask, version: 0, note: "Attempted edit" },
+            ],
+        ] as const) {
+            const response = await POST(
+                post(botToken, {
+                    jsonrpc: "2.0",
+                    id: 3,
+                    method: "tools/call",
+                    params: { name, arguments: args },
+                }),
+            );
+            expect(response.status).toBe(200);
+            expect((await response.json()).result).toMatchObject({
+                isError: true,
+                content: [
+                    {
+                        type: "text",
+                        text: JSON.stringify({
+                            error:
+                                name === "follow_task"
+                                    ? "Not allowed to change this task"
+                                    : "Not found",
+                        }),
+                    },
+                ],
+            });
+        }
     });
 
     it("refuses a client outside MCP_ALLOWED_CLIENTS", async () => {
