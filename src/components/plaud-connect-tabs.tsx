@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { toastApiError } from "@/lib/api-errors";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import {
     DEFAULT_SERVER_KEY,
     PLAUD_SERVERS,
@@ -387,6 +388,7 @@ function EmailCodePane({ onConnected, onSwitchToToken }: EmailCodePaneProps) {
                     <Label htmlFor="plaud-email">{i18n("Plaud Email")}</Label>
                     <Input
                         id="plaud-email"
+                        autoComplete="username"
                         type="email"
                         placeholder={i18n("you@example.com")}
                         value={email}
@@ -716,6 +718,9 @@ function PasteTokenPane({ onConnected, onUseConnector }: PasteTokenPaneProps) {
                     {i18n("Access token")}
                 </Label>
                 <textarea
+                    {...getPasswordManagerAttributes(undefined, {
+                        secret: true,
+                    })}
                     id="plaud-access-token"
                     placeholder={i18n("eyJhbGciOi…")}
                     value={token}

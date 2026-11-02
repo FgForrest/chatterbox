@@ -5,6 +5,7 @@ import { Building2, UserRound } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
 import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 
 /** A person or a thing, as the picker offers it. */
 export interface PickedRecord {
@@ -104,10 +105,14 @@ export function RecordPicker({
             className="rounded-md border"
         >
             <Command.Input
+                asChild
+                {...getPasswordManagerAttributes()}
                 autoFocus
                 placeholder={i18n("Find a person or a thing")}
                 className="h-9 w-full border-b bg-transparent px-3 text-sm outline-none"
-            />
+            >
+                <input type="search" />
+            </Command.Input>
             <Command.List className="max-h-56 overflow-y-auto p-1">
                 <Command.Empty className="px-2 py-3 text-sm text-muted-foreground">
                     {records === null

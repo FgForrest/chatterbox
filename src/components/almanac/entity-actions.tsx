@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
 import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 
 interface Candidate {
     id: string;
@@ -292,6 +293,7 @@ export function EntityActions({
                             </DialogDescription>
                         </DialogHeader>
                         <textarea
+                            {...getPasswordManagerAttributes()}
                             value={notes}
                             maxLength={4000}
                             onChange={(event) => setNotes(event.target.value)}
@@ -349,6 +351,7 @@ export function EntityActions({
                                     aria-label={i18n("Name")}
                                 />
                                 <textarea
+                                    {...getPasswordManagerAttributes()}
                                     value={description}
                                     maxLength={4000}
                                     onChange={(event) =>

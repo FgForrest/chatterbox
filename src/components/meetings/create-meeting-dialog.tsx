@@ -18,6 +18,7 @@ import {
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { matchFolders } from "@/lib/folders/navigation";
 import { dateTimeInputIso } from "@/lib/i18n/time-zone";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import type { RecordingFolder } from "@/types/folder";
 import { meetingRequest } from "./api";
 import { CalendarEventPicker } from "./calendar-event-picker";
@@ -190,6 +191,7 @@ export function CreateMeetingDialog({
                         <label className="grid gap-1 text-sm">
                             {i18n("Title")}
                             <input
+                                {...getPasswordManagerAttributes()}
                                 className="rounded-md border bg-background p-2"
                                 value={title}
                                 maxLength={500}
@@ -202,6 +204,7 @@ export function CreateMeetingDialog({
                             <label className="grid gap-1 text-sm">
                                 {i18n("Start (optional)")}
                                 <input
+                                    {...getPasswordManagerAttributes()}
                                     type="datetime-local"
                                     className="min-w-0 rounded-md border bg-background p-2"
                                     value={start}
@@ -213,6 +216,7 @@ export function CreateMeetingDialog({
                             <label className="grid gap-1 text-sm">
                                 {i18n("End (optional)")}
                                 <input
+                                    {...getPasswordManagerAttributes()}
                                     type="datetime-local"
                                     className="min-w-0 rounded-md border bg-background p-2"
                                     value={end}

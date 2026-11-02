@@ -13,7 +13,9 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog";
+import { OLDER_TASK_POSITION_BASE } from "@/lib/meetings/positions";
 import { groupAgendaTasks } from "@/lib/meetings/task-groups";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import { cn } from "@/lib/utils";
 import { meetingRequest, meetingUrl } from "./api";
 import type { MeetingDetail, OlderTask } from "./types";
@@ -21,6 +23,114 @@ import type { AgendaController } from "./use-agenda";
 
 function searchText(value: string) {
     return value.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase();
+}
+
+function OlderTaskGroup({
+    group,
+    selected,
+    adding,
+    onToggleTask,
+    onToggleGroup,
+    ids,
+}: {
+    group: ReturnType<typeof groupAgendaTasks<OlderTask>>[number];
+    selected: ReadonlyMap<string, OlderTask>;
+    adding: boolean;
+    onToggleTask: (task: OlderTask, checked: boolean) => void;
+    onToggleGroup: (tasks: OlderTask[], checked: boolean) => void;
+    ids: string;
+}) {
+    const i18n = useExtracted();
+    const format = useFormatter();
+    const checked = group.tasks.every((task) => selected.has(task.id));
+    const mixed = !checked && group.tasks.some((task) => selected.has(task.id));
+    return (
+        <section className="space-y-2">
+            <div className="flex items-center gap-3">
+                <input
+                    type="checkbox"
+                    className="size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-ring"
+                    aria-label={i18n("Select all tasks: {name}", {
+                        name: group.name ?? i18n("No assignee"),
+                    })}
+                    checked={checked}
+                    aria-checked={mixed ? "mixed" : checked}
+                    ref={(node) => {
+                        if (node) node.indeterminate = mixed;
+                    }}
+                    disabled={adding}
+                    onChange={(event) =>
+                        onToggleGroup(group.tasks, event.target.checked)
+                    }
+                />
+                <h3 className="text-sm font-medium">
+                    {group.name ?? i18n("No assignee")}
+                    {!group.invited && group.name && (
+                        <span className="ml-2 rounded border px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
+                            {i18n("Not invited")}
+                        </span>
+                    )}
+                </h3>
+            </div>
+            <ul className="divide-y rounded-lg border">
+                {group.tasks.map((task, taskIndex) => {
+                    const source = task.evidence ?? task.recording;
+                    return (
+                        <li key={task.id}>
+                            <label
+                                className={cn(
+                                    "flex cursor-pointer items-start gap-3 p-3 text-sm focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring",
+                                    selected.has(task.id) && "bg-primary/10",
+                                )}
+                            >
+                                <input
+                                    type="checkbox"
+                                    className="mt-1 size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-ring"
+                                    aria-labelledby={`${ids}-${taskIndex}`}
+                                    aria-describedby={`${ids}-${taskIndex}-meta`}
+                                    checked={selected.has(task.id)}
+                                    disabled={adding}
+                                    onChange={(event) =>
+                                        onToggleTask(task, event.target.checked)
+                                    }
+                                />
+                                <span className="min-w-0">
+                                    <span
+                                        id={`${ids}-${taskIndex}`}
+                                        className="block whitespace-pre-wrap"
+                                    >
+                                        {task.text}
+                                    </span>
+                                    <span
+                                        id={`${ids}-${taskIndex}-meta`}
+                                        className="block text-xs text-muted-foreground"
+                                    >
+                                        {source?.title ?? i18n("Own task")} ·{" "}
+                                        {format.dateTime(
+                                            new Date(
+                                                source?.startTime ??
+                                                    task.createdAt,
+                                            ),
+                                            { dateStyle: "medium" },
+                                        )}{" "}
+                                        ·{" "}
+                                        {task.dueDate
+                                            ? format.dateTime(
+                                                  new Date(
+                                                      `${task.dueDate}T12:00:00`,
+                                                  ),
+                                                  { dateStyle: "medium" },
+                                              )
+                                            : i18n("No due date")}
+                                    </span>
+                                </span>
+                            </label>
+                        </li>
+                    );
+                })}
+            </ul>
+        </section>
+    );
 }
 
 /** Picks unfinished tasks from the agenda's folders and adds the selected ones to the agenda. */
@@ -36,7 +146,6 @@ export function OlderTasksDialog({
     mutate: AgendaController["mutate"];
 }) {
     const i18n = useExtracted();
-    const format = useFormatter();
     const [scope, setScope] = useState<"invited" | "all">("invited");
     const [older, setOlder] = useState<OlderTask[] | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -82,42 +191,65 @@ export function OlderTasksDialog({
     const selection = [...selected.values()].filter(
         (task) => !inAgenda.has(task.id),
     );
+    const toggleTask = (task: OlderTask, checked: boolean) => {
+        setSelected((current) => {
+            const next = new Map(current);
+            if (checked) next.set(task.id, task);
+            else next.delete(task.id);
+            return next;
+        });
+    };
+    const toggleGroup = (tasks: OlderTask[], checked: boolean) => {
+        setSelected((current) => {
+            const next = new Map(current);
+            for (const task of tasks) {
+                if (checked) next.set(task.id, task);
+                else next.delete(task.id);
+            }
+            return next;
+        });
+    };
     const add = async () => {
         if (adding || !selection.length) return;
         setAdding(true);
-        let failed = false;
-        for (const task of selection) {
-            // mutate reports its own failure; stop there so an outage shows one error and the rest stay selected.
-            const saved = await mutate(
-                "/tasks",
-                "POST",
-                { taskId: task.id },
-                (value) => ({
+        const saved = await mutate(
+            "/tasks",
+            "POST",
+            { taskIds: selection.map((task) => task.id) },
+            (value) => {
+                const ids = new Set(selection.map((task) => task.id));
+                const lastPosition = Math.max(
+                    -1,
+                    ...value.tasks.map((task) => task.position),
+                );
+                const firstPosition = Math.max(
+                    lastPosition + 1,
+                    OLDER_TASK_POSITION_BASE,
+                );
+                return {
                     ...value,
                     tasks: [
-                        ...value.tasks.filter((entry) => entry.id !== task.id),
-                        {
-                            ...task,
-                            removedAt: null,
-                            agendaNote: null,
-                            agendaOrigin: "older",
-                            position: 100000,
-                        },
+                        ...value.tasks.filter((entry) => !ids.has(entry.id)),
+                        ...selection.map((task, index) => {
+                            const previous = value.tasks.find(
+                                (entry) => entry.id === task.id,
+                            );
+                            return {
+                                ...task,
+                                removedAt: null,
+                                agendaNote: previous?.agendaNote ?? null,
+                                agendaOrigin:
+                                    previous?.agendaOrigin ??
+                                    ("older" as const),
+                                position: firstPosition + index,
+                            };
+                        }),
                     ],
-                }),
-            ).catch(() => false);
-            if (!saved) {
-                failed = true;
-                break;
-            }
-            setSelected((current) => {
-                const next = new Map(current);
-                next.delete(task.id);
-                return next;
-            });
-        }
+                };
+            },
+        ).catch(() => false);
         setAdding(false);
-        if (!failed) {
+        if (saved) {
             setSelected(new Map());
             onOpenChange(false);
         }
@@ -153,6 +285,7 @@ export function OlderTasksDialog({
                         aria-hidden="true"
                     />
                     <input
+                        {...getPasswordManagerAttributes()}
                         type="search"
                         value={query}
                         onChange={(event) => setQuery(event.target.value)}
@@ -194,112 +327,15 @@ export function OlderTasksDialog({
                         </p>
                     ) : (
                         groups.map((group, groupIndex) => (
-                            <section
+                            <OlderTaskGroup
                                 key={group.name ?? "unassigned"}
-                                className="space-y-2"
-                            >
-                                <h3 className="text-sm font-medium">
-                                    {group.name ?? i18n("No assignee")}
-                                    {!group.invited && group.name && (
-                                        <span className="ml-2 rounded border px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
-                                            {i18n("Not invited")}
-                                        </span>
-                                    )}
-                                </h3>
-                                <ul className="divide-y rounded-lg border">
-                                    {group.tasks.map((task, taskIndex) => {
-                                        const source =
-                                            task.evidence ?? task.recording;
-                                        return (
-                                            <li key={task.id}>
-                                                <label
-                                                    className={cn(
-                                                        "flex cursor-pointer items-start gap-3 p-3 text-sm focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring",
-                                                        selected.has(task.id) &&
-                                                            "bg-primary/10",
-                                                    )}
-                                                >
-                                                    <input
-                                                        type="checkbox"
-                                                        className="mt-1 size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-ring"
-                                                        aria-labelledby={`${rowId}-${groupIndex}-${taskIndex}`}
-                                                        aria-describedby={`${rowId}-${groupIndex}-${taskIndex}-meta`}
-                                                        checked={selected.has(
-                                                            task.id,
-                                                        )}
-                                                        disabled={adding}
-                                                        onChange={(event) => {
-                                                            const checked =
-                                                                event.target
-                                                                    .checked;
-                                                            setSelected(
-                                                                (current) => {
-                                                                    const next =
-                                                                        new Map(
-                                                                            current,
-                                                                        );
-                                                                    if (checked)
-                                                                        next.set(
-                                                                            task.id,
-                                                                            task,
-                                                                        );
-                                                                    else
-                                                                        next.delete(
-                                                                            task.id,
-                                                                        );
-                                                                    return next;
-                                                                },
-                                                            );
-                                                        }}
-                                                    />
-                                                    <span className="min-w-0">
-                                                        <span
-                                                            id={`${rowId}-${groupIndex}-${taskIndex}`}
-                                                            className="block whitespace-pre-wrap"
-                                                        >
-                                                            {task.text}
-                                                        </span>
-                                                        <span
-                                                            id={`${rowId}-${groupIndex}-${taskIndex}-meta`}
-                                                            className="block text-xs text-muted-foreground"
-                                                        >
-                                                            {source?.title ??
-                                                                i18n(
-                                                                    "Own task",
-                                                                )}{" "}
-                                                            ·{" "}
-                                                            {format.dateTime(
-                                                                new Date(
-                                                                    source?.startTime ??
-                                                                        task.createdAt,
-                                                                ),
-                                                                {
-                                                                    dateStyle:
-                                                                        "medium",
-                                                                },
-                                                            )}{" "}
-                                                            ·{" "}
-                                                            {task.dueDate
-                                                                ? format.dateTime(
-                                                                      new Date(
-                                                                          `${task.dueDate}T12:00:00`,
-                                                                      ),
-                                                                      {
-                                                                          dateStyle:
-                                                                              "medium",
-                                                                      },
-                                                                  )
-                                                                : i18n(
-                                                                      "No due date",
-                                                                  )}
-                                                        </span>
-                                                    </span>
-                                                </label>
-                                            </li>
-                                        );
-                                    })}
-                                </ul>
-                            </section>
+                                group={group}
+                                selected={selected}
+                                adding={adding}
+                                onToggleTask={toggleTask}
+                                onToggleGroup={toggleGroup}
+                                ids={`${rowId}-${groupIndex}`}
+                            />
                         ))
                     )}
                 </div>

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { NativeSelect } from "@/components/ui/native-select";
 import { listUsers } from "@/db/queries/admin";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import {
     formatBytes,
     formatNumber,
@@ -57,6 +58,7 @@ export default async function AdminUsersPage({
 
             <form className="flex gap-2 items-center" action="/admin/users">
                 <input
+                    {...getPasswordManagerAttributes()}
                     type="search"
                     name="q"
                     defaultValue={q}

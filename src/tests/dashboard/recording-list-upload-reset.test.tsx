@@ -60,7 +60,7 @@ describe("RecordingList upload reset", () => {
         );
 
         fireEvent.change(
-            screen.getByRole("textbox", { name: "Search recordings" }),
+            screen.getByRole("searchbox", { name: "Search recordings" }),
             {
                 target: { value: "different" },
             },
@@ -70,7 +70,7 @@ describe("RecordingList upload reset", () => {
         rerender(<RecordingList {...props} resetToRecentKey={1} />);
 
         expect(
-            screen.getByRole("textbox", { name: "Search recordings" }),
+            screen.getByRole("searchbox", { name: "Search recordings" }),
         ).toHaveProperty("value", "");
         expect(screen.getByText("Uploaded recording")).toBeTruthy();
     });

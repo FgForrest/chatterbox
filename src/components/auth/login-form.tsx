@@ -9,9 +9,11 @@ import { toast } from "sonner";
 import { MetalButton } from "@/components/metal-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { loginReturnPath } from "@/lib/auth/return-path";
 import { signIn } from "@/lib/auth-client";
 
 interface LoginFormProps {
+    returnTo?: string;
     /**
      * Whether the "Don't have an account? Register" footer link should be
      * shown. Default `true`. Set to `false` when `DISABLE_REGISTRATION=true`
@@ -38,6 +40,7 @@ interface LoginFormProps {
 export function LoginForm({
     registrationEnabled = true,
     smtpConfigured = false,
+    returnTo,
 }: LoginFormProps) {
     const i18n = useExtracted();
     const [email, setEmail] = useState("");
@@ -69,7 +72,7 @@ export function LoginForm({
             }
 
             toast.success(i18n("Logged in successfully"));
-            push("/dashboard");
+            push(loginReturnPath(returnTo));
             refresh();
         } catch (error) {
             const message =

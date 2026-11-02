@@ -16,6 +16,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { dateTimeInput, dateTimeInputIso } from "@/lib/i18n/time-zone";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import type { Recording } from "@/types/recording";
 import { AgendaCalendarExport } from "./agenda-export";
 import { meetingRequest } from "./api";
@@ -117,6 +118,7 @@ export function MeetingSettings({
                     <label className="grid gap-1 text-sm">
                         {i18n("Title")}
                         <input
+                            {...getPasswordManagerAttributes()}
                             disabled={busy || !editable}
                             value={title}
                             maxLength={500}
@@ -130,6 +132,7 @@ export function MeetingSettings({
                     <label className="grid gap-1 text-sm">
                         {i18n("Start (optional)")}
                         <input
+                            {...getPasswordManagerAttributes()}
                             disabled={busy || !editable}
                             type="datetime-local"
                             value={start}
@@ -143,6 +146,7 @@ export function MeetingSettings({
                     <label className="grid gap-1 text-sm">
                         {i18n("End (optional)")}
                         <input
+                            {...getPasswordManagerAttributes()}
                             disabled={busy || !editable}
                             type="datetime-local"
                             value={end}

@@ -1,9 +1,7 @@
-import { z } from "zod";
+import { addAgendaTasksInput } from "@/lib/meetings/model";
 import { meetingRoute } from "@/lib/meetings/route";
-import { addAgendaTask } from "@/lib/meetings/service";
+import { addAgendaTasks } from "@/lib/meetings/service";
 export const POST = meetingRoute(async ({ userId, params, request }) => {
-    const input = z
-        .object({ taskId: z.string().min(1).max(255) })
-        .parse(await request.json());
-    await addAgendaTask(userId, params.id, input.taskId);
+    const input = addAgendaTasksInput.parse(await request.json());
+    await addAgendaTasks(userId, params.id, input.taskIds ?? [input.taskId]);
 });

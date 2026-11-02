@@ -165,7 +165,7 @@ describe("localized folder labels", () => {
         ).toBeNull();
         fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
         fireEvent.change(
-            screen.getByRole("textbox", { name: cs("Search folders") }),
+            screen.getByRole("searchbox", { name: cs("Search folders") }),
             {
                 target: { value: "Soukromé" },
             },

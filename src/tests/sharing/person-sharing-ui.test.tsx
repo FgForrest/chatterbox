@@ -839,7 +839,7 @@ describe("person sharing controls", () => {
         expect(
             screen.getAllByRole("button", { name: "Manage folder sharing" }),
         ).toHaveLength(1);
-        fireEvent.change(screen.getByRole("textbox"), {
+        fireEvent.change(screen.getByRole("searchbox"), {
             target: { value: "demo" },
         });
         expect(
@@ -950,7 +950,7 @@ describe("person sharing controls", () => {
             />,
         );
         await screen.findByText("Through folder Research");
-        fireEvent.change(screen.getByRole("textbox"), {
+        fireEvent.change(screen.getByRole("searchbox"), {
             target: { value: "lena" },
         });
         expect(
@@ -1108,7 +1108,7 @@ describe("person sharing controls", () => {
         expect(
             screen.queryByRole("button", { name: "Invite again" }),
         ).toBeNull();
-        expect(screen.queryByRole("textbox")).toBeNull();
+        expect(screen.queryByRole("searchbox")).toBeNull();
     });
 
     it("uses singular recipient counts for one colleague", async () => {

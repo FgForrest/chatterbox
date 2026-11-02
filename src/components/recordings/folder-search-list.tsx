@@ -18,6 +18,7 @@ import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useLibraryPreferences } from "@/hooks/use-library-preferences";
 import type { LabelledFolder } from "@/lib/folders/labels";
 import { type FolderMatch, matchFolderEntries } from "@/lib/folders/navigation";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 
 export type FolderSearchEntry = FolderMatch<LabelledFolder & { id: string }>;
 
@@ -262,6 +263,7 @@ export function FolderSearchList({
             }}
         >
             <Command.Input
+                {...getPasswordManagerAttributes()}
                 asChild
                 autoFocus
                 value={query}
@@ -271,7 +273,7 @@ export function FolderSearchList({
                 aria-label={i18n("Search folders")}
                 className="mb-2 w-full shrink-0 rounded border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-                <input aria-activedescendant={activeId} />
+                <input type="search" aria-activedescendant={activeId} />
             </Command.Input>
             <Command.List
                 asChild

@@ -49,6 +49,9 @@ export async function toastApiError(
     opts: ToastApiErrorOptions,
 ): Promise<ApiErrorBody> {
     const body = await parseApiError(response);
+    if (response.status === 401 && body.code === "AUTH_SESSION_MISSING") {
+        return body;
+    }
     const message = body.error || opts.fallback || "Request failed";
     const errorId =
         typeof body.details?.errorId === "string"

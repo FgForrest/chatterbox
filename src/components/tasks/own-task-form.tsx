@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { addOwnTask } from "@/components/tasks/task-api";
 import { TaskFolderPicker } from "@/components/tasks/task-folder-picker";
 import { folderDisplayPath } from "@/lib/folders/labels";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import type { TaskListItem } from "@/lib/tasks/tasks";
 import type { RecordingFolder } from "@/types/folder";
 
@@ -157,6 +158,7 @@ export function OwnTaskForm({
                 }}
             >
                 <textarea
+                    {...getPasswordManagerAttributes()}
                     ref={inputRef}
                     required
                     disabled={saving}
@@ -181,6 +183,7 @@ export function OwnTaskForm({
                         }
                     />
                     <input
+                        {...getPasswordManagerAttributes()}
                         type="date"
                         disabled={saving}
                         aria-label={i18n("Due date")}

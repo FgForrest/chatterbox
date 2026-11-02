@@ -131,7 +131,7 @@ it("includes meeting rows in keyboard navigation and title search", () => {
     const { ref, onSelectMeeting } = mount();
     act(() => ref.current?.next());
     expect(onSelectMeeting).toHaveBeenCalledWith("agenda");
-    fireEvent.change(screen.getByRole("textbox"), {
+    fireEvent.change(screen.getByRole("searchbox"), {
         target: { value: "Untimed" },
     });
     expect(screen.queryByText("Acme planning")).toBeNull();

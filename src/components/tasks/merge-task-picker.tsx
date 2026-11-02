@@ -19,6 +19,7 @@ import {
     DialogTrigger,
 } from "@/components/ui/dialog";
 import { ActionTooltip } from "@/components/ui/tooltip";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import type { MergeCandidateView } from "@/lib/tasks/proposals";
 import type { TaskMergePreview } from "@/lib/tasks/tasks";
 import { cn } from "@/lib/utils";
@@ -233,6 +234,8 @@ export function MergeTaskPicker({
                             aria-hidden="true"
                         />
                         <input
+                            type="search"
+                            {...getPasswordManagerAttributes()}
                             value={query}
                             onChange={(event) => setQuery(event.target.value)}
                             onKeyDown={(event) => {
