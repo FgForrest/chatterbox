@@ -32,6 +32,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         Array.isArray(returnTo) ? returnTo[0] : returnTo,
     );
     if ((await getSession())?.user) redirect(destination);
+    const clientReturnTo = returnTo === undefined ? undefined : destination;
 
     if (isSsoEnabled()) {
         return (
@@ -42,14 +43,14 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                 <SsoLogin
                     providerName={env.OIDC_PROVIDER_NAME}
                     error={Array.isArray(error) ? error[0] : error}
-                    returnTo={destination}
+                    returnTo={clientReturnTo}
                 />
             </SelfHostAuthChrome>
         );
     }
 
     const formProps = {
-        returnTo: destination,
+        returnTo: clientReturnTo,
         registrationEnabled: !env.DISABLE_REGISTRATION,
         smtpConfigured: isSmtpConfigured(),
     };
