@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -13,6 +13,11 @@ import {
     validCutRange,
 } from "@/lib/recordings/cut-range";
 import { runFfmpeg } from "@/lib/transcription/ffmpeg";
+
+function hasFfmpeg(): boolean {
+    const probe = spawnSync("ffmpeg", ["-version"], { stdio: "ignore" });
+    return probe.status === 0;
+}
 
 const turns = [
     { speaker: "S1", startMs: 0, endMs: 2000, text: "Private opening." },
@@ -64,7 +69,7 @@ describe("recording cut range", () => {
     });
 });
 
-describe("ffmpeg cuts", () => {
+describe.skipIf(!hasFfmpeg())("ffmpeg cuts", () => {
     it.each([
         ["ogg", "libopus", 20, 48000],
         ["m4a", "aac", 24, 48000],

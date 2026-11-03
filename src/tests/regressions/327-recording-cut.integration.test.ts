@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { Readable } from "node:stream";
 import { eq } from "drizzle-orm";
 import {
@@ -198,6 +198,12 @@ import {
 import { insertRecordings } from "@/tests/integration/items";
 import { seededAudioProfileSettings } from "@/tests/profiles/seeded-profile-fixture";
 
+function hasFfmpeg(): boolean {
+    const probe = spawnSync("ffmpeg", ["-version"], { stdio: "ignore" });
+    return probe.status === 0;
+}
+
+const itIfFfmpeg = hasFfmpeg() ? it : it.skip;
 const adminUrl = getTestDatabaseUrl();
 const turns: TranscriptTurn[] = [
     { speaker: "S1", startMs: 0, endMs: 2000, text: "Opening private words." },
@@ -745,68 +751,73 @@ describe.skipIf(!adminUrl)("recording cut routes and transaction", () => {
             ),
         ).toBe("My title");
     });
-    it("streams a cut and resumes failed storage cleanup without cutting a second time", async () => {
-        const original = execFileSync("ffmpeg", [
-            "-nostdin",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "sine=frequency=440:sample_rate=48000:duration=10",
-            "-c:a",
-            "libopus",
-            "-f",
-            "ogg",
-            "pipe:1",
-        ]);
-        mocks.storage.downloadStream.mockResolvedValue(
-            Readable.from([original]),
-        );
-        mocks.storage.uploadStream.mockImplementation(
-            async (_key: string, stream: Readable) => {
-                let bytes = 0;
-                for await (const part of stream) bytes += part.length;
-                expect(bytes).toBeGreaterThan(0);
-            },
-        );
-        mocks.storage.deleteFile.mockImplementation(async (key: string) => {
-            if (key === "owner/Recording.ogg")
-                throw new Error("Temporary storage failure");
-        });
-        const job = await queued();
-        const run = (attempt: number) =>
-            recordingCutJobHandler.run({
-                userId: "owner",
-                jobId: job.id,
-                payload: job.payload,
-                attempt,
-                maxAttempts: 3,
-                signal: new AbortController().signal,
-                reportProgress: vi.fn(),
+    itIfFfmpeg(
+        "streams a cut and resumes failed storage cleanup without cutting a second time",
+        async () => {
+            const original = execFileSync("ffmpeg", [
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:sample_rate=48000:duration=10",
+                "-c:a",
+                "libopus",
+                "-f",
+                "ogg",
+                "pipe:1",
+            ]);
+            mocks.storage.downloadStream.mockResolvedValue(
+                Readable.from([original]),
+            );
+            mocks.storage.uploadStream.mockImplementation(
+                async (_key: string, stream: Readable) => {
+                    let bytes = 0;
+                    for await (const part of stream) bytes += part.length;
+                    expect(bytes).toBeGreaterThan(0);
+                },
+            );
+            mocks.storage.deleteFile.mockImplementation(async (key: string) => {
+                if (key === "owner/Recording.ogg")
+                    throw new Error("Temporary storage failure");
             });
-        await expect(run(1)).rejects.toThrow("The recording could not be cut.");
-        const [recording] = await database.db.select().from(recordings);
-        expect(recording.duration).toBe(5000);
-        expect(recording.cutAt).toBeInstanceOf(Date);
-        expect(recording.fileMd5).not.toBe("a".repeat(32));
-        expect(recording.waveformPeaks).toHaveLength(500);
-        expect(recording.storagePath).toContain("owner/.cuts/");
-        await database.db
-            .update(asyncJobs)
-            .set({ attempts: 2 })
-            .where(eq(asyncJobs.id, job.id));
-        mocks.storage.deleteFile.mockResolvedValue(undefined);
-        await run(2);
-        expect(mocks.storage.downloadStream).toHaveBeenCalledTimes(1);
-        expect(mocks.storage.uploadStream).toHaveBeenCalledTimes(1);
-        expect(
-            (await database.db.select().from(transcriptions)).every(
-                (row) => row.revision === 1,
-            ),
-        ).toBe(true);
-    });
+            const job = await queued();
+            const run = (attempt: number) =>
+                recordingCutJobHandler.run({
+                    userId: "owner",
+                    jobId: job.id,
+                    payload: job.payload,
+                    attempt,
+                    maxAttempts: 3,
+                    signal: new AbortController().signal,
+                    reportProgress: vi.fn(),
+                });
+            await expect(run(1)).rejects.toThrow(
+                "The recording could not be cut.",
+            );
+            const [recording] = await database.db.select().from(recordings);
+            expect(recording.duration).toBe(5000);
+            expect(recording.cutAt).toBeInstanceOf(Date);
+            expect(recording.fileMd5).not.toBe("a".repeat(32));
+            expect(recording.waveformPeaks).toHaveLength(500);
+            expect(recording.storagePath).toContain("owner/.cuts/");
+            await database.db
+                .update(asyncJobs)
+                .set({ attempts: 2 })
+                .where(eq(asyncJobs.id, job.id));
+            mocks.storage.deleteFile.mockResolvedValue(undefined);
+            await run(2);
+            expect(mocks.storage.downloadStream).toHaveBeenCalledTimes(1);
+            expect(mocks.storage.uploadStream).toHaveBeenCalledTimes(1);
+            expect(
+                (await database.db.select().from(transcriptions)).every(
+                    (row) => row.revision === 1,
+                ),
+            ).toBe(true);
+        },
+    );
     it("withdraws Organization facts normally while preserving private confirmed facts", async () => {
         await share();
         await database.db.insert(people).values({
@@ -1292,72 +1303,81 @@ describe.skipIf(!adminUrl)("recording cut routes and transaction", () => {
             "owner/Recording.ogg",
         );
     });
-    it("durably encrypts the prepared key before uploading and recovers it after a crash", async () => {
-        const original = execFileSync("ffmpeg", [
-            "-nostdin",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "sine=frequency=440:sample_rate=48000:duration=10",
-            "-c:a",
-            "libopus",
-            "-f",
-            "ogg",
-            "pipe:1",
-        ]);
-        mocks.storage.downloadStream.mockImplementation(async () =>
-            Readable.from([original]),
-        );
-        const job = await queued();
-        let orphan = "";
-        mocks.storage.uploadStream.mockImplementation(
-            async (key: string, stream: Readable) => {
-                orphan = key;
-                for await (const _chunk of stream) {
-                }
-                const [stored] = await database.db
-                    .select()
-                    .from(asyncJobs)
-                    .where(eq(asyncJobs.id, job.id));
-                expect(stored.payload.preparedStoragePath).not.toContain(key);
-                expect(
-                    decryptText(stored.payload.preparedStoragePath as string),
-                ).toBe(key);
-                throw new Error("Process stopped after upload");
-            },
-        );
-        mocks.storage.deleteFile.mockRejectedValue(
-            new Error("Storage unavailable during shutdown"),
-        );
-        await expect(runCut(job)).rejects.toThrow(
-            "The recording could not be cut.",
-        );
-        expect(orphan).toContain("/.cuts/");
-        const [checkpoint] = await database.db
-            .select()
-            .from(asyncJobs)
-            .where(eq(asyncJobs.id, job.id));
-        expect(
-            decryptText(checkpoint.payload.preparedStoragePath as string),
-        ).toBe(orphan);
-        expect(checkpoint.payload.preparedStoragePath).not.toContain(orphan);
-        mocks.storage.deleteFile.mockReset().mockResolvedValue(undefined);
-        mocks.storage.downloadStream.mockRejectedValue(
-            new Error("Stop after recovery"),
-        );
-        await database.db
-            .update(asyncJobs)
-            .set({ attempts: 2 })
-            .where(eq(asyncJobs.id, job.id));
-        await expect(runCut(job, 2)).rejects.toThrow();
-        expect(mocks.storage.deleteFile).toHaveBeenCalledWith(orphan);
-        expect(
-            (await database.db.select().from(recordings))[0].storagePath,
-        ).toBe("owner/Recording.ogg");
-    });
+    itIfFfmpeg(
+        "durably encrypts the prepared key before uploading and recovers it after a crash",
+        async () => {
+            const original = execFileSync("ffmpeg", [
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:sample_rate=48000:duration=10",
+                "-c:a",
+                "libopus",
+                "-f",
+                "ogg",
+                "pipe:1",
+            ]);
+            mocks.storage.downloadStream.mockImplementation(async () =>
+                Readable.from([original]),
+            );
+            const job = await queued();
+            let orphan = "";
+            mocks.storage.uploadStream.mockImplementation(
+                async (key: string, stream: Readable) => {
+                    orphan = key;
+                    for await (const _chunk of stream) {
+                    }
+                    const [stored] = await database.db
+                        .select()
+                        .from(asyncJobs)
+                        .where(eq(asyncJobs.id, job.id));
+                    expect(stored.payload.preparedStoragePath).not.toContain(
+                        key,
+                    );
+                    expect(
+                        decryptText(
+                            stored.payload.preparedStoragePath as string,
+                        ),
+                    ).toBe(key);
+                    throw new Error("Process stopped after upload");
+                },
+            );
+            mocks.storage.deleteFile.mockRejectedValue(
+                new Error("Storage unavailable during shutdown"),
+            );
+            await expect(runCut(job)).rejects.toThrow(
+                "The recording could not be cut.",
+            );
+            expect(orphan).toContain("/.cuts/");
+            const [checkpoint] = await database.db
+                .select()
+                .from(asyncJobs)
+                .where(eq(asyncJobs.id, job.id));
+            expect(
+                decryptText(checkpoint.payload.preparedStoragePath as string),
+            ).toBe(orphan);
+            expect(checkpoint.payload.preparedStoragePath).not.toContain(
+                orphan,
+            );
+            mocks.storage.deleteFile.mockReset().mockResolvedValue(undefined);
+            mocks.storage.downloadStream.mockRejectedValue(
+                new Error("Stop after recovery"),
+            );
+            await database.db
+                .update(asyncJobs)
+                .set({ attempts: 2 })
+                .where(eq(asyncJobs.id, job.id));
+            await expect(runCut(job, 2)).rejects.toThrow();
+            expect(mocks.storage.deleteFile).toHaveBeenCalledWith(orphan);
+            expect(
+                (await database.db.select().from(recordings))[0].storagePath,
+            ).toBe("owner/Recording.ogg");
+        },
+    );
     it("purges AI suggestions in every owner's scope and state, preserving accepted agenda points", async () => {
         await database.db.insert(itemShares).values({
             userId: "owner",
