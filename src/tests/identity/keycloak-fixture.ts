@@ -6,6 +6,7 @@ import {
     createKeycloakHttp,
     type KeycloakHttp,
 } from "@/lib/identity/providers/keycloak/http";
+import e2eSeed from "../../../e2e/keycloak/riffado-e2e-realm.json";
 import seed from "./fixtures/realm.json";
 
 interface BootstrapCredentials {
@@ -129,6 +130,53 @@ async function deleteRealm(
         throw new Error(`Test realm cleanup failed (${response.status})`);
 }
 
+async function importRealm(
+    credentials: BootstrapCredentials,
+    realm: string,
+    seed: { realm: string },
+) {
+    const representation = { ...structuredClone(seed), realm };
+    const imported = await fetch(`${credentials.baseUrl}/admin/realms`, {
+        method: "POST",
+        headers: {
+            authorization: `Bearer ${await masterToken(credentials)}`,
+            "content-type": "application/json",
+        },
+        body: JSON.stringify(representation),
+        signal: AbortSignal.timeout(30_000),
+    });
+    if (!imported.ok)
+        throw new Error(`Test realm import failed (${imported.status})`);
+    return {
+        http: createKeycloakHttp({
+            baseUrl: credentials.baseUrl,
+            realm,
+            token: () => masterToken(credentials),
+        }),
+        issuer: `${credentials.baseUrl}/realms/${realm}`,
+        dispose: () => deleteRealm(credentials, realm),
+    };
+}
+
+/** Import the browser E2E fixture for the local-authorization SSO and MCP tests. */
+export async function provisionE2eTestRealm(realm: string) {
+    if (!/^chb-[a-z0-9-]+$/.test(realm))
+        throw new Error("Test realm names must start with chb-");
+    const credentials = bootstrapCredentials();
+    await deleteRealm(credentials, realm);
+    const representation = structuredClone(e2eSeed);
+    for (const person of representation.users) {
+        if (person.realmRoles) {
+            person.realmRoles = person.realmRoles.map((role) =>
+                role === `default-roles-${representation.realm}`
+                    ? `default-roles-${realm}`
+                    : role,
+            );
+        }
+    }
+    return importRealm(credentials, realm, representation);
+}
+
 /** Import a static realm into a disposable local Keycloak and return its handle. */
 export async function provisionTestRealm(
     label: string,
@@ -141,24 +189,7 @@ export async function provisionTestRealm(
     if (!/^chb-[a-z0-9-]+$/.test(realm))
         throw new Error("Test realm names must start with chb-");
     if (options.realmName) await deleteRealm(credentials, realm);
-    const representation = structuredClone(seed);
-    representation.realm = realm;
-    const imported = await fetch(`${credentials.baseUrl}/admin/realms`, {
-        method: "POST",
-        headers: {
-            authorization: `Bearer ${await masterToken(credentials)}`,
-            "content-type": "application/json",
-        },
-        body: JSON.stringify(representation),
-        signal: AbortSignal.timeout(30_000),
-    });
-    if (!imported.ok)
-        throw new Error(`Test realm import failed (${imported.status})`);
-    const http = createKeycloakHttp({
-        baseUrl: credentials.baseUrl,
-        realm,
-        token: () => masterToken(credentials),
-    });
+    const { http } = await importRealm(credentials, realm, seed);
     const admin = { http };
     const groupIds = {} as Record<Capability, string>;
     const names: Record<Capability, string> = {

@@ -76,6 +76,7 @@ import {
 import { mailLearnParts } from "@/lib/learn/mail-parts";
 import type { LearnObject } from "@/lib/learn/output";
 import { chooseLearnPath } from "@/lib/learn/provider";
+import { finishKnownFactsOnly } from "@/lib/learn/review";
 import { resolveLearnReviewLocale } from "@/lib/learn/review-language";
 import { runBridgePass } from "@/lib/learn/run-bridge";
 import {
@@ -674,7 +675,15 @@ export const learnJobHandler: JobHandler<LearnJobPayload> = {
 
     async run(context): Promise<PipelineJobResult> {
         try {
-            const result = await runLearnJob(context);
+            let result = await runLearnJob(context);
+            if (
+                (result.status === "ready" || result.skipped === "ready") &&
+                (await finishKnownFactsOnly(
+                    context.payload.runId,
+                    context.userId,
+                ))
+            )
+                result = { ...result, status: "finished", skipped: undefined };
             const outcome: StepOutcome =
                 typeof result.skipped === "string"
                     ? { kind: "skipped", reason: result.skipped }

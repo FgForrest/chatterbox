@@ -11,7 +11,7 @@ Learn reads a transcript against your [Almanac](almanac.md) and proposes what it
 - **new people and things** worth adding to the Almanac,
 - **facts** that were said ("Marek works on Pathfinder").
 
-Nothing changes until you review the proposals.
+Known facts mentioned again are applied automatically when the run finishes. Other proposals wait for your review.
 
 Learn is available on self-hosted instances with an AI provider that can write summaries, on transcripts with timings (see [Which provider to choose](transcripts.md#which-provider-to-choose)).
 
@@ -40,10 +40,14 @@ The review has the same contents inline or in a window. **Review** on the widget
 - **Transcript language**: Learn’s reading is preselected. Keep it, keep the provider’s detected language, or pick another from the language list. **Finish review** confirms the choice for this recording in both private and Organization views. Agreement or uncertainty creates no language item and stores nothing. This check applies to audio recordings; mail keeps its existing language handling.
 - **Speakers**: who Learn thinks each unnamed speaker is, and why. **▷** plays the evidence. **Someone else…** picks another person, **Unknown** marks the speaker unknown.
 - **New in the Almanac**: people and things Learn heard that the Almanac does not know. These start unticked. Correct the name or type before ticking, choose **It is something known…** if it is a record you already have under another name, or **Never propose it** to stop it being proposed on any recording.
-- **Corrections**: misheard names, how often, and where. These start ticked.
-- **New facts** and **Known facts** mentioned again.
+- **Corrections**: misheard names, how often, and where. Only corrections confirmed before start ticked.
+- **New facts**. Known facts mentioned again are applied automatically and do not appear in the review or its counts. A run containing only known facts finishes without a review and releases the summary hold.
 
-Tick what is right, then click **Finish review**. **Save and continue later** keeps your ticks without applying anything. Unticked proposals are not proposed again on this recording.
+Tick what is right, then click **Finish review**. **Save and continue later** keeps your ticks without applying anything. Finishing is final, including with nothing selected: unticked proposals are rejected.
+
+For a quick exit, use **Speakers and summary only** in the band above the sections. It uses only speakers you explicitly confirmed, previously confirmed corrections, and the selected transcript language. A guess marked **?** is never confirmed by this action. Other suggestions are skipped without rejection and may return on **Re-learn**. With automatic summaries enabled, the summary starts immediately and its task review is skipped when task detection is enabled. Mail has **Summary only**, without speakers. When summaries are manual, the band offers **Speakers only** or **Skip Learn** and does not start a summary.
+
+The band disappears after your first change outside Speakers and stays hidden after reloading. Confirming or declining a speaker does not hide it. The inline footer stays visible as you scroll. After quick finish the review disappears; **Undo** in the toast restores it for about eight seconds. Leaving the page commits immediately. This choice applies only to this item.
 
 You do not have to open the review: the proposals also appear in the transcript itself. A proposed correction is highlighted, and a proposed speaker shows as a name with **?**, each with a tick to accept it. **Speaker guesses** above the transcript lists the proposed names with **Accept all**.
 
@@ -55,7 +59,7 @@ Finished Learn states leave the detail page. Open the book icon **Knowledge** in
 
 Accepted corrections are kept beside the original text, never in place of it, so they can always be undone. See [Corrected words](transcripts.md#corrected-words).
 
-When the processing profile has **Correct the transcript after Learn** on, Learn then reads the whole transcript once more with the Almanac at hand and fixes other misheard words. Each fix is underlined in amber and can be undone.
+After a regular Finish, when the processing profile has **Correct the transcript after Learn** on, Learn then reads the whole transcript once more with the Almanac at hand and fixes other misheard words. Each fix is underlined in amber and can be undone.
 
 When you share a recording or mail whose Learn review you finished for its current content, what you confirmed becomes Organization knowledge without another confirmation. The completed state and available counts appear in the item's **Knowledge** panel. The workflow continues without another Learn review. Curators can use **Re-learn** to review it again, and can merge or delete Organization people and things.
 

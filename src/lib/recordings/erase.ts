@@ -779,6 +779,7 @@ async function loadRemoteRecording(userId: string, recordingId: string) {
                 plaudFileId: recordings.plaudFileId,
                 deviceSn: recordings.deviceSn,
                 storagePath: recordings.storagePath,
+                cutAt: recordings.cutAt,
             })
             .from(recordings)
             .where(
@@ -865,6 +866,12 @@ export async function restoreAudioFromPlaud(
         userId,
         recordingId,
     );
+    if (recording.cutAt)
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            "Audio from Plaud cannot be restored after a cut",
+            409,
+        );
     // Shared, the recording is the organization account's to change.
     const refusal = await contentWriterRefusalNow({
         recordingId,
@@ -886,7 +893,10 @@ export async function restoreAudioFromPlaud(
     // its audio replaced, nor its retention marker cleared.
     await db.transaction(async (tx) => {
         const [locked] = await tx
-            .select({ deletedAt: recordings.deletedAt })
+            .select({
+                deletedAt: recordings.deletedAt,
+                cutAt: recordings.cutAt,
+            })
             .from(recordings)
             .where(
                 and(
@@ -903,6 +913,12 @@ export async function restoreAudioFromPlaud(
                 404,
             );
         }
+        if (locked.cutAt)
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "Audio from Plaud cannot be restored after a cut",
+                409,
+            );
         const shared = await contentWriterRefusal(tx, {
             recordingId,
             ownerUserId: userId,

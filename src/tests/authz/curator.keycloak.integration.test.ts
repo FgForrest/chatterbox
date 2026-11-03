@@ -5,8 +5,8 @@
  * - a curator changes a shared recording's speakers under their own
  *   identity: the new person is the Organization's, its creator the
  *   curator, never the organization account;
- * - a member, an administrator without `org.curate` and the owner are
- *   refused as before;
+ * - the owner writes shared content in the Organization scope on either view;
+ * - a non-owner member and an administrator without `org.curate` are refused;
  * - taking `org.curate` away through access management refuses the
  *   curator's next request, and a run queued before the change (a summary,
  *   a Learn run) re-checks at execution and writes nothing.
@@ -311,26 +311,77 @@ describeWithKeycloak("curators of the Organization (Keycloak)", () => {
     it.each([
         ["a member", "mia"],
         ["an administrator without curation", "adam"],
-        ["the owner", "olga"],
     ])("refuses %s on the Organization view", async (_label, as) => {
         const response = await nameSpeaker(as, "speaker_1", "Someone");
         expect(response.status).toBe(403);
     });
 
-    it("refuses the owner on the private view while it is shared", async () => {
+    it.each([
+        "org",
+        "private",
+    ] as const)("lets the owner name a speaker in the Organization scope from the %s view (#221)", async (view) => {
+        const owner = await userId("olga");
+        const displayName = `Owner ${view}`;
         const version = await seen("cora");
         const response = await speakerChangeRoute(
-            recordingRequest("olga", `/api/recordings/${REC}/speakers`, {
-                method: "PUT",
-                body: JSON.stringify({
-                    ...version,
-                    label: "speaker_1",
-                    displayName: "Someone",
-                }),
-            }),
+            recordingRequest(
+                "olga",
+                `/api/recordings/${REC}/speakers?view=${view}`,
+                {
+                    method: "PUT",
+                    body: JSON.stringify({
+                        ...version,
+                        label: "speaker_1",
+                        displayName,
+                    }),
+                },
+            ),
             params,
         );
-        expect([404, 409]).toContain(response.status);
+        expect(response.status).toBe(200);
+        const created = (
+            await db().select().from(people).where(eq(people.userId, orgUserId))
+        ).find((row) => decryptText(row.displayName) === displayName);
+        expect(created).toMatchObject({
+            userId: orgUserId,
+            createdByUserId: owner,
+        });
+        const [speaker] = await db()
+            .select()
+            .from(transcriptSpeakers)
+            .where(
+                and(
+                    eq(transcriptSpeakers.label, "speaker_1"),
+                    eq(transcriptSpeakers.personId, created?.id ?? ""),
+                ),
+            );
+        expect(speaker).toMatchObject({
+            status: "confirmed",
+            confirmedByUserId: owner,
+        });
+    });
+
+    it.each([
+        ["a member", "mia"],
+        ["an administrator without curation", "adam"],
+    ])("refuses %s on the private view while it is shared", async (_label, as) => {
+        const version = await seen("cora");
+        const response = await speakerChangeRoute(
+            recordingRequest(
+                as,
+                `/api/recordings/${REC}/speakers?view=private`,
+                {
+                    method: "PUT",
+                    body: JSON.stringify({
+                        ...version,
+                        label: "speaker_1",
+                        displayName: "Someone",
+                    }),
+                },
+            ),
+            params,
+        );
+        expect(response.status).toBe(404);
     });
 
     it("authorizes a curator's Learn run and refuses a member's", async () => {

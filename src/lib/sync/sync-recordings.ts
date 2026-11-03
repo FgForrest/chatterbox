@@ -242,6 +242,7 @@ async function hasUnseenPlaudContentGaps(
     const conditions = [
         eq(recordings.userId, userId),
         isNull(recordings.deletedAt),
+        isNull(recordings.cutAt),
         ne(recordings.deviceSn, "local"),
         or(
             and(
@@ -331,6 +332,8 @@ async function processRecording(
         const recordingId = existingRecording?.id ?? nanoid();
 
         const versionKey = plaudRecording.version_ms.toString();
+
+        if (existingRecording?.cutAt) return { status: "skipped" };
 
         // An explicitly erased audio blob stays erased even when Plaud's
         // metadata version changes. The user can restore it from the erase
@@ -486,6 +489,8 @@ async function processRecording(
                 const [locked] = await tx
                     .select({
                         deletedAt: recordings.deletedAt,
+                        cutAt: recordings.cutAt,
+                        audioReapedAt: recordings.audioReapedAt,
                         titleEditedAt: chatterItems.titleEditedAt,
                         fileMd5: recordings.fileMd5,
                     })
@@ -500,7 +505,13 @@ async function processRecording(
                     .for("update")
                     .limit(1);
 
-                if (!locked || locked.deletedAt) return false;
+                if (
+                    !locked ||
+                    locked.deletedAt ||
+                    locked.cutAt ||
+                    locked.audioReapedAt
+                )
+                    return false;
                 if (overwrites) {
                     await storage.uploadFile(
                         storageKey,

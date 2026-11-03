@@ -1,0 +1,1 @@
+ALTER TABLE "recordings" ADD COLUMN "cut_at" timestamp;

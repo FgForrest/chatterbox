@@ -430,8 +430,8 @@ export function AccessSection() {
                     onClick={async () => {
                         setBusy(true);
                         try {
-                            const result = await signIn.oauth2({
-                                providerId: SSO_PROVIDER_ID,
+                            const result = await signIn.social({
+                                provider: SSO_PROVIDER_ID,
                                 callbackURL: new URL(
                                     "/settings#access",
                                     window.location.origin,

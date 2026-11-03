@@ -1,14 +1,14 @@
 ---
 title: Learn proposes knowledge from transcripts for a person to confirm; knowledge stays encrypted and is searched in memory
 date: 2026-09-30
-updated: 2026-10-22 22:30
+updated: 2026-11-03 09:25
 status: superseded
 kind: feature
 issues: []
 prs: [69]
 areas: [src/lib/learn, src/lib/knowledge, src/lib/sharing/share-gate.ts, src/app/api/mcp/learn, src/lib/learn/auto-learn.ts]
 supersedes: [2026-09-14-speaker-identity-without-biometrics]
-superseded-by: [2026-10-01-almanac-and-new-records, 2026-10-02-almanac-guided-transcript-correction]
+superseded-by: [2026-10-01-almanac-and-new-records, 2026-10-02-almanac-guided-transcript-correction, 2026-11-02-quick-finish-of-reviews, 2026-11-03-destructive-recording-cut]
 relates: [2026-09-28-agent-bridge-cli-providers, 2026-09-30-self-hosted-embeddings, 2026-09-30-shared-recording-edited-by-organization, 2026-10-01-name-matching-across-word-forms, 2026-10-12-calendar-meet-speaker-candidates, 2026-10-20-learn-review-one-column, 2026-09-23-shared-organization-scope, 2026-09-13-durable-job-queue, 2026-10-22-recording-language-checked-by-learn]
 ---
 
@@ -23,11 +23,15 @@ user, chosen by whether the recording is shared. PR #69 built the whole plan in 
 reviewed by two independent model reviewers and fixed before the next; a follow-up, PR #79, fixed what
 the first real automatic run exposed.
 
+**Superseded in part** by [destructive recording cuts](../2026-11-03-destructive-recording-cut.md): "Facts die with their transcript" has one exception. A confirmed fact in the owner's private scope becomes manual when a cut removes its last supported evidence. The rest of this rule still holds, including normal Organization withdrawal.
+
 **Superseded in part** for two rules: the operator flag `LEARN_AUTO` that gated automatic Learn was
 dropped a day later ([Almanac and new records](../2026-10-01-almanac-and-new-records.md)), and the
 rejection of sending knowledge to the transcription provider was partly revisited, so a ranked
 subset of names now goes as key terms ([Almanac-guided transcript correction](../2026-10-02-almanac-guided-transcript-correction.md)).
 Everything else here still holds.
+
+**Superseded in part** by [quick finish of reviews](../2026-11-02-quick-finish-of-reviews.md): Known facts mentioned again now apply automatically without a visible pre-tick, and quick finish applies confirmed speakers and previous corrections without rejecting the rest. Other confirmation, encryption and speaker-guess rules still hold.
 
 ## Why
 

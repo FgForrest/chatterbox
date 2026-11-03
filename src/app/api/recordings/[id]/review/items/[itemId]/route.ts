@@ -25,6 +25,7 @@ export const PATCH = apiHandler<ItemContext>(async (request, context) => {
         decision?: unknown;
         version?: unknown;
         choice?: unknown;
+        speakerOnly?: unknown;
     } | null;
     const decision = body?.decision;
     if (
@@ -51,6 +52,7 @@ export const PATCH = apiHandler<ItemContext>(async (request, context) => {
                 decision,
                 version: body.version,
                 choice: body.choice,
+                speakerOnly: body.speakerOnly === true,
             },
             requestedReviewSource(request),
         ),

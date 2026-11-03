@@ -7,10 +7,12 @@ import {
     mailPendingShares,
     people,
     recordingFolderAssignments,
+    recordings,
     recordingTasks,
     taskContentVectors,
     taskMentions,
     taskVectors,
+    transcriptions,
 } from "@/db/schema";
 import { contentKindColumn, hasContentKind } from "@/lib/content/item-kinds";
 import { readItemContent } from "@/lib/content/read-item-content";
@@ -543,6 +545,42 @@ export async function persistContentVectors(
     vectors: ReadonlyMap<number, Float32Array>,
 ): Promise<void> {
     await db.transaction(async (tx) => {
+        const [item] = await tx
+            .select({ kind: chatterItems.kind })
+            .from(chatterItems)
+            .where(
+                and(
+                    eq(chatterItems.id, key.itemId),
+                    eq(chatterItems.userId, key.userId),
+                    isNull(chatterItems.deletedAt),
+                ),
+            )
+            .limit(1);
+        if (!item) return;
+        if (item.kind === "audio") {
+            const [recording] = await tx
+                .select({ deletedAt: recordings.deletedAt })
+                .from(recordings)
+                .where(
+                    and(
+                        eq(recordings.id, key.itemId),
+                        eq(recordings.userId, key.userId),
+                    ),
+                )
+                .for("update");
+            if (!recording || recording.deletedAt) return;
+            const [transcript] = await tx
+                .select({ revision: transcriptions.revision })
+                .from(transcriptions)
+                .where(
+                    and(
+                        eq(transcriptions.id, key.sourceId),
+                        eq(transcriptions.recordingId, key.itemId),
+                        eq(transcriptions.userId, key.userId),
+                    ),
+                );
+            if (!transcript || transcript.revision !== key.revision) return;
+        }
         await tx
             .delete(taskContentVectors)
             .where(

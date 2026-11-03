@@ -95,6 +95,7 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     "recordings/[id]/peaks/route.ts": { POST: "access", PUT: "access" },
     "recordings/[id]/process-again/route.ts": { POST: "owner" },
     "recordings/[id]/erase/route.ts": { POST: "owner" },
+    "recordings/[id]/cut/route.ts": { GET: "owner", POST: "owner" },
     "recordings/[id]/folders/route.ts": {
         POST: "folders",
         PATCH: "folders",
@@ -115,7 +116,7 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     // the private view, the organization account on the Organization's).
     "recordings/[id]/language/route.ts": { GET: "view", PATCH: "view" },
     "recordings/[id]/learn/route.ts": { GET: "view", POST: "view" },
-    "recordings/[id]/review/route.ts": { GET: "view" },
+    "recordings/[id]/review/route.ts": { GET: "view", PATCH: "view" },
     "recordings/[id]/review/items/[itemId]/route.ts": { PATCH: "view" },
     "recordings/[id]/review/finish/route.ts": { POST: "view" },
     "recordings/[id]/review/dismissals/route.ts": { DELETE: "view" },
@@ -144,6 +145,7 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     "recordings/[id]/tasks/route.ts": { GET: "tasks", POST: "tasks" },
     "recordings/[id]/tasks/[taskId]/match/route.ts": { DELETE: "tasks" },
     "recordings/[id]/tasks/accept/route.ts": { POST: "tasks" },
+    "recordings/[id]/tasks/skip/route.ts": { POST: "tasks", PATCH: "tasks" },
     "recordings/[id]/tasks/merge/route.ts": {
         GET: "tasks",
         POST: "tasks",

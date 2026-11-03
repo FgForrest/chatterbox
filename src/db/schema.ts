@@ -49,6 +49,7 @@ export const users = pgTable(
         email: text("email").notNull().unique(),
         emailVerified: boolean("email_verified").notNull().default(false),
         name: text("name"),
+        image: text("image"),
         uiLocale: varchar("ui_locale", { length: 10 }),
         timeZone: varchar("time_zone", { length: 100 }),
         // 'org' marks the self-host organization account created from
@@ -242,8 +243,8 @@ export const accounts = pgTable(
     },
     (table) => ({
         userIdIdx: index("accounts_user_id_idx").on(table.userId),
-        // Sign-in by provider looks the account up by (providerId, accountId).
-        providerAccountIdx: index("accounts_provider_account_idx").on(
+        // One binding per provider identity, including concurrent first sign-ins.
+        providerAccountIdx: uniqueIndex("accounts_provider_account_idx").on(
             table.providerId,
             table.accountId,
         ),
@@ -697,6 +698,8 @@ export const itemProcessing = pgTable(
         profileRevisionId: text("profile_revision_id"),
         manualOnly: boolean("manual_only").notNull().default(false),
         phases: jsonb("phases").$type<PipelinePhases>().notNull().default({}),
+        taskReviewSkippedAt: timestamp("task_review_skipped_at"),
+        taskReviewChangedAt: timestamp("task_review_changed_at"),
         requestedGeneration: integer("requested_generation")
             .notNull()
             .default(0),
@@ -803,6 +806,7 @@ export const recordings = pgTable(
         // legitimately comes back -- a Plaud version bump re-downloads the
         // audio, a manual re-run rewrites the transcript or summary.
         audioReapedAt: timestamp("audio_reaped_at"),
+        cutAt: timestamp("cut_at"),
         // DB-backed claim for the external remote-trash operation. The
         // retention worker runs in every app process, so this prevents two
         // processes from moving the same remote original concurrently.

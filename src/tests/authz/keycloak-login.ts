@@ -20,14 +20,14 @@ export async function keycloakLogin(
     person: { username: string; password: string },
 ): Promise<{ location: string; cookie: string }> {
     const start = await handler(
-        new Request(`${TEST_APP_URL}/api/auth/sign-in/oauth2`, {
+        new Request(`${TEST_APP_URL}/api/auth/sign-in/social`, {
             method: "POST",
             headers: {
                 "content-type": "application/json",
                 origin: TEST_APP_URL,
             },
             body: JSON.stringify({
-                providerId: "oidc",
+                provider: "oidc",
                 callbackURL: "/dashboard",
                 errorCallbackURL: "/login",
             }),

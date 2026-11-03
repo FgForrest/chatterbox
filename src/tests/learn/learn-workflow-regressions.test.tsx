@@ -60,6 +60,24 @@ const FAILED_REVIEW = {
 const READY_REVIEW = {
     ...IDLE_REVIEW,
     run: { id: "run-1", status: "ready" },
+    items: [
+        {
+            id: "finding-1",
+            kind: "fact",
+            preTicked: false,
+            decision: null,
+            choice: null,
+            version: 0,
+            dependsOnLabel: null,
+            payload: {
+                subject: { entityId: "term-1" },
+                relationKey: "means",
+                object: { literal: "A project" },
+                startMs: 0,
+                speakerLabel: null,
+            },
+        },
+    ],
 };
 
 const FINISHED_REVIEW = {
@@ -342,6 +360,11 @@ describe.each(["audio", "mail"] as const)("%s Learn workflow line", (kind) => {
     it.each([
         { name: "ready to start", review: IDLE_REVIEW, action: "Learn" },
         { name: "waiting for review", review: READY_REVIEW, action: "Review" },
+        {
+            name: "no visible findings",
+            review: { ...READY_REVIEW, items: [] },
+            action: "Finish review",
+        },
     ])("shows the $action primary action when $name", async ({
         review,
         action,

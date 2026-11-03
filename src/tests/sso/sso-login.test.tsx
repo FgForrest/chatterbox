@@ -1,18 +1,25 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+} from "@testing-library/react";
+import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { oauth2 } = vi.hoisted(() => ({
-    oauth2: vi.fn().mockResolvedValue({ data: { url: "x" }, error: null }),
+const { social } = vi.hoisted(() => ({
+    social: vi.fn().mockResolvedValue({ data: { url: "x" }, error: null }),
 }));
-vi.mock("@/lib/auth-client", () => ({ signIn: { oauth2 } }));
+vi.mock("@/lib/auth-client", () => ({ signIn: { social } }));
 
 import { SsoLogin } from "@/components/auth/sso-login";
 
 afterEach(() => {
     cleanup();
-    oauth2.mockClear();
+    social.mockClear();
 });
 
 describe("SsoLogin", () => {
@@ -21,12 +28,40 @@ describe("SsoLogin", () => {
         fireEvent.click(
             screen.getByRole("button", { name: "Sign in with Acme SSO" }),
         );
-        expect(oauth2).toHaveBeenCalledWith({
-            providerId: "oidc",
+        expect(social).toHaveBeenCalledWith({
+            provider: "oidc",
             callbackURL: `${window.location.origin}/dashboard`,
             errorCallbackURL: `${window.location.origin}/login`,
         });
         expect(screen.queryByRole("alert")).toBeNull();
+    });
+
+    it("shows the unavailable message when discovery prevents starting sign-in", async () => {
+        const errorToast = vi
+            .spyOn(toast, "error")
+            .mockImplementation(() => "toast");
+        social.mockResolvedValueOnce({
+            data: null,
+            error: { code: "SSO_UNAVAILABLE" },
+        });
+        try {
+            render(<SsoLogin providerName="Acme SSO" />);
+            fireEvent.click(
+                screen.getByRole("button", { name: "Sign in with Acme SSO" }),
+            );
+            await waitFor(() =>
+                expect(errorToast).toHaveBeenCalledWith(
+                    "Your access could not be verified with the identity provider right now. Try again shortly.",
+                ),
+            );
+            expect(
+                screen
+                    .getByRole("button", { name: "Sign in with Acme SSO" })
+                    .hasAttribute("disabled"),
+            ).toBe(false);
+        } finally {
+            errorToast.mockRestore();
+        }
     });
 
     it.each([
@@ -35,6 +70,7 @@ describe("SsoLogin", () => {
         ["ORG_ACCOUNT_SSO", "This identity cannot sign in"],
         ["signup_disabled", "does not accept new accounts"],
         ["email_is_missing", "did not share an email address"],
+        ["email_not_found", "did not share an email address"],
         ["access_denied", "cancelled at the identity provider"],
         ["SSO_ACCESS_DENIED", "has no access to this application"],
         ["SSO_UNAVAILABLE", "could not be verified with the identity provider"],

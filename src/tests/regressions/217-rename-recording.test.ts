@@ -10,6 +10,12 @@
 
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
+const mockedRecording = vi.hoisted(() => ({
+    storagePath: "user-1/legacy.mp3",
+    storageFilename: null as string | null,
+    cutAt: null,
+}));
+
 vi.mock("@/lib/env", () => ({
     env: {
         DEFAULT_STORAGE_TYPE: "local",
@@ -29,20 +35,42 @@ vi.mock("@/db", () => {
         update: vi.fn(),
         transaction: vi.fn(),
     };
-    // The title is written in a transaction that first locks the recording
-    // (and checks it is not shared, which needs no query here: no
-    // Organization is configured).
     db.transaction.mockImplementation(
         async (run: (tx: unknown) => Promise<unknown>) => {
-            const lock = {
-                from: () => lock,
-                where: () => lock,
-                for: () => Promise.resolve([{ id: "rec-1" }]),
-            };
-            return run({
-                select: () => lock,
+            let reads = 0;
+            const tx = {
+                select: (columns: Record<string, unknown>) => {
+                    if ("storagePath" in columns) {
+                        reads = 1;
+                        return {
+                            from: () => ({
+                                where: () => ({
+                                    for: async () => [mockedRecording],
+                                }),
+                            }),
+                        };
+                    }
+                    if (reads++ === 1)
+                        return {
+                            from: () => ({
+                                where: () => ({ limit: async () => [] }),
+                            }),
+                        };
+                    if (reads > 2) return db.select(columns);
+                    return {
+                        from: () => ({
+                            where: () => ({
+                                for: async () => [{ id: "rec-1" }],
+                            }),
+                        }),
+                    };
+                },
                 update: (...args: unknown[]) => db.update(...args),
-            });
+                transaction: async (
+                    savepoint: (value: unknown) => Promise<unknown>,
+                ) => savepoint(tx),
+            };
+            return run(tx);
         },
     );
     return { db };
@@ -134,6 +162,8 @@ function mockUpdateReturning(row: unknown) {
     const writes: { table: unknown; values: Record<string, unknown> }[] = [];
     let table: unknown;
     const set = vi.fn((values: Record<string, unknown>) => {
+        if (typeof values.storageFilename === "string")
+            mockedRecording.storageFilename = values.storageFilename;
         setPayloads.push(values);
         writes.push({ table, values });
         const returned =
@@ -162,9 +192,13 @@ function mockSelectReturning(result: unknown[]) {
 }
 
 function mockOwnedRecording(storagePath = "user-1/legacy.mp3") {
-    return mockSelectReturning([
-        { id: "rec-1", storagePath, storageFilename: null },
-    ]);
+    mockedRecording.storagePath = storagePath;
+    mockedRecording.storageFilename = null;
+    const row = { id: "rec-1", ...mockedRecording };
+    const initial = mockSelectReturning([row]);
+    mockSelectReturning([row]);
+    mockSelectReturning([]);
+    return initial;
 }
 
 /**
@@ -203,6 +237,7 @@ function exprReferencesColumn(
 describe("PATCH /api/recordings/[id]", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(db.select).mockReset();
         (requireApiSession as unknown as Mock).mockResolvedValue({
             user: { id: "user-1" },
         });

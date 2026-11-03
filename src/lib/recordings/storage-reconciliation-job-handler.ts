@@ -4,6 +4,7 @@ import { recordingItemJoin } from "@/db/items";
 import { chatterItems, recordings } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import { rewriteExistingRecordingSidecars } from "@/lib/export/document-sidecars";
+import { JobDeferredError } from "@/lib/jobs/retryable";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
 import {
     reconcileRecordingStorage,
@@ -110,6 +111,11 @@ export const storageReconciliationJobHandler: JobHandler<StorageReconciliationJo
                 storagePath: recording.storagePath,
                 storageFilename: recording.storageFilename,
             });
+            if (result.deferred)
+                throw new JobDeferredError(
+                    5000,
+                    "Recording cutting is still running",
+                );
             await rewriteExistingRecordingSidecars(userId, recording.id);
             return { reconciled: result.changed };
         },

@@ -3,6 +3,7 @@ import {
     asc,
     desc,
     eq,
+    exists,
     gt,
     inArray,
     isNotNull,
@@ -13,7 +14,8 @@ import {
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
-import { meetingVisibility } from "@/db/queries/meetings";
+import { loadAgendaSourceVisibility } from "@/db/queries/agenda-source-visibility";
+import { type MeetingTx, meetingVisibility } from "@/db/queries/meetings";
 import {
     ANY_TASK_ITEM,
     type TaskViewer,
@@ -23,6 +25,7 @@ import {
     agendaPoints,
     agendaSuggestions,
     aiEnhancements,
+    asyncJobs,
     chatterItems,
     mailContents,
     meetingAgendas,
@@ -31,21 +34,34 @@ import {
     recordingTasks,
     taskMentions,
 } from "@/db/schema";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { taskMentionVisible } from "@/lib/tasks/mentions";
+
+const cutAgendaPlacement = alias(
+    recordingFolderAssignments,
+    "cut_agenda_placement",
+);
+const cutSourcePlacement = alias(
+    recordingFolderAssignments,
+    "cut_source_placement",
+);
 
 const mentionItem = alias(chatterItems, "agenda_mention_item");
 const preferredSummary = alias(aiEnhancements, "agenda_preferred_summary");
 
 /** Visible summaries of folder arrivals since the previous held or recorded meeting. */
-async function folderSuggestionInputs(input: {
-    agenda: typeof meetingAgendas.$inferSelect;
-    folderId: string;
-    userId: string;
-    orgUserId: string | null;
-    viewer: TaskViewer;
-}) {
+async function folderSuggestionInputs(
+    executor: MeetingTx,
+    input: {
+        agenda: typeof meetingAgendas.$inferSelect;
+        folderId: string;
+        userId: string;
+        orgUserId: string | null;
+        viewer: TaskViewer;
+    },
+) {
     const { agenda } = input;
-    const [previous] = await db
+    const [previous] = await executor
         .select({
             at: sql<Date>`coalesce(${meetingAgendas.plannedStart}, ${meetingAgendas.createdAt})`.mapWith(
                 meetingAgendas.plannedStart,
@@ -84,7 +100,7 @@ async function folderSuggestionInputs(input: {
         )
         .limit(1);
     const since = previous?.at ? new Date(previous.at) : new Date(0);
-    const [previousRecording] = await db
+    const [previousRecording] = await executor
         .select({ at: chatterItems.occurredAt })
         .from(recordings)
         .innerJoin(chatterItems, eq(chatterItems.id, recordings.id))
@@ -102,7 +118,7 @@ async function folderSuggestionInputs(input: {
     if (previousRecording && previousRecording.at > since)
         since.setTime(previousRecording.at.getTime());
     const [summaries, tasks, points, suggestions] = await Promise.all([
-        db
+        executor
             .select({
                 itemId: chatterItems.id,
                 source: aiEnhancements.source,
@@ -157,24 +173,31 @@ async function folderSuggestionInputs(input: {
                 desc(aiEnhancements.source),
             )
             .limit(101),
-        db
-            .select({ id: recordingTasks.id, text: recordingTasks.text })
+        executor
+            .select({
+                id: recordingTasks.id,
+                text: recordingTasks.text,
+                itemId: recordingTasks.itemId,
+            })
             .from(recordingTasks)
             .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
             .where(
                 and(
                     eq(recordingTasks.status, "open"),
+                    isNull(chatterItems.deletedAt),
+                    sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
                     taskVisible(input.viewer, ANY_TASK_ITEM, true),
                     sql`exists (select 1 from ${recordingFolderAssignments} where ${recordingFolderAssignments.folderId} = ${input.folderId} and (${recordingFolderAssignments.itemId} = ${recordingTasks.itemId} or exists (select 1 from ${taskMentions} inner join ${chatterItems} as agenda_mention_item on ${mentionItem.id} = ${taskMentions.itemId} where ${taskMentions.taskId} = ${recordingTasks.id} and ${taskMentions.itemId} = ${recordingFolderAssignments.itemId} and ${taskMentions.matchDecision} in ('home', 'accepted', 'kept_new') and ${taskMentionVisible(input.viewer, { itemId: taskMentions.itemId, userId: taskMentions.userId, view: taskMentions.view }, { id: mentionItem.id, userId: mentionItem.userId, deletedAt: mentionItem.deletedAt })})))`,
                 ),
             )
             .orderBy(desc(recordingTasks.updatedAt), asc(recordingTasks.id))
             .limit(201),
-        db
+        executor
             .select({
                 id: agendaPoints.id,
                 parentId: agendaPoints.parentId,
                 text: agendaPoints.text,
+                sources: agendaPoints.sources,
             })
             .from(agendaPoints)
             .where(
@@ -184,10 +207,11 @@ async function folderSuggestionInputs(input: {
                 ),
             )
             .orderBy(asc(agendaPoints.position), asc(agendaPoints.id)),
-        db
+        executor
             .select({
                 text: agendaSuggestions.text,
                 state: agendaSuggestions.state,
+                sources: agendaSuggestions.sources,
             })
             .from(agendaSuggestions)
             .where(
@@ -208,29 +232,177 @@ export async function agendaSuggestionInputs(input: {
     orgUserId: string | null;
     viewer: TaskViewer;
 }) {
-    const folderIds =
-        typeof input.folderId === "string" ? [input.folderId] : input.folderId;
-    const results = await Promise.all(
-        (folderIds.length ? [...new Set(folderIds)] : [""]).map((folderId) =>
-            folderSuggestionInputs({ ...input, folderId }),
-        ),
+    const snapshot = await db.transaction(
+        async (executor) => {
+            const folderIds =
+                typeof input.folderId === "string"
+                    ? [input.folderId]
+                    : input.folderId;
+            const results = await Promise.all(
+                (folderIds.length ? [...new Set(folderIds)] : [""]).map(
+                    (folderId) =>
+                        folderSuggestionInputs(executor, {
+                            ...input,
+                            folderId,
+                        }),
+                ),
+            );
+            const sourceItemIds = [
+                ...new Set(
+                    results.flatMap((result) => [
+                        ...result.summaries.map((row) => row.itemId),
+                        ...result.tasks.flatMap((row) =>
+                            row.itemId ? [row.itemId] : [],
+                        ),
+                        ...[...result.points, ...result.suggestions].flatMap(
+                            (row) => row.sources?.itemIds ?? [],
+                        ),
+                    ]),
+                ),
+            ];
+            const recordingVersions = sourceItemIds.length
+                ? await executor
+                      .select({
+                          id: recordings.id,
+                          userId: recordings.userId,
+                          cutAt: recordings.cutAt,
+                      })
+                      .from(recordings)
+                      .innerJoin(
+                          chatterItems,
+                          eq(chatterItems.id, recordings.id),
+                      )
+                      .where(
+                          and(
+                              inArray(recordings.id, sourceItemIds),
+                              meetingVisibility(input.userId, input.orgUserId),
+                          ),
+                      )
+                : [];
+            return {
+                recordingVersions,
+                summaries: [
+                    ...new Map(
+                        results
+                            .flatMap((result) => result.summaries)
+                            .map((row) => [row.itemId, row]),
+                    ).values(),
+                ],
+                tasks: [
+                    ...new Map(
+                        results
+                            .flatMap((result) => result.tasks)
+                            .map((row) => [row.id, row]),
+                    ).values(),
+                ],
+                points: results[0].points,
+                suggestions: results[0].suggestions,
+            };
+        },
+        { isolationLevel: "repeatable read", accessMode: "read only" },
     );
+    const visibleSources = await loadAgendaSourceVisibility(input.viewer, [
+        ...snapshot.points.map((point) => point.sources),
+        ...snapshot.suggestions.map((suggestion) => suggestion.sources),
+    ]);
     return {
-        summaries: [
-            ...new Map(
-                results
-                    .flatMap((result) => result.summaries)
-                    .map((row) => [row.itemId, row]),
-            ).values(),
-        ],
-        tasks: [
-            ...new Map(
-                results
-                    .flatMap((result) => result.tasks)
-                    .map((row) => [row.id, row]),
-            ).values(),
-        ],
-        points: results[0].points,
-        suggestions: results[0].suggestions,
+        ...snapshot,
+        points: snapshot.points.filter((point) =>
+            visibleSources(point.sources),
+        ),
+        suggestions: snapshot.suggestions.filter((suggestion) =>
+            visibleSources(suggestion.sources),
+        ),
     };
+}
+
+/** Lock source recordings before the agenda, refusing results made from content cut during generation. */
+export async function lockAgendaSuggestionSourcesInTx(
+    tx: MeetingTx,
+    versions: { id: string; userId: string; cutAt: Date | null }[],
+) {
+    for (const version of [...versions].sort((a, b) =>
+        a.id.localeCompare(b.id),
+    )) {
+        const [current] = await tx
+            .select({
+                cutAt: recordings.cutAt,
+                deletedAt: recordings.deletedAt,
+            })
+            .from(recordings)
+            .where(
+                and(
+                    eq(recordings.id, version.id),
+                    eq(recordings.userId, version.userId),
+                ),
+            )
+            .for("update");
+        if (
+            !current ||
+            current.deletedAt ||
+            current.cutAt?.getTime() !== version.cutAt?.getTime()
+        )
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "Suggestion sources changed during generation",
+                409,
+            );
+    }
+}
+
+/** Cancel all agenda drafts that use this owner's recording, including jobs not yet reading their folders. */
+export async function cancelAgendaSuggestionsForRecordingInTx(
+    tx: MeetingTx,
+    userId: string,
+    recordingId: string,
+) {
+    const now = new Date();
+    await tx
+        .update(asyncJobs)
+        .set({
+            status: "failed",
+            completedAt: now,
+            updatedAt: now,
+            claimToken: null,
+            heartbeatAt: null,
+            errorCode: ErrorCode.CONFLICT,
+            lastError: "Cancelled because a source recording was cut",
+        })
+        .where(
+            and(
+                eq(asyncJobs.kind, "agenda.suggestions"),
+                inArray(asyncJobs.status, ["pending", "processing"]),
+                or(
+                    sql`${asyncJobs.payload} -> 'sourceItemIds' @> ${JSON.stringify([recordingId])}::jsonb`,
+                    exists(
+                        tx
+                            .select({ id: meetingAgendas.id })
+                            .from(meetingAgendas)
+                            .innerJoin(
+                                cutAgendaPlacement,
+                                eq(
+                                    cutAgendaPlacement.itemId,
+                                    meetingAgendas.meetingItemId,
+                                ),
+                            )
+                            .innerJoin(
+                                cutSourcePlacement,
+                                eq(
+                                    cutSourcePlacement.folderId,
+                                    cutAgendaPlacement.folderId,
+                                ),
+                            )
+                            .where(
+                                and(
+                                    eq(meetingAgendas.id, asyncJobs.subjectId),
+                                    eq(cutSourcePlacement.itemId, recordingId),
+                                    eq(cutSourcePlacement.userId, userId),
+                                ),
+                            ),
+                    ),
+                    sql`exists (select 1 from ${agendaSuggestions} where ${agendaSuggestions.agendaId} = ${asyncJobs.subjectId}
+                and ${agendaSuggestions.sources} -> 'itemIds' @> ${JSON.stringify([recordingId])}::jsonb)`,
+                ),
+            ),
+        );
 }

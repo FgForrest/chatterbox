@@ -205,3 +205,20 @@ export function addOwnTask(
         visibleMentionQuotes: [],
     }));
 }
+
+/** Skip without recording rejection memory, including when navigating away. */
+export async function skipTaskReview(
+    recordingId: string,
+    keepalive: boolean,
+): Promise<void> {
+    await send(recordingUrl(recordingId, "/skip"), {
+        method: "POST",
+        keepalive,
+    });
+    invalidateItemProcessing(recordingId);
+}
+
+/** Persist the first edit even before an in-place text field is saved. */
+export function touchTaskReview(recordingId: string): Promise<void> {
+    return send(recordingUrl(recordingId, "/skip"), { method: "PATCH" });
+}

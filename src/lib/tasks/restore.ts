@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { lockPrivateFolderTree } from "@/db/queries/private-folder-tree";
 import {
     chatterItems,
+    itemProcessing,
     people,
     recordingTasks,
     taskMentions,
@@ -76,6 +77,16 @@ const archivedTask = z.object({
 });
 
 const bundleSchema = z.object({
+    reviews: z
+        .array(
+            z.object({
+                itemId: z.string().min(1),
+                view: z.enum(["private", "org"]),
+                taskReviewSkipped: z.boolean().default(false),
+                taskReviewChanged: z.boolean().default(false),
+            }),
+        )
+        .default([]),
     folders: z
         .array(
             z.object({ id: z.string().min(1), restoredId: z.string().min(1) }),
@@ -122,7 +133,7 @@ async function authorizedTaskActor(
     return closable ? actor.id : null;
 }
 
-/** Restore task files and optional status history after items and people. Unknown or unauthorized historical actors become null. Older archives retain the legacy statistics fallback; existing tasks and their history stay unchanged. */
+/** Restore task files and optional status history after items and people. Unknown or unauthorized historical actors become null. Older archives retain the legacy statistics fallback; existing tasks and their history stay unchanged. Task-review markers are only added, never cleared, and only for items whose proposals this restore brings back or that have no tasks yet, so a review settled since the export stays settled. */
 export async function restoreTaskArchive(
     viewer: TaskViewer,
     input: unknown,
@@ -163,7 +174,12 @@ export async function restoreTaskArchive(
                 );
             folderMap.set(folder.id, folder.restoredId);
         }
-        const itemIds = bundle.items.map((item) => item.itemId);
+        const itemIds = [
+            ...new Set([
+                ...bundle.items.map((item) => item.itemId),
+                ...bundle.reviews.map((review) => review.itemId),
+            ]),
+        ];
         const items = itemIds.length
             ? await tx
                   .select({
@@ -235,6 +251,17 @@ export async function restoreTaskArchive(
                 409,
             );
         const known = new Set(existing.map((row) => row.id));
+        const itemsWithTasks = new Set(
+            itemIds.length
+                ? (
+                      await tx
+                          .selectDistinct({ itemId: recordingTasks.itemId })
+                          .from(recordingTasks)
+                          .where(inArray(recordingTasks.itemId, itemIds))
+                  ).map((row) => row.itemId)
+                : [],
+        );
+        const restoredProposalItems = new Set<string>();
         let count = 0;
         for (const { task, itemId, owner } of rows) {
             if (
@@ -360,7 +387,48 @@ export async function restoreTaskArchive(
                     statementAt: new Date(task.createdAt),
                     quote: task.quote ? encryptText(task.quote) : null,
                 });
+            if (itemId && task.status === "proposed")
+                restoredProposalItems.add(itemId);
             count++;
+        }
+        for (const review of bundle.reviews) {
+            if (viewer.isOrg && review.view !== "org")
+                throw new AppError(
+                    ErrorCode.FORBIDDEN,
+                    "Organization archives restore only Organization reviews",
+                    403,
+                );
+            if (
+                (!review.taskReviewSkipped && !review.taskReviewChanged) ||
+                (itemsWithTasks.has(review.itemId) &&
+                    !restoredProposalItems.has(review.itemId))
+            )
+                continue;
+            const now = new Date();
+            const set = {
+                ...(review.taskReviewSkipped
+                    ? { taskReviewSkippedAt: now }
+                    : {}),
+                ...(review.taskReviewChanged
+                    ? { taskReviewChangedAt: now }
+                    : {}),
+            };
+            await tx
+                .insert(itemProcessing)
+                .values({
+                    itemId: review.itemId,
+                    userId: owners.get(review.itemId) as string,
+                    view: review.view,
+                    ...set,
+                })
+                .onConflictDoUpdate({
+                    target: [itemProcessing.itemId, itemProcessing.view],
+                    set,
+                    setWhere: eq(
+                        itemProcessing.userId,
+                        owners.get(review.itemId) as string,
+                    ),
+                });
         }
         let follows = 0;
         for (const follow of bundle.follows) {

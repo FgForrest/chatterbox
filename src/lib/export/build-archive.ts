@@ -70,6 +70,7 @@ import {
     personalTasksForArchive,
     taskHomeMovesForArchive,
     taskMentionsForArchive,
+    taskReviewsForArchive,
     tasksForArchive,
     taskUpdatesForArchive,
 } from "@/lib/tasks/archive";
@@ -84,6 +85,7 @@ export interface ArchiveResult {
 interface ManifestRecording {
     id: string;
     confirmedLanguage: string | null;
+    cutAt?: string | null;
     calendarEventId?: string | null;
     calendarSeriesId?: string | null;
     /** Whose recording it is: in the Organization's archive only. */
@@ -394,6 +396,7 @@ export async function buildAndUploadExportArchive(input: {
         personalTasks?: { count: number; path: string };
         meetings?: { count: number; path: string };
         taskFollows?: { count: number; path: string };
+        taskReviews?: { count: number; path: string };
         personShares?: { count: number; path: string };
         folderShares?: { count: number; path: string };
         taskEvidence?: {
@@ -441,6 +444,7 @@ export async function buildAndUploadExportArchive(input: {
         const entry: ManifestRecording = {
             id: recording.id,
             confirmedLanguage: recording.confirmedLanguage ?? null,
+            cutAt: recording.cutAt?.toISOString() ?? null,
             calendarEventId: recording.calendarEventId,
             calendarSeriesId: recording.calendarSeriesId,
             ...(scope.kind === "organization"
@@ -901,6 +905,16 @@ export async function buildAndUploadExportArchive(input: {
         ...recordingIds,
         ...archivedMail.map((mail) => mail.id),
     ]);
+    const taskReviews = await taskReviewsForArchive(scope, [
+        ...containedItemIds,
+    ]);
+    if (taskReviews.length) {
+        const path = "tasks/reviews.json";
+        archive.append(Buffer.from(JSON.stringify(taskReviews, null, 2)), {
+            name: path,
+        });
+        manifest.taskReviews = { count: taskReviews.length, path };
+    }
     if (scope.kind === "personal" && containedItemIds.size > 0) {
         const remarks = await db
             .select()
@@ -1966,6 +1980,9 @@ interface ArchivedLearn {
         kind: string;
         preTicked: boolean;
         decision: string | null;
+        outcome: string | null;
+        choice: unknown;
+        version: number;
         dependsOnLabel: string | null;
         payload: unknown;
     }[];
@@ -2009,6 +2026,9 @@ async function collectLearn(userId: string): Promise<ArchivedLearn> {
                       kind: learnReviewItems.kind,
                       preTicked: learnReviewItems.preTicked,
                       decision: learnReviewItems.decision,
+                      outcome: learnReviewItems.outcome,
+                      choice: learnReviewItems.choice,
+                      version: learnReviewItems.version,
                       dependsOnLabel: learnReviewItems.dependsOnLabel,
                       payload: learnReviewItems.payload,
                   })
@@ -2031,6 +2051,7 @@ async function collectLearn(userId: string): Promise<ArchivedLearn> {
         items: items.map((item) => ({
             ...item,
             payload: decryptJsonField(item.payload),
+            choice: item.choice ? decryptJsonField(item.choice) : null,
         })),
     };
 }

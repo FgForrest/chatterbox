@@ -16,6 +16,7 @@ import {
     remapCorrectionAnchors,
 } from "@/lib/knowledge/correction-anchors";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
+import { type CutRange, turnStays } from "@/lib/recordings/cut-range";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -36,10 +37,12 @@ export async function recheckCorrectionsInTx(
         transcriptionId,
         previousTurns,
         nextTurns,
+        cutRange,
     }: {
         transcriptionId: string;
         previousTurns: readonly TranscriptTurn[] | null;
         nextTurns: readonly TranscriptTurn[] | null;
+        cutRange?: CutRange;
     },
 ): Promise<Set<string>> {
     const ofTranscript = eq(
@@ -73,11 +76,32 @@ export async function recheckCorrectionsInTx(
     const scopes = new Set([...preTicked, ...rows].map((row) => row.userId));
     if (rows.length === 0) return scopes;
 
-    const positions = remapCorrectionAnchors(
-        rows.map((row) => ({ ...row, heard: decryptText(row.heard) })),
-        previousTurns,
-        nextTurns,
-    );
+    const positions = cutRange
+        ? rows.map((row) => {
+              const previous = previousTurns?.[row.turnIndex];
+              if (!previous || !turnStays(previous, cutRange)) return null;
+              const turnIndex = (previousTurns ?? [])
+                  .slice(0, row.turnIndex)
+                  .filter((turn) => turnStays(turn, cutRange)).length;
+              const heard = decryptText(row.heard);
+              if (
+                  nextTurns?.[turnIndex]?.text.slice(
+                      row.charStart,
+                      row.charEnd,
+                  ) !== heard
+              )
+                  return null;
+              return {
+                  turnIndex,
+                  charStart: row.charStart,
+                  charEnd: row.charEnd,
+              };
+          })
+        : remapCorrectionAnchors(
+              rows.map((row) => ({ ...row, heard: decryptText(row.heard) })),
+              previousTurns,
+              nextTurns,
+          );
     const lost = rows.filter((_, index) => !positions[index]);
     if (lost.length > 0) {
         await tx.delete(transcriptCorrections).where(

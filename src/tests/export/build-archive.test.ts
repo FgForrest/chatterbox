@@ -3,12 +3,16 @@ import unzipper from "unzipper";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as Schema from "@/db/schema";
 import type { StorageProvider } from "@/lib/storage/types";
+import type { ArchivedTaskReview } from "@/lib/tasks/archive";
 
-const { dbMock, archivedTasks, archivedMeetings } = vi.hoisted(() => ({
-    dbMock: { select: vi.fn() },
-    archivedTasks: new Map<string, unknown[]>(),
-    archivedMeetings: [] as Record<string, unknown>[],
-}));
+const { dbMock, archivedTasks, archivedMeetings, archivedReviews } = vi.hoisted(
+    () => ({
+        dbMock: { select: vi.fn() },
+        archivedTasks: new Map<string, unknown[]>(),
+        archivedMeetings: [] as Record<string, unknown>[],
+        archivedReviews: [] as ArchivedTaskReview[],
+    }),
+);
 
 vi.mock("@/db", () => ({ db: dbMock }));
 vi.mock("@/lib/pipeline/trigger", () => ({ requestAdvanceInTx: vi.fn() }));
@@ -17,6 +21,7 @@ vi.mock("@/lib/tasks/archive", () => ({
     personalTasksForArchive: vi.fn(async () => []),
     followsForArchive: vi.fn(async () => []),
     taskUpdatesForArchive: vi.fn(async () => new Map()),
+    taskReviewsForArchive: vi.fn(async () => archivedReviews),
     taskMentionsForArchive: vi.fn(async () => []),
     taskHomeMovesForArchive: vi.fn(async () => []),
     archivedAssigneeIds: vi.fn(() => []),
@@ -478,6 +483,7 @@ describe("buildAndUploadExportArchive", () => {
         vi.clearAllMocks();
         storage = new FakeStorage();
         archivedMeetings.length = 0;
+        archivedReviews.length = 0;
     });
 
     it("bundles agenda content and its manifest path even without recordings", async () => {
@@ -1791,6 +1797,50 @@ describe("buildAndUploadExportArchive", () => {
         );
         expect(audioEntry?.[1].compressionMethod).toBe(0);
         expect(entries.get("manifest.json")?.compressionMethod).toBe(8);
+    });
+
+    it("bundles skipped review state before its summary produces any tasks", async () => {
+        archivedReviews.push({
+            itemId: "rec-1",
+            view: "private",
+            taskReviewSkipped: true,
+            taskReviewChanged: true,
+        });
+        mockSelectSequence([
+            [
+                {
+                    id: "rec-1",
+                    userId: "user-1",
+                    title: "enc-recording",
+                    occurredAt: new Date("2026-01-01T00:00:00Z"),
+                    endTime: new Date("2026-01-01T00:01:00Z"),
+                    duration: 60000,
+                    filesize: 0,
+                    deviceSn: "SN-1",
+                    storagePath: "audio/missing.mp3",
+                },
+            ],
+            [],
+            [],
+        ]);
+        await buildAndUploadExportArchive({
+            scope: { kind: "personal", userId: "user-1" },
+            sourceStorage: storage,
+            destinationStorage: storage,
+            storageKey: "exports/reviews.zip",
+        });
+        const entries = await readZipEntries(storage.uploaded as Buffer);
+        expect(
+            JSON.parse(
+                entries.get("tasks/reviews.json")?.buffer.toString("utf8") ??
+                    "[]",
+            ),
+        ).toEqual(archivedReviews);
+        expect(
+            JSON.parse(
+                entries.get("manifest.json")?.buffer.toString("utf8") ?? "{}",
+            ).taskReviews,
+        ).toEqual({ count: 1, path: "tasks/reviews.json" });
     });
 
     it("carries a recording's accepted tasks", async () => {

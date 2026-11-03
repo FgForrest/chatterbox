@@ -86,6 +86,12 @@ import {
 } from "@/lib/tasks/mentions";
 import { taskFingerprint } from "@/lib/tasks/proposals";
 import {
+    clearTaskReviewInTx,
+    markTaskReviewInTx,
+    taskReviewNotSkipped,
+    taskReviewState,
+} from "@/lib/tasks/review-state";
+import {
     countRoutedTaskProposals,
     createRoutedMergeProposalsInTx,
     movePendingTaskProposalsInTx,
@@ -95,6 +101,7 @@ import {
 } from "@/lib/tasks/routing";
 import { logTaskStatusInTx } from "@/lib/tasks/status-transitions";
 import { isoDateOrNull } from "@/lib/tasks/summary-items";
+import { waitingTaskDecisions } from "@/lib/tasks/waiting-review";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -233,6 +240,8 @@ export interface RecordingTasks {
      * this viewer cannot see proposals awaiting someone else's review.
      */
     reviewed: boolean;
+    taskReviewSkipped?: boolean;
+    taskReviewChanged?: boolean;
     tasks: TaskView[];
     /** Waiting for review; only its reviewer sees them. */
     proposals: TaskView[];
@@ -581,21 +590,31 @@ export async function listRecordingTasks(
         .where(eq(recordingTaskRejections.itemId, recordingId))
         .limit(1);
 
-    const [updates, matches] = recording.canEdit
-        ? await Promise.all([
-              listUpdateProposals(viewer, recordingId, recording.ownerUserId),
-              listSuggestedMatches(
+    const [updates, matches, reviewState] = await Promise.all([
+        recording.canEdit
+            ? listUpdateProposals(viewer, recordingId, recording.ownerUserId)
+            : [],
+        recording.canEdit
+            ? listSuggestedMatches(
                   viewer,
                   recordingId,
                   recording.ownerUserId,
                   recording.shared ? "org" : "private",
                   views.filter((task) => task.status === "proposed"),
-              ),
-          ])
-        : [[], []];
+              )
+            : [],
+        taskReviewState(db, {
+            itemId: recordingId,
+            userId: recording.ownerUserId,
+            view: recording.shared ? "org" : "private",
+        }),
+    ]);
     return {
+        taskReviewSkipped: recording.canEdit && reviewState.skipped,
+        taskReviewChanged: recording.canEdit && reviewState.changed,
         canEdit: recording.canEdit,
         reviewed:
+            reviewState.skipped ||
             (!recording.canEdit && recording.hasProposals) ||
             rejection !== undefined ||
             views.some((task) => task.status !== "proposed"),
@@ -1281,6 +1300,16 @@ export async function addTask(
             .where(eq(recordingTasks.itemId, recordingId));
         const now = new Date();
         const open = input.status === "open";
+        if (!open)
+            await markTaskReviewInTx(
+                tx,
+                {
+                    itemId: recordingId,
+                    userId: recording.ownerUserId,
+                    view: recording.shared ? "org" : "private",
+                },
+                "changed",
+            );
         const [row] = await tx
             .insert(recordingTasks)
             .values({
@@ -1401,6 +1430,16 @@ export async function updateTask(
                 );
             }
 
+            if (task.status === "proposed" && task.recordingId)
+                await markTaskReviewInTx(
+                    tx,
+                    {
+                        itemId: task.recordingId,
+                        userId: task.ownerUserId,
+                        view: task.shared ? "org" : "private",
+                    },
+                    "changed",
+                );
             const now = new Date();
             const set: Partial<typeof recordingTasks.$inferInsert> = {
                 version: task.version + 1,
@@ -2276,7 +2315,16 @@ export async function mergeTaskIntoTask(
                         eq(recordingTasks.userId, source.ownerUserId),
                     ),
                 );
-            if (options.reviewItemId) {
+            if (proposal && options.reviewItemId) {
+                await markTaskReviewInTx(
+                    tx,
+                    {
+                        itemId: options.reviewItemId,
+                        userId: source.ownerUserId,
+                        view: source.shared ? "org" : "private",
+                    },
+                    "changed",
+                );
                 await requestAdvanceInTx(tx, {
                     itemId: options.reviewItemId,
                     userId: source.ownerUserId,
@@ -2343,6 +2391,15 @@ export async function mergeProposals(
                 ),
             );
         if (rows.length !== ids.length) throw notFound();
+        await markTaskReviewInTx(
+            tx,
+            {
+                itemId: recordingId,
+                userId: recording.ownerUserId,
+                view: recording.shared ? "org" : "private",
+            },
+            "changed",
+        );
         const ordered = ids.map((id) => rows.find((row) => row.id === id));
         const [first, ...rest] = ordered;
         if (!first) throw notFound();
@@ -2427,8 +2484,29 @@ export async function tickUpdateProposal(
     ticked: boolean,
     version: number,
 ): Promise<void> {
-    await db.transaction(async (tx) => {
+    await retryOnDeadlock(() =>
+        tickUpdateProposalOnce(viewer, recordingId, updateId, ticked, version),
+    );
+}
+
+function tickUpdateProposalOnce(
+    viewer: TaskViewer,
+    recordingId: string,
+    updateId: string,
+    ticked: boolean,
+    version: number,
+): Promise<void> {
+    return db.transaction(async (tx) => {
         const recording = await lockRecordingForEdit(tx, viewer, recordingId);
+        await markTaskReviewInTx(
+            tx,
+            {
+                itemId: recordingId,
+                userId: recording.ownerUserId,
+                view: recording.shared ? "org" : "private",
+            },
+            "changed",
+        );
         const updated = await tx
             .update(taskUpdateProposals)
             .set({ ticked, updatedAt: new Date() })
@@ -2940,6 +3018,11 @@ export async function acceptReview(
                         ),
                     );
             }
+            await clearTaskReviewInTx(tx, {
+                itemId: recordingId,
+                userId: recording.ownerUserId,
+                view: recording.shared ? "org" : "private",
+            });
             await requestAdvanceInTx(tx, {
                 itemId: recordingId,
                 userId: recording.ownerUserId,
@@ -3140,6 +3223,11 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
                     id: chatterItems.id,
                     userId: chatterItems.userId,
                 }),
+                taskReviewNotSkipped(
+                    chatterItems.id,
+                    chatterItems.userId,
+                    sql`case when ${recordingSharedCondition(chatterItems.id)} then 'org' else 'private' end`,
+                ),
             ),
         )
         .orderBy(desc(chatterItems.occurredAt));
@@ -3747,4 +3835,56 @@ export async function setTaskFollowInTx(
         .values({ taskId, userId: viewer.userId, createdAt })
         .onConflictDoNothing();
     return true;
+}
+
+/** Skip all current review decisions without rejecting them; a late duplicate after Finish is a no-op. */
+export async function skipTaskReview(
+    viewer: TaskViewer,
+    itemId: string,
+): Promise<void> {
+    await retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            const item = await lockRecordingForEdit(tx, viewer, itemId);
+            const view = item.shared ? "org" : "private";
+            const scope = { itemId, userId: item.ownerUserId, view } as const;
+            if (
+                (
+                    await waitingTaskDecisions(
+                        tx,
+                        itemId,
+                        item.ownerUserId,
+                        view,
+                        true,
+                    )
+                ).total === 0
+            )
+                return;
+            if (!(await taskReviewState(tx, scope)).skipped)
+                await markTaskReviewInTx(tx, scope, "skipped");
+            await requestAdvanceInTx(tx, { ...scope, reason: "task-review" });
+        }),
+    );
+    nudge();
+    await notifyIfShared(itemId);
+}
+
+/** Remember an edit begun in the review before its field loses focus. */
+export async function touchTaskReview(
+    viewer: TaskViewer,
+    itemId: string,
+): Promise<void> {
+    await retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            const item = await lockRecordingForEdit(tx, viewer, itemId);
+            await markTaskReviewInTx(
+                tx,
+                {
+                    itemId,
+                    userId: item.ownerUserId,
+                    view: item.shared ? "org" : "private",
+                },
+                "changed",
+            );
+        }),
+    );
 }

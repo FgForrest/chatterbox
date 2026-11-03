@@ -361,7 +361,7 @@ export async function gatherFacts(
                     eq(mailPendingShares.userId, userId),
                 ),
             ),
-        waitingTaskDecisions(db, itemId, userId, view),
+        waitingTaskDecisions(db, itemId, userId, view, false, contentView),
         plaudTranscriptPromise,
         item.kind === "audio"
             ? db
@@ -407,7 +407,10 @@ export async function gatherFacts(
             : Promise.resolve([]),
         item.kind === "audio"
             ? db
-                  .select({ audioReapedAt: recordings.audioReapedAt })
+                  .select({
+                      audioReapedAt: recordings.audioReapedAt,
+                      cutAt: recordings.cutAt,
+                  })
                   .from(recordings)
                   .where(
                       and(
@@ -763,6 +766,7 @@ export async function gatherFacts(
                       jobActive: transcriptionJob !== undefined,
                       contentReaped: item.contentReapedAt !== null,
                       audioReaped: recording?.audioReapedAt != null,
+                      cut: recording?.cutAt != null,
                       shared,
                       ...(failedTranscriptionJob?.completedAt
                           ? {

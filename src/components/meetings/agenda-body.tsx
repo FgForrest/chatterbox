@@ -203,7 +203,10 @@ export function AgendaBody({
                         Date.parse(detail.liveEndedAt)),
         );
     const changedCount = tasks.filter(taskChanged).length;
-    const discussed = detail.points.filter((point) => point.discussedAt).length;
+    const topLevelPoints = detail.points.filter((point) => !point.parentId);
+    const discussed = topLevelPoints.filter(
+        (point) => point.discussedAt,
+    ).length;
     const busy = agenda.pending > 0;
     const taskPending = (taskId: string) =>
         agenda.pendingPaths.some(
@@ -528,11 +531,11 @@ export function AgendaBody({
                         {live || readOnly
                             ? i18n(
                                   "{discussed, number} of {total, number} discussed",
-                                  { discussed, total: detail.points.length },
+                                  { discussed, total: topLevelPoints.length },
                               )
                             : i18n(
                                   "{count, plural, one {# point} other {# points}}",
-                                  { count: detail.points.length },
+                                  { count: topLevelPoints.length },
                               )}
                     </HeadingCount>
                     {canEdit && !live && (
@@ -824,7 +827,7 @@ export function AgendaBody({
                                     "{discussed, number} of {total, plural, one {# point discussed} other {# points discussed}} · {tasks, plural, one {# task changed} other {# tasks changed}}",
                                     {
                                         discussed,
-                                        total: detail.points.length,
+                                        total: topLevelPoints.length,
                                         tasks: changedCount,
                                     },
                                 )}
@@ -865,7 +868,7 @@ export function AgendaBody({
                             "{discussed, number} of {total, plural, one {# point discussed} other {# points discussed}} · {tasks, plural, one {# task} other {# tasks}}",
                             {
                                 discussed,
-                                total: detail.points.length,
+                                total: topLevelPoints.length,
                                 tasks: tasks.length,
                             },
                         )}

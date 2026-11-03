@@ -15,9 +15,9 @@ import {
     rememberSsoReturnPath,
 } from "@/lib/auth/return-path";
 
-const { oauth2, email, push, refresh, redirect, getSession, ssoEnabled } =
+const { social, email, push, refresh, redirect, getSession, ssoEnabled } =
     vi.hoisted(() => ({
-        oauth2: vi.fn().mockResolvedValue({ data: {}, error: null }),
+        social: vi.fn().mockResolvedValue({ data: {}, error: null }),
         email: vi.fn().mockResolvedValue({ data: {}, error: null }),
         push: vi.fn(),
         refresh: vi.fn(),
@@ -30,7 +30,7 @@ const { oauth2, email, push, refresh, redirect, getSession, ssoEnabled } =
         ssoEnabled: vi.fn().mockReturnValue(true),
     }));
 
-vi.mock("@/lib/auth-client", () => ({ signIn: { oauth2, email } }));
+vi.mock("@/lib/auth-client", () => ({ signIn: { social, email } }));
 vi.mock("@/lib/auth-server", () => ({ getSession }));
 vi.mock("@/lib/sso/config", () => ({ isSsoEnabled: ssoEnabled }));
 vi.mock("@/lib/smtp", () => ({ isSmtpConfigured: () => false }));
@@ -89,7 +89,7 @@ describe("login page return destination wiring", () => {
         fireEvent.click(
             screen.getByRole("button", { name: "Sign in with Acme" }),
         );
-        expect(oauth2).toHaveBeenCalledWith(
+        expect(social).toHaveBeenCalledWith(
             expect.objectContaining({
                 callbackURL: `${window.location.origin}${destination}`,
             }),

@@ -67,14 +67,25 @@ beforeEach(() => {
                 server = {
                     ...server,
                     version: server.version + 1,
-                    points: server.points.map((entry) => ({
-                        ...entry,
-                        ...(body.discussed !== undefined
-                            ? { discussedAt: body.discussed ? at : null }
-                            : {}),
-                        ...(body.note !== undefined ? { note: body.note } : {}),
-                        version: entry.version + 1,
-                    })),
+                    points: server.points.map((entry) =>
+                        entry.id ===
+                        decodeURIComponent(url.split("/").at(-1) ?? "")
+                            ? {
+                                  ...entry,
+                                  ...(body.discussed !== undefined
+                                      ? {
+                                            discussedAt: body.discussed
+                                                ? at
+                                                : null,
+                                        }
+                                      : {}),
+                                  ...(body.note !== undefined
+                                      ? { note: body.note }
+                                      : {}),
+                                  version: entry.version + 1,
+                              }
+                            : entry,
+                    ),
                 };
             else
                 server = {
@@ -185,6 +196,36 @@ describe.each([
             fireEvent.click(screen.getByRole("button", { name: /Agenda/ }));
         return view;
     }
+    it("counts only top-level points and their own discussed state", async () => {
+        await mount({
+            points: [
+                point("First", { discussedAt: at }),
+                point("Second", { position: 1 }),
+                point("Second child", {
+                    parentId: "Second",
+                    discussedAt: at,
+                }),
+                point("Another child", { parentId: "Second", position: 1 }),
+                point("Third", { position: 2 }),
+            ],
+        });
+        expect(
+            screen.getByText("2 · Discussion points").parentElement
+                ?.textContent,
+        ).toContain(variant === "meeting" ? "3 points" : "1 of 3 discussed");
+        if (variant === "live")
+            expect(
+                screen.getByText("1 of 3 points discussed · 0 tasks changed"),
+            ).toBeTruthy();
+        if (variant === "recording") {
+            const summary = screen.getByRole("button", { name: /Agenda/ });
+            fireEvent.click(summary);
+            expect(summary.getAttribute("aria-expanded")).toBe("false");
+            expect(summary.textContent).toContain(
+                "1 of 3 points discussed · 3 tasks",
+            );
+        }
+    });
     it("groups invitees first, other assignees next and unassigned last; shows taskless invitees", async () => {
         await mount();
         const names = screen
@@ -326,6 +367,54 @@ describe.each([
             screen.queryByRole("button", { name: "Suggest points" }),
         ).toBeNull();
     });
+});
+it("keeps live parent and child checkboxes independent of the top-level counters", async () => {
+    server = detail({
+        state: "live",
+        liveStartedAt: at,
+        points: [
+            point("First"),
+            point("Second", { position: 1 }),
+            point("Child", { parentId: "Second" }),
+            point("Sibling", { parentId: "Second", position: 1 }),
+            point("Third", { position: 2 }),
+        ],
+    });
+    render(
+        <AgendaBody
+            id="agenda"
+            variant="live"
+            initial={server}
+            userId="owner"
+        />,
+    );
+    for (const [name, discussed] of [
+        ["Child", 0],
+        ["Second", 1],
+        ["Second", 0],
+    ] as const) {
+        await act(async () =>
+            fireEvent.click(screen.getByLabelText(`Discussed: ${name}`)),
+        );
+        await waitFor(() =>
+            expect(
+                screen.getByText(`${discussed} of 3 discussed`),
+            ).toBeTruthy(),
+        );
+        expect(
+            screen.getByText(
+                `${discussed} of 3 points discussed · 0 tasks changed`,
+            ),
+        ).toBeTruthy();
+        expect(screen.getByLabelText("Discussed: Child")).toHaveProperty(
+            "checked",
+            true,
+        );
+        expect(screen.getByLabelText("Discussed: Sibling")).toHaveProperty(
+            "checked",
+            false,
+        );
+    }
 });
 it("shows the server's unavailable AI suggestions error as a toast", async () => {
     render(<AgendaBody id="agenda" initial={server} userId="owner" />);

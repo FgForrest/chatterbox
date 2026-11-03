@@ -79,6 +79,16 @@ A lecture or a long monologue is split into paragraphs of about half a minute, a
 - **Click a timestamp** to move the player there without playing.
 - **While it plays,** the sentence being spoken is highlighted and the transcript scrolls along. If you scroll the transcript yourself, playback moves to the sentence you are reading.
 
+## Cutting the start and end
+
+Only the owner can cut a recording. Open the scissors beside Download in the player or beside Re-transcribe in the transcript. Hover or focus a turn and choose **Start here** or **End here**. The same buttons in the pinned cut bar use the current playback position, snapped to a turn. Without a transcript they use the exact playback position.
+
+Faded, struck-through turns and shaded ends of the scrubber show what will be deleted. Reset an edge with **×**, or choose **Cancel** to leave everything unchanged. **Cut…** opens the deletion confirmation. An Organization recording must leave the Organization first; the confirmation shows the withdrawal and retention warning.
+
+The cut is permanent: it deletes audio and transcript turns, and the remaining recording starts at 0:00. If retention already removed the audio, only transcripts are cut. Summaries, generated titles, topics, task proposals and Learn results are refreshed through the processing profile, without another transcription. Accepted tasks, confirmed Almanac knowledge, summary remarks, manually set titles and corrections on retained turns stay. Cutting is unavailable during transcription, while another cut is running, or when any transcript lacks turn times.
+
+The original remains in Plaud and in exports and backups made earlier. Chatterbox never imports the original audio, transcript or summary from Plaud again after a cut, including through Restore audio.
+
 ## Corrected words
 
 When Learn has corrected a misheard name, the transcript reads corrected. Corrected words have a dotted underline.

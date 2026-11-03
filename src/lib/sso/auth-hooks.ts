@@ -1,5 +1,6 @@
 import type { Account, OAuth2Tokens, OAuth2UserInfo } from "better-auth";
 import { APIError } from "better-auth/api";
+import type { GenericOAuthUserInfo } from "better-auth/plugins/generic-oauth";
 import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { accounts, sessions, users } from "@/db/schema";
@@ -33,7 +34,13 @@ import {
 } from "@/lib/sso/tokens";
 
 /** A newer access decision superseded this callback's provider response. */
-export class SupersededSignInError extends Error {}
+export class SupersededSignInError extends APIError {
+    constructor() {
+        super("FOUND", undefined, {
+            location: `${env.APP_URL}/login?error=${SSO_UNAVAILABLE_ERROR}`,
+        });
+    }
+}
 
 async function refuseOrgAccount(userId: string): Promise<void> {
     const [row] = await db
@@ -76,7 +83,7 @@ async function signInIssuer(): Promise<string | null> {
  */
 export async function verifySsoLogin(
     tokens: OAuth2Tokens,
-): Promise<OAuth2UserInfo> {
+): Promise<GenericOAuthUserInfo> {
     if (!tokens.idToken || !tokens.accessToken) {
         refuseLogin(SSO_TOKEN_INVALID_ERROR);
     }
@@ -110,7 +117,6 @@ export async function verifySsoLogin(
             tokens: providerTokens,
         });
         const info: OAuth2UserInfo = {
-            id: identity.subject,
             email: identity.email,
             emailVerified: identity.emailVerified,
             name: identity.name ?? identity.email ?? undefined,

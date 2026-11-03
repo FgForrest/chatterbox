@@ -21,10 +21,12 @@ export function TaskTextInput({
     text,
     className,
     onSave,
+    onEdit,
 }: {
     text: string;
     className?: string;
     onSave: (text: string) => void;
+    onEdit?: () => void;
 }) {
     const i18n = useExtracted();
     const [draft, setDraft] = useState(text);
@@ -53,7 +55,10 @@ export function TaskTextInput({
             rows={1}
             maxLength={2000}
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+                onEdit?.();
+                setDraft(event.target.value);
+            }}
             onBlur={save}
             onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {

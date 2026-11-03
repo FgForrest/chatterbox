@@ -2,6 +2,7 @@ import { and, eq, isNull, notExists } from "drizzle-orm";
 import type { db } from "@/db";
 import { reviewableTaskTargetCondition } from "@/db/queries/tasks";
 import { recordingTasks, taskMentions, taskUpdateProposals } from "@/db/schema";
+import { taskReviewState } from "@/lib/tasks/review-state";
 
 type Executor = Pick<typeof db, "select">;
 
@@ -18,7 +19,21 @@ export async function waitingTaskDecisions(
     itemId: string,
     ownerUserId: string,
     view?: "private" | "org",
+    includeSkipped = false,
+    reviewView: "private" | "org" = view ?? "private",
 ): Promise<WaitingTaskDecisions> {
+    if (
+        !includeSkipped &&
+        (
+            await taskReviewState(executor, {
+                itemId,
+                userId: ownerUserId,
+                view: reviewView,
+            })
+        ).skipped
+    ) {
+        return { proposals: 0, followUps: 0, total: 0 };
+    }
     const [newTasks, followUps, matches] = await Promise.all([
         executor
             .select({ taskId: recordingTasks.id })

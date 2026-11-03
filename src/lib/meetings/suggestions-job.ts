@@ -1,11 +1,15 @@
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { agendaSuggestionInputs } from "@/db/queries/agenda-suggestions";
+import {
+    agendaSuggestionInputs,
+    lockAgendaSuggestionSourcesInTx,
+} from "@/db/queries/agenda-suggestions";
 import { enqueueJob } from "@/db/queries/async-jobs";
 import {
     agendaPoints,
     agendaSuggestions,
+    asyncJobs,
     meetingAgendas,
     users,
 } from "@/db/schema";
@@ -81,7 +85,7 @@ export const agendaSuggestionsJobHandler: JobHandler<{
                 ) ?? undefined,
         };
     },
-    async run({ userId, payload, signal, reportProgress }) {
+    async run({ userId, payload, signal, reportProgress, jobId }) {
         const { access, folders, pin, outputLanguage } =
             await agendaSuggestionsProvider(userId, payload.agendaId);
         const { agenda } = access;
@@ -101,6 +105,26 @@ export const agendaSuggestionsJobHandler: JobHandler<{
                 ...(await taskViewerById(userId)),
                 includeReceived: true,
             },
+        });
+        await db.transaction(async (tx) => {
+            await lockAgendaSuggestionSourcesInTx(tx, input.recordingVersions);
+            await tx
+                .update(asyncJobs)
+                .set({
+                    payload: {
+                        ...payload,
+                        sourceItemIds: input.recordingVersions.map(
+                            (row) => row.id,
+                        ),
+                    },
+                })
+                .where(
+                    and(
+                        eq(asyncJobs.id, jobId),
+                        eq(asyncJobs.userId, userId),
+                        eq(asyncJobs.status, "processing"),
+                    ),
+                );
         });
         if (input.summaries.length > 100 || input.tasks.length > 200)
             throw new AppError(
@@ -208,6 +232,7 @@ export const agendaSuggestionsJobHandler: JobHandler<{
         });
         signal.throwIfAborted();
         return db.transaction(async (tx) => {
+            await lockAgendaSuggestionSourcesInTx(tx, input.recordingVersions);
             const current = await requireMeetingAccess(
                 userId,
                 agenda.id,

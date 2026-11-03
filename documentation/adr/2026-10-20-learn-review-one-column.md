@@ -1,14 +1,14 @@
 ---
 title: The Learn review is one column of stacked sections, written in the reviewer's language
 date: 2026-10-20
-updated: 2026-10-22 17:05
-status: accepted
+updated: 2026-11-02 18:00
+status: superseded
 kind: feature
 issues: []
 prs: [82, 172, 173, 175, 194, 199]
 areas: [src/components/learn/learn-widget.tsx, src/components/learn/review-parts.tsx, src/lib/learn/review-language.ts, src/lib/learn/review-prose.ts, src/lib/knowledge/vocabulary-labels.ts, messages/cs-CZ.json]
 supersedes: []
-superseded-by: []
+superseded-by: [2026-11-02-quick-finish-of-reviews]
 relates: [2026-09-30-learn, 2026-10-22-recording-language-checked-by-learn]
 ---
 
@@ -22,6 +22,8 @@ the reviewer: core vocabulary labels are shown in the interface language (PR #17
 writes the reasons under each proposal in the reviewer's language (PR #175), with a locale fallback
 for people whose interface is on Auto (PR #194) and a check of the answer rather than only an
 instruction (PR #199).
+
+**Superseded in part** by [quick finish of reviews](2026-11-02-quick-finish-of-reviews.md): The known-facts section, jump chip and review counts are removed; known facts apply without review. The stacked layout, dependencies and language rules still hold.
 
 ## Why
 

@@ -20,6 +20,7 @@ import { agendaSuggestionsJobHandler } from "@/lib/meetings/suggestions-job";
 import { pipelineActionJobHandler } from "@/lib/pipeline/action-job";
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
 import { recordingSessionFinalizeJobHandler } from "@/lib/recording-sessions/finalize-job-handler";
+import { recordingCutJobHandler } from "@/lib/recordings/cut-job-handler";
 import {
     storageReconciliationJobHandler,
     storageReconciliationScanJobHandler,
@@ -35,6 +36,7 @@ import { registerJobHandler } from "./registry";
 export function registerJobHandlers(): void {
     registerJobHandler(agendaSuggestionsJobHandler);
     registerJobHandler(summaryJobHandler);
+    registerJobHandler(recordingCutJobHandler);
     registerJobHandler(topicsJobHandler);
     registerJobHandler(transcriptionJobHandler);
     registerJobHandler(videoExtractionJobHandler);

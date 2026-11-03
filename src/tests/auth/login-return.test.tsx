@@ -15,13 +15,13 @@ import {
     rememberSsoReturnPath,
 } from "@/lib/auth/return-path";
 
-const { email, oauth2, push, refresh } = vi.hoisted(() => ({
+const { email, social, push, refresh } = vi.hoisted(() => ({
     email: vi.fn().mockResolvedValue({ data: {}, error: null }),
-    oauth2: vi.fn().mockResolvedValue({ data: {}, error: null }),
+    social: vi.fn().mockResolvedValue({ data: {}, error: null }),
     push: vi.fn(),
     refresh: vi.fn(),
 }));
-vi.mock("@/lib/auth-client", () => ({ signIn: { email, oauth2 } }));
+vi.mock("@/lib/auth-client", () => ({ signIn: { email, social } }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh }) }));
 vi.mock("posthog-js", () => ({ default: { __loaded: false } }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -54,8 +54,8 @@ describe("login return destination", () => {
         fireEvent.click(
             screen.getByRole("button", { name: "Sign in with Acme" }),
         );
-        expect(oauth2).toHaveBeenCalledWith({
-            providerId: "oidc",
+        expect(social).toHaveBeenCalledWith({
+            provider: "oidc",
             callbackURL: `${window.location.origin}/tasks?x=1#notes`,
             errorCallbackURL: `${window.location.origin}/login?returnTo=%2Ftasks%3Fx%3D1%23notes`,
         });
@@ -68,7 +68,7 @@ describe("login return destination", () => {
         fireEvent.click(
             screen.getByRole("button", { name: "Sign in with Acme" }),
         );
-        expect(oauth2).toHaveBeenCalledWith(
+        expect(social).toHaveBeenCalledWith(
             expect.objectContaining({
                 callbackURL: `${window.location.origin}/dashboard`,
             }),
@@ -81,13 +81,13 @@ describe("login return destination", () => {
         fireEvent.click(
             screen.getByRole("button", { name: "Sign in with Acme" }),
         );
-        await waitFor(() => expect(oauth2).toHaveBeenCalledOnce());
+        await waitFor(() => expect(social).toHaveBeenCalledOnce());
         first.unmount();
         render(<SsoLogin providerName="Acme" error="access_denied" />);
         fireEvent.click(
             screen.getByRole("button", { name: "Sign in with Acme" }),
         );
-        expect(oauth2).toHaveBeenLastCalledWith(
+        expect(social).toHaveBeenLastCalledWith(
             expect.objectContaining({
                 callbackURL: `${window.location.origin}/tasks?x=1#notes`,
             }),
@@ -103,7 +103,7 @@ describe("login return destination", () => {
         fireEvent.click(
             screen.getByRole("button", { name: "Sign in with Acme" }),
         );
-        expect(oauth2).toHaveBeenLastCalledWith(
+        expect(social).toHaveBeenLastCalledWith(
             expect.objectContaining({
                 callbackURL: `${window.location.origin}/dashboard`,
             }),
@@ -125,7 +125,7 @@ describe("login return destination", () => {
         fireEvent.click(
             screen.getByRole("button", { name: "Sign in with Acme" }),
         );
-        expect(oauth2).toHaveBeenCalledWith(
+        expect(social).toHaveBeenCalledWith(
             expect.objectContaining({
                 callbackURL: `${window.location.origin}/dashboard`,
             }),

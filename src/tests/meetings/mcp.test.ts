@@ -62,7 +62,7 @@ beforeEach(() => {
         suggestionIds: new Set(),
         pointIds: new Set(),
     });
-    service.list.mockResolvedValue([{ id: "agenda" }]);
+    service.list.mockResolvedValue([{ id: "agenda", folders: [] }]);
     service.get.mockResolvedValue({
         unchanged: false,
         points: [],

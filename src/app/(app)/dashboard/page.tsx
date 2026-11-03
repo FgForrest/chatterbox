@@ -148,6 +148,7 @@ async function loadOrganizationLibrary(
             deviceSn: recordings.deviceSn,
             waveformPeaks: recordings.waveformPeaks,
             audioReapedAt: recordings.audioReapedAt,
+            cutAt: recordings.cutAt,
             transcriptReapedAt: chatterItems.contentReapedAt,
             summaryReapedAt: chatterItems.summaryReapedAt,
             ownerName: users.name,
@@ -218,6 +219,7 @@ async function loadOrganizationLibrary(
         ({
             waveformPeaks,
             audioReapedAt,
+            cutAt,
             transcriptReapedAt,
             summaryReapedAt,
             userId,
@@ -233,6 +235,7 @@ async function loadOrganizationLibrary(
                     needsReview: reviewIds.has(row.id),
                     audioReaped: audioReapedAt !== null,
                     audioReapedAt,
+                    cutAt,
                     transcriptReapedAt,
                     summaryReapedAt,
                     waveformPeaks: Array.isArray(waveformPeaks)
@@ -291,6 +294,7 @@ export default async function DashboardPage() {
                 // retention policy" instead of rendering a dead <audio>
                 // element that fails on first play.
                 audioReapedAt: recordings.audioReapedAt,
+                cutAt: recordings.cutAt,
                 transcriptReapedAt: chatterItems.contentReapedAt,
                 summaryReapedAt: chatterItems.summaryReapedAt,
             })
@@ -367,6 +371,7 @@ export default async function DashboardPage() {
         ({
             waveformPeaks,
             audioReapedAt,
+            cutAt,
             transcriptReapedAt,
             summaryReapedAt,
             ...r
@@ -379,6 +384,7 @@ export default async function DashboardPage() {
                     needsReview: reviewIds.has(r.id),
                     audioReaped: audioReapedAt !== null,
                     audioReapedAt,
+                    cutAt,
                     transcriptReapedAt,
                     summaryReapedAt,
                     // jsonb comes back already-parsed; coerce to the typed shape.

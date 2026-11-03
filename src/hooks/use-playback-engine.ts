@@ -202,7 +202,7 @@ export function usePlaybackEngine({
         pendingSeek.current = null;
         setCurrentTime(0);
         setDuration(0);
-        audio.src = `/api/recordings/${recording.id}/audio`;
+        audio.src = `/api/recordings/${recording.id}/audio${recording.cutAt ? `?v=${encodeURIComponent(recording.cutAt)}` : ""}`;
         audio.load();
         syncPlaying();
         return () => {
@@ -214,7 +214,14 @@ export function usePlaybackEngine({
             }
             if (!audio.paused) audio.pause();
         };
-    }, [recording.id, autoPlayNext, pause, setPosition, syncPlaying]);
+    }, [
+        recording.id,
+        recording.cutAt,
+        autoPlayNext,
+        pause,
+        setPosition,
+        syncPlaying,
+    ]);
 
     useEffect(() => {
         if (audioRef.current) audioRef.current.volume = volume / 100;

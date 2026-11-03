@@ -45,6 +45,9 @@ vi.mock("@/components/dashboard/recording-player", () => ({
     },
     transcriptPlayback: (ref: { current: RecordingPlayerHandle | null }) => ({
         play: (ms: number) => ref.current?.playFrom(ms / 1000),
+        pause: () => ref.current?.pause(),
+        seek: (ms: number) => ref.current?.seekTo(ms / 1000),
+        subscribe: () => () => {},
     }),
 }));
 
