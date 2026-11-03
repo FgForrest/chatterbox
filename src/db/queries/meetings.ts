@@ -161,7 +161,7 @@ export async function listMeetingRows(
             item: chatterItems,
             authorName: users.name,
             counts: {
-                points: sql<number>`(select count(*)::int from ${agendaPoints} where ${agendaPoints.agendaId} = ${meetingAgendas.id} and ${agendaPoints.userId} = ${meetingAgendas.userId})`,
+                points: sql<number>`(select count(*)::int from ${agendaPoints} where ${agendaPoints.agendaId} = ${meetingAgendas.id} and ${agendaPoints.userId} = ${meetingAgendas.userId} and ${agendaPoints.parentId} is null)`,
                 tasks: sql<number>`(select count(*)::int from ${agendaTasks}
                     inner join ${recordingTasks} on ${recordingTasks.id} = ${agendaTasks.taskId}
                     left join ${chatterItems} as agenda_task_item on ${taskItem.id} = ${recordingTasks.itemId}

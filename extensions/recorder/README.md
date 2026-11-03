@@ -129,7 +129,7 @@ meeting audio keeps recording with a persistent notification and popup warning
 explaining the failure. After deliberately recording without a microphone, you
 can dismiss permission reminders in the popup and re-enable them in Options.
 
-## Meeting agendas (0.8.2)
+## Meeting agendas (0.8.3)
 
 A supporting server advertises `features.agendas: true`. The popup then shows an
 Agenda card for a meeting running now or starting within 15 minutes and preselects
@@ -141,6 +141,7 @@ you click. The extension is absent from the side panel menu on tabs where no
 agenda has been opened. If Chrome refuses the request, the same page opens in a
 small extension window. Preparation shows the outline and task review; **Live meeting** enables
 discussed ticks, timestamped hints, notes, quick points and task **Done / Drop**.
+The "X of Y discussed" count includes only top-level points.
 Changes save to the server and colleagues' changes refresh every 15 seconds.
 Task actions change real tasks and honor their existing permissions. Absorbed
 agendas remain read-only. **Open in Chatterbox** opens the full meeting page.
@@ -167,7 +168,8 @@ in Options after adding or rescheduling a meeting to update reminders immediatel
 are independent Options switches, both on by default. Older servers hide the
 agenda Options section and add no agenda UI or requests to recording.
 Version 0.8.2 keeps the fallback window's matched agenda if the requesting tab
-closes while matching. It changes no permissions; 0.8.0 added only `sidePanel`.
+closes while matching. Version 0.8.3 counts only top-level points. Neither changes
+permissions; 0.8.0 added only `sidePanel`.
 
 ## Load it for development
 
