@@ -122,6 +122,14 @@ export function RecordingCutProvider({
     const cutError = useCallback(
         (message: string) => {
             switch (message) {
+                case "Only the recording owner may cut it":
+                    return i18n("Only the recording's owner can cut it.");
+                case "Recording not found":
+                    return i18n("This recording no longer exists.");
+                case "There is no audio or transcript to cut":
+                    return i18n(
+                        "There is nothing left to cut: the recording has no audio or transcript.",
+                    );
                 case "Choose a smaller range that keeps part of the recording":
                     return i18n(
                         "Choose a smaller range that keeps part of the recording.",

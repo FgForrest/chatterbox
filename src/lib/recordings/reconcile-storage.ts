@@ -13,8 +13,6 @@ import {
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import type { StorageProvider } from "@/lib/storage/types";
 
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
 const MAX_FILENAME_CANDIDATES = 1_000;
 const STORAGE_FILENAME_UNIQUE =
     "recordings_user_id_storage_filename_stem_unique";
@@ -106,7 +104,7 @@ async function storageKeyExists(
 async function reserveStorageFilename(
     state: RecordingStorageState,
     storage: StorageProvider,
-    tx: Tx,
+    cutAt: Date | null,
 ): Promise<string> {
     const extension = audioExtension(state.storagePath);
     for (let index = 0; index < MAX_FILENAME_CANDIDATES; index++) {
@@ -116,7 +114,7 @@ async function reserveStorageFilename(
             index,
         );
         const candidatePath = `${state.userId}/${candidate}`;
-        const [holder] = await tx
+        const [holder] = await db
             .select({ id: recordings.id })
             .from(recordings)
             .where(
@@ -143,20 +141,22 @@ async function reserveStorageFilename(
             const currentNameCondition = state.storageFilename
                 ? eq(recordings.storageFilename, state.storageFilename)
                 : isNull(recordings.storageFilename);
-            const [reserved] = await tx.transaction((savepoint) =>
-                savepoint
-                    .update(recordings)
-                    .set({ storageFilename: candidate, updatedAt: new Date() })
-                    .where(
-                        and(
-                            eq(recordings.id, state.id),
-                            eq(recordings.userId, state.userId),
-                            currentNameCondition,
-                            isNull(recordings.deletedAt),
-                        ),
-                    )
-                    .returning({ storageFilename: recordings.storageFilename }),
-            );
+            const [reserved] = await db
+                .update(recordings)
+                .set({ storageFilename: candidate, updatedAt: new Date() })
+                .where(
+                    and(
+                        eq(recordings.id, state.id),
+                        eq(recordings.userId, state.userId),
+                        eq(recordings.storagePath, state.storagePath),
+                        cutAt
+                            ? eq(recordings.cutAt, cutAt)
+                            : isNull(recordings.cutAt),
+                        currentNameCondition,
+                        isNull(recordings.deletedAt),
+                    ),
+                )
+                .returning({ storageFilename: recordings.storageFilename });
             if (!reserved?.storageFilename) {
                 throw new Error(
                     `Recording ${state.id} changed while its storage filename was being reserved`,
@@ -180,112 +180,140 @@ async function reserveStorageFilename(
 export async function reconcileRecordingStorage(
     state: RecordingStorageState,
 ): Promise<RecordingStorageReconciliation> {
+    const currentColumns = {
+        storagePath: recordings.storagePath,
+        storageFilename: recordings.storageFilename,
+        cutAt: recordings.cutAt,
+    };
+    const recordingCondition = and(
+        eq(recordings.id, state.id),
+        eq(recordings.userId, state.userId),
+        isNull(recordings.deletedAt),
+    );
+    const cutCondition = and(
+        eq(asyncJobs.userId, state.userId),
+        eq(asyncJobs.subjectId, state.id),
+        eq(asyncJobs.kind, "recording.cut"),
+        inArray(asyncJobs.status, ["pending", "processing"]),
+    );
+    const [current] = await db
+        .select(currentColumns)
+        .from(recordings)
+        .where(recordingCondition)
+        .limit(1);
+    const deferred = (latest = current): RecordingStorageReconciliation => ({
+        deferred: true,
+        changed: false,
+        storagePath: latest?.storagePath ?? state.storagePath,
+        storageFilename: latest?.storageFilename ?? state.storageFilename ?? "",
+    });
+    if (!current || current.storagePath !== state.storagePath)
+        return deferred();
+    const [cut] = await db
+        .select({ id: asyncJobs.id })
+        .from(asyncJobs)
+        .where(cutCondition)
+        .limit(1);
+    if (cut) return deferred();
+
     const storage = await createUserStorageProvider(state.userId);
-    let filesToDelete: string[] = [];
+    const storageFilename =
+        state.storageFilename &&
+        storageFilenameMatchesTitle(
+            state.storageFilename,
+            state.title,
+            audioExtension(state.storagePath),
+        )
+            ? state.storageFilename
+            : await reserveStorageFilename(state, storage, current.cutAt);
+    const expectedStoragePath = `${state.userId}/${storageFilename}`;
+    if (expectedStoragePath === state.storagePath) {
+        return {
+            changed: storageFilename !== state.storageFilename,
+            storagePath: state.storagePath,
+            storageFilename,
+        };
+    }
+
+    const [shared] = state.storagePath
+        ? await db
+              .select({ id: recordings.id })
+              .from(recordings)
+              .where(
+                  and(
+                      eq(recordings.userId, state.userId),
+                      eq(recordings.storagePath, state.storagePath),
+                      ne(recordings.id, state.id),
+                  ),
+              )
+              .limit(1)
+        : [];
+    const copiedSources = state.storagePath
+        ? await copyExistingRecordingFiles(
+              storage,
+              state.storagePath,
+              expectedStoragePath,
+          )
+        : [];
+
     const result = await db.transaction(async (tx) => {
-        const [current] = await tx
-            .select({
-                storagePath: recordings.storagePath,
-                storageFilename: recordings.storageFilename,
-            })
+        const [latest] = await tx
+            .select(currentColumns)
             .from(recordings)
-            .where(
-                and(
-                    eq(recordings.id, state.id),
-                    eq(recordings.userId, state.userId),
-                    isNull(recordings.deletedAt),
-                ),
-            )
+            .where(recordingCondition)
             .for("update");
-        if (!current || current.storagePath !== state.storagePath)
-            throw new Error("Recording storage changed while reconciling");
-        const [cut] = await tx
+        if (
+            !latest ||
+            latest.storagePath !== state.storagePath ||
+            latest.cutAt?.getTime() !== current.cutAt?.getTime() ||
+            latest.storageFilename !== storageFilename
+        )
+            return deferred(latest);
+        const [activeCut] = await tx
             .select({ id: asyncJobs.id })
             .from(asyncJobs)
-            .where(
-                and(
-                    eq(asyncJobs.userId, state.userId),
-                    eq(asyncJobs.subjectId, state.id),
-                    eq(asyncJobs.kind, "recording.cut"),
-                    inArray(asyncJobs.status, ["pending", "processing"]),
-                ),
-            )
+            .where(cutCondition)
             .limit(1);
-        if (cut)
-            return {
-                deferred: true,
-                changed: false,
-                storagePath: current.storagePath,
-                storageFilename: current.storageFilename ?? "",
-            };
-        const storageFilename =
-            state.storageFilename &&
-            storageFilenameMatchesTitle(
-                state.storageFilename,
-                state.title,
-                audioExtension(state.storagePath),
-            )
-                ? state.storageFilename
-                : await reserveStorageFilename(state, storage, tx);
-        const expectedStoragePath = `${state.userId}/${storageFilename}`;
-        if (expectedStoragePath === state.storagePath) {
-            return {
-                changed: storageFilename !== state.storageFilename,
-                storagePath: state.storagePath,
-                storageFilename,
-            };
-        }
-
-        const [shared] = state.storagePath
-            ? await tx
-                  .select({ id: recordings.id })
-                  .from(recordings)
-                  .where(
-                      and(
-                          eq(recordings.userId, state.userId),
-                          eq(recordings.storagePath, state.storagePath),
-                          ne(recordings.id, state.id),
-                      ),
-                  )
-                  .limit(1)
-            : [];
-        const copiedSources = state.storagePath
-            ? await copyExistingRecordingFiles(
-                  storage,
-                  state.storagePath,
-                  expectedStoragePath,
-              )
-            : [];
+        if (activeCut) return deferred(latest);
 
         const [relocated] = await tx
             .update(recordings)
             .set({ storagePath: expectedStoragePath, updatedAt: new Date() })
             .where(
                 and(
-                    eq(recordings.id, state.id),
-                    eq(recordings.userId, state.userId),
+                    recordingCondition,
                     eq(recordings.storagePath, state.storagePath),
                     eq(recordings.storageFilename, storageFilename),
-                    isNull(recordings.deletedAt),
                 ),
             )
             .returning({ storagePath: recordings.storagePath });
-
-        if (!relocated) {
-            throw new Error(
-                `Recording ${state.id} changed while its storage files were being renamed`,
-            );
-        }
-
-        if (!shared) filesToDelete = copiedSources;
-
+        if (!relocated) return deferred(latest);
         return {
             changed: true,
             storagePath: relocated.storagePath,
             storageFilename,
         };
     });
-    if (filesToDelete.length)
-        await deleteOldRecordingFiles(storage, filesToDelete, state.id);
+    if (!result.changed && result.storagePath !== expectedStoragePath) {
+        const oldStem = sidecarKey(state.storagePath, "transcript").slice(
+            0,
+            -".transcript.md".length,
+        );
+        const newStem = sidecarKey(expectedStoragePath, "transcript").slice(
+            0,
+            -".transcript.md".length,
+        );
+        await deleteOldRecordingFiles(
+            storage,
+            copiedSources.map((key) =>
+                key === state.storagePath
+                    ? expectedStoragePath
+                    : `${newStem}${key.slice(oldStem.length)}`,
+            ),
+            state.id,
+        );
+    } else if (result.changed && !shared) {
+        await deleteOldRecordingFiles(storage, copiedSources, state.id);
+    }
     return result;
 }

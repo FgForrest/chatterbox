@@ -8,6 +8,7 @@ import {
     screen,
     within,
 } from "@testing-library/react";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RecordingPlayer } from "@/components/dashboard/recording-player";
 import { TranscriptView } from "@/components/dashboard/transcript-view";
@@ -21,6 +22,8 @@ import {
 } from "@/components/recordings/recording-cut";
 import { useWaveform } from "@/hooks/use-waveform";
 import type { Recording } from "@/types/recording";
+
+vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
 vi.mock("@/hooks/use-playback-engine", () => ({
     usePlaybackEngine: () => ({
@@ -125,6 +128,7 @@ describe("shared recording cut mode", () => {
     });
     afterEach(() => {
         cleanup();
+        vi.useRealTimers();
         vi.unstubAllGlobals();
     });
     it.each([
@@ -302,6 +306,136 @@ describe("shared recording cut mode", () => {
             "/api/recordings/recording/withdraw-preview",
         );
     });
+    it.each([
+        "completed",
+        "failed",
+    ])("submits the destructive cut and clears progress after the job %s", async (status) => {
+        vi.useFakeTimers();
+        const post = Promise.withResolvers<Response>();
+        let polls = 0;
+        fetchMock.mockImplementation(
+            async (url: string, init?: RequestInit) => {
+                if (init?.method === "POST") return post.promise;
+                if (url === "/api/jobs/cut-job") {
+                    polls++;
+                    return Response.json(
+                        polls === 1
+                            ? { status: "processing" }
+                            : {
+                                  status,
+                                  error: "The recording or transcript changed. Reload it and choose the cut again.",
+                              },
+                    );
+                }
+                return Response.json({ job: null });
+            },
+        );
+        view();
+        await act(async () => {});
+        fireEvent.click(
+            within(screen.getByTestId("player")).getByRole("button"),
+        );
+        const bar = within(
+            screen.getByRole("region", { name: "Cut recording" }),
+        );
+        fireEvent.click(bar.getByRole("button", { name: "Start here" }));
+        fireEvent.click(bar.getByRole("button", { name: "End here" }));
+        fireEvent.click(bar.getByRole("button", { name: "Cut…" }));
+        fireEvent.click(screen.getByRole("button", { name: "Delete and cut" }));
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/recordings/recording/cut",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ startMs: 3000, endMs: 6000 }),
+            },
+        );
+        expect(playback.pause).toHaveBeenCalledOnce();
+        expect(screen.queryByRole("alertdialog")).toBeNull();
+        expect(
+            screen.queryByRole("region", { name: "Cut recording" }),
+        ).toBeNull();
+        expect(screen.getByRole("status").textContent).toBe("Cutting…");
+        await act(async () => {
+            post.resolve(Response.json({ jobId: "cut-job" }, { status: 202 }));
+        });
+        expect(polls).toBe(1);
+        expect(screen.getByRole("status").textContent).toBe("Cutting…");
+        for (const widget of ["player", "transcript"])
+            expect(
+                (
+                    within(screen.getByTestId(widget)).getByRole("button", {
+                        name: "Cutting…",
+                    }) as HTMLButtonElement
+                ).disabled,
+            ).toBe(true);
+        expect(changed).not.toHaveBeenCalled();
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(2000);
+        });
+        expect(polls).toBe(2);
+        expect(screen.queryByRole("status")).toBeNull();
+        expect(
+            screen.queryByRole("region", { name: "Cut recording" }),
+        ).toBeNull();
+        expect(changed).toHaveBeenCalledOnce();
+        if (status === "failed") {
+            expect(toast.error).toHaveBeenCalledExactlyOnceWith(
+                "The recording or transcript changed. Reload it and choose the cut again.",
+            );
+            fireEvent.click(
+                within(screen.getByTestId("player")).getByRole("button", {
+                    name: "Cut the start and end",
+                }),
+            );
+            expect(
+                screen.getByRole("region", { name: "Cut recording" }),
+            ).toBeTruthy();
+        } else expect(toast.error).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        [
+            403,
+            "Only the recording owner may cut it",
+            "Only the recording's owner can cut it.",
+        ],
+        [404, "Recording not found", "This recording no longer exists."],
+        [
+            400,
+            "There is no audio or transcript to cut",
+            "There is nothing left to cut: the recording has no audio or transcript.",
+        ],
+    ])("explains a rejected cut (%s)", async (status, error, message) => {
+        fetchMock.mockImplementation(
+            async (_url: string, init?: RequestInit) =>
+                init?.method === "POST"
+                    ? Response.json(
+                          { error, code: "CUT_ERROR" },
+                          { status: Number(status) },
+                      )
+                    : Response.json({ job: null }),
+        );
+        view();
+        await act(async () => {});
+        fireEvent.click(
+            within(screen.getByTestId("player")).getByRole("button"),
+        );
+        const bar = within(
+            screen.getByRole("region", { name: "Cut recording" }),
+        );
+        fireEvent.click(bar.getByRole("button", { name: "Start here" }));
+        fireEvent.click(bar.getByRole("button", { name: "Cut…" }));
+        await act(async () => {
+            fireEvent.click(
+                screen.getByRole("button", { name: "Delete and cut" }),
+            );
+        });
+        expect(toast.error).toHaveBeenCalledExactlyOnceWith(message);
+        expect(screen.queryByRole("status")).toBeNull();
+        expect(changed).not.toHaveBeenCalled();
+    });
+
     it("resumes a pending cut with disabled scissors and visible progress", async () => {
         fetchMock.mockResolvedValue(
             new Response(

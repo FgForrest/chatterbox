@@ -12,7 +12,8 @@ import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 const mockedRecording = vi.hoisted(() => ({
     storagePath: "user-1/legacy.mp3",
-    storageFilename: null,
+    storageFilename: null as string | null,
+    cutAt: null,
 }));
 
 vi.mock("@/lib/env", () => ({
@@ -161,6 +162,8 @@ function mockUpdateReturning(row: unknown) {
     const writes: { table: unknown; values: Record<string, unknown> }[] = [];
     let table: unknown;
     const set = vi.fn((values: Record<string, unknown>) => {
+        if (typeof values.storageFilename === "string")
+            mockedRecording.storageFilename = values.storageFilename;
         setPayloads.push(values);
         writes.push({ table, values });
         const returned =
@@ -190,9 +193,12 @@ function mockSelectReturning(result: unknown[]) {
 
 function mockOwnedRecording(storagePath = "user-1/legacy.mp3") {
     mockedRecording.storagePath = storagePath;
-    return mockSelectReturning([
-        { id: "rec-1", storagePath, storageFilename: null },
-    ]);
+    mockedRecording.storageFilename = null;
+    const row = { id: "rec-1", ...mockedRecording };
+    const initial = mockSelectReturning([row]);
+    mockSelectReturning([row]);
+    mockSelectReturning([]);
+    return initial;
 }
 
 /**
@@ -231,6 +237,7 @@ function exprReferencesColumn(
 describe("PATCH /api/recordings/[id]", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(db.select).mockReset();
         (requireApiSession as unknown as Mock).mockResolvedValue({
             user: { id: "user-1" },
         });

@@ -410,6 +410,7 @@ function stubTranscriptSidecar(opts: {
 describe("exportRecordingSidecars", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(db.select).mockReset();
         uploadFile.mockResolvedValue("stored");
         exists.mockResolvedValue(false);
         copyFile.mockResolvedValue("copied");
@@ -652,6 +653,15 @@ describe("exportRecordingSidecars", () => {
             )
             .mockReturnValueOnce(rows([]) as never)
             .mockReturnValueOnce(rows([]) as never)
+            .mockReturnValueOnce(rows([]) as never)
+            .mockReturnValueOnce(
+                rows([
+                    {
+                        storagePath: "user-1/legacy.mp3",
+                        storageFilename: "Board_meeting.mp3",
+                    },
+                ]) as never,
+            )
             .mockReturnValueOnce(rows([]) as never)
             .mockReturnValueOnce(
                 rows([
