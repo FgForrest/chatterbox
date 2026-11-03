@@ -24,6 +24,11 @@ import {
 } from "@/components/people/speaker-accents";
 import { PlayAtIcon } from "@/components/playback/play-at-button";
 import { usePlayback } from "@/components/playback/playback-context";
+import {
+    CutLine,
+    CutTurnAction,
+    useRecordingCut,
+} from "@/components/recordings/recording-cut";
 import { useTranscriptFollow } from "@/hooks/use-transcript-follow";
 import { isUntimed } from "@/lib/knowledge/correction-anchors";
 import { speakerPositions } from "@/lib/knowledge/speaker-groups";
@@ -33,6 +38,7 @@ import {
 } from "@/lib/knowledge/speaker-label-rules";
 import type { SpeakerAttributions } from "@/lib/knowledge/speaker-references";
 import type { OverlayCorrection } from "@/lib/learn/render";
+import { turnStays } from "@/lib/recordings/cut-range";
 import {
     formatClock,
     paragraphsOf,
@@ -267,6 +273,7 @@ export function TranscriptView({
     corrections = null,
 }: TranscriptViewProps) {
     const playback = usePlayback();
+    const cut = useRecordingCut();
     const i18n = useExtracted();
     // Marks are anchored to stored turns; a transcript without them has none.
     const marksByTurn = useMemo(() => {
@@ -483,6 +490,24 @@ export function TranscriptView({
             {paragraphs.map((paragraph, index) => {
                 const turnIndex = paragraph.turnIndex;
                 const turn = turns[turnIndex];
+                const storedTurn = storedTurns?.[turnIndex];
+                const removed = Boolean(
+                    cut?.open &&
+                        storedTurn &&
+                        !turnStays(storedTurn, cut.range),
+                );
+                const closesTurn =
+                    paragraphs[index + 1]?.turnIndex !== turnIndex;
+                const firstKept = cut?.open
+                    ? storedTurns?.findIndex((candidate) =>
+                          turnStays(candidate, cut.range),
+                      )
+                    : -1;
+                const lastKept = cut?.open
+                    ? storedTurns?.findLastIndex((candidate) =>
+                          turnStays(candidate, cut.range),
+                      )
+                    : -1;
                 const opensTurn =
                     paragraphs[index - 1]?.turnIndex !== turnIndex;
                 const named = showSpeakers && turn.label !== "";
@@ -578,11 +603,18 @@ export function TranscriptView({
                                 </div>
                             );
                         })}
+                        {cut?.open &&
+                            cut.range.startMs > 0 &&
+                            turnIndex === firstKept &&
+                            opensTurn && <CutLine edge="start" />}
                         <div
                             data-turn-index={opensTurn ? turnIndex : undefined}
                             data-accent={Math.max(0, position)}
-                            className={`group/para relative space-y-1 rounded-md transition-colors duration-700 ${gutter ? "pl-6" : ""} ${firstTopicParagraph !== null && index >= firstTopicParagraph ? "ml-10" : ""} ${highlightedParagraph === index || highlightedTurnIndex === turnIndex ? "bg-primary/10" : ""}`}
+                            className={`group/para relative space-y-1 ${cut?.open ? "py-2" : ""} ${removed ? "opacity-40 line-through" : ""} rounded-md transition-colors duration-700 ${gutter ? "pl-6" : ""} ${firstTopicParagraph !== null && index >= firstTopicParagraph ? "ml-10" : ""} ${highlightedParagraph === index || highlightedTurnIndex === turnIndex ? "bg-primary/10" : ""}`}
                         >
+                            {opensTurn && storedTurn && (
+                                <CutTurnAction turn={storedTurn} edge="start" />
+                            )}
                             {!named && canSeek && playButton}
                             {!named && canSeek && (
                                 <button
@@ -723,7 +755,14 @@ export function TranscriptView({
                                     );
                                 })}
                             </p>
+                            {closesTurn && storedTurn && (
+                                <CutTurnAction turn={storedTurn} edge="end" />
+                            )}
                         </div>
+                        {cut?.open &&
+                            cut.range.endMs < cut.recording.duration &&
+                            turnIndex === lastKept &&
+                            closesTurn && <CutLine edge="end" />}
                     </Fragment>
                 );
             })}

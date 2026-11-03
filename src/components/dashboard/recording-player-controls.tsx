@@ -4,6 +4,7 @@ import { Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { useExtracted } from "next-intl";
 import type { ReactNode } from "react";
 import { Waveform } from "@/components/dashboard/waveform";
+import { CutPreviewOverlay } from "@/components/recordings/recording-cut";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { PLAYBACK_SPEED_OPTIONS } from "@/hooks/use-playback-engine";
@@ -100,7 +101,7 @@ export function RecordingPlayerControls({
               Waveform takes whatever's left, with min-w-0 so flex
               doesn't expand the parent when bars are dense.
             */}
-            <div className="order-last min-w-0 basis-full sm:order-none sm:basis-auto sm:flex-1">
+            <div className="relative order-last min-w-0 basis-full sm:order-none sm:basis-auto sm:flex-1">
                 {scrubberStyle === "waveform" && waveformPeaks ? (
                     <Waveform
                         peaks={waveformPeaks}
@@ -125,6 +126,7 @@ export function RecordingPlayerControls({
                         disabled={seekDisabled}
                     />
                 )}
+                <CutPreviewOverlay />
             </div>
 
             <Button

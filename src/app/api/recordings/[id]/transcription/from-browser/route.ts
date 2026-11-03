@@ -18,6 +18,8 @@ const bodySchema = z.object({
         .nullish()
         .transform((v) => (v ? v : null)),
     model: z.string().trim().min(1).max(100),
+    audioMd5: z.string().max(32).optional(),
+    audioCutAt: z.string().datetime().nullish(),
 });
 
 /**
@@ -66,6 +68,8 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         text: parsed.data.text,
         detectedLanguage: parsed.data.detectedLanguage,
         model: parsed.data.model,
+        audioMd5: parsed.data.audioMd5,
+        audioCutAt: parsed.data.audioCutAt,
     });
 
     if (!result.success) {

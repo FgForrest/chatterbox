@@ -454,7 +454,8 @@ export async function claimDueJobs(
     const result =
         kind === "pipeline.advance" ||
         kind === "pipeline.action" ||
-        kind === "agenda.suggestions"
+        kind === "agenda.suggestions" ||
+        kind === "recording.cut"
             ? await db.execute(sql`
         with eligible_users as (
             select

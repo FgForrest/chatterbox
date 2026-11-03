@@ -11,6 +11,7 @@ type Status = "idle" | "decoding" | "ready" | "error" | "skipped";
 
 interface UseWaveformArgs {
     recordingId: string;
+    audioIdentity?: string;
     durationMs: number;
     /** Peaks already known server-side. When truthy, we skip decode. */
     initialPeaks: number[] | null;
@@ -60,6 +61,7 @@ function readPeaks(value: unknown): number[] {
  */
 export function useWaveform({
     recordingId,
+    audioIdentity,
     durationMs,
     initialPeaks,
     autoStart = true,
@@ -72,7 +74,8 @@ export function useWaveform({
     // Track the in-flight recording id so a late-arriving decode result
     // for a previously-selected recording doesn't clobber the current
     // one's peaks.
-    const currentIdRef = useRef(recordingId);
+    const identity = `${recordingId}:${audioIdentity ?? ""}`;
+    const currentIdRef = useRef(identity);
     const abortRef = useRef<AbortController | null>(null);
 
     // Reset state when the selected recording changes. The previous
@@ -83,12 +86,12 @@ export function useWaveform({
     // parent's router.refresh() re-supplies them.
     // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
     useEffect(() => {
-        currentIdRef.current = recordingId;
+        currentIdRef.current = identity;
         abortRef.current?.abort();
         abortRef.current = null;
         setPeaks(initialPeaks);
         setStatus(initialPeaks ? "ready" : "idle");
-    }, [recordingId]);
+    }, [identity]);
 
     // Unmount cleanup: abort any in-flight fetch so we don't keep
     // bytes flowing into a component that's gone. The recording-switch
@@ -106,6 +109,7 @@ export function useWaveform({
 
     const runDecode = useCallback(async () => {
         const id = recordingId;
+        const decodedIdentity = identity;
         const controller = new AbortController();
         abortRef.current?.abort();
         abortRef.current = controller;
@@ -144,7 +148,7 @@ export function useWaveform({
             // Stale-result guard: if the user switched recordings while
             // we were decoding, drop the result rather than overwrite
             // the new selection's peaks.
-            if (currentIdRef.current !== id) return;
+            if (currentIdRef.current !== decodedIdentity) return;
 
             setPeaks(decoded);
             setStatus("ready");
@@ -158,14 +162,14 @@ export function useWaveform({
             }
         } catch (err) {
             if (controller.signal.aborted) return;
-            if (currentIdRef.current !== id) return;
+            if (currentIdRef.current !== decodedIdentity) return;
             // Log to console for self-host debugging but never toast —
             // waveform absence is a graceful degradation, not an error
             // the user needs to act on.
             console.warn("Waveform decode failed:", err);
             setStatus("error");
         }
-    }, [recordingId]);
+    }, [recordingId, identity]);
 
     // Auto-start: short recordings decode automatically; longer ones
     // wait for a user gesture (the "Generate waveform" button).

@@ -126,6 +126,7 @@ export interface PipelineFacts {
         jobActive: boolean;
         contentReaped?: boolean;
         audioReaped?: boolean;
+        cut?: boolean;
         shared?: boolean;
         failed?: {
             errorCode: string;

@@ -31,6 +31,7 @@ import {
     clearAutoLearnHoldInTx,
     riffadoRecordingOfInTx,
 } from "@/lib/learn/hold";
+import type { CutRange } from "@/lib/recordings/cut-range";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -41,6 +42,8 @@ export async function transcriptRewrittenInTx(
         transcriptionId: string;
         previous: SpeakerVersion;
         next: SpeakerVersion;
+        /** A cut preserves the voices and words on the retained audio. */
+        cut?: CutRange;
         /**
          * The md5 of the audio the new text was made from, read when its
          * transcription began; the recording's current one by default.
@@ -48,16 +51,18 @@ export async function transcriptRewrittenInTx(
         audioMd5?: string | null;
     },
 ): Promise<void> {
-    const audioChanged = await stampTranscriptAudioInTx(
+    const stampedAudioChanged = await stampTranscriptAudioInTx(
         tx,
         args.transcriptionId,
         args.audioMd5,
     );
+    const audioChanged = args.cut ? false : stampedAudioChanged;
     await remapTranscriptAttributionsInTx(tx, { ...args, audioChanged });
     const corrected = await recheckCorrectionsInTx(tx, {
         transcriptionId: args.transcriptionId,
         previousTurns: args.previous.turns,
         nextTurns: args.next.turns,
+        cutRange: args.cut,
     });
     const evidenced = await recheckEvidenceInTx(tx, {
         transcriptionId: args.transcriptionId,

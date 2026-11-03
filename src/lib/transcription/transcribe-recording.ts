@@ -119,6 +119,8 @@ export type TranscribeErrorCode =
     | "TRANSCRIPTION_FAILED";
 
 export interface StoreBrowserTranscriptionInput {
+    audioMd5?: string;
+    audioCutAt?: string | null;
     userId: string;
     recordingId: string;
     text: string;
@@ -200,7 +202,12 @@ export async function storeBrowserTranscription(
     try {
         const advance = await db.transaction(async (tx) => {
             const [stillActive] = await tx
-                .select({ deletedAt: recordings.deletedAt })
+                .select({
+                    deletedAt: recordings.deletedAt,
+                    cutAt: recordings.cutAt,
+                    fileMd5: recordings.fileMd5,
+                    audioReapedAt: recordings.audioReapedAt,
+                })
                 .from(recordings)
                 .where(
                     and(
@@ -212,6 +219,18 @@ export async function storeBrowserTranscription(
                 .limit(1);
             if (!stillActive || stillActive.deletedAt) {
                 throw RECORDING_TOMBSTONED;
+            }
+            if (
+                stillActive.cutAt &&
+                (stillActive.audioReapedAt ||
+                    input.audioMd5 !== stillActive.fileMd5 ||
+                    input.audioCutAt !== stillActive.cutAt.toISOString())
+            ) {
+                throw new AppError(
+                    ErrorCode.CONFLICT,
+                    "The recording audio changed. Transcribe it again.",
+                    409,
+                );
             }
             // Shared since the browser started: the Organization's now.
             refused = await contentWriterRefusal(tx, {
@@ -275,7 +294,7 @@ export async function storeBrowserTranscription(
                         text,
                         turns: null,
                     }),
-                    audioMd5: null,
+                    audioMd5: input.audioMd5 ?? null,
                 });
             } else {
                 await tx.insert(transcriptions).values({
@@ -293,13 +312,12 @@ export async function storeBrowserTranscription(
                     producedByUserId: userId,
                     ...runRecord,
                 });
-                // Which audio the browser fetched is not known here; it
-                // has no turns, so no speaker rests on it.
+                // Do not stamp current audio when an older browser sent no identity.
                 await stampNewTranscriptAudioInTx(tx, {
                     recordingId,
                     userId,
                     source: "riffado",
-                    audioMd5: null,
+                    audioMd5: input.audioMd5 ?? null,
                 });
             }
 

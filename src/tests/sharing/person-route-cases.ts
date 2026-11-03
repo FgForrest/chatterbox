@@ -3,6 +3,7 @@ import { POST as detachAgenda } from "@/app/api/recordings/[id]/agenda/detach/ro
 import { POST as handler3POST } from "@/app/api/recordings/[id]/categorize/preview/route";
 import { POST as handler4POST } from "@/app/api/recordings/[id]/categorize/route";
 import { DELETE as handler5DELETE } from "@/app/api/recordings/[id]/corrections/[correctionId]/route";
+import { POST as cutRecording } from "@/app/api/recordings/[id]/cut/route";
 import { POST as handler7POST } from "@/app/api/recordings/[id]/erase/route";
 import {
     DELETE as handler8DELETE,
@@ -51,6 +52,11 @@ import { POST as handler31POST } from "@/app/api/recordings/[id]/transcribe/rout
 import { POST as handler32POST } from "@/app/api/recordings/[id]/transcription/from-browser/route";
 
 export const personWriteRoutes = [
+    {
+        path: "recordings/[id]/cut/route.ts",
+        method: "POST",
+        handler: cutRecording,
+    },
     {
         path: "recordings/[id]/agenda/detach/route.ts",
         method: "POST",

@@ -616,6 +616,7 @@ export async function remapTranscriptAttributionsInTx(
     },
 ): Promise<void> {
     const matched = mapLabels(previous.turns, next.turns, {
+        retainedLabels: next.retainedLabels,
         previousLabels: previous.labels,
         nextLabels: next.labels,
     });

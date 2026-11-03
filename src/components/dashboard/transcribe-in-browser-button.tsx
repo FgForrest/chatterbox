@@ -4,6 +4,7 @@ import { Cpu, Loader2 } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
+import { useRecordingCut } from "@/components/recordings/recording-cut";
 import { Button } from "@/components/ui/button";
 import { transcribeInBrowser } from "@/lib/transcription/browser-transcriber";
 import type { TranscriptionModel } from "@/types/transcription";
@@ -50,13 +51,17 @@ export function TranscribeInBrowserButton({
     model = "whisper-base",
 }: Props) {
     const i18n = useExtracted();
+    const cut = useRecordingCut();
+    const setBrowserTranscribing = cut?.setBrowserTranscribing;
     const [phase, setPhase] = useState<Phase>("idle");
 
     const run = useCallback(async () => {
         try {
+            setBrowserTranscribing?.(true);
             setPhase("downloading-audio");
             const audioRes = await fetch(
                 `/api/recordings/${recordingId}/audio`,
+                { cache: "no-store" },
             );
             if (!audioRes.ok) {
                 throw new Error(`Failed to fetch audio (${audioRes.status})`);
@@ -82,12 +87,24 @@ export function TranscribeInBrowserButton({
                         text: result.text,
                         detectedLanguage: result.detectedLanguage,
                         model,
+                        audioMd5:
+                            audioRes.headers?.get("X-Audio-Md5") ?? undefined,
+                        audioCutAt:
+                            audioRes.headers?.get("X-Recording-Cut-At") || null,
                     }),
                 },
             );
             if (!postRes.ok) {
-                const err = await postRes.json().catch(() => ({}));
-                throw new Error(err.error ?? "Failed to save transcription");
+                const err = (await postRes.json().catch(() => ({}))) as {
+                    error?: string;
+                };
+                throw new Error(
+                    postRes.status === 409
+                        ? i18n(
+                              "The recording audio changed. Transcribe it again.",
+                          )
+                        : (err.error ?? "Failed to save transcription"),
+                );
             }
 
             toast.success(i18n("Transcribed in browser"));
@@ -100,8 +117,9 @@ export function TranscribeInBrowserButton({
             );
         } finally {
             setPhase("idle");
+            setBrowserTranscribing?.(false);
         }
-    }, [recordingId, model, onComplete, i18n]);
+    }, [recordingId, model, onComplete, i18n, setBrowserTranscribing]);
 
     const busy = phase !== "idle";
 
@@ -110,7 +128,7 @@ export function TranscribeInBrowserButton({
             onClick={run}
             size="sm"
             variant="outline"
-            disabled={disabled || busy}
+            disabled={disabled || busy || cut?.cutting}
             title={i18n(
                 "Run Whisper in your browser. No API key required; audio never leaves your machine.",
             )}
