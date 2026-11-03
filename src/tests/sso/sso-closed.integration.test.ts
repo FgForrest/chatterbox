@@ -9,6 +9,7 @@
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { accounts, users } from "@/db/schema";
+import type * as AuthModule from "@/lib/auth";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -16,7 +17,7 @@ import {
 } from "@/tests/integration/postgres";
 import { createFakeIdentityProvider } from "@/tests/sso/fake-idp";
 
-const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
+const { dbProxy, dbRef, mockEnv, idpRef } = vi.hoisted(() => {
     const ref: { current: Record<PropertyKey, unknown> | null } = {
         current: null,
     };
@@ -36,6 +37,11 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
         },
     );
     return {
+        idpRef: {
+            current: null as ReturnType<
+                typeof createFakeIdentityProvider
+            > | null,
+        },
         dbProxy: proxy,
         dbRef: ref,
         mockEnv: {
@@ -61,6 +67,13 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
     };
 });
 
+vi.mock("@/lib/auth", async (importOriginal) => {
+    const idp = createFakeIdentityProvider(() => auth.handler);
+    idpRef.current = idp;
+    vi.spyOn(globalThis, "fetch").mockImplementation(idp.fetch);
+    return importOriginal<typeof AuthModule>();
+});
+
 vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 vi.mock("@/lib/posthog-server", () => ({
@@ -81,7 +94,8 @@ import { auth } from "@/lib/auth";
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 
-const idp = createFakeIdentityProvider(() => auth.handler);
+const idp = idpRef.current;
+if (!idp) throw new Error("fake identity provider was not initialized");
 
 describeWithDatabase("single sign-on on a closed instance", () => {
     let database: TestPostgresDatabase | null = null;
@@ -109,7 +123,6 @@ describeWithDatabase("single sign-on on a closed instance", () => {
             "sso_closed",
         );
         dbRef.current = database.db as unknown as Record<PropertyKey, unknown>;
-        vi.spyOn(globalThis, "fetch").mockImplementation(idp.fetch);
     }, 120_000);
 
     afterAll(async () => {

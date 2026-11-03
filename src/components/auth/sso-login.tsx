@@ -57,6 +57,7 @@ export function SsoLogin({ providerName, error, returnTo }: SsoLoginProps) {
                     { name },
                 );
             case "email_is_missing":
+            case "email_not_found":
                 return i18n(
                     "Your identity provider did not share an email address. Ask your administrator to release it to {name}.",
                     { name },
@@ -98,13 +99,13 @@ export function SsoLogin({ providerName, error, returnTo }: SsoLoginProps) {
         }
         rememberSsoReturnPath(destination);
         try {
-            const result = await signIn.oauth2({
-                providerId: SSO_PROVIDER_ID,
+            const result = await signIn.social({
+                provider: SSO_PROVIDER_ID,
                 callbackURL,
                 errorCallbackURL: errorCallbackURL.href,
             });
             if (result.error) {
-                toast.error(i18n("Sign-in failed. Please try again."));
+                toast.error(errorMessage(result.error.code ?? ""));
                 setIsLoading(false);
             }
         } catch {

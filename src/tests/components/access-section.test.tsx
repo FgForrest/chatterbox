@@ -9,12 +9,12 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { toast, oauth2 } = vi.hoisted(() => ({
-    oauth2: vi.fn().mockResolvedValue({}),
+const { toast, social } = vi.hoisted(() => ({
+    social: vi.fn().mockResolvedValue({}),
     toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
 }));
 vi.mock("sonner", () => ({ toast }));
-vi.mock("@/lib/auth-client", () => ({ signIn: { oauth2 } }));
+vi.mock("@/lib/auth-client", () => ({ signIn: { social } }));
 vi.mock("@/components/confirm-dialog", () => ({
     useConfirm: () => async (options: { onConfirm: () => Promise<void> }) => {
         await options.onConfirm();
@@ -281,8 +281,8 @@ describe("AccessSection", () => {
             }),
         );
         await waitFor(() =>
-            expect(oauth2).toHaveBeenCalledWith({
-                providerId: "oidc",
+            expect(social).toHaveBeenCalledWith({
+                provider: "oidc",
                 callbackURL: "http://localhost:3000/settings#access",
                 errorCallbackURL: "/login",
                 additionalData: { reauthenticate: true },
