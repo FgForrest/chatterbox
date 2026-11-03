@@ -62,6 +62,7 @@ export interface WorkflowWidgetProps {
     headerAction?: ReactNode;
     children?: ReactNode;
     footer?: WorkflowWidgetFooter;
+    stickyFooter?: boolean;
     closeLabel?: string;
     dialogWidth?: DialogWidth;
     dialogLine?: ReactNode;
@@ -276,13 +277,22 @@ function WidgetFooter({
     footer,
     closeLabel,
     frame,
+    stickyFooter,
 }: {
     footer: WorkflowWidgetFooter;
     closeLabel?: string;
     frame: WorkflowWidgetFrame;
+    stickyFooter?: boolean;
 }) {
     return (
-        <footer className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <footer
+            className={cn(
+                "flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6",
+                frame === "inline" &&
+                    stickyFooter &&
+                    "sticky bottom-0 z-20 rounded-b-xl bg-card shadow-[0_-4px_12px_-6px_rgba(0,0,0,0.2)]",
+            )}
+        >
             <div className="min-w-0 flex-1 text-sm text-muted-foreground">
                 {footer.status}
             </div>
@@ -314,7 +324,10 @@ function WidgetContents(props: WorkflowWidgetProps) {
                 {props.children && (
                     <div
                         className={cn(
-                            "min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6",
+                            "min-h-0 flex-1 px-4 py-4 sm:px-6",
+                            props.frame === "inline" && props.stickyFooter
+                                ? "overflow-x-clip"
+                                : "overflow-y-auto",
                             props.bodyClassName,
                         )}
                         data-widget-body
@@ -327,6 +340,7 @@ function WidgetContents(props: WorkflowWidgetProps) {
                         footer={props.footer}
                         closeLabel={props.closeLabel}
                         frame={props.frame}
+                        stickyFooter={props.stickyFooter}
                     />
                 )}
             </div>
@@ -370,6 +384,7 @@ export function WorkflowWidget(props: WorkflowWidgetProps) {
                     hasNoPadding
                     className={cn(
                         "@container/workflow gap-0 border-l-2 shadow-none",
+                        props.stickyFooter && "overflow-clip",
                         toneClasses[tone],
                         inlineLine && "hidden",
                     )}

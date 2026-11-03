@@ -1,9 +1,19 @@
-import { and, eq, inArray, isNull, ne, or, type SQL } from "drizzle-orm";
+import {
+    and,
+    eq,
+    inArray,
+    isNotNull,
+    isNull,
+    ne,
+    or,
+    type SQL,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
     chatterItems,
     type EvidenceProvenance,
+    itemProcessing,
     people,
     recordingTasks,
     type TaskUpdateProposalKind,
@@ -724,4 +734,53 @@ export async function followsForArchive(
             createdAt: row.createdAt.toISOString(),
         })),
     );
+}
+
+export interface ArchivedTaskReview {
+    itemId: string;
+    view: "private" | "org";
+    taskReviewSkipped: boolean;
+    taskReviewChanged: boolean;
+}
+
+/** Preserve review state even when a skipped summary has not produced proposals yet. */
+export async function taskReviewsForArchive(
+    scope: ArchiveScope,
+    itemIds: readonly string[],
+): Promise<ArchivedTaskReview[]> {
+    if (!itemIds.length) return [];
+    const rows = await db
+        .select({
+            itemId: itemProcessing.itemId,
+            view: itemProcessing.view,
+            skippedAt: itemProcessing.taskReviewSkippedAt,
+            changedAt: itemProcessing.taskReviewChangedAt,
+        })
+        .from(itemProcessing)
+        .innerJoin(
+            chatterItems,
+            and(
+                eq(chatterItems.id, itemProcessing.itemId),
+                eq(chatterItems.userId, itemProcessing.userId),
+            ),
+        )
+        .where(
+            and(
+                archivedItemCondition(scope),
+                inArray(itemProcessing.itemId, [...itemIds]),
+                scope.kind === "organization"
+                    ? eq(itemProcessing.view, "org")
+                    : undefined,
+                or(
+                    isNotNull(itemProcessing.taskReviewSkippedAt),
+                    isNotNull(itemProcessing.taskReviewChangedAt),
+                ),
+            ),
+        );
+    return rows.map(({ itemId, view, skippedAt, changedAt }) => ({
+        itemId,
+        view,
+        taskReviewSkipped: skippedAt !== null,
+        taskReviewChanged: changedAt !== null,
+    }));
 }

@@ -1,14 +1,14 @@
 ---
 title: The Almanac corrects transcripts twice; ranked key terms go to the transcription provider, and an agent pass after Learn fixes what is left
 date: 2026-10-02
-updated: 2026-10-22 22:30
-status: accepted
+updated: 2026-11-02 19:53
+status: superseded
 kind: feature
 issues: []
 prs: [80, 81, 83]
 areas: [src/lib/transcription/almanac-terms.ts, src/lib/transcription/elevenlabs-transcribe.ts, src/lib/transcription/speechmatics-transcribe.ts, src/lib/learn/correction-pass.ts, src/lib/learn/correction-pass-job.ts, src/lib/learn/correction-pass-queue.ts, src/lib/profiles/settings.ts]
 supersedes: [2026-09-30-learn]
-superseded-by: []
+superseded-by: [2026-11-02-quick-finish-of-reviews]
 relates: [2026-09-13-native-transcription-adapters, 2026-10-19-processing-profiles-and-workflow]
 ---
 
@@ -20,6 +20,8 @@ and Speechmatics (PR #80), always, with no setting. After a Learn run finishes, 
 has the Learn model read the whole transcript again with the Almanac and fix what was misheard,
 including words that are not Almanac names; its fixes apply at once with an undo per spot, and the
 pass has its own setting, on by default (PR #81, brought to `main` as PR #83).
+
+**Superseded in part** by [quick finish of reviews](2026-11-02-quick-finish-of-reviews.md): Only quick finish releases the summary hold without queuing the extra correction pass. Known-facts-only runs, ordinary Finish and empty Learn runs keep the correction-pass and hold-release rules; key terms are unchanged.
 
 ## Why
 

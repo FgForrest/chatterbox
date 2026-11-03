@@ -361,7 +361,7 @@ export async function gatherFacts(
                     eq(mailPendingShares.userId, userId),
                 ),
             ),
-        waitingTaskDecisions(db, itemId, userId, view),
+        waitingTaskDecisions(db, itemId, userId, view, false, contentView),
         plaudTranscriptPromise,
         item.kind === "audio"
             ? db

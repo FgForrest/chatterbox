@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import {
+    act,
     cleanup,
     fireEvent,
     render,
@@ -11,12 +12,14 @@ import {
 import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LearnReview } from "@/components/learn/learn-review";
+import { LearnWidget } from "@/components/learn/learn-widget";
 import { PlaybackProvider } from "@/components/playback/playback-context";
 import { createTestPlayback } from "@/tests/helpers/playback";
 
 vi.mock("sonner", () => ({
     toast: {
         error: vi.fn(),
+        dismiss: vi.fn(),
         success: vi.fn(),
         warning: vi.fn(),
         info: vi.fn(),
@@ -82,6 +85,8 @@ function inTurn(...bodies: unknown[]) {
 
 function respond(routes: Record<string, unknown>) {
     const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+        if (init?.method === "PATCH" && !url.includes("/items/"))
+            return Response.json({ changed: true });
         const key = `${init?.method ?? "GET"} ${url}`;
         const route = routes[key] as { inTurn?: unknown[] } | undefined;
         const body =
@@ -205,7 +210,6 @@ describe("LearnReview", () => {
                 "Speakers",
                 "New in the Almanac",
                 "Corrections",
-                "Known facts mentioned again",
                 "New facts",
                 "New kind of relation",
             ];
@@ -726,7 +730,10 @@ describe("LearnReview", () => {
         );
         const patched = () =>
             fetch.mock.calls
-                .filter(([, init]) => init?.method === "PATCH")
+                .filter(
+                    ([url, init]) =>
+                        init?.method === "PATCH" && url.includes("/items/"),
+                )
                 .map(([url, init]) => [
                     url.split("/items/")[1]?.split("?")[0],
                     JSON.parse(String(init?.body)).decision,
@@ -831,7 +838,10 @@ describe("LearnReview", () => {
         await screen.findByText("0 of 3 selected");
         expect(
             fetch.mock.calls
-                .filter(([, init]) => init?.method === "PATCH")
+                .filter(
+                    ([url, init]) =>
+                        init?.method === "PATCH" && url.includes("/items/"),
+                )
                 .map(([url]) => url),
         ).toEqual([
             "/api/recordings/rec-1/review/items/speaker_1?source=riffado",
@@ -1691,12 +1701,16 @@ describe("LearnReview", () => {
             await waitFor(() =>
                 expect(
                     fetch.mock.calls.filter(
-                        ([, init]) => init?.method === "PATCH",
+                        ([url, init]) =>
+                            init?.method === "PATCH" && url.includes("/items/"),
                     ),
                 ).toHaveLength(2),
             );
             const bodies = fetch.mock.calls
-                .filter(([, init]) => init?.method === "PATCH")
+                .filter(
+                    ([url, init]) =>
+                        init?.method === "PATCH" && url.includes("/items/"),
+                )
                 .map(([, init]) => JSON.parse(String(init?.body)));
             expect(bodies).toEqual([
                 {
@@ -1742,12 +1756,16 @@ describe("LearnReview", () => {
             await waitFor(() =>
                 expect(
                     fetch.mock.calls.filter(
-                        ([, init]) => init?.method === "PATCH",
+                        ([url, init]) =>
+                            init?.method === "PATCH" && url.includes("/items/"),
                     ),
                 ).toHaveLength(2),
             );
             const choices = fetch.mock.calls
-                .filter(([, init]) => init?.method === "PATCH")
+                .filter(
+                    ([url, init]) =>
+                        init?.method === "PATCH" && url.includes("/items/"),
+                )
                 .map(([, init]) => JSON.parse(String(init?.body)).choice);
             expect(choices).toEqual([
                 { name: "Veltrix", typeKey: "product" },
@@ -1787,7 +1805,8 @@ describe("LearnReview", () => {
             await waitFor(() =>
                 expect(
                     fetch.mock.calls.filter(
-                        ([, init]) => init?.method === "PATCH",
+                        ([url, init]) =>
+                            init?.method === "PATCH" && url.includes("/items/"),
                     ),
                 ).toHaveLength(2),
             );
@@ -1826,7 +1845,10 @@ describe("LearnReview", () => {
                 expect(never.getAttribute("aria-pressed")).toBe("false"),
             );
             const decisions = fetch.mock.calls
-                .filter(([, init]) => init?.method === "PATCH")
+                .filter(
+                    ([url, init]) =>
+                        init?.method === "PATCH" && url.includes("/items/"),
+                )
                 .map(([, init]) => JSON.parse(String(init?.body)).decision);
             expect(decisions).toEqual(["rejected", null]);
         });
@@ -1977,5 +1999,232 @@ describe("LearnReview", () => {
                 ),
             ).toBeTruthy();
         });
+    });
+});
+
+describe.each([
+    "inline",
+    "dialog",
+] as const)("quick Learn in the %s frame", (frame) => {
+    afterEach(() => {
+        cleanup();
+        vi.unstubAllGlobals();
+        vi.clearAllMocks();
+    });
+    const speaker = {
+        ...READY.items[1],
+        id: "speaker",
+        kind: "speaker",
+        payload: {
+            label: "speaker_1",
+            personId: "p-jan",
+            reason: "Guess",
+            evidenceMs: [],
+            source: "calendar",
+            guess: { confidence: 0.4 },
+        },
+    };
+    const quickReady = {
+        ...READY,
+        quickFinish: { automaticSummary: true, skipTasks: true },
+        items: [
+            ...READY.items,
+            speaker,
+            {
+                ...READY.items[1],
+                id: "known",
+                kind: "known_fact",
+                preTicked: true,
+            },
+        ],
+    };
+    async function open(kind: "audio" | "mail" = "audio") {
+        render(
+            <LearnWidget
+                kind={kind}
+                recordingId="rec-1"
+                source="riffado"
+                turns={TURNS}
+                frame={frame}
+                showTrigger={false}
+            />,
+        );
+        if (frame === "dialog")
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Review" }),
+            );
+        await screen.findByRole("heading", { name: /Review what Learn found/ });
+    }
+    it("shows the band, confirmed count and totals without known facts", async () => {
+        respond({
+            "GET /api/recordings/rec-1/review?source=riffado": quickReady,
+        });
+        await open();
+        const button = screen.getByRole("button", {
+            name: "Speakers and summary only",
+        });
+        expect(button.className).toContain("min-h-11");
+        expect(screen.getByText("0 of 1 speakers confirmed")).toBeTruthy();
+        expect(screen.getByText("1 of 3 will be applied")).toBeTruthy();
+        expect(screen.queryByText("Known facts mentioned again")).toBeNull();
+        expect(
+            document.querySelector('[data-shared-learn-row="known_fact"]'),
+        ).toBeNull();
+    });
+    it("keeps quick finish available after speaker decisions, then hides it on a non-speaker tick", async () => {
+        respond({
+            "GET /api/recordings/rec-1/review?source=riffado": quickReady,
+            "PATCH /api/recordings/rec-1/review/items/speaker?source=riffado": {
+                version: 1,
+            },
+            "PATCH /api/recordings/rec-1/review/items/i-fact?source=riffado": {
+                version: 1,
+            },
+        });
+        await open();
+        fireEvent.click(
+            screen.getByRole("checkbox", { name: "Accept Speaker 1 as Jan" }),
+        );
+        await screen.findByText("1 of 1 speakers confirmed");
+        expect(
+            screen.getByRole("button", { name: "Speakers and summary only" }),
+        ).toBeTruthy();
+        fireEvent.click(
+            screen.getByRole("checkbox", { name: "Jan — leads — Orion" }),
+        );
+        expect(
+            screen.queryByRole("button", { name: "Speakers and summary only" }),
+        ).toBeNull();
+        expect(
+            screen.getByRole("button", { name: "Finish review" }),
+        ).toBeTruthy();
+    });
+    it("keeps the band absent after reloading an edited review", async () => {
+        respond({
+            "GET /api/recordings/rec-1/review?source=riffado": {
+                ...quickReady,
+                run: { ...quickReady.run, reviewChanged: true },
+            },
+        });
+        await open();
+        expect(
+            screen.queryByRole("button", { name: "Speakers and summary only" }),
+        ).toBeNull();
+    });
+    it("defers quick finish and restores the mounted review with Undo", async () => {
+        const fetch = respond({
+            "GET /api/recordings/rec-1/review?source=riffado": quickReady,
+        });
+        await open();
+        fireEvent.click(
+            screen.getByRole("button", { name: "Speakers and summary only" }),
+        );
+        await waitFor(() =>
+            expect(
+                screen.queryByRole("heading", {
+                    name: /Review what Learn found/,
+                }),
+            ).toBeNull(),
+        );
+        const options = vi.mocked(toast.success).mock
+            .lastCall?.[1] as unknown as {
+            action: { onClick: () => void };
+            onAutoClose: () => void;
+        };
+        expect(options).toMatchObject({ duration: 8000 });
+        expect(
+            fetch.mock.calls.filter(([, init]) => init?.method === "POST"),
+        ).toHaveLength(0);
+        fireEvent.click(document.body);
+        await act(async () => {
+            options.action.onClick();
+        });
+        expect(
+            await screen.findByRole("heading", {
+                name: /Review what Learn found/,
+            }),
+        ).toBeTruthy();
+        await act(async () => {
+            options.onAutoClose();
+        });
+        expect(
+            fetch.mock.calls.filter(([, init]) => init?.method === "POST"),
+        ).toHaveLength(0);
+    });
+    it("commits the reviewed versions only when the toast closes", async () => {
+        const fetch = respond({
+            "GET /api/recordings/rec-1/review?source=riffado": inTurn(
+                quickReady,
+                quickReady,
+                { ...quickReady, run: { id: "run-1", status: "finished" } },
+            ),
+            "POST /api/recordings/rec-1/review/finish?source=riffado": {
+                status: "finished",
+                applied: 1,
+                skipped: [],
+            },
+        });
+        await open();
+        fireEvent.click(
+            screen.getByRole("button", { name: "Speakers and summary only" }),
+        );
+        await waitFor(() =>
+            expect(
+                screen.queryByRole("heading", {
+                    name: /Review what Learn found/,
+                }),
+            ).toBeNull(),
+        );
+        const options = vi.mocked(toast.success).mock
+            .lastCall?.[1] as unknown as {
+            onAutoClose: () => void;
+        };
+        await act(async () => {
+            options.onAutoClose();
+        });
+        await waitFor(() =>
+            expect(fetch).toHaveBeenCalledWith(
+                "/api/recordings/rec-1/review/finish?source=riffado",
+                expect.objectContaining({
+                    method: "POST",
+                    keepalive: false,
+                    body: JSON.stringify({
+                        quick: true,
+                        runId: "run-1",
+                        versions: {
+                            "i-correction": 0,
+                            "i-fact": 0,
+                            speaker: 0,
+                            known: 0,
+                        },
+                    }),
+                }),
+            ),
+        );
+        expect(
+            screen.queryByRole("heading", { name: /Review what Learn found/ }),
+        ).toBeNull();
+    });
+    it("uses the same band on mail without speakers", async () => {
+        respond({ "GET /api/recordings/rec-1/review": quickReady });
+        await open("mail");
+        expect(screen.getByText("In a hurry? Summary only")).toBeTruthy();
+        expect(
+            screen.getByRole("button", { name: "Summary only" }),
+        ).toBeTruthy();
+        expect(screen.queryByText(/speakers confirmed/)).toBeNull();
+    });
+    it("does not promise automatic work for a manual profile", async () => {
+        respond({
+            "GET /api/recordings/rec-1/review?source=riffado": {
+                ...quickReady,
+                quickFinish: { automaticSummary: false, skipTasks: false },
+            },
+        });
+        await open();
+        expect(
+            screen.getByRole("button", { name: "Speakers only" }),
+        ).toBeTruthy();
+        expect(screen.queryByText(/starts the summary now/)).toBeNull();
     });
 });

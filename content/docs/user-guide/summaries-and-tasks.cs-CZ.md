@@ -77,7 +77,13 @@ Jakmile jsou změny úkolů připravené, otevře se za shrnutím vložený prve
 - Pokud je možných kandidátů více, vyberte správný, nebo zvolte **Ponechat jako nový**. **Sloučit do dřívějšího úkolu** prohledá všechny otevřené úkoly v rozsahu složek, nejen navržené kandidáty.
 - Změna termínu zobrazuje **Současný termín** i **Navržený termín**. Dokončení je označeno **Vyžaduje potvrzení**. Výrok starší než poslední úprava úkolu se zobrazí jako **Dřívější zmínka** a nevyžaduje rozhodnutí.
 - Shrnutí může také navrhnout **Už není potřeba** nebo **Předáno někomu jinému**. Tyto možnosti nejsou nikdy předem vybrané. Neznámý řešitel se zobrazí ke kontrole a nevytvoří se potají.
-- Odškrtněte nový úkol, který není skutečný. Před přijetím opravte jeho text, řešitele nebo termín. V zápatí **Přidat úkol** doplní a zaměří úkol, který shrnutí opomenulo, a **Použít vybrané změny** použije vše, co zůstalo zaškrtnuté; **Uložit a pokračovat později** zachová kontrolu bez použití změn.
+- Odškrtněte nový úkol, který není skutečný. Před přijetím opravte jeho text, řešitele nebo termín. Pod seznamem Úkoly **Přidat úkol** doplní a zaměří úkol, který shrnutí opomenulo. V přichyceném zápatí **Použít vybrané změny** použije vše, co zůstalo zaškrtnuté; **Uložit a pokračovat později** zachová kontrolu bez použití změn.
+
+Nadpis Úkoly obsahuje zaškrtávátko celé skupiny a počet vybraných položek. Při nulovém výběru hlavní akce uvádí **Dokončit bez úkolů**. Dokončení je konečné: všechny nezaškrtnuté návrhy se zamítnou, i když není vybraný žádný.
+
+Dokud jste nic nezměnili, **Přeskočit** v záhlaví kontroly znamená „teď ne“ a nic nezamítá. Po prvním zaškrtnutí, úpravě, sloučení nebo přidání úkolu tlačítko zmizí a nevrátí se ani po obnovení stránky. Přeskočení skryje kartu a přibližně osm sekund nabídne **Vrátit**; opuštění stránky akci potvrdí ihned. Po dokončené ani přeskočené kontrole nezůstává další řádek.
+
+Vlastník nebo jiný oprávněný kontrolující může otevřít **Přeskočené návrhy (n)** pod shrnutím vedle **Přidat úkol** nebo v záhlaví seznamu úkolů. Zavření okna je ponechá přeskočené; dokončení v něm je konečné. I pozdější shrnutí ponechají kontrolu této položky přeskočenou, dokud ji nedokončíte. Volba **Jen mluvčí a shrnutí** v Učení může stejným způsobem přeskočit následnou kontrolu úkolů.
 
 Kontrola zobrazuje jednu kartu pro každý úkol. Shoda je hlavní rozhodnutí; změny termínu, dokončení, **Už není potřeba** a **Předáno někomu jinému** pro tento úkol jsou uvedeny pod ní. Tlačítko **Kde to zaznělo** ukazuje čas a během přehrávání pasáže se změní na pozastavení. Pokud citaci nelze v přepisu najít, kontrola to napíše místo nefunkčního odkazu.
 
@@ -146,6 +152,8 @@ Na stránce Úkoly je zdroj malé tlačítko pod textem. Pod nahrávkou nebo po�
 ### Záloha a obnova úkolů
 
 Osobní záloha obsahuje `tasks/personal.json`, `tasks/follows.json` a poznámky ve stávajících souborech úkolů položek. Záloha Organizace neobsahuje vlastní úkoly ani sledování členů. Po obnově odkazovaných položek a lidí lze přihlášenou relací poslat POST na `/api/tasks/restore` s `{personal, items, follows}`: `personal` je pole vlastních úkolů, `items` obsahuje `{itemId, tasks}` ze souboru `tasks.json` nahrávky nebo pole úkolů pošty a `follows` je pole sledování. Existující úkoly se nemění; ID jiného vlastníka jsou odmítnuta. Odkazy sledování na chybějící úkoly se přeskočí. Tímto se obnovují úkoly; Klepna nemá obecnou obrazovku obnovy celého archivu.
+
+Přeskočené kontroly a značky jejich úprav jsou v `tasks/reviews.json`, po položce a pohledu. Po obnově odkazovaných položek předejte toto pole jako `reviews` do `/api/tasks/restore`. Starší zálohy bez něj se obnoví bez značky přeskočení.
 
 Každý vlastní úkol nese `folderId`. Po obnově soukromých složek ze souboru `organization/folders.json` přidejte do požadavku `folders: [{id, restoredId}]`, kde `id` je ID složky v archivu a `restoredId` je ID obnovené soukromé složky. Odkaz bez mapování se nastaví na null, včetně složek vynechaných ze zálohy. Cílové složky Organizace i jiných uživatelů jsou odmítnuty. Zálohy Organizace se nemění.
 

@@ -14,6 +14,7 @@ import {
     sharePersonInTx,
 } from "@/lib/knowledge/share-provenance";
 import { transcriptSpeakerLabels } from "@/lib/knowledge/speaker-labels";
+import { carryTaskReviewScopeInTx } from "@/lib/tasks/review-state";
 import { routeAwaitingShareTaskProposalsInTx } from "@/lib/tasks/routing";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -209,6 +210,11 @@ export async function publishTaskAssigneesInTx(
             }
         }
     }
+    await carryTaskReviewScopeInTx(
+        tx,
+        { itemId: recordingId, userId: ownerUserId, view: "private" },
+        "org",
+    );
     await routeAwaitingShareTaskProposalsInTx(tx, recordingId);
     if (personIds.length > 0) scopes.add(orgUserId);
     return scopes;

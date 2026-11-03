@@ -101,8 +101,10 @@ export function NewRecordItem({
     quote,
     onDecide,
     onLinked,
+    onEdit,
 }: {
     payload: NewRecordView;
+    onEdit?: () => void;
     choice: Record<string, unknown> | null;
     ticked: boolean;
     /**
@@ -212,7 +214,10 @@ export function NewRecordItem({
                             maxLength={200}
                             disabled={disabled || rejected}
                             aria-label={i18n("Name")}
-                            onChange={(event) => setName(event.target.value)}
+                            onChange={(event) => {
+                                onEdit?.();
+                                setName(event.target.value);
+                            }}
                             onBlur={() => {
                                 const trimmed = name.trim();
                                 if (!trimmed) {

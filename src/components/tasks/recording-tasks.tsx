@@ -8,6 +8,7 @@ import { AddTaskButton } from "@/components/tasks/add-task-button";
 import type { SpeakerChoice } from "@/components/tasks/assignee-picker";
 import { mergeTaskIntoTarget } from "@/components/tasks/task-api";
 import { useTaskMergeFailure } from "@/components/tasks/task-merge-feedback";
+import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
 import { TaskRow } from "@/components/tasks/task-row";
 import type { RecordingTasksState } from "@/components/tasks/use-recording-tasks";
 
@@ -61,14 +62,29 @@ export function RecordingTasks({
         <AddTaskButton onClick={() => void state.add("open")} />
     );
 
+    const skippedLink =
+        data.canEdit && data.taskReviewSkipped && state.waiting > 0 ? (
+            <TaskReviewLink
+                state={state}
+                speakers={speakers}
+                organizationOnly={organizationOnly}
+                allowAdd={allowAdd}
+                frame="dialog"
+                skipped
+            />
+        ) : null;
+
     // No tasks: the summary's own list, as before tasks, unless a review
     // already said what its items were or is about to.
     if (data.tasks.length === 0) {
         if (reviewing) return null;
         return (
             <div className="space-y-2">
-                {data.reviewed ? null : fallback}
-                {addButton}
+                {data.reviewed || state.waiting > 0 ? null : fallback}
+                <div className="flex flex-wrap items-center gap-2">
+                    {addButton}
+                    {skippedLink}
+                </div>
             </div>
         );
     }
@@ -77,20 +93,23 @@ export function RecordingTasks({
         <section aria-label={i18n("Tasks")} className="space-y-2">
             <div className="flex items-center justify-between gap-2">
                 <h4 className="text-sm font-medium">{i18n("Tasks")}</h4>
-                {dropped.length > 0 && (
-                    <button
-                        type="button"
-                        aria-expanded={showDropped}
-                        className="rounded px-1 text-xs text-muted-foreground hover:text-foreground"
-                        onClick={() => setShowDropped(!showDropped)}
-                    >
-                        {showDropped
-                            ? i18n("Hide dropped")
-                            : i18n("Show dropped ({count})", {
-                                  count: String(dropped.length),
-                              })}
-                    </button>
-                )}
+                <div className="flex items-center gap-2">
+                    {skippedLink}
+                    {dropped.length > 0 && (
+                        <button
+                            type="button"
+                            aria-expanded={showDropped}
+                            className="rounded px-1 text-xs text-muted-foreground hover:text-foreground"
+                            onClick={() => setShowDropped(!showDropped)}
+                        >
+                            {showDropped
+                                ? i18n("Hide dropped")
+                                : i18n("Show dropped ({count})", {
+                                      count: String(dropped.length),
+                                  })}
+                        </button>
+                    )}
+                </div>
             </div>
             {shown.length > 0 && (
                 <ul className="divide-y rounded-lg border">

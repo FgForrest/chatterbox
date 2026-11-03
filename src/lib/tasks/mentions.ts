@@ -32,6 +32,7 @@ import type { ArchiveScope } from "@/lib/export/archive-scope";
 import { hasAudio } from "@/lib/recordings/audio-availability";
 import { sharedItemCondition } from "@/lib/sharing/shared";
 import type { TaskViewer } from "@/lib/tasks/access";
+import { carryTaskReviewScopeInTx } from "@/lib/tasks/review-state";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -840,10 +841,15 @@ export async function deleteItemTaskVectorsInTx(
 }
 
 /** Re-home Organization tasks whose home item is being withdrawn. */
-export function withdrawItemTaskHomesInTx(
+export async function withdrawItemTaskHomesInTx(
     tx: Tx,
     input: Omit<MoveInput, "removeMentions" | "reason">,
 ): Promise<void> {
+    await carryTaskReviewScopeInTx(
+        tx,
+        { itemId: input.itemId, userId: input.ownerUserId, view: "org" },
+        "private",
+    );
     return moveItemTaskHomesInTx(tx, {
         ...input,
         reason: "withdrawn",

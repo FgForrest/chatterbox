@@ -11,7 +11,7 @@ Funkce Učení porovnává přepis s vaším [Almanachem](almanac.md) a navrhuje
 - **nové osoby a věci**, které stojí za to přidat do Almanachu,
 - **fakta**, která byla řečena („Marek pracuje na Pathfinderu”).
 
-Nic se nezmění, dokud návrhy nezkontrolujete.
+Známá fakta zmíněná znovu se použijí automaticky při dokončení běhu. Ostatní návrhy čekají na Vaši kontrolu.
 
 Učení je dostupné u přepisů s časovými údaji na instancích s vlastním hostingem a poskytovatelem AI, který umí vytvářet souhrny (viz [Jakého poskytovatele zvolit](transcripts.md#which-provider-to-choose)).
 
@@ -46,10 +46,14 @@ Obsah kontroly je stejný, ať je vložený v položce, nebo otevřený v okně.
 - **Jazyk přepisu**: jazyk rozpoznaný Učením je předvybraný. Můžete jej ponechat, zachovat jazyk rozpoznaný poskytovatelem nebo vybrat jiný ze seznamu. **Dokončit kontrolu** potvrdí volbu pro tuto nahrávku v soukromém pohledu i v pohledu Organizace. Při shodě nebo nejistotě se jazyk nenabízí ani neukládá. Kontrola platí pro zvukové nahrávky; zacházení s jazykem pošty se nemění.
 - **Mluvčí**: koho Učení považuje za každého nepojmenovaného mluvčího a proč. **▷** přehraje důkaz. **Někdo jiný…** vybere jinou osobu, **Neznámý** označí mluvčího za neznámého.
 - **Nové v Almanachu**: osoby a věci, které Učení rozpoznalo, ale Almanach je nezná. Začínají nezaškrtnuté. Opravte jméno nebo typ před zaškrtnutím, zvolte **Je to něco známého…**, pokud záznam už máte pod jiným jménem, nebo **Nikdy nenavrhovat**, pokud jej nechcete navrhovat v žádné nahrávce.
-- **Opravy**: špatně rozpoznaná jména, četnost a výskyt. Tyto návrhy jsou předem zaškrtnuté.
-- **Nová fakta** a **Známá fakta** zmiňovaná znovu. Vztahy se zobrazují česky, například „Jan Novák — pracuje pro — Bluefin Logistics“ nebo „Jan Novák — má roli — provozní ředitel“. Základní typy v nabídce jsou například **Pojem**, **Místo** a **Produkt nebo systém**. Vlastní typy a vztahy si ponechávají Vámi zadaný název.
+- **Opravy**: špatně rozpoznaná jména, četnost a výskyt. Předem zaškrtnuté jsou jen opravy, které jste už dříve potvrdili.
+- **Nová fakta**. Známá fakta zmíněná znovu se použijí automaticky a nejsou součástí kontroly ani jejích počtů. Pokud běh najde jen známá fakta, dokončí se bez kontroly a uvolní čekání shrnutí. Vztahy se zobrazují česky, například „Jan Novák — pracuje pro — Bluefin Logistics“ nebo „Jan Novák — má roli — provozní ředitel“. Základní typy v nabídce jsou například **Pojem**, **Místo** a **Produkt nebo systém**. Vlastní typy a vztahy si ponechávají Vámi zadaný název.
 
-Zaškrtněte, co je správně, a klikněte na **Dokončit kontrolu**. **Uložit a pokračovat později** zachová Vaše zaškrtnutí bez použití změn. Nezaškrtnuté návrhy již na této nahrávce nebudou navrženy.
+Zaškrtněte, co je správně, a klikněte na **Dokončit kontrolu**. **Uložit a pokračovat později** zachová Vaše zaškrtnutí bez použití změn. Dokončení je konečné i při nulovém výběru: nezaškrtnuté návrhy se zamítnou.
+
+Pro rychlé dokončení použijte **Jen mluvčí a shrnutí** v pruhu nad sekcemi. Použije jen výslovně potvrzené mluvčí, dříve potvrzené opravy a vybraný jazyk přepisu. Odhad označený **?** tato akce nepotvrdí. Ostatní návrhy se přeskočí bez zamítnutí a mohou se vrátit při volbě **Učit se znovu**. Při zapnutém automatickém shrnutí začne shrnutí ihned a při zapnutém hledání úkolů se jeho kontrola úkolů přeskočí. Pošta nabízí **Jen shrnutí**, bez mluvčích. Při ručním shrnování pruh nabízí **Jen mluvčí** nebo **Přeskočit Učení** a shrnutí nespouští.
+
+Po první změně mimo sekci Mluvčí pruh zmizí a nevrátí se ani po obnovení stránky. Potvrzení nebo odmítnutí mluvčího jej neskryje. Zápatí vložené kontroly zůstává při posouvání viditelné. Po rychlém dokončení kontrola zmizí; volba **Vrátit** v oznámení ji přibližně osm sekund obnoví. Opuštění stránky akci potvrdí ihned. Volba platí jen pro tuto položku.
 
 Přehled nemusíte otevírat: návrhy se zobrazují i přímo v přepisu. Návrh opravy je zvýrazněn, navržený mluvčí je zobrazen jako jméno s **?**, každý s fajfkou k přijetí. **Návrhy mluvčích** nad přepisem zobrazují navržená jména s možností **Přijmout vše**.
 
@@ -63,7 +67,7 @@ Dokončené stavy Učení z detailu zmizí. Výsledky otevřete ikonou knihy **Z
 
 Přijaté opravy jsou uchovány vedle původního textu, nikdy ne místo něj, takže je lze vždy vrátit zpět. Viz [Opravená slova](transcripts.md#corrected-words).
 
-Pokud má profil zpracování zapnuté **Opravit přepis po Učení**, Učení potom ještě jednou přečte celý přepis s údaji z Almanachu a opraví další nesprávně rozpoznaná slova. Každá oprava je podtržena jantarovou barvou a můžete ji vrátit zpět.
+Po běžném dokončení, pokud má profil zpracování zapnuté **Opravit přepis po Učení**, Učení potom ještě jednou přečte celý přepis s údaji z Almanachu a opraví další nesprávně rozpoznaná slova. Každá oprava je podtržena jantarovou barvou a můžete ji vrátit zpět.
 
 Když sdílíte nahrávku nebo e-mail, u kterých jste dokončili kontrolu Učení pro aktuální obsah, Klepna předá potvrzené poznatky Organizaci bez dalšího potvrzení. Dokončení a dostupné počty najdete ve **Znalostech** položky. Pracovní postup pokračuje bez další kontroly Učení. Kurátoři mohou spustit **Učit se znovu** a osoby i věci Organizace slučovat nebo mazat.
 

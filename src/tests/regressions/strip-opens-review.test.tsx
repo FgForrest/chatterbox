@@ -494,7 +494,7 @@ describe.each([
         fireEvent.click(screen.getByRole("button", { name: "Review tasks" }));
 
         expect(
-            screen.getByRole("button", { name: "Apply selected changes" }),
+            screen.getByRole("button", { name: "Finish without tasks" }),
         ).toBeTruthy();
         expect(document.activeElement).toBe(
             screen.getByRole("heading", { name: /Task review/ }),
