@@ -158,11 +158,12 @@ function render() {
     el("prep").setAttribute("aria-pressed", String(!live));
     el("live").setAttribute("aria-pressed", String(live));
     el("points").replaceChildren();
+    const topLevelPoints = detail.points.filter((point) => !point.parentId);
     el("point-count").textContent = t("agendaProgress", [
-        String(detail.points.filter((point) => point.discussedAt).length),
-        String(detail.points.length),
+        String(topLevelPoints.filter((point) => point.discussedAt).length),
+        String(topLevelPoints.length),
     ]);
-    for (const point of detail.points.filter((entry) => !entry.parentId))
+    for (const point of topLevelPoints)
         renderPoint(point);
     el("quick-add").hidden = !detail.permissions.edit;
     el("point-text").disabled = saving;

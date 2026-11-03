@@ -188,6 +188,28 @@ async function start(doc = document, tabId = 7) {
 }
 
 describe("agenda side panel", () => {
+    it("counts top-level points and keeps parent and child ticks independent", async () => {
+        data.points[0].discussedAt = "2026-10-27T09:00:00Z";
+        data.points[1].discussedAt = "2026-10-27T09:00:00Z";
+        data.points.push(
+            { id: "p3", text: "Budget", parentId: null, version: 0 },
+            { id: "p4", text: "Costs", parentId: "p3", version: 0 },
+            { id: "p5", text: "Next steps", parentId: null, version: 0 },
+        );
+        await start();
+        expect(el("point-count").textContent).toBe("1 of 3 discussed");
+        el("live").click();
+        const checkboxes = () =>
+            el("points").querySelectorAll('input[type="checkbox"]');
+        checkboxes()[1].click();
+        await settle();
+        expect(el("point-count").textContent).toBe("1 of 3 discussed");
+        expect(checkboxes()[0].checked).toBe(true);
+        checkboxes()[2].click();
+        await settle();
+        expect(el("point-count").textContent).toBe("2 of 3 discussed");
+        expect(checkboxes()[3].checked).toBe(false);
+    });
     it("keeps two mounted tab panels on their own agendas for reads, edits and selection", async () => {
         const first = document.implementation.createHTMLDocument();
         const second = document.implementation.createHTMLDocument();

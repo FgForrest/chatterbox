@@ -935,6 +935,28 @@ suite("meeting planning server (PostgreSQL)", () => {
             "owner",
         ]);
     });
+    it.each([
+        "owner-folder",
+        "org-folder",
+    ])("counts only top-level agenda points in %s lists and recorder matches", async (folderId) => {
+        const meeting = await create(folderId);
+        await addPoint("owner", meeting.id, { text: "First" });
+        const parent = await addPoint("owner", meeting.id, { text: "Second" });
+        await addPoint("owner", meeting.id, { text: "Third" });
+        for (const text of ["Child", "Another child"])
+            await addPoint("owner", meeting.id, { text, parentId: parent.id });
+        const rows = await listMeetings("owner", { includePast: true });
+        expect(rows.find((row) => row.id === meeting.id)?.counts.points).toBe(
+            3,
+        );
+        const matches = await matchRecorderAgendas(
+            "owner",
+            new Date(start.getTime() + 60000),
+        );
+        expect(
+            matches.find((row) => row.id === meeting.id)?.counts.points,
+        ).toBe(3);
+    });
     it("reports Calendar export authority without Google calls on repeated non-author loads", async () => {
         const meeting = await prepareMeeting("owner", {
             folderId: "org-folder",
