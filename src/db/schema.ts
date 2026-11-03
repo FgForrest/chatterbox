@@ -805,6 +805,7 @@ export const recordings = pgTable(
         // legitimately comes back -- a Plaud version bump re-downloads the
         // audio, a manual re-run rewrites the transcript or summary.
         audioReapedAt: timestamp("audio_reaped_at"),
+        cutAt: timestamp("cut_at"),
         // DB-backed claim for the external remote-trash operation. The
         // retention worker runs in every app process, so this prevents two
         // processes from moving the same remote original concurrently.

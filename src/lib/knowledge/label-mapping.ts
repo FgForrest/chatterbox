@@ -30,6 +30,8 @@ export function demoteAll(mapping: LabelMapping): LabelMapping {
 }
 
 export interface LabelMappingOptions {
+    /** Labels whose speech is retained verbatim by a destructive cut. */
+    retainedLabels?: readonly string[];
     /** Share of the old label's speech that must fall in the new label. */
     minRecall?: number;
     /** Share of the new label's speech that must come from the old label. */
@@ -92,6 +94,11 @@ export function mapLabels(
     options: LabelMappingOptions = {},
 ): LabelMapping {
     const mapping: LabelMapping = { carried: new Map(), uncertain: new Map() };
+    if (options.retainedLabels) {
+        for (const label of options.retainedLabels)
+            mapping.carried.set(label, label);
+        return mapping;
+    }
     if (previous && next && sameUntimedSpeakers(previous, next)) {
         for (const turn of previous) {
             const label = speakerKey(turn.speaker);

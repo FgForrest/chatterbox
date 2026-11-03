@@ -36,6 +36,10 @@ import {
 import type { PlayAtTarget } from "@/components/playback/play-at-button";
 import { usePlayback } from "@/components/playback/playback-context";
 import { useProductName } from "@/components/product-name-provider";
+import {
+    RecordingCutButton,
+    useRecordingCut,
+} from "@/components/recordings/recording-cut";
 import { SourceSwitcher } from "@/components/source-switcher";
 import { SummaryWidget } from "@/components/summary/summary-widget";
 import {
@@ -217,6 +221,7 @@ export function TranscriptionPanel({
     processing = null,
 }: TranscriptionPanelProps) {
     const playback = usePlayback();
+    const cut = useRecordingCut();
     const i18n = useExtracted();
     const name = useProductName();
     const transcriptList = toTranscriptList(transcripts, transcription);
@@ -249,6 +254,9 @@ export function TranscriptionPanel({
     const activeTranscript =
         transcriptList.find((t) => t.source === activeSource) ??
         transcriptList[0];
+    useEffect(() => {
+        cut?.setActiveTurns(activeTranscript?.turns ?? null);
+    }, [cut?.setActiveTurns, activeTranscript?.turns]);
     useWorkflowWidgetOpen(
         `recording-learn-review-${recording.id}`,
         (source) => {
@@ -922,6 +930,7 @@ export function TranscriptionPanel({
                                                     )}
                                                     disabled={
                                                         transcriptionRunning ||
+                                                        cut?.cutting ||
                                                         recording.audioReaped
                                                     }
                                                     title={
@@ -973,6 +982,7 @@ export function TranscriptionPanel({
                                         </AlertDialogContent>
                                     </AlertDialog>
                                 )}
+                                <RecordingCutButton />
                                 {transcriptList.length > 1 &&
                                     activeTranscript && (
                                         <>
@@ -1070,6 +1080,7 @@ export function TranscriptionPanel({
                                         size="sm"
                                         disabled={
                                             transcriptionRunning ||
+                                            cut?.cutting ||
                                             recording.audioReaped
                                         }
                                         title={
@@ -1088,6 +1099,7 @@ export function TranscriptionPanel({
                                             recordingId={recording.id}
                                             disabled={
                                                 transcriptionRunning ||
+                                                cut?.cutting ||
                                                 recording.audioReaped
                                             }
                                             onComplete={

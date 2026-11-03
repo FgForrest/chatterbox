@@ -372,7 +372,10 @@ export async function upsertTranscription(
             const [stillActive] = await tx
                 .select({
                     deletedAt: recordings.deletedAt,
+                    cutAt: recordings.cutAt,
                     transcriptReapedAt: chatterItems.contentReapedAt,
+                    fileMd5: recordings.fileMd5,
+                    audioReapedAt: recordings.audioReapedAt,
                 })
                 .from(recordings)
                 .innerJoin(chatterItems, recordingItemJoin)
@@ -388,7 +391,11 @@ export async function upsertTranscription(
             if (
                 !stillActive ||
                 stillActive.deletedAt ||
-                (stillActive.transcriptReapedAt && !allowReaped)
+                (stillActive.transcriptReapedAt && !allowReaped) ||
+                (stillActive.cutAt &&
+                    (source === "plaud" ||
+                        stillActive.audioReapedAt ||
+                        args.audioMd5 !== stillActive.fileMd5))
             ) {
                 throw RECORDING_WRITE_BLOCKED;
             }
@@ -595,6 +602,7 @@ export async function upsertEnhancement(
                 : await tx
                       .select({
                           deletedAt: recordings.deletedAt,
+                          cutAt: recordings.cutAt,
                           summaryReapedAt: chatterItems.summaryReapedAt,
                       })
                       .from(recordings)
@@ -611,7 +619,10 @@ export async function upsertEnhancement(
             if (
                 !stillActive ||
                 stillActive.deletedAt ||
-                (stillActive.summaryReapedAt && !allowReaped)
+                (stillActive.summaryReapedAt && !allowReaped) ||
+                (source === "plaud" &&
+                    "cutAt" in stillActive &&
+                    stillActive.cutAt)
             ) {
                 throw RECORDING_WRITE_BLOCKED;
             }

@@ -85,6 +85,7 @@ export interface ArchiveResult {
 interface ManifestRecording {
     id: string;
     confirmedLanguage: string | null;
+    cutAt?: string | null;
     calendarEventId?: string | null;
     calendarSeriesId?: string | null;
     /** Whose recording it is: in the Organization's archive only. */
@@ -443,6 +444,7 @@ export async function buildAndUploadExportArchive(input: {
         const entry: ManifestRecording = {
             id: recording.id,
             confirmedLanguage: recording.confirmedLanguage ?? null,
+            cutAt: recording.cutAt?.toISOString() ?? null,
             calendarEventId: recording.calendarEventId,
             calendarSeriesId: recording.calendarSeriesId,
             ...(scope.kind === "organization"

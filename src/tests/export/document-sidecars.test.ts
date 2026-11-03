@@ -17,9 +17,15 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
 }));
 
-vi.mock("@/db", () => ({
-    db: { select: vi.fn(), update: vi.fn() },
-}));
+vi.mock("@/db", () => {
+    const db = {
+        select: vi.fn(),
+        update: vi.fn(),
+        transaction: async (run: (value: unknown) => Promise<unknown>) =>
+            run(db),
+    };
+    return { db };
+});
 
 const { enqueueExportPlansForUser } = vi.hoisted(() => ({
     enqueueExportPlansForUser: vi.fn().mockResolvedValue(undefined),
@@ -64,6 +70,7 @@ type QueryChain = Promise<unknown[]> & {
     where: () => QueryChain;
     innerJoin: () => QueryChain;
     leftJoin: () => QueryChain;
+    for: () => QueryChain;
     limit: () => Promise<unknown[]>;
 };
 
@@ -78,6 +85,7 @@ function rows(result: unknown[]): QueryChain {
         where: () => chain,
         innerJoin: () => chain,
         leftJoin: () => chain,
+        for: () => chain,
         limit: () => Promise.resolve(result),
     });
     return chain;
@@ -637,6 +645,12 @@ describe("exportRecordingSidecars", () => {
                     },
                 ]) as never,
             )
+            .mockReturnValueOnce(
+                rows([
+                    { storagePath: "user-1/legacy.mp3", storageFilename: null },
+                ]) as never,
+            )
+            .mockReturnValueOnce(rows([]) as never)
             .mockReturnValueOnce(rows([]) as never)
             .mockReturnValueOnce(rows([]) as never)
             .mockReturnValueOnce(

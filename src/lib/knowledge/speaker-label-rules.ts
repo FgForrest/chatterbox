@@ -90,6 +90,8 @@ export function speakerLabelsForTranscript({
 
 /** One version of a transcript, as far as its speakers go. */
 export interface SpeakerVersion {
+    /** A destructive cut keeps these exact labels, including overlapping speech. */
+    retainedLabels?: readonly string[];
     /** Decrypted timed turns, or null for a transcript without timings. */
     turns: readonly TranscriptTurn[] | null;
     /** Its speaker labels as keys, first speaker first. */

@@ -397,7 +397,9 @@ export function ItemEraseMenu({
                             <DropdownMenuLabel>
                                 {i18n("Local artifacts")}
                             </DropdownMenuLabel>
-                            {recording.audioReaped && isPlaudRecording ? (
+                            {recording.audioReaped &&
+                            isPlaudRecording &&
+                            !recording.cutAt ? (
                                 <DropdownMenuItem
                                     // Shared, only the organization account changes it.
                                     disabled={shared}

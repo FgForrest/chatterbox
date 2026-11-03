@@ -7,12 +7,18 @@ const mocks = vi.hoisted(() => ({
     exists: vi.fn(),
     select: vi.fn(),
     update: vi.fn(),
+    transaction: vi.fn(),
+    locked: {
+        storagePath: "user-1/legacy.mp3",
+        storageFilename: null as string | null,
+    },
 }));
 
 vi.mock("@/db", () => ({
     db: {
         select: mocks.select,
         update: mocks.update,
+        transaction: mocks.transaction,
     },
 }));
 vi.mock("@/lib/recordings/storage-files", () => ({
@@ -50,6 +56,10 @@ function state(
         storageFilename: string | null;
     }> = {},
 ) {
+    mocks.locked = {
+        storagePath: overrides.storagePath ?? "user-1/legacy.mp3",
+        storageFilename: overrides.storageFilename ?? null,
+    };
     return {
         id: "rec-1",
         userId: "user-1",
@@ -73,6 +83,32 @@ describe("recording storage reconciliation", () => {
         ]);
         mocks.deleteOldRecordingFiles.mockResolvedValue(undefined);
         mocks.select.mockReturnValue(selection([]));
+        mocks.transaction.mockImplementation(
+            async (run: (tx: unknown) => Promise<unknown>) => {
+                let reads = 0;
+                const tx = {
+                    select: (...args: unknown[]) => {
+                        if (reads++ === 0)
+                            return {
+                                from: () => ({
+                                    where: () => ({
+                                        for: async () => [mocks.locked],
+                                    }),
+                                }),
+                            };
+                        if (reads === 2) return selection([]);
+                        return mocks.select(...args);
+                    },
+                    update: mocks.update,
+                    transaction: async (
+                        savepoint: (value: {
+                            update: typeof mocks.update;
+                        }) => Promise<unknown>,
+                    ) => savepoint({ update: mocks.update }),
+                };
+                return run(tx);
+            },
+        );
         mocks.update.mockImplementation(() => ({
             set: vi
                 .fn()

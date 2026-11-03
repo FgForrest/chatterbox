@@ -169,6 +169,7 @@ export async function recheckEvidenceInTx(
         .where(eq(transcriptions.id, transcriptionId));
     const revision = transcript?.revision ?? 0;
     const matched = mapLabels(previous.turns, next.turns, {
+        retainedLabels: next.retainedLabels,
         previousLabels: previous.labels,
         nextLabels: next.labels,
     });

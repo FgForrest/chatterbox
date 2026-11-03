@@ -56,6 +56,7 @@ const recording = {
     waveformPeaks: null,
     deletedAt: null,
     audioReapedAt: null,
+    cutAt: null,
     contentReapedAt: null,
     summaryReapedAt: null,
     remoteRetentionClaimedAt: null,

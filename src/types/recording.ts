@@ -58,6 +58,7 @@ export type Recording = Omit<RecordingQueryResult, "startTime"> & {
      */
     audioReaped?: boolean;
     audioReapedAt?: string | null;
+    cutAt?: string | null;
     transcriptReapedAt?: string | null;
     summaryReapedAt?: string | null;
     /**
@@ -89,6 +90,7 @@ export function serializeRecording(
         waveformPeaks?: number[] | null;
         audioReaped?: boolean;
         audioReapedAt?: Date | null;
+        cutAt?: Date | null;
         transcriptReapedAt?: Date | null;
         summaryReapedAt?: Date | null;
         view?: RecordingView;
@@ -104,6 +106,7 @@ export function serializeRecording(
         ...(flags?.needsReview ? { needsReview: true } : {}),
         audioReaped: flags?.audioReaped ?? false,
         audioReapedAt: flags?.audioReapedAt?.toISOString() ?? null,
+        cutAt: flags?.cutAt?.toISOString() ?? null,
         transcriptReapedAt: flags?.transcriptReapedAt?.toISOString() ?? null,
         summaryReapedAt: flags?.summaryReapedAt?.toISOString() ?? null,
         // Empty arrays would be invalid per the field contract ("null

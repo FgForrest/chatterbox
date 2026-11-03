@@ -115,6 +115,8 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
                     "Content-Length": chunkSize.toString(),
                     "Content-Range": `bytes ${start}-${end}/${fileSize}`,
                     "Accept-Ranges": "bytes",
+                    "X-Audio-Md5": recording.fileMd5,
+                    "X-Recording-Cut-At": recording.cutAt?.toISOString() ?? "",
                     ...downloadHeaders,
                 },
             });
@@ -126,6 +128,8 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             "Content-Type": contentType,
             "Content-Length": fileSize.toString(),
             "Accept-Ranges": "bytes",
+            "X-Audio-Md5": recording.fileMd5,
+            "X-Recording-Cut-At": recording.cutAt?.toISOString() ?? "",
             ...downloadHeaders,
         },
     });
