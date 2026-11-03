@@ -473,26 +473,38 @@ describeWithKeycloak("web sign-in with identity-provider authorization", () => {
     });
 
     it("requests fresh authentication only for the explicit reauthentication path", async () => {
-        for (const reauthenticate of [false, true]) {
+        for (const reauthenticate of [undefined, false, true, "true"]) {
             const response = await auth.handler(
-                new Request(`${TEST_APP_URL}/api/auth/sign-in/oauth2`, {
+                new Request(`${TEST_APP_URL}/api/auth/sign-in/social`, {
                     method: "POST",
                     headers: {
                         origin: TEST_APP_URL,
                         "content-type": "application/json",
                     },
                     body: JSON.stringify({
-                        providerId: "oidc",
+                        provider: "oidc",
                         callbackURL: "/settings#access",
                         additionalData: { reauthenticate },
+                        ...(reauthenticate === true
+                            ? {
+                                  additionalParams: {
+                                      prompt: "none",
+                                      max_age: "3600",
+                                  },
+                              }
+                            : {}),
                     }),
                 }),
             );
             expect(response.status).toBe(200);
             const { url } = (await response.json()) as { url: string };
             const params = new URL(url).searchParams;
-            expect(params.get("max_age")).toBe(reauthenticate ? "0" : null);
-            expect(params.get("prompt")).toBe(reauthenticate ? "login" : null);
+            expect(params.get("max_age")).toBe(
+                reauthenticate === true ? "0" : null,
+            );
+            expect(params.get("prompt")).toBe(
+                reauthenticate === true ? "login" : null,
+            );
         }
     });
 
@@ -638,6 +650,7 @@ describeWithKeycloak("web sign-in with identity-provider authorization", () => {
             }),
         );
         expect(out.status).toBe(200);
+        expect(await out.json()).toEqual({ success: true });
         expect(
             await db()
                 .select()

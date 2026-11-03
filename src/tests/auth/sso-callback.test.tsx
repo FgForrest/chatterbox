@@ -80,12 +80,12 @@ describe("SSO callbacks through better-auth", () => {
         "/dashboard?filter=a:b",
     ])("starts sign-in for %s through the real callback validator", async (returnTo) => {
         const rejected = await auth.handler(
-            new Request(`${origin}/api/auth/sign-in/oauth2`, {
+            new Request(`${origin}/api/auth/sign-in/social`, {
                 method: "POST",
                 headers: { "content-type": "application/json" },
                 body: JSON.stringify({
-                    providerId: "oidc",
-                    callbackURL: returnTo,
+                    provider: "oidc",
+                    callbackURL: `https://untrusted.example${returnTo}`,
                 }),
             }),
         );
@@ -118,9 +118,30 @@ describe("SSO callbacks through better-auth", () => {
             screen.getByRole("button", { name: "Sign in with Acme" }),
         );
         await waitFor(() => expect(responses).toHaveLength(1));
+        const { url } = (await responses[0].clone().json()) as { url: string };
+        const state = new URL(url).searchParams.get("state");
+        expect(state).toBeTruthy();
+        const cookie = responses[0].headers
+            .getSetCookie()
+            .map((value) => value.split(";")[0])
+            .join("; ");
+        const forged = await auth.handler(
+            new Request(
+                `${origin}/api/auth/callback/oidc?error=access_denied&state=forged`,
+                { headers: { cookie } },
+            ),
+        );
+        expect(forged.status).toBe(302);
+        expect(
+            new URL(
+                forged.headers.get("location") ?? "",
+                origin,
+            ).searchParams.get("error"),
+        ).toBe("state_mismatch");
         const cancellation = await auth.handler(
             new Request(
-                `${origin}/api/auth/oauth2/callback/oidc?error=access_denied&state=example`,
+                `${origin}/api/auth/callback/oidc?error=access_denied&state=${state}`,
+                { headers: { cookie } },
             ),
         );
         expect(cancellation.status).toBe(302);
@@ -129,13 +150,17 @@ describe("SSO callbacks through better-auth", () => {
             origin,
         );
         expect(retry.pathname).toBe("/login");
-        expect(retry.searchParams.has("returnTo")).toBe(false);
+        expect(retry.searchParams.get("error")).toBe("access_denied");
+        expect(retry.searchParams.get("returnTo")).toBe("/tasks?x=1#notes");
         first.unmount();
         render(
             <SsoLogin
                 providerName="Acme"
                 error={retry.searchParams.get("error") ?? undefined}
             />,
+        );
+        expect(screen.getByRole("alert").textContent).toBe(
+            "Sign-in was cancelled at the identity provider.",
         );
         fireEvent.click(
             screen.getByRole("button", { name: "Sign in with Acme" }),

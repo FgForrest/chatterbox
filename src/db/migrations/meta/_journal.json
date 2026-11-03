@@ -1079,6 +1079,20 @@
       "when": 1793690215317,
       "tag": "0153_lowly_madelyne_pryor",
       "breakpoints": true
+    },
+    {
+      "idx": 154,
+      "version": "7",
+      "when": 1793707538767,
+      "tag": "0154_ordinary_deathstrike",
+      "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1793713392601,
+      "tag": "0155_neat_stature",
+      "breakpoints": true
     }
   ]
 }

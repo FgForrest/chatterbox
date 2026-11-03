@@ -1,7 +1,7 @@
 ---
 title: Self-host sign-in through one OpenID Connect provider, password login switched off
 date: 2026-10-06
-updated: 2026-10-22 22:30
+updated: 2026-11-03 15:24
 status: accepted
 kind: feature
 issues: []
@@ -136,9 +136,14 @@ provider sign-out across applications.
   verifies password users' emails, so the default would refuse every link. The provider stays
   untrusted, so linking still needs `email_verified` from the provider.
 - `mapSsoProfile` keeps the old email when the provider's new email belongs to another account.
-- better-auth decodes the ID token without verifying its signature (acceptable for the code flow
-  over TLS, per OpenID Connect Core). Hence `OIDC_ISSUER_URL` must be `https` unless the host is internal
-  (loopback, private IP, single-label or `.local`/`.internal` names).
+- Until better-auth 1.7, better-auth decoded the ID token without verifying its signature (acceptable
+  for the code flow over TLS, per OpenID Connect Core). Since 1.7 it verifies signature, issuer,
+  audience and nonce against the provider's JWKS, and `requireIdTokenVerification` refuses a
+  provider whose discovery document lacks `issuer` or `jwks_uri`. `OIDC_ISSUER_URL` still must be
+  `https` unless the host is internal (loopback, private IP, single-label or `.local`/`.internal`
+  names): discovery and the JWKS arrive over that channel.
+- One account row per provider identity: `(provider_id, account_id)` is unique (migration 0155),
+  since better-auth 1.7 refuses to sign in an identity that matches two rows.
 - Partial configuration (one of the three variables missing) stops the server.
 - The provider's tokens are not stored in this mode. Personal API tokens are not sessions and keep
   working.
@@ -183,3 +188,5 @@ provider sign-out across applications.
   security-reviewed, PR #88 opened.
 - **2026-10-06**: `DISABLE_REGISTRATION` made to close SSO sign-up as well; PR #88 merged.
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
+- **2026-11-03**: technical details updated for the better-auth 1.7.7 upgrade (replacing #319):
+  verified ID tokens and the unique provider identity. The decisions are unchanged.

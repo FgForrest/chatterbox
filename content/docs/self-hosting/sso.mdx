@@ -74,7 +74,14 @@ Chatterbox reads the provider's endpoints from
 provider's token endpoint, so that channel has to be TLS. Plain `http` is
 accepted only for internal hosts (`localhost`, private IP addresses,
 single-label names such as a compose service `keycloak`, and `.local` /
-`.internal` names).
+`.internal` names). The discovery document must list `issuer` and
+`jwks_uri`: every ID token is checked against the provider's signing keys.
+
+If the provider cannot be reached, signing in asks to try again shortly.
+People already signed in keep working, and
+Chatterbox tries the provider again every 30 seconds, so no restart is
+needed once it is back. The endpoints it discovered are kept until the
+next restart.
 
 All three of issuer, client id and secret must be set; a partial
 configuration stops the server with an error.

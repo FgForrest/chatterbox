@@ -49,6 +49,7 @@ export const users = pgTable(
         email: text("email").notNull().unique(),
         emailVerified: boolean("email_verified").notNull().default(false),
         name: text("name"),
+        image: text("image"),
         uiLocale: varchar("ui_locale", { length: 10 }),
         timeZone: varchar("time_zone", { length: 100 }),
         // 'org' marks the self-host organization account created from
@@ -242,8 +243,8 @@ export const accounts = pgTable(
     },
     (table) => ({
         userIdIdx: index("accounts_user_id_idx").on(table.userId),
-        // Sign-in by provider looks the account up by (providerId, accountId).
-        providerAccountIdx: index("accounts_provider_account_idx").on(
+        // One binding per provider identity, including concurrent first sign-ins.
+        providerAccountIdx: uniqueIndex("accounts_provider_account_idx").on(
             table.providerId,
             table.accountId,
         ),

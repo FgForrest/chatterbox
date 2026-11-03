@@ -12,9 +12,12 @@
  * create scratch databases on.
  */
 
+import { createHmac } from "node:crypto";
+import { setTimeout as pause } from "node:timers/promises";
 import { and, eq } from "drizzle-orm";
 import {
     afterAll,
+    afterEach,
     beforeAll,
     beforeEach,
     describe,
@@ -30,6 +33,7 @@ import {
     sessions,
     users,
 } from "@/db/schema";
+import type * as AuthModule from "@/lib/auth";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -40,7 +44,7 @@ import {
     createFakeIdentityProvider,
 } from "@/tests/sso/fake-idp";
 
-const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
+const { dbProxy, dbRef, mockEnv, idpRef } = vi.hoisted(() => {
     const ref: { current: Record<PropertyKey, unknown> | null } = {
         current: null,
     };
@@ -60,10 +64,21 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
         },
     );
     return {
+        idpRef: {
+            discoveryAvailable: true,
+            discoveryRequests: 0,
+            current: null as ReturnType<
+                typeof createFakeIdentityProvider
+            > | null,
+        },
         dbProxy: proxy,
         dbRef: ref,
         mockEnv: {
             IS_HOSTED: false,
+            AUTHZ_MODE: "local" as "local" | "idp",
+            IDENTITY_PROVIDER: "keycloak",
+            AUTHZ_VERIFICATION_MAX_AGE: 1800,
+            MCP_SERVICE_CLIENTS: [] as string[],
             BILLING_ENABLED: undefined as boolean | undefined,
             SELF_HOST_MODE: "shared" as "shared" | "local",
             ORG_ACCOUNT_EMAIL: "org@example.test" as string | undefined,
@@ -85,6 +100,24 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
     };
 });
 
+vi.mock("@/lib/auth", async (importOriginal) => {
+    const idp = createFakeIdentityProvider(() => auth.handler);
+    idpRef.current = idp;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.endsWith("/.well-known/openid-configuration")) {
+            idpRef.discoveryRequests++;
+            if (!idpRef.discoveryAvailable) {
+                return Promise.resolve(
+                    Response.json({ error: "unavailable" }, { status: 503 }),
+                );
+            }
+        }
+        return idp.fetch(input, init);
+    });
+    return importOriginal<typeof AuthModule>();
+});
+
 vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 vi.mock("@/lib/posthog-server", () => ({
@@ -100,11 +133,12 @@ vi.mock("@/lib/notifications/email", () => ({
     sendVerifyEmail: vi.fn(),
 }));
 
+import { GET as authRouteGet } from "@/app/api/auth/[...all]/route";
 import {
     clearSsoSessionsMarker,
     revokeSessionsOnSsoSwitch,
 } from "@/db/queries/sso";
-import { auth } from "@/lib/auth";
+import { auth, resetAuthDiscoveryForTests } from "@/lib/auth";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { ensureOrgAccount } from "@/lib/org/account";
@@ -121,7 +155,8 @@ function required<T>(value: T | null | undefined): T {
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 
-const idp = createFakeIdentityProvider(() => auth.handler);
+const idp = idpRef.current;
+if (!idp) throw new Error("fake identity provider was not initialized");
 const ssoLogin = idp.login;
 
 describeWithDatabase("single sign-on (PostgreSQL, fake IdP)", () => {
@@ -191,11 +226,11 @@ describeWithDatabase("single sign-on (PostgreSQL, fake IdP)", () => {
             "sso",
         );
         dbRef.current = database.db as unknown as Record<PropertyKey, unknown>;
-        vi.spyOn(globalThis, "fetch").mockImplementation(idp.fetch);
         orgUserId = (await ensureOrgAccount()) ?? "";
     }, 120_000);
 
     afterAll(async () => {
+        resetAuthDiscoveryForTests();
         vi.restoreAllMocks();
         dbRef.current = null;
         await database?.dispose();
@@ -203,6 +238,332 @@ describeWithDatabase("single sign-on (PostgreSQL, fake IdP)", () => {
 
     beforeEach(() => {
         mockEnv.SELF_HOST_MODE = "shared";
+        mockEnv.AUTHZ_MODE = "local";
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it("imports auth without discovery or touching a context", () => {
+        expect(idpRef.discoveryRequests).toBe(0);
+    });
+
+    it("serves existing sessions and sign-out during hung startup and background retries, then recovers", async () => {
+        resetAuthDiscoveryForTests({
+            discoveryTimeoutMs: 100,
+            candidateTimeoutMs: 150,
+            retryIntervalMs: 1000,
+        });
+        const userId = await passwordUser(
+            "discovery@example.test",
+            "Discovery Example",
+        );
+        const cookies: string[] = [];
+        for (let index = 0; index < 4; index++) {
+            const token = `discovery-session-${index}`;
+            await db()
+                .insert(sessions)
+                .values({
+                    userId,
+                    token,
+                    expiresAt: new Date(Date.now() + 3600_000),
+                });
+            const signature = createHmac("sha256", mockEnv.BETTER_AUTH_SECRET)
+                .update(token)
+                .digest("base64");
+            cookies.push(
+                `better-auth.session_token=${encodeURIComponent(`${token}.${signature}`)}`,
+            );
+        }
+        const discoveries = idpRef.discoveryRequests;
+        const fetchMock = vi.mocked(globalThis.fetch);
+        fetchMock.mockImplementation((input, init) => {
+            const url = input instanceof Request ? input.url : String(input);
+            if (url.endsWith("/.well-known/openid-configuration")) {
+                idpRef.discoveryRequests++;
+                return new Promise<Response>(() => {});
+            }
+            return idp.fetch(input, init);
+        });
+        const request = (path: string, cookie = cookies[0]) =>
+            new Request(`${APP_URL}/api/auth${path}`, {
+                method: path === "/sign-out" ? "POST" : "GET",
+                headers: { cookie, origin: APP_URL },
+            });
+        const start = () =>
+            auth.handler(
+                new Request(`${APP_URL}/api/auth/sign-in/social`, {
+                    method: "POST",
+                    headers: {
+                        "content-type": "application/json",
+                        origin: APP_URL,
+                    },
+                    body: JSON.stringify({
+                        provider: "oidc",
+                        callbackURL: "/dashboard",
+                    }),
+                }),
+            );
+        async function promptly<T>(operation: Promise<T>): Promise<T> {
+            return Promise.race([
+                operation,
+                pause(800).then(() => {
+                    throw new Error("Auth waited on discovery");
+                }),
+            ]);
+        }
+        async function checkSessions(signOutCookie: string) {
+            const response = await promptly(
+                auth.handler(request("/get-session")),
+            );
+            expect(response.status).toBe(200);
+            expect(await response.json()).toMatchObject({
+                user: { id: userId },
+            });
+            expect(
+                await promptly(
+                    auth.api.getSession({
+                        headers: new Headers({ cookie: cookies[0] }),
+                    }),
+                ),
+            ).toMatchObject({ user: { id: userId } });
+            const signedOut = await promptly(
+                auth.fetch(request("/sign-out", signOutCookie)),
+            );
+            expect(signedOut.status).toBe(200);
+            expect(await signedOut.json()).toEqual({ success: true });
+        }
+        vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+        try {
+            const initial = start();
+            await checkSessions(cookies[1]);
+            expect(idpRef.discoveryRequests).toBe(discoveries + 1);
+            await vi.advanceTimersByTimeAsync(150);
+            const unavailable = await promptly(initial);
+            expect(unavailable.status).toBe(503);
+            expect(await unavailable.json()).toMatchObject({
+                code: "SSO_UNAVAILABLE",
+            });
+            const initialContext = await auth.$context;
+            const signInSocial = auth.api.signInSocial;
+            const options = auth.options;
+            expect(initialContext.socialProviders).toEqual([]);
+            expect((await start()).status).toBe(503);
+            expect(idpRef.discoveryRequests).toBe(discoveries + 1);
+            await vi.advanceTimersByTimeAsync(850);
+            expect(idpRef.discoveryRequests).toBe(discoveries + 2);
+            await checkSessions(cookies[2]);
+            expect((await promptly(start())).status).toBe(503);
+            await vi.advanceTimersByTimeAsync(150);
+            fetchMock.mockImplementation(idp.fetch);
+            await vi.advanceTimersByTimeAsync(850);
+            await vi.waitFor(async () =>
+                expect(
+                    (await auth.$context).socialProviders.map((p) => p.id),
+                ).toContain("oidc"),
+            );
+            expect(await auth.$context).not.toBe(initialContext);
+            expect(auth.options).not.toBe(options);
+            expect(auth.fetch).toBe(auth.handler);
+            const calls = fetchMock.mock.calls.length;
+            await vi.advanceTimersByTimeAsync(3000);
+            expect(fetchMock).toHaveBeenCalledTimes(calls);
+            vi.useRealTimers();
+            const [first, second, direct] = await promptly(
+                Promise.all([
+                    start(),
+                    start(),
+                    signInSocial({ body: { provider: "oidc" } }),
+                ]),
+            );
+            expect([first.status, second.status]).toEqual([200, 200]);
+            expect(direct.url).toContain("/protocol/openid-connect/auth?");
+        } finally {
+            vi.useRealTimers();
+            fetchMock.mockImplementation(idp.fetch);
+            resetAuthDiscoveryForTests();
+            await auth.$context;
+        }
+    });
+
+    it("discards a candidate that initializes after its deadline", async () => {
+        resetAuthDiscoveryForTests({
+            discoveryTimeoutMs: 1000,
+            candidateTimeoutMs: 50,
+            retryIntervalMs: 1000,
+        });
+        let release!: () => void;
+        const waiting = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const fetchMock = vi.mocked(globalThis.fetch);
+        let requests = 0;
+        fetchMock.mockImplementation(async (input, init) => {
+            const url = input instanceof Request ? input.url : String(input);
+            if (
+                url.endsWith("/.well-known/openid-configuration") &&
+                ++requests === 1
+            )
+                await waiting;
+            return idp.fetch(input, init);
+        });
+        vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+        try {
+            const pending = auth.$context;
+            await vi.advanceTimersByTimeAsync(50);
+            const fallback = await pending;
+            expect(fallback.socialProviders).toEqual([]);
+            release();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(await auth.$context).toBe(fallback);
+            expect(requests).toBe(1);
+            await vi.advanceTimersByTimeAsync(950);
+            await vi.waitFor(async () =>
+                expect(
+                    (await auth.$context).socialProviders.map((p) => p.id),
+                ).toContain("oidc"),
+            );
+            expect(requests).toBe(2);
+        } finally {
+            release();
+            vi.useRealTimers();
+            fetchMock.mockImplementation(idp.fetch);
+            resetAuthDiscoveryForTests();
+            await auth.$context;
+        }
+    });
+
+    it("waits for a slow but healthy first discovery without an unavailable retry window", async () => {
+        resetAuthDiscoveryForTests({
+            discoveryTimeoutMs: 1000,
+            candidateTimeoutMs: 1200,
+        });
+        let release!: () => void;
+        const waiting = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const fetchMock = vi.mocked(globalThis.fetch);
+        fetchMock.mockImplementation(async (input, init) => {
+            const url = input instanceof Request ? input.url : String(input);
+            if (url.endsWith("/.well-known/openid-configuration"))
+                await waiting;
+            return idp.fetch(input, init);
+        });
+        const pending = auth.api.signInSocial({ body: { provider: "oidc" } });
+        await expect(
+            auth.api.getSession({ headers: new Headers() }),
+        ).resolves.toBeNull();
+        release();
+        try {
+            expect((await pending).url).toContain(
+                "/protocol/openid-connect/auth?",
+            );
+        } finally {
+            release();
+            fetchMock.mockImplementation(idp.fetch);
+        }
+    });
+
+    it("keeps refusal hooks and database hooks on the provider-free fallback", async () => {
+        resetAuthDiscoveryForTests();
+        idpRef.discoveryAvailable = false;
+        vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+            const url = input instanceof Request ? input.url : String(input);
+            return url.endsWith("/.well-known/openid-configuration")
+                ? Promise.resolve(new Response(null, { status: 503 }))
+                : idp.fetch(input, init);
+        });
+        try {
+            const fallback = await auth.$context;
+            expect(fallback.socialProviders).toEqual([]);
+            const refused = await auth.handler(
+                new Request(`${APP_URL}/api/auth/sign-in/email`, {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: "{}",
+                }),
+            );
+            expect(refused.status).toBe(404);
+            await expect(
+                auth.api.signInSocial({
+                    body: { provider: "oidc", idToken: { token: "unused" } },
+                }),
+            ).rejects.toMatchObject({
+                statusCode: 403,
+                body: { code: "SSO_ID_TOKEN_SIGN_IN_DISABLED" },
+            });
+            await expect(
+                fallback.internalAdapter.createSession(orgUserId, false),
+            ).rejects.toMatchObject({ body: { code: "ORG_ACCOUNT_SSO" } });
+            await expect(
+                fallback.internalAdapter.linkAccount({
+                    userId: orgUserId,
+                    providerId: "oidc",
+                    accountId: "fallback-org",
+                }),
+            ).rejects.toMatchObject({ body: { code: "ORG_ACCOUNT_SSO" } });
+            const user = await fallback.internalAdapter.createUser(
+                {
+                    name: "Fallback Example",
+                    email: "fallback@example.test",
+                    emailVerified: true,
+                    image: "https://example.test/image.png",
+                },
+                { method: "oauth", oauth: { providerId: "oidc" } },
+            );
+            expect(user.image).toBeNull();
+        } finally {
+            idpRef.discoveryAvailable = true;
+            vi.mocked(globalThis.fetch).mockImplementation(idp.fetch);
+            resetAuthDiscoveryForTests();
+            await auth.$context;
+        }
+    });
+
+    it("keeps the initialized instance when its provider is present", async () => {
+        const context = await auth.$context;
+        const discoveries = idpRef.discoveryRequests;
+        const clock = vi
+            .spyOn(Date, "now")
+            .mockReturnValue(Date.now() + 300_000);
+        try {
+            expect(
+                await auth.api.getSession({ headers: new Headers() }),
+            ).toBeNull();
+            expect(
+                (await auth.fetch(new Request(`${APP_URL}/api/auth/ok`)))
+                    .status,
+            ).toBe(200);
+            expect(await auth.$context).toBe(context);
+            expect(idpRef.discoveryRequests).toBe(discoveries);
+        } finally {
+            clock.mockRestore();
+        }
+    });
+
+    it("serves the Next.js auth route through the guarded handler", async () => {
+        expect("handler" in auth).toBe(true);
+        expect("getSession" in auth.api).toBe(true);
+        expect("then" in auth.api).toBe(false);
+        expect(Object.keys(auth.api)).toContain("signInSocial");
+        expect(auth.api.getSession).toBe(auth.api.getSession);
+        expect(auth.api.getSession.path).toBe("/get-session");
+        expect({ ...auth }.handler).toBe(auth.handler);
+        const response = await authRouteGet(
+            new Request(`${APP_URL}/api/auth/get-session`),
+        );
+        expect(response.status).toBe(200);
+        expect(await response.json()).toBeNull();
+        const callback = await authRouteGet(
+            new Request(
+                `${APP_URL}/api/auth/oauth2/callback/oidc?code=forged&state=forged`,
+            ),
+        );
+        expect(callback.status).toBe(302);
+        expect(callback.headers.get("location")).toContain(
+            "error=state_mismatch",
+        );
     });
 
     it("created the organization account without a password", async () => {
@@ -220,6 +581,7 @@ describeWithDatabase("single sign-on (PostgreSQL, fake IdP)", () => {
             email: "Ann@Example.test",
             email_verified: true,
             name: "Ann Example",
+            picture: "https://example.test/profile.png",
         });
         expect(location).toBe("/dashboard");
         expect(cookie).toContain("session_token");
@@ -227,6 +589,7 @@ describeWithDatabase("single sign-on (PostgreSQL, fake IdP)", () => {
         const ann = await userByEmail("ann@example.test");
         expect(ann?.name).toBe("Ann Example");
         expect(ann?.emailVerified).toBe(true);
+        expect(ann?.image).toBeNull();
 
         const account = await ssoAccountOf(required(ann).id);
         expect(account?.accountId).toBe("sub-ann");
@@ -241,6 +604,108 @@ describeWithDatabase("single sign-on (PostgreSQL, fake IdP)", () => {
         const lifetime = required(session).expiresAt.getTime() - Date.now();
         expect(lifetime).toBeGreaterThan(24 * 60 * 60 * 1000 - 60_000);
         expect(lifetime).toBeLessThanOrEqual(24 * 60 * 60 * 1000);
+    });
+
+    it.each([
+        "local",
+        "idp",
+    ] as const)("refuses direct ID-token sign-in in %s authorization mode before inspecting the token", async (mode) => {
+        let token = "";
+        const fetchMock = vi.mocked(globalThis.fetch);
+        fetchMock.mockImplementation(async (input, init) => {
+            const response = await idp.fetch(input, init);
+            const url = input instanceof Request ? input.url : String(input);
+            if (url.endsWith("/protocol/openid-connect/token")) {
+                token = (
+                    (await response.clone().json()) as { id_token: string }
+                ).id_token;
+            }
+            return response;
+        });
+        try {
+            expect(
+                (
+                    await ssoLogin({
+                        sub: `sub-direct-${mode}`,
+                        email: `direct-${mode}@example.test`,
+                        email_verified: true,
+                        name: "Direct Example",
+                    })
+                ).location,
+            ).toBe("/dashboard");
+        } finally {
+            fetchMock.mockImplementation(idp.fetch);
+        }
+        expect(token).not.toBe("");
+        const before = {
+            users: await db().select().from(users),
+            accounts: await db().select().from(accounts),
+            sessions: await db().select().from(sessions),
+        };
+        mockEnv.AUTHZ_MODE = mode;
+        fetchMock.mockClear();
+        const response = await auth.handler(
+            new Request(`${APP_URL}/api/auth/sign-in/social`, {
+                method: "POST",
+                headers: {
+                    "content-type": "application/json",
+                    origin: APP_URL,
+                },
+                body: JSON.stringify({
+                    provider: "oidc",
+                    idToken: { token },
+                    additionalData: { reauthenticate: true },
+                }),
+            }),
+        );
+        expect(response.status).toBe(403);
+        expect(await response.json()).toMatchObject({
+            code: "SSO_ID_TOKEN_SIGN_IN_DISABLED",
+        });
+        expect(response.headers.getSetCookie()).toEqual([]);
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(await db().select().from(users)).toEqual(before.users);
+        expect(await db().select().from(accounts)).toEqual(before.accounts);
+        expect(await db().select().from(sessions)).toEqual(before.sessions);
+    });
+
+    it.each([
+        null,
+        "another-request-nonce",
+    ])("refuses an ID token with nonce %s without creating an account or session", async (idTokenNonce) => {
+        const { location, cookie } = await ssoLogin(
+            {
+                sub: "sub-replayed",
+                email: "replayed@example.test",
+                email_verified: true,
+                name: "Replayed Example",
+            },
+            { idTokenNonce },
+        );
+        expect(location).toBe("/login?error=unable_to_get_user_info");
+        expect(cookie).not.toContain("session_token");
+        expect(await userByEmail("replayed@example.test")).toBeNull();
+    });
+
+    it("does not force reauthentication in local authorization mode", async () => {
+        const response = await auth.handler(
+            new Request(`${APP_URL}/api/auth/sign-in/social`, {
+                method: "POST",
+                headers: {
+                    "content-type": "application/json",
+                    origin: APP_URL,
+                },
+                body: JSON.stringify({
+                    provider: "oidc",
+                    additionalData: { reauthenticate: true },
+                }),
+            }),
+        );
+        expect(response.status).toBe(200);
+        const { url } = (await response.json()) as { url: string };
+        const params = new URL(url).searchParams;
+        expect(params.get("max_age")).toBeNull();
+        expect(params.get("prompt")).toBeNull();
     });
 
     it("puts the user into the Organization Almanac and keeps them current", async () => {
@@ -271,6 +736,7 @@ describeWithDatabase("single sign-on (PostgreSQL, fake IdP)", () => {
             email: "eve@example.test",
             email_verified: true,
             name: "Eve Q. Example",
+            picture: "https://example.test/changed-profile.png",
         });
         const records = await db()
             .select()
@@ -280,9 +746,10 @@ describeWithDatabase("single sign-on (PostgreSQL, fake IdP)", () => {
         expect(decryptText(required(records[0]).displayName)).toBe(
             "Eve Q. Example",
         );
-        expect((await userByEmail("eve@example.test"))?.name).toBe(
-            "Eve Q. Example",
-        );
+        expect(await userByEmail("eve@example.test")).toMatchObject({
+            name: "Eve Q. Example",
+            image: null,
+        });
         const aliases = await db()
             .select()
             .from(knowledgeAliases)
@@ -352,7 +819,9 @@ describeWithDatabase("single sign-on (PostgreSQL, fake IdP)", () => {
             email_verified: true,
             name: "Someone",
         });
-        expect(location).toBe("/login?error=unable_to_link_account");
+        expect(new URL(location, APP_URL).searchParams.get("error")).toBe(
+            "ORG_ACCOUNT_SSO",
+        );
         expect(await ssoAccountOf(orgUserId)).toBeNull();
         const orgSessions = await db()
             .select()
@@ -418,6 +887,161 @@ describeWithDatabase("single sign-on (PostgreSQL, fake IdP)", () => {
             }),
         );
         expect(response.status).toBe(404);
+    });
+
+    it("enforces one provider identity across users at the database", async () => {
+        const first = await passwordUser(
+            "unique-first@example.test",
+            "First Example",
+        );
+        const second = await passwordUser(
+            "unique-second@example.test",
+            "Second Example",
+        );
+        await db().insert(accounts).values({
+            userId: first,
+            providerId: "oidc",
+            accountId: "unique-subject",
+        });
+        await expect(
+            db().insert(accounts).values({
+                userId: second,
+                providerId: "oidc",
+                accountId: "unique-subject",
+            }),
+        ).rejects.toMatchObject({
+            cause: {
+                code: "23505",
+                constraint_name: "accounts_provider_account_idx",
+            },
+        });
+    });
+
+    it("serializes concurrent first links by the unique index and permits the next sign-in", async () => {
+        const userId = await passwordUser("race@example.test", "Race Example");
+        const context = await auth.$context;
+        const link = context.internalAdapter.linkAccount.bind(
+            context.internalAdapter,
+        );
+        let reached = 0;
+        let release!: () => void;
+        const barrier = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const spy = vi
+            .spyOn(context.internalAdapter, "linkAccount")
+            .mockImplementation(async (...args) => {
+                reached++;
+                if (reached === 2) release();
+                await barrier;
+                return link(...args);
+            });
+        const claims = {
+            sub: "race-subject",
+            email: "race@example.test",
+            email_verified: true,
+            name: "Race Example",
+        };
+        const pending = Promise.all([ssoLogin(claims), ssoLogin(claims)]);
+        try {
+            const results = await pending;
+            expect(reached).toBe(2);
+            expect(results.map((result) => result.location).sort()).toEqual([
+                "/dashboard",
+                "/login?error=unable_to_link_account",
+            ]);
+            const losing = required(
+                results.find((result) => result.location.startsWith("/login")),
+            );
+            expect(losing.cookie).not.toContain("session_token");
+            expect(
+                await db()
+                    .select()
+                    .from(accounts)
+                    .where(
+                        and(
+                            eq(accounts.userId, userId),
+                            eq(accounts.providerId, "oidc"),
+                        ),
+                    ),
+            ).toHaveLength(1);
+            expect(
+                await db()
+                    .select()
+                    .from(sessions)
+                    .where(eq(sessions.userId, userId)),
+            ).toHaveLength(1);
+        } finally {
+            release();
+            await pending;
+            spy.mockRestore();
+        }
+        expect((await ssoLogin(claims)).location).toBe("/dashboard");
+    });
+
+    it.each([
+        "local",
+        "idp",
+    ] as const)("binds sub without advertised signing algorithms in %s mode", async (mode) => {
+        mockEnv.AUTHZ_MODE = mode;
+        const algorithms = idp.discovery.id_token_signing_alg_values_supported;
+        delete idp.discovery.id_token_signing_alg_values_supported;
+        resetAuthDiscoveryForTests();
+        try {
+            const sub = `no-algorithms-${mode}`;
+            const email = `${sub}@example.test`;
+            const result = await ssoLogin({
+                sub,
+                email,
+                email_verified: true,
+                name: "Subject Example",
+            });
+            expect(result.location).toBe("/dashboard");
+            expect(
+                (await ssoAccountOf(required(await userByEmail(email)).id))
+                    ?.accountId,
+            ).toBe(sub);
+        } finally {
+            idp.discovery.id_token_signing_alg_values_supported = algorithms;
+            mockEnv.AUTHZ_MODE = "local";
+            resetAuthDiscoveryForTests();
+            await auth.$context;
+        }
+    });
+
+    it.each([
+        "jwks_uri",
+        "issuer",
+    ])("refuses discovery without %s and recovers through a background retry", async (field) => {
+        const value = idp.discovery[field];
+        delete idp.discovery[field];
+        resetAuthDiscoveryForTests({ retryIntervalMs: 1000 });
+        vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+        try {
+            await expect(
+                auth.api.signInSocial({ body: { provider: "oidc" } }),
+            ).rejects.toMatchObject({
+                statusCode: 503,
+                body: { code: "SSO_UNAVAILABLE" },
+            });
+            expect((await auth.$context).socialProviders).toEqual([]);
+            idp.discovery[field] = value;
+            await vi.advanceTimersByTimeAsync(1000);
+            await vi.waitFor(async () =>
+                expect(
+                    (await auth.$context).socialProviders.map((p) => p.id),
+                ).toContain("oidc"),
+            );
+            expect(
+                (await auth.api.signInSocial({ body: { provider: "oidc" } }))
+                    .url,
+            ).toContain("/protocol/openid-connect/auth?");
+        } finally {
+            vi.useRealTimers();
+            idp.discovery[field] = value;
+            resetAuthDiscoveryForTests();
+            await auth.$context;
+        }
     });
 
     it("ends existing sessions once per switch to SSO", async () => {

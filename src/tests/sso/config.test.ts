@@ -70,7 +70,7 @@ describe("password endpoints switched off under SSO", () => {
     });
 
     it("leaves sign-in through the provider and sign-out alone", () => {
-        expect(PASSWORD_AUTH_PATHS).not.toContain("/sign-in/oauth2");
+        expect(PASSWORD_AUTH_PATHS).not.toContain("/sign-in/social");
         expect(PASSWORD_AUTH_PATHS).not.toContain("/sign-out");
         expect(PASSWORD_AUTH_PATHS).not.toContain("/get-session");
     });

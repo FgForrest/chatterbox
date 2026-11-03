@@ -31,7 +31,7 @@ vi.mock("next-intl", () => ({
 vi.mock("next/navigation", () => ({
     useRouter: () => ({ refresh: vi.fn(), replace: vi.fn() }),
 }));
-vi.mock("@/lib/auth-client", () => ({ signIn: { oauth2: vi.fn() } }));
+vi.mock("@/lib/auth-client", () => ({ signIn: { social: vi.fn() } }));
 vi.mock("@/components/confirm-dialog", () => ({ useConfirm: () => vi.fn() }));
 vi.mock("@/components/plaud-connect-tabs", () => ({
     PlaudConnectTabs: () => null,

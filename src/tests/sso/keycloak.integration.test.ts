@@ -134,13 +134,13 @@ function decodeHtml(value: string): string {
 async function keycloakLogin(username: string): Promise<string> {
     const browser = new Browser();
 
-    const startUrl = `${APP_URL}/api/auth/sign-in/oauth2`;
+    const startUrl = `${APP_URL}/api/auth/sign-in/social`;
     const start = await auth.handler(
         new Request(startUrl, {
             method: "POST",
             headers: { "content-type": "application/json", origin: APP_URL },
             body: JSON.stringify({
-                providerId: "oidc",
+                provider: "oidc",
                 callbackURL: "/dashboard",
                 errorCallbackURL: "/login",
             }),

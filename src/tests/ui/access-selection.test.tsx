@@ -23,7 +23,7 @@ const { toast } = vi.hoisted(() => ({
     toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
 }));
 vi.mock("sonner", () => ({ toast }));
-vi.mock("@/lib/auth-client", () => ({ signIn: { oauth2: vi.fn() } }));
+vi.mock("@/lib/auth-client", () => ({ signIn: { social: vi.fn() } }));
 vi.mock("@/components/confirm-dialog", () => ({
     useConfirm: () => vi.fn(),
 }));

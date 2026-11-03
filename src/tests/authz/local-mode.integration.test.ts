@@ -9,6 +9,8 @@
  * create scratch databases on.
  */
 
+import type * as BetterAuthModule from "better-auth";
+import { betterAuth } from "better-auth";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { apiKeys, sessions, users } from "@/db/schema";
@@ -61,6 +63,10 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
     };
 });
 
+vi.mock("better-auth", async (importOriginal) => {
+    const original = await importOriginal<typeof BetterAuthModule>();
+    return { ...original, betterAuth: vi.fn(original.betterAuth) };
+});
 vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 vi.mock("@/lib/posthog-server", () => ({
@@ -69,6 +75,7 @@ vi.mock("@/lib/posthog-server", () => ({
 }));
 
 import { accessManagementAvailable, listAccess } from "@/lib/access/service";
+import { auth } from "@/lib/auth";
 import {
     authenticateRequest,
     createApiKey,
@@ -119,6 +126,40 @@ describeWithDatabase("AUTHZ_MODE=local (PostgreSQL)", () => {
         dbRef.current = null;
         await database?.dispose();
     }, 30_000);
+
+    it("keeps password sign-in and the same instance after the SSO retry window when SSO is off", async () => {
+        const context = await auth.$context;
+        const instances = vi.mocked(betterAuth).mock.calls.length;
+        const fetchSpy = vi.spyOn(globalThis, "fetch");
+        const clock = vi
+            .spyOn(Date, "now")
+            .mockReturnValue(Date.now() + 60_000);
+        try {
+            const response = await auth.handler(
+                new Request(`${mockEnv.APP_URL}/api/auth/sign-in/email`, {
+                    method: "POST",
+                    headers: {
+                        "content-type": "application/json",
+                        origin: mockEnv.APP_URL,
+                    },
+                    body: JSON.stringify({
+                        email: mockEnv.ORG_ACCOUNT_EMAIL,
+                        password: mockEnv.ORG_ACCOUNT_PASSWORD,
+                    }),
+                }),
+            );
+            expect(response.status).toBe(200);
+            expect(response.headers.getSetCookie().join(";")).toContain(
+                "session_token",
+            );
+            expect(await auth.$context).toBe(context);
+            expect(betterAuth).toHaveBeenCalledTimes(instances);
+            expect(fetchSpy).not.toHaveBeenCalled();
+        } finally {
+            fetchSpy.mockRestore();
+            clock.mockRestore();
+        }
+    });
 
     it("lets every signed-in account use the application, and nothing more", async () => {
         const access = await sessionAccess(await session("user-ann"));

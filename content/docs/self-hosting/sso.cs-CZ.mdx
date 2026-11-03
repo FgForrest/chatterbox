@@ -57,7 +57,9 @@ OIDC_PROVIDER_NAME="Acme SSO"     # the button label; defaults to "SSO"
 # OIDC_SESSION_MAX_AGE=86400       # seconds, see Sessions below
 ```
 
-Klepna načítá koncové body poskytovatele z `<OIDC_ISSUER_URL>/.well-known/openid-configuration`. Adresa vydavatele musí být `https`: Klepna věří ID tokenu, který získá přímo od koncových bodů poskytovatele, proto tento kanál musí být přes TLS. Prostý `http` je akceptován pouze pro interní hosty (`localhost`, privátní IP adresy, jednoznačné názvy jako služba compose `keycloak` a názvy `.local` / `.internal`).
+Klepna načítá koncové body poskytovatele z `<OIDC_ISSUER_URL>/.well-known/openid-configuration`. Adresa vydavatele musí být `https`: Klepna věří ID tokenu, který získá přímo od koncových bodů poskytovatele, proto tento kanál musí být přes TLS. Prostý `http` je akceptován pouze pro interní hosty (`localhost`, privátní IP adresy, jednoznačné názvy jako služba compose `keycloak` a názvy `.local` / `.internal`). Dokument discovery musí obsahovat `issuer` a `jwks_uri`: každý ID token se ověřuje podpisovými klíči poskytovatele.
+
+Když je poskytovatel nedostupný, přihlášení požádá, ať to zkusíte za chvíli znovu. Kdo už je přihlášený, pracuje dál, a Klepna poskytovatele zkouší znovu každých 30 sekund, takže po jeho návratu není potřeba restart. Zjištěné koncové body si Klepna drží do dalšího restartu.
 
 Všechny tři údaje – vydavatel, ID klienta a tajný klíč – musí být nastaveny; částečná konfigurace zastaví server s chybou.
 
