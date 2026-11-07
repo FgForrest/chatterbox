@@ -221,6 +221,8 @@ describe("personNamesFit", () => {
         ["🙂", "Jan Dvořák"],
         ["Ing.", "Jan Dvořák"],
         ["---", "?"],
+        ["J", "Jana Dvořáková"],
+        ["J. D.", "Jan Dvořák"],
         ["Jan Karel Dvořák", "Jan Petr Dvořák"],
     ])("does not fit %s to %s, either way round", (left, right) => {
         expect(personNamesFit(left, right)).toBe(false);

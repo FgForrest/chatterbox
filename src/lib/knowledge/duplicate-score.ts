@@ -115,13 +115,18 @@ function personNameWords(name: string): string[] {
  * Whether one person name could be a shorter or fuller form of the other: all
  * words of either are in the other, given nicknames and initials and without
  * academic titles. "Honza", "Dvořák, J." and "Ing. Jan Dvořák, Ph.D." fit
- * "Jan Dvořák"; "Jan Malý" and "Jana Dvořáková" do not. A name with no words
- * left fits nothing.
+ * "Jan Dvořák"; "Jan Malý" and "Jana Dvořáková" do not. At least one whole
+ * word must be shared, so initials alone or a name with no words fit nothing.
  */
 export function personNamesFit(left: string, right: string): boolean {
     const leftWords = personNameWords(left);
     const rightWords = personNameWords(right);
-    if (leftWords.length === 0 || rightWords.length === 0) return false;
+    const sharesWholeWord = leftWords.some(
+        (word) =>
+            word.length > 1 &&
+            rightWords.some((other) => wordFits(word, other)),
+    );
+    if (!sharesWholeWord) return false;
     return (
         leftWords.every((word) =>
             rightWords.some((other) => wordFits(word, other)),

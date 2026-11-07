@@ -1,7 +1,7 @@
 ---
 title: A first single sign-on no longer takes over a record whose name does not fit
 date: 2026-11-07
-updated: 2026-11-07 21:50
+updated: 2026-11-07 21:55
 status: accepted
 kind: fix
 issues: []
@@ -62,7 +62,8 @@ takeover hands someone's tasks over with no sign that it happened.
   only: in a person's own Almanac nobody else writes.
 - `personNamesFit` in `src/lib/knowledge/duplicate-score.ts` needs all words of one name in the
   other, given nicknames and initials and without academic titles. It deliberately does not fold
-  surname forms, because that also folded Ivana to Ivan. A name with no words left fits nothing.
+  surname forms, because that also folded Ivana to Ivan. At least one whole word must be shared, so
+  bare initials or a name with no words left fit nothing.
 - These are not someone else's record: one the holder created, and one named by the address itself.
 - A provider that gives no name proves nothing: the record stays and nothing is renamed. Splitting
   here would duplicate every known person on a deployment whose provider sends no `name` claim.
@@ -74,7 +75,7 @@ takeover hands someone's tasks over with no sign that it happened.
 
 `src/tests/sso/sso-login.integration.test.ts` goes through the real login hook with a fake identity
 provider, on PostgreSQL. `src/tests/knowledge/duplicate-score.test.ts` holds the name table. Each of
-14 mutations of the new conditions failed a test, including the order of the stamp. Two Codex review
+15 mutations of the new conditions failed a test, including the order of the stamp. Two Codex review
 rounds and the PR review bot found holes in earlier versions of the name rule, all with
 reproductions; what they left open is listed below.
 
