@@ -1253,7 +1253,11 @@ export function TranscriptionPanel({
 
             {activeTranscript?.text &&
                 (!widgets || widgets.summary.visible) && (
-                    <div className={agenda ? "order-1 space-y-4" : "contents"}>
+                    <div
+                        className={
+                            agenda ? "order-1 flex flex-col gap-4" : "contents"
+                        }
+                    >
                         <SummaryWidget
                             itemId={recording.id}
                             onResummarizeReady={setResummarizeAction}
