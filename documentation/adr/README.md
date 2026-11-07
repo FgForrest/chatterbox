@@ -40,7 +40,7 @@ field, a filename date disagrees with `date:`, a value is not one of the allowed
 
 | Date | Record | Kind | Status | Refs |
 |------|--------|------|--------|------|
-| 2026-11-07 | [Attended recordings disclose only title, start and duration for time reporting](2026-11-07-attended-recordings-for-time-reporting.md) | feature | accepted |  |
+| 2026-11-07 | [Attended recordings disclose only title, start and duration for time reporting](2026-11-07-attended-recordings-for-time-reporting.md) | feature | accepted | [PR #340](https://github.com/FgForrest/chatterbox/pull/340) |
 | 2026-11-03 | [Cutting a recording deletes the cut part; there is no hide mode](2026-11-03-destructive-recording-cut.md) | feature | accepted | [#327](https://github.com/FgForrest/chatterbox/issues/327) |
 | 2026-11-02 | [Untouched reviews can be skipped without rejection, with task state scoped to the item and view](2026-11-02-quick-finish-of-reviews.md) | feature | proposed |  |
 | 2026-10-31 | [Item invitations acknowledge existing folder access and require extra filing only by choice](2026-10-31-share-acceptance-with-existing-folder-access.md) | fix | accepted |  |

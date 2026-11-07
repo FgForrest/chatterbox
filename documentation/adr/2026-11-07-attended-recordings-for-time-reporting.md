@@ -5,7 +5,7 @@ updated: 2026-11-07 19:22
 status: accepted
 kind: feature
 issues: []
-prs: []
+prs: [340]
 areas: [src/lib/mcp/data/recordings.ts, src/lib/mcp/tools/recordings.ts, content/docs/self-hosting/mcp.mdx]
 supersedes: [2026-10-07-external-mcp-server]
 superseded-by: []
