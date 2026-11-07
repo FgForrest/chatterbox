@@ -1170,7 +1170,13 @@ suite("meeting planning server (PostgreSQL)", () => {
         "owner",
         "other",
     ])("recording DELETE applies the agenda lifecycle for %s", async (recordingOwner) => {
-        const meeting = await create();
+        const futureStart = new Date(Date.now() + 86400000);
+        const meeting = await prepareMeeting("owner", {
+            folderId: "owner-folder",
+            title: "Acme",
+            start: futureStart.toISOString(),
+            end: new Date(futureStart.getTime() + 3600000).toISOString(),
+        });
         await addPoint("owner", meeting.id, {
             text: "Keep only if another author",
         });
