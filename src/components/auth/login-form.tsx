@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { MetalButton } from "@/components/metal-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { loginReturnPath } from "@/lib/auth/return-path";
+import { loginReturnPathWithFragment } from "@/lib/auth/return-path";
 import { signIn } from "@/lib/auth-client";
 
 interface LoginFormProps {
@@ -72,7 +72,7 @@ export function LoginForm({
             }
 
             toast.success(i18n("Logged in successfully"));
-            push(loginReturnPath(returnTo));
+            push(loginReturnPathWithFragment(returnTo, window.location.hash));
             refresh();
         } catch (error) {
             const message =
