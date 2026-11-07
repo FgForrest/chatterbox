@@ -2,6 +2,11 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { sessionIdpCredentials, sessions, users } from "@/db/schema";
 import {
+    logSession,
+    providerErrorDescription,
+    type SessionEndDetails,
+} from "@/lib/auth/session-log";
+import {
     accessStateVersion,
     recordAccessState,
 } from "@/lib/authz/access-state";
@@ -31,6 +36,8 @@ export type SessionRefusal =
 export type SessionAccess =
     | { ok: true; actor: ActorContext; authTime: Date | null }
     | { ok: false; reason: SessionRefusal };
+
+type RenewalAccess = SessionAccess & { ending?: SessionEndDetails };
 
 type CredentialRow = typeof sessionIdpCredentials.$inferSelect;
 
@@ -95,8 +102,27 @@ export async function storeSessionCredential(
 }
 
 /** End one session; its credential goes with it. */
-async function endSession(sessionId: string): Promise<void> {
-    await db.delete(sessions).where(eq(sessions.id, sessionId));
+export async function endSession(
+    session: { id: string; userId: string },
+    details: SessionEndDetails,
+): Promise<void> {
+    const [ended] = await db
+        .delete(sessions)
+        .where(eq(sessions.id, session.id))
+        .returning({
+            id: sessions.id,
+            userId: sessions.userId,
+            createdAt: sessions.createdAt,
+            expiresAt: sessions.expiresAt,
+        });
+    if (ended)
+        logSession("ended", {
+            ...details,
+            user: ended.userId,
+            session: ended.id,
+            createdAt: ended.createdAt,
+            expiresAt: ended.expiresAt,
+        });
 }
 
 /**
@@ -107,7 +133,7 @@ async function endSession(sessionId: string): Promise<void> {
 async function renew(
     sessionId: string,
     userId: string,
-): Promise<SessionAccess> {
+): Promise<RenewalAccess> {
     return db.transaction(async (tx) => {
         const [row] = await tx
             .select()
@@ -120,7 +146,17 @@ async function renew(
             )
             .for("update")
             .limit(1);
-        if (!row) return { ok: false, reason: "ended" } as const;
+        if (!row)
+            return {
+                ok: false,
+                reason: "ended",
+                ending: { cause: "no-credential" },
+            } as const;
+        const timings = {
+            verifiedAt: row.verifiedAt,
+            authTime: row.authTime,
+            refreshTokenExpiresAt: row.refreshTokenExpiresAt,
+        };
         if (Date.now() - row.verifiedAt.getTime() < maxAgeMs()) {
             const capabilities = storedCapabilities(row);
             return capabilities.has("use")
@@ -129,10 +165,19 @@ async function renew(
                       actor: userActor(userId, row, capabilities),
                       authTime: row.authTime,
                   }
-                : ({ ok: false, reason: "not-granted" } as const);
+                : ({
+                      ok: false,
+                      reason: "not-granted",
+                      ending: { cause: "access-withdrawn", ...timings },
+                  } as const);
         }
         const refreshToken = decryptText(row.refreshToken);
-        if (!refreshToken) return { ok: false, reason: "ended" } as const;
+        if (!refreshToken)
+            return {
+                ok: false,
+                reason: "ended",
+                ending: { cause: "no-refresh-token", ...timings },
+            } as const;
 
         let tokens: ProviderTokens;
         let capabilities: Set<Capability>;
@@ -150,16 +195,35 @@ async function renew(
                 error instanceof IdentityProviderError &&
                 error.kind === "reauthentication_required"
             ) {
-                return { ok: false, reason: "ended" } as const;
+                return {
+                    ok: false,
+                    reason: "ended",
+                    ending: {
+                        cause: "provider-refused",
+                        ...timings,
+                        providerError: error.providerError,
+                        providerDetail: error.providerDetail,
+                    },
+                } as const;
             }
             if (error instanceof SsoTokenError) {
-                console.warn(`[authz] renewed token refused: ${error.message}`);
-                return { ok: false, reason: "ended" } as const;
+                return {
+                    ok: false,
+                    reason: "ended",
+                    ending: {
+                        cause: "token-refused",
+                        ...timings,
+                        providerDetail: providerErrorDescription(error.message),
+                    },
+                } as const;
             }
             if (error instanceof IdentityProviderError) {
-                console.warn(
-                    `[authz] could not renew a session's access: ${error.kind}`,
-                );
+                logSession("renew-failed", {
+                    user: userId,
+                    session: sessionId,
+                    kind: error.kind,
+                    ...timings,
+                });
                 return { ok: false, reason: "unavailable" } as const;
             }
             throw error;
@@ -195,10 +259,23 @@ async function renew(
                 .update(sessionIdpCredentials)
                 .set({ verifiedAt: new Date(0) })
                 .where(eq(sessionIdpCredentials.sessionId, sessionId));
+            logSession("renew-failed", {
+                user: userId,
+                session: sessionId,
+                kind: "superseded",
+                ...timings,
+            });
             return { ok: false, reason: "unavailable" } as const;
         }
         if (!capabilities.has("use")) {
-            return { ok: false, reason: "not-granted" } as const;
+            return {
+                ok: false,
+                reason: "not-granted",
+                ending: {
+                    cause: "access-withdrawn",
+                    ...timings,
+                },
+            } as const;
         }
         return {
             ok: true,
@@ -208,14 +285,14 @@ async function renew(
     });
 }
 
-const renewing = new Map<string, Promise<SessionAccess>>();
+const renewing = new Map<string, Promise<RenewalAccess>>();
 
 /**
  * {@link renew}, joined by the requests of the same session this process
  * is already renewing: one of them waits on the credential row's lock,
  * not one per parallel request.
  */
-function renewOnce(sessionId: string, userId: string): Promise<SessionAccess> {
+function renewOnce(sessionId: string, userId: string): Promise<RenewalAccess> {
     const key = `${sessionId}\u0000${userId}`;
     let pending = renewing.get(key);
     if (!pending) {
@@ -249,7 +326,7 @@ export async function sessionAccess(session: {
         .limit(1);
     if (!user) return { ok: false, reason: "ended" };
     if (user.role === "org" && isSsoEnabled()) {
-        await endSession(session.id);
+        await endSession(session, { cause: "org-account" });
         return { ok: false, reason: "org-account" };
     }
 
@@ -281,11 +358,11 @@ export async function sessionAccess(session: {
         )
         .limit(1);
     if (!row) {
-        await endSession(session.id);
+        await endSession(session, { cause: "no-credential" });
         return { ok: false, reason: "ended" };
     }
 
-    let access: SessionAccess;
+    let access: RenewalAccess;
     if (Date.now() - row.verifiedAt.getTime() < maxAgeMs()) {
         const capabilities = storedCapabilities(row);
         access = capabilities.has("use")
@@ -294,7 +371,16 @@ export async function sessionAccess(session: {
                   actor: userActor(session.userId, row, capabilities),
                   authTime: row.authTime,
               }
-            : { ok: false, reason: "not-granted" };
+            : {
+                  ok: false,
+                  reason: "not-granted",
+                  ending: {
+                      cause: "access-withdrawn",
+                      verifiedAt: row.verifiedAt,
+                      authTime: row.authTime,
+                      refreshTokenExpiresAt: row.refreshTokenExpiresAt,
+                  },
+              };
     } else {
         access = await renewOnce(session.id, session.userId);
     }
@@ -302,8 +388,9 @@ export async function sessionAccess(session: {
         !access.ok &&
         (access.reason === "ended" || access.reason === "not-granted")
     ) {
-        await endSession(session.id);
+        await endSession(session, access.ending ?? { cause: "no-credential" });
     }
+    if (!access.ok) return { ok: false, reason: access.reason };
     return access;
 }
 

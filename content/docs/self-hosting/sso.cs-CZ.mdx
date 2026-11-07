@@ -88,6 +88,14 @@ Dělejte to jen pro tentýž realm na nové adrese. Chcete-li lidi záměrně p�
 - První spuštění s jednotným přihlášením ukončí **všechny** existující relace, takže nikdo nezůstane přihlášen přes heslo. Vypnutí a opětovné zapnutí SSO to způsobí znovu.
 - Relace trvá `OIDC_SESSION_MAX_AGE` sekund (výchozí 24 hodin) a její délka se nepřidlužuje použitím. Uživatel deaktivovaný u poskytovatele ztratí přístup do Klepna v tomto intervalu.
 - **Odhlásit se** ukončí pouze relaci Klepna. Relace poskytovatele zůstává, takže další **Přihlášení** může automaticky projít bez výzvy.
+- Klepna zapisuje `[session] started`, `ended` a `renew-failed` s ID uživatele
+  a relace, důvodem a dostupnými časy v minutách. Hledejte podle `user=` nebo
+  `session=`; `expiresAt` je pevný konec platnosti, `authAgeMin` / `sinceAuthMin`
+  udávají stáří přihlášení u poskytovatele a záporné `refreshExpiresInMin`
+  znamená prošlý obnovovací token. `renew-failed` relaci ponechá; ukončení
+  správcem, úklidem nebo přechodem na jednotné přihlášení uvádí `count`.
+  Prošlé relace se zaznamenají při načtení nebo úklidu,
+  takže řádek `started` bez `ended` už může být za časem `expiresAt`.
 - Osobní API tokeny nejsou relace a nadále fungují.
 
 <span id="the-almanac" />

@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { sessions, verifications } from "@/db/schema";
+import { logSession } from "@/lib/auth/session-log";
 
 /**
  * Delete up to `limit` sign-in sessions that expired before `expiredBefore`.
@@ -24,6 +25,8 @@ export async function pruneExpiredSessions(
         )
         returning id
     `);
+    if (rows.length > 0)
+        logSession("ended", { cause: "expired-cleanup", count: rows.length });
     return rows.length;
 }
 

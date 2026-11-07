@@ -3,7 +3,8 @@ import { APIError } from "better-auth/api";
 import type { GenericOAuthUserInfo } from "better-auth/plugins/generic-oauth";
 import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { accounts, sessions, users } from "@/db/schema";
+import { accounts, users } from "@/db/schema";
+import { logSession } from "@/lib/auth/session-log";
 import { recordAccessState } from "@/lib/authz/access-state";
 import {
     authRequestStartedAt,
@@ -11,7 +12,7 @@ import {
     setLoginGrant,
 } from "@/lib/authz/login-grant";
 import { orderedCapabilities } from "@/lib/authz/policy";
-import { storeSessionCredential } from "@/lib/authz/session-access";
+import { endSession, storeSessionCredential } from "@/lib/authz/session-access";
 import { env } from "@/lib/env";
 import { getClaimsProvider, isIdpAuthorization } from "@/lib/identity/factory";
 import { IdentityProviderError } from "@/lib/identity/ports";
@@ -272,8 +273,15 @@ export async function guardSsoSession(session: {
 export async function afterSsoSession(session: {
     id: string;
     userId: string;
+    expiresAt: Date;
 }): Promise<void> {
     const grant = currentLoginGrant();
+    logSession("started", {
+        user: session.userId,
+        session: session.id,
+        expiresAt: session.expiresAt,
+        authTime: grant?.identity.authTime,
+    });
     const account = await linkedAccountOf(session.userId);
     const issuer = await signInIssuer();
     if (account && !account.issuer && issuer) {
@@ -311,7 +319,11 @@ export async function afterSsoSession(session: {
             return true;
         });
         if (!stored) {
-            await db.delete(sessions).where(eq(sessions.id, session.id));
+            await endSession(session, {
+                cause: "sign-in-superseded",
+                authTime: grant.identity.authTime,
+                refreshTokenExpiresAt: grant.tokens.refreshTokenExpiresAt,
+            });
             throw new SupersededSignInError();
         }
     }

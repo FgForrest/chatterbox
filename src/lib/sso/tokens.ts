@@ -6,6 +6,10 @@ import {
     type JWTVerifyGetKey,
     jwtVerify,
 } from "jose";
+import {
+    providerErrorCode,
+    providerErrorDescription,
+} from "@/lib/auth/session-log";
 import { env } from "@/lib/env";
 import { getClaimsProvider } from "@/lib/identity/factory";
 import { IdentityProviderError } from "@/lib/identity/ports";
@@ -223,17 +227,23 @@ export async function refreshProviderTokens(
         unknown
     > | null;
     if (!response.ok) {
+        const provider = {
+            error: providerErrorCode(body?.error),
+            detail: providerErrorDescription(body?.error_description),
+        };
         if (body?.error === "invalid_grant") {
             throw new IdentityProviderError(
                 "reauthentication_required",
                 "The identity provider ended the sign-in",
                 response.status,
+                provider,
             );
         }
         throw new IdentityProviderError(
             response.status >= 500 ? "unavailable" : "invalid_response",
             "The identity provider could not renew the sign-in",
             response.status,
+            provider,
         );
     }
     if (typeof body?.access_token !== "string") {

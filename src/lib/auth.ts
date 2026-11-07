@@ -4,6 +4,7 @@ import { APIError, createAuthMiddleware } from "better-auth/api";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import { logSessionDeleted } from "./auth/session-log";
 import { runInAuthRequest } from "./authz/login-grant";
 import { sessionAccess } from "./authz/session-access";
 import { env } from "./env";
@@ -278,6 +279,11 @@ function createAuthInstance(includeProvider: boolean) {
                 ? {
                       account: { create: { before: prepareSsoAccount } },
                       session: {
+                          delete: {
+                              after: async (session, context) => {
+                                  logSessionDeleted(session, context?.path);
+                              },
+                          },
                           create: {
                               before: guardSsoSession,
                               after: afterSsoSession,
