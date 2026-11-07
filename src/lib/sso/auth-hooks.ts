@@ -1,7 +1,7 @@
 import type { Account, OAuth2Tokens, OAuth2UserInfo } from "better-auth";
 import { APIError } from "better-auth/api";
 import type { GenericOAuthUserInfo } from "better-auth/plugins/generic-oauth";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, isNotNull, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { accounts, users } from "@/db/schema";
 import { logSession } from "@/lib/auth/session-log";
@@ -328,6 +328,7 @@ export async function afterSsoSession(session: {
         }
     }
 
+    let recorded = false;
     try {
         const [user] = await db
             .select({ id: users.id, name: users.name, email: users.email })
@@ -336,6 +337,7 @@ export async function afterSsoSession(session: {
             .limit(1);
         if (!user) return;
         await recordSsoUserInAlmanac(user);
+        recorded = true;
     } catch (error) {
         console.error("[sso] could not record the user in the Almanac:", error);
     }
@@ -345,7 +347,13 @@ export async function afterSsoSession(session: {
         await db
             .update(users)
             .set({ lastSsoLoginAt: new Date() })
-            .where(eq(users.id, session.userId));
+            .where(
+                and(
+                    eq(users.id, session.userId),
+                    // A first sign-in that recorded nobody stays the first.
+                    recorded ? undefined : isNotNull(users.lastSsoLoginAt),
+                ),
+            );
         await ensureMailbox(session.userId);
     } catch (error) {
         console.error("[mail] could not set up the user's mailbox:", error);

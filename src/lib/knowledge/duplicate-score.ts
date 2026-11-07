@@ -72,6 +72,64 @@ function personForm(name: string): string {
     return words.join(" ");
 }
 
+const NAME_TITLES = new Set([
+    "arch",
+    "bc",
+    "bca",
+    "csc",
+    "dis",
+    "doc",
+    "dr",
+    "drsc",
+    "ing",
+    "judr",
+    "mba",
+    "mddr",
+    "mgr",
+    "msc",
+    "mudr",
+    "mvdr",
+    "paedr",
+    "phd",
+    "phdr",
+    "prof",
+    "rndr",
+    "thdr",
+]);
+
+function wordFits(word: string, other: string): boolean {
+    if (word === other) return true;
+    if (word.length === 1) return other.startsWith(word);
+    const given = GIVEN_NAMES.get(word);
+    return given !== undefined && given === GIVEN_NAMES.get(other);
+}
+
+function personNameWords(name: string): string[] {
+    return normalizeName(name)
+        .replace(/\b(ph|th) d\b/g, " ")
+        .split(" ")
+        .filter((word) => word && !NAME_TITLES.has(word));
+}
+
+/**
+ * Whether one person name could be a shorter or fuller form of the other: all
+ * words of either are in the other, given nicknames and initials and without
+ * academic titles. "Honza", "Dvořák, J." and "Ing. Jan Dvořák, Ph.D." fit
+ * "Jan Dvořák"; "Jan Malý" and "Jana Dvořáková" do not.
+ */
+export function personNamesFit(left: string, right: string): boolean {
+    const leftWords = personNameWords(left);
+    const rightWords = personNameWords(right);
+    return (
+        leftWords.every((word) =>
+            rightWords.some((other) => wordFits(word, other)),
+        ) ||
+        rightWords.every((word) =>
+            leftWords.some((other) => wordFits(word, other)),
+        )
+    );
+}
+
 function legalName(name: string): string {
     return normalizeName(name)
         .replace(

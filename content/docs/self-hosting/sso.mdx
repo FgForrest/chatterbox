@@ -149,6 +149,14 @@ Organization's Almanac, or in their own when the
 by email and takes the provider's current name; nicknames, notes and facts
 added in Chatterbox are kept.
 
+In the Organization's Almanac, a record with a person's address but a name that
+does not fit theirs is treated as someone else's at their first sign-in, because
+members can put an address on the wrong person before its holder ever signs in.
+That record keeps its name and loses the address, the person gets a new record,
+and a warning goes to the server log. If the two were the same person after all
+(a nickname Chatterbox does not know, a name change), a curator can merge them
+in the Almanac.
+
 ## The organization account
 
 With single sign-on, `ORG_ACCOUNT_PASSWORD` is optional and nobody can

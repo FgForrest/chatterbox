@@ -30,10 +30,13 @@ import {
     instanceState,
     knowledgeAliases,
     people,
+    personEmails,
     sessions,
     users,
 } from "@/db/schema";
 import type * as AuthModule from "@/lib/auth";
+import type * as AlmanacModule from "@/lib/sso/almanac";
+import { recordSsoUserInAlmanac } from "@/lib/sso/almanac";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -120,6 +123,13 @@ vi.mock("@/lib/auth", async (importOriginal) => {
 
 vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
+vi.mock("@/lib/sso/almanac", async (importOriginal) => {
+    const original = await importOriginal<typeof AlmanacModule>();
+    return {
+        ...original,
+        recordSsoUserInAlmanac: vi.fn(original.recordSsoUserInAlmanac),
+    };
+});
 vi.mock("@/lib/posthog-server", () => ({
     captureServerEvent: vi.fn().mockResolvedValue(undefined),
     captureServerException: vi.fn(),
@@ -203,6 +213,32 @@ describeWithDatabase("single sign-on (PostgreSQL, fake IdP)", () => {
             )
             .limit(1);
         return row ?? null;
+    }
+
+    async function knownPerson(
+        displayName: string,
+        email: string,
+        ownerId = orgUserId,
+    ) {
+        const [row] = await db()
+            .insert(people)
+            .values({
+                userId: ownerId,
+                displayName: encryptText(displayName),
+                primaryEmail: encryptText(email),
+                primaryEmailHash: lookupHash(email),
+            })
+            .returning();
+        return required(row);
+    }
+
+    async function personById(id: string) {
+        const [row] = await db()
+            .select()
+            .from(people)
+            .where(eq(people.id, id))
+            .limit(1);
+        return required(row);
     }
 
     async function passwordUser(email: string, name: string) {
@@ -755,6 +791,249 @@ describeWithDatabase("single sign-on (PostgreSQL, fake IdP)", () => {
             .from(knowledgeAliases)
             .where(eq(knowledgeAliases.personId, required(person).id));
         expect(aliases).toHaveLength(1);
+    });
+
+    it("leaves another person's record alone at the first sign-in", async () => {
+        const email = "nora@example.test";
+        const other = await knownPerson("Ivana Malá", email);
+        await db()
+            .insert(personEmails)
+            .values(
+                [email, "ivana@example.test"].map((address) => ({
+                    userId: orgUserId,
+                    personId: other.id,
+                    email: encryptText(address),
+                    emailHash: lookupHash(address),
+                })),
+            );
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+        await ssoLogin({
+            sub: "sub-nora",
+            email,
+            email_verified: true,
+            name: "Nora Veselá",
+        });
+
+        const kept = await personById(other.id);
+        expect(decryptText(kept.displayName)).toBe("Ivana Malá");
+        expect(kept.primaryEmail).toBeNull();
+        expect(kept.primaryEmailHash).toBeNull();
+        expect(
+            await db()
+                .select({ hash: personEmails.emailHash })
+                .from(personEmails)
+                .where(eq(personEmails.personId, other.id)),
+        ).toEqual([{ hash: lookupHash("ivana@example.test") }]);
+
+        const holder = required(await personByEmail(orgUserId, email));
+        expect(holder.id).not.toBe(other.id);
+        expect(decryptText(holder.displayName)).toBe("Nora Veselá");
+        expect(holder.createdByUserId).toBe(
+            required(await userByEmail(email)).id,
+        );
+
+        const logged = warn.mock.calls.flat().map(String);
+        expect(logged.some((line) => line.includes(other.id))).toBe(true);
+        expect(
+            logged.filter(
+                (line) =>
+                    line.includes("Ivana") ||
+                    line.includes("Nora") ||
+                    line.includes(email),
+            ),
+        ).toEqual([]);
+        warn.mockRestore();
+
+        await ssoLogin({
+            sub: "sub-nora",
+            email,
+            email_verified: true,
+            name: "Nora Skálová",
+        });
+        const again = required(await personByEmail(orgUserId, email));
+        expect(again.id).toBe(holder.id);
+        expect(decryptText(again.displayName)).toBe("Nora Skálová");
+        expect(decryptText((await personById(other.id)).displayName)).toBe(
+            "Ivana Malá",
+        );
+    });
+
+    it.each([
+        "Jan Dvorak",
+        "Dvořák, Jan",
+        "Honza Dvořák",
+        "Honza",
+        "J. Dvořák",
+        "Ing. Jan Dvořák",
+        "fit-address@example.test",
+    ])("keeps a record named %s for Jan Dvořák at the first sign-in", async (name) => {
+        const email =
+            name === "fit-address@example.test"
+                ? name
+                : `fit-${lookupHash(name).slice(0, 12)}@example.test`;
+        const person = await knownPerson(name, email);
+
+        await ssoLogin({
+            sub: `sub-${email}`,
+            email,
+            email_verified: true,
+            name: "Jan Dvořák",
+        });
+
+        const kept = await personById(person.id);
+        expect(decryptText(kept.displayName)).toBe("Jan Dvořák");
+        expect(kept.primaryEmailHash).toBe(lookupHash(email));
+    });
+
+    it("follows the provider to a wholly new name after the first sign-in", async () => {
+        const email = "bea@example.test";
+        const person = await knownPerson("Bea Hart", email);
+        const login = { sub: "sub-bea", email, email_verified: true };
+        await ssoLogin({ ...login, name: "Bea Hart" });
+
+        await ssoLogin({ ...login, name: "Cleo Stone" });
+
+        const renamed = await personById(person.id);
+        expect(decryptText(renamed.displayName)).toBe("Cleo Stone");
+        expect(renamed.primaryEmailHash).toBe(lookupHash(email));
+    });
+
+    it.each([
+        null,
+        "  ",
+        "quiet@example.test",
+    ])("keeps the record when the provider's name is %j", async (name) => {
+        const email = "quiet@example.test";
+        const userId = await passwordUser(email, "Quiet");
+        const person = await knownPerson("Rita Malá", email);
+        try {
+            expect(
+                await recordSsoUserInAlmanac({ id: userId, name, email }),
+            ).toBe(person.id);
+            const kept = await personById(person.id);
+            expect(decryptText(kept.displayName)).toBe("Rita Malá");
+            expect(kept.primaryEmailHash).toBe(lookupHash(email));
+        } finally {
+            await db().delete(people).where(eq(people.id, person.id));
+            await db().delete(users).where(eq(users.id, userId));
+        }
+    });
+
+    it("keeps a record the user created, for a first sign-in the stamp cannot tell", async () => {
+        const email = "legacy@example.test";
+        const userId = await passwordUser(email, "Legacy");
+        const person = await knownPerson("Rita Malá", email);
+        await db()
+            .update(people)
+            .set({ createdByUserId: userId })
+            .where(eq(people.id, person.id));
+
+        expect(
+            await recordSsoUserInAlmanac({
+                id: userId,
+                name: "Tea Hart",
+                email,
+            }),
+        ).toBe(person.id);
+
+        expect(decryptText((await personById(person.id)).displayName)).toBe(
+            "Tea Hart",
+        );
+    });
+
+    it("still checks whose record it is after a first sign-in that recorded nobody", async () => {
+        const email = "lea@example.test";
+        const login = {
+            sub: "sub-lea",
+            email,
+            email_verified: true,
+            name: "Lea Veselá",
+        };
+        const other = await knownPerson("Ivana Malá", email);
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        vi.mocked(recordSsoUserInAlmanac).mockRejectedValueOnce(
+            new Error("database down"),
+        );
+
+        await ssoLogin(login);
+
+        expect(required(await userByEmail(email)).lastSsoLoginAt).toBeNull();
+        expect(error).toHaveBeenCalled();
+        error.mockRestore();
+
+        await ssoLogin(login);
+
+        const kept = await personById(other.id);
+        expect(decryptText(kept.displayName)).toBe("Ivana Malá");
+        expect(kept.primaryEmailHash).toBeNull();
+        const holder = required(await personByEmail(orgUserId, email));
+        expect(decryptText(holder.displayName)).toBe("Lea Veselá");
+        expect(
+            required(await userByEmail(email)).lastSsoLoginAt,
+        ).not.toBeNull();
+    });
+
+    it("keeps a returning user's addresses active when recording fails", async () => {
+        const email = "mia@example.test";
+        const login = {
+            sub: "sub-mia",
+            email,
+            email_verified: true,
+            name: "Mia Hart",
+        };
+        await ssoLogin(login);
+        const longAgo = new Date("2026-01-01T00:00:00.000Z");
+        await db()
+            .update(users)
+            .set({ lastSsoLoginAt: longAgo })
+            .where(eq(users.email, email));
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        vi.mocked(recordSsoUserInAlmanac).mockRejectedValueOnce(
+            new Error("database down"),
+        );
+
+        await ssoLogin(login);
+
+        error.mockRestore();
+        expect(
+            required(
+                required(await userByEmail(email)).lastSsoLoginAt,
+            ).getTime(),
+        ).toBeGreaterThan(longAgo.getTime());
+    });
+
+    it("names a new record by the address when the provider gives no name", async () => {
+        const email = "unnamed@example.test";
+        const userId = await passwordUser(email, "Unnamed");
+
+        const id = await recordSsoUserInAlmanac({
+            id: userId,
+            name: null,
+            email,
+        });
+
+        expect(decryptText((await personById(required(id))).displayName)).toBe(
+            email,
+        );
+    });
+
+    it("keeps a record in the user's own Almanac whatever its name", async () => {
+        mockEnv.SELF_HOST_MODE = "local";
+        const email = "own@example.test";
+        const userId = await passwordUser(email, "Own");
+        const person = await knownPerson("Rita Malá", email, userId);
+
+        await ssoLogin({
+            sub: "sub-own",
+            email,
+            email_verified: true,
+            name: "Olga Veselá",
+        });
+
+        const kept = await personById(person.id);
+        expect(decryptText(kept.displayName)).toBe("Olga Veselá");
+        expect(kept.primaryEmailHash).toBe(lookupHash(email));
     });
 
     it("uses the user's own Almanac when the Organization scope is off", async () => {
