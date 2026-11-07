@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { LOGIN_RETURN_PATH_HEADER } from "@/lib/auth/return-path";
 import { env } from "@/lib/env";
 import { decideHostnameGate } from "@/lib/hosted/hostname-gate";
 
@@ -46,14 +47,18 @@ function gatedResponse(request: NextRequest): NextResponse {
         return NextResponse.next({ request: { headers } });
     }
 
-    /* ── Admin: expose pathname to server components ── */
-    if (pathname.startsWith("/admin")) {
-        const headers = new Headers(request.headers);
-        headers.set("x-pathname", pathname);
-        return NextResponse.next({ request: { headers } });
-    }
+    if (pathname.startsWith("/api/")) return NextResponse.next();
 
-    return NextResponse.next();
+    const headers = new Headers(request.headers);
+    headers.set(
+        LOGIN_RETURN_PATH_HEADER,
+        `${pathname}${request.nextUrl.search}`,
+    );
+    if (pathname.startsWith("/admin")) {
+        /* ── Admin: expose pathname to server components ── */
+        headers.set("x-pathname", pathname);
+    }
+    return NextResponse.next({ request: { headers } });
 }
 
 export function proxy(request: NextRequest) {
