@@ -57,6 +57,8 @@ The chips above the transcript are the speakers.
 
 Names you give appear everywhere the transcript does: in the summary, in exports, in copied Markdown and in the API.
 
+When you name a colleague whose person record carries their primary email, their AI client can list this recording's title, start and duration for reporting time, even without access to the recording, only if it started at or after their first single sign-on. Adding the email later also lists recordings where the person is already named, but never those from before their first sign-in.
+
 Speaker suggestions show their source and, for a guess, the model's reason in the tooltip. Calendar and Meet are used on automatic and manual runs. Confirm a **?** suggestion with one click; leaving it unticked never names the speaker. Identity uses invitations, attendance and transcript clues, never voice data.
 
 ### Topics

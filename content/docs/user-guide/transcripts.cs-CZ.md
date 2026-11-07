@@ -67,6 +67,8 @@ Změna jazyka sama nic znovu nespouští. Pokud se existující výstup jazykov�
 
 Zadaná jména se zobrazují všude tam, kde vystupuje přepis: ve shrnutí, exportech, zkopírovaném Markdown i v API.
 
+Když pojmenujete kolegu, jehož záznam osoby obsahuje jeho hlavní e-mail, jeho AI klient může pro vykazování času vypsat název, začátek a délku této nahrávky i bez přístupu k ní, ale jen pokud začala v okamžiku jeho prvního jednotného přihlášení nebo později. Pozdější doplnění e-mailu zpřístupní i nahrávky, kde je osoba už pojmenovaná, nikdy však ty z doby před jejím prvním přihlášením.
+
 Návrhy mluvčích ukazují původ a u odhadu také vysvětlení modelu v nápovědě. Kalendář a Meet se používají při automatickém i ručním běhu. Návrh s **?** potvrdíte jedním kliknutím; nezaškrtnutý návrh mluvčího nikdy nepojmenuje. Identita vychází z pozvánek, účasti a vodítek v přepisu, nikdy z hlasových dat.
 
 <span id="topics" />

@@ -773,13 +773,21 @@ describeWithDatabase("MCP recording tools (PostgreSQL)", () => {
             return client;
         }
 
-        it("lists both tools and answers within their output schemas", async () => {
+        it("lists the recording tools and answers within their output schemas", async () => {
             const client = await connect(alice());
             const listed = await client.listTools();
             expect(listed.tools.map((t) => t.name)).toEqual([
                 "list_folders",
                 "list_recordings",
+                "list_attended_recordings",
             ]);
+            const attendedListing = listed.tools.find(
+                (t) => t.name === "list_attended_recordings",
+            );
+            expect(attendedListing?.inputSchema.properties).toMatchObject({
+                from: { description: expect.stringMatching(/\S/) },
+                to: { description: expect.stringMatching(/\S/) },
+            });
             const listing = listed.tools.find(
                 (t) => t.name === "list_recordings",
             );

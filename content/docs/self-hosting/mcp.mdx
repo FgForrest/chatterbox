@@ -29,7 +29,7 @@ permissions allow; calling a known tool without its permission returns
 | `tasks:write`      | `create_task`, `update_task`, `follow_task`, `merge_tasks`                                                           |
 | `mail:read`        | `list_mail`, `get_mail`, `search_mail`                                                             |
 
-`list_folders` and `list_recordings` come with any of `transcripts:read`,
+`list_folders`, `list_recordings` and `list_attended_recordings` come with any of `transcripts:read`,
 `summaries:read` or `tasks:read`.
 
 - **Almanac** (`knowledge:read`): people and things, their types,
@@ -65,7 +65,9 @@ Permissions combine, and some fields need two of them:
 - `tasks:write` includes `tasks:read`.
 
 A permission never widens what a caller already sees: Chatterbox's usual rules
-choose the rows (see [What callers see](#what-callers-see)).
+choose the rows (see [What callers see](#what-callers-see)). The exception is
+`list_attended_recordings`, which discloses only the title, start and duration
+of attended recordings, including ones the caller cannot read.
 
 `get_transcript.language` remains the provider’s detected language. `confirmed_language` is the recording’s user-confirmed ISO 639-1 code, or `null` in Automatic mode; `detected_language` repeats the original provider detection. `list_recordings` also includes `confirmed_language`. These fields do not change the transcript text.
 
@@ -294,7 +296,25 @@ not serve, and a client without its connector key get 403 "Forbidden".
 The app log names the reason (see
 [When Claude cannot connect](./claude#when-claude-cannot-connect)).
 
-**Received items** become readable after the invitation is accepted, on self-host instances showing the Organization scope. Recording, transcript, summary and mail list/get/search tools include them under the same tool permissions. Links use `view=received`; received task results include `received_owner_name`. Speaker names are the owner's confirmed names as plain text; the owner's private people, facts, aliases and folders stay hidden. Received items can be filtered by the receiver's own filing folders and accepted folder attachments. Service callers and unrelated curators gain no access to person shares.
+**Attended recordings:** `list_attended_recordings` lists your own recordings,
+including uploads, and those where a confirmed speaker links to an unmerged person
+in the owner's or Organization's Almanac whose primary email matches your verified
+email. It returns only `title`, `recorded_at` (start in UTC) and `duration_ms`,
+even for private recordings you cannot read. Other people's recordings are listed
+only if they started at or after your first single sign-on; earlier ones never appear.
+
+A wrong primary email can disclose those fields to the address holder for recordings
+from their first sign-in on; a person without an email is not matched. Curators can change an Organization person's
+email, and a shared mail's owner can also fill an empty one through Learn;
+entries disappear when retention deletes the recording or changed audio is
+re-transcribed. The access log records the listing, targets and caller.
+Owners have no opt-out.
+
+Service callers and unverified emails are refused, including for own recordings.
+Both `from` and `to` are required; a date-only `to` includes the whole UTC day.
+At most 200 results are returned; `truncated: true` means narrow the range.
+
+**Received items** become readable after the invitation is accepted, on self-host instances showing the Organization scope. The usual recording, transcript, summary and mail list/get/search tools include them under the same tool permissions. Links use `view=received`; received task results include `received_owner_name`. Speaker names are the owner's confirmed names as plain text; the owner's private people, facts, aliases and folders stay hidden. Received items can be filtered by the receiver's own filing folders and accepted folder attachments. Service callers and unrelated curators gain no access to person shares.
 
 **Shared folders:** `list_folders` includes accepted attachments in the receiver's private tree, with their chosen name, `shared: true` and `read_only: true`. Pass the attachment ID as `folder` to recording and mail listing/search tools. Results contain only the owner's current directly assigned items, never subfolder contents; direct and inherited access produce one result per item. The owner's original shared folder name is visible in the app, but their other folder names stay hidden. Outgoing shared folders also carry `shared: true`; they remain writable by their owner. Removing the attachment or deleting the source ends that folder access; a private folder cannot be moved or filed into the Organization. An attachment is never a task filing target, and own tasks filed in a shared folder stay visible only to their author.
 
@@ -340,7 +360,8 @@ Each also stops after 10 seconds. The answer reports `scanned`,
 `complete` and `continue_before`; pass `continue_before` back as `before`
 (as `cursor` for `list_recordings`) to search further back. Matching
 ignores case and accents and matches word forms in the recording's
-language. Listings return 50 items per page with `next_cursor`
+language. Except for `list_attended_recordings` (200 at most, no cursor),
+listings return 50 items per page with `next_cursor`
 (`list_mishearings` 200); `get_transcript` pages by about 40,000
 characters, splitting a longer turn into pieces that keep its speaker and
 timing.

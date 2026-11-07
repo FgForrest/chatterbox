@@ -130,7 +130,11 @@ const KNOWLEDGE_TOOLS = [
     "get_facts",
     "list_mishearings",
 ];
-const RECORDING_TOOLS = ["list_folders", "list_recordings"];
+const RECORDING_TOOLS = [
+    "list_folders",
+    "list_recordings",
+    "list_attended_recordings",
+];
 const TRANSCRIPT_TOOLS = ["get_transcript", "search_transcripts"];
 const SUMMARY_TOOLS = ["get_summary", "search_summaries"];
 const TASK_READ_TOOLS = ["list_tasks", "search_tasks"];

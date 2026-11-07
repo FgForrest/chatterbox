@@ -6,6 +6,7 @@ import {
     gte,
     inArray,
     isNotNull,
+    isNull,
     lt,
     lte,
     not,
@@ -20,6 +21,7 @@ import {
     chatterItems,
     knowledgeFactEvidence,
     knowledgeFacts,
+    people,
     recordings,
     transcriptCorrections,
     transcriptions,
@@ -271,6 +273,70 @@ function spokeIn(personId: string): SQL {
     );
 }
 
+function recordingDateConditions(filters: RecordingFilters): SQL[] {
+    const conditions: SQL[] = [];
+    if (filters.from) {
+        conditions.push(gte(chatterItems.occurredAt, filters.from));
+    }
+    if (filters.to) {
+        conditions.push(
+            filters.to.inclusive
+                ? lte(chatterItems.occurredAt, filters.to.at)
+                : lt(chatterItems.occurredAt, filters.to.at),
+        );
+    }
+    return conditions;
+}
+
+/**
+ * Own recordings or confirmed attendance by primary email, limited to the date range.
+ * Others' recordings must start at or after the linked account's first SSO sign-in;
+ * without that account only own recordings count, regardless of their start time.
+ */
+export function attendedRecordingCondition(
+    userId: string,
+    emailHash: string,
+    firstSsoSignInAt: Date | null,
+    filters: RecordingFilters,
+): SQL {
+    const attended = exists(
+        db
+            .select({ one: sql`1` })
+            .from(transcriptSpeakers)
+            .innerJoin(
+                transcriptions,
+                and(
+                    eq(transcriptions.id, transcriptSpeakers.transcriptionId),
+                    eq(transcriptions.userId, transcriptSpeakers.userId),
+                ),
+            )
+            .innerJoin(people, eq(people.id, transcriptSpeakers.personId))
+            .where(
+                and(
+                    ownTranscript(),
+                    eq(transcriptSpeakers.status, "confirmed"),
+                    eq(people.primaryEmailHash, emailHash),
+                    isNull(people.mergedIntoId),
+                    or(
+                        eq(people.userId, recordings.userId),
+                        orgOwnedCondition(people.userId),
+                    ),
+                ),
+            ),
+    );
+    // Attendance deliberately bypasses mcpRecordingCondition to disclose only title, start and duration without read access.
+    return and(
+        isNull(recordings.deletedAt),
+        ...recordingDateConditions(filters),
+        or(
+            eq(recordings.userId, userId),
+            firstSsoSignInAt
+                ? and(gte(chatterItems.occurredAt, firstSsoSignInAt), attended)
+                : undefined,
+        ),
+    ) as SQL;
+}
+
 function mentions(caller: McpCaller, entityId: string): SQL {
     const shared = sharedCondition(caller);
     const corrected = exists(
@@ -337,17 +403,10 @@ export async function recordingFilterConditions(
     caller: McpCaller,
     filters: RecordingFilters,
 ): Promise<SQL> {
-    const conditions: (SQL | undefined)[] = [mcpRecordingCondition(caller)];
-    if (filters.from) {
-        conditions.push(gte(chatterItems.occurredAt, filters.from));
-    }
-    if (filters.to) {
-        conditions.push(
-            filters.to.inclusive
-                ? lte(chatterItems.occurredAt, filters.to.at)
-                : lt(chatterItems.occurredAt, filters.to.at),
-        );
-    }
+    const conditions: (SQL | undefined)[] = [
+        mcpRecordingCondition(caller),
+        ...recordingDateConditions(filters),
+    ];
     if (filters.folderId) {
         const folder = folderRecordingCondition(
             await callerFolderOrganization(caller),
