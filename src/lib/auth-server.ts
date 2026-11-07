@@ -4,6 +4,10 @@ import { redirect } from "next/navigation";
 import { cache } from "react";
 import { db } from "@/db";
 import { users } from "@/db/schema";
+import {
+    LOGIN_RETURN_PATH_HEADER,
+    loginRedirectPath,
+} from "@/lib/auth/return-path";
 import type { ActorContext } from "@/lib/authz/model";
 import {
     type SessionAccess,
@@ -65,10 +69,17 @@ export const requireAuth = cache(async () => {
     const resolved = await getSessionWithAccess();
 
     if (!resolved) {
-        redirect("/login");
+        redirect(
+            loginRedirectPath((await headers()).get(LOGIN_RETURN_PATH_HEADER)),
+        );
     }
     if (!resolved.access.ok) {
-        redirect(`/login?error=${LOGIN_ERRORS[resolved.access.reason]}`);
+        redirect(
+            loginRedirectPath(
+                (await headers()).get(LOGIN_RETURN_PATH_HEADER),
+                LOGIN_ERRORS[resolved.access.reason],
+            ),
+        );
     }
     const { session } = resolved;
 
