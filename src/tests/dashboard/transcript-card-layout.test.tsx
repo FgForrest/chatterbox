@@ -151,6 +151,13 @@ describe("transcript card narrow controls", () => {
                 .closest(".order-4"),
         ).toBeTruthy();
     });
+    it("spaces the summary from its task review when an agenda reorders them", () => {
+        panel({ agenda: <div data-testid="absorbed-agenda" /> });
+        // space-y misses compact widget lines, which sit in display: contents spans.
+        expect(
+            screen.getByTestId("summary-and-tasks").parentElement?.className,
+        ).toBe("order-1 flex flex-col gap-4");
+    });
     it("preserves the existing content layout for recordings without an agenda", () => {
         const { container } = panel();
         expect(
