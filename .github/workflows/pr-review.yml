@@ -23,6 +23,9 @@ permissions:
 
 jobs:
   review:
+    # The action refuses a bot as the actor, which turned every Dependabot PR
+    # red. Skipped by PR author, so a rerun by a person does not change it.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
