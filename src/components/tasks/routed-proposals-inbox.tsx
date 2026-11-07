@@ -204,71 +204,80 @@ export function RoutedProposalsInbox() {
                                     </span>
                                 )}
                             </p>
-                            {!notice && (
-                                <p className="text-xs text-muted-foreground">
-                                    {i18n("Proposed by {person}", {
-                                        person:
-                                            row.proposedBy?.name ??
-                                            i18n("Someone"),
-                                    })}
-                                </p>
-                            )}
-                            {row.sourceItem && (
-                                <TaskEvidenceLink
-                                    evidence={{
-                                        itemId: row.sourceItem.id,
-                                        itemKind: row.sourceItem.kind,
-                                        audioAvailable:
-                                            row.sourceItem.audioAvailable,
-                                        startMs: row.evidenceStartMs,
-                                        text: row.evidenceText,
-                                    }}
-                                    quote={row.quote}
-                                />
-                            )}
-                            {result ? (
-                                <output className="text-xs font-medium">
-                                    {result.state === "obsolete"
-                                        ? obsoleteMessage(result.obsoleteReason)
-                                        : result.state === "applied"
-                                          ? i18n("Applied")
-                                          : notice
-                                            ? i18n("Dismissed")
-                                            : i18n("Rejected")}
-                                </output>
-                            ) : (
-                                <div className="flex gap-2">
-                                    {!notice && (
-                                        <Button
-                                            size="sm"
-                                            disabled={busy === row.id}
-                                            onClick={() =>
-                                                void decide(row, "apply")
-                                            }
-                                        >
-                                            {i18n("Apply")}
-                                        </Button>
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                {!notice && (
+                                    <span>
+                                        {i18n("Proposed by {person}", {
+                                            person:
+                                                row.proposedBy?.name ??
+                                                i18n("Someone"),
+                                        })}
+                                    </span>
+                                )}
+                                {row.sourceItem && (
+                                    <TaskEvidenceLink
+                                        evidence={{
+                                            itemId: row.sourceItem.id,
+                                            itemKind: row.sourceItem.kind,
+                                            audioAvailable:
+                                                row.sourceItem.audioAvailable,
+                                            startMs: row.evidenceStartMs,
+                                            text: row.evidenceText,
+                                        }}
+                                        quote={row.quote}
+                                    />
+                                )}
+                                <div className="ml-auto flex flex-wrap items-center justify-end gap-2 text-foreground">
+                                    {result ? (
+                                        <output className="font-medium">
+                                            {result.state === "obsolete"
+                                                ? obsoleteMessage(
+                                                      result.obsoleteReason,
+                                                  )
+                                                : result.state === "applied"
+                                                  ? i18n("Applied")
+                                                  : notice
+                                                    ? i18n("Dismissed")
+                                                    : i18n("Rejected")}
+                                        </output>
+                                    ) : (
+                                        <>
+                                            {!notice && (
+                                                <Button
+                                                    size="sm"
+                                                    disabled={busy === row.id}
+                                                    onClick={() =>
+                                                        void decide(
+                                                            row,
+                                                            "apply",
+                                                        )
+                                                    }
+                                                >
+                                                    {i18n("Apply")}
+                                                </Button>
+                                            )}
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                disabled={busy === row.id}
+                                                onClick={() =>
+                                                    void decide(row, "reject")
+                                                }
+                                            >
+                                                {busy === row.id && (
+                                                    <Loader2
+                                                        className="size-3.5 animate-spin"
+                                                        aria-hidden="true"
+                                                    />
+                                                )}
+                                                {notice
+                                                    ? i18n("Dismiss")
+                                                    : i18n("Reject")}
+                                            </Button>
+                                        </>
                                     )}
-                                    <Button
-                                        size="sm"
-                                        variant="outline"
-                                        disabled={busy === row.id}
-                                        onClick={() =>
-                                            void decide(row, "reject")
-                                        }
-                                    >
-                                        {busy === row.id && (
-                                            <Loader2
-                                                className="size-3.5 animate-spin"
-                                                aria-hidden="true"
-                                            />
-                                        )}
-                                        {notice
-                                            ? i18n("Dismiss")
-                                            : i18n("Reject")}
-                                    </Button>
                                 </div>
-                            )}
+                            </div>
                         </li>
                     );
                 })}

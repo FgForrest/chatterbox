@@ -273,7 +273,7 @@ export function TaskReviewLink({
                     merging === null &&
                     state.skip ? (
                         <Button
-                            variant="outline"
+                            variant="ghost"
                             size="sm"
                             disabled={state.accepting}
                             onClick={state.skip}
