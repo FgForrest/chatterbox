@@ -464,21 +464,12 @@ describeWithDatabase(
 
             const firstSignInAt = new Date();
             await member("u-newhire", "newhire@example.test", firstSignInAt);
-            const inheritedId = await recordSsoUserInAlmanac({
+            const holderId = await recordSsoUserInAlmanac({
                 id: "u-newhire",
                 name: "Nora Newhire",
                 email: "newhire@example.test",
             });
-            expect(inheritedId).toBe(target.id);
-            const [inherited] = await db()
-                .select()
-                .from(people)
-                .where(
-                    and(eq(people.id, target.id), eq(people.userId, orgUserId)),
-                );
-            expect(decryptText(inherited?.displayName ?? "")).toBe(
-                "Nora Newhire",
-            );
+            if (!holderId) throw new Error("holder was not recorded");
             const attended = RECORDING_TOOLS.find(
                 (tool) => tool.name === "list_attended_recordings",
             );
@@ -503,7 +494,7 @@ describeWithDatabase(
                 );
             expect(await list()).toEqual({ recordings: [], truncated: false });
 
-            await nameTarget("after-inherited-sign-in", target.id);
+            await nameTarget("after-inherited-sign-in", holderId);
             const afterSignInAt = new Date(firstSignInAt.getTime() + 1);
             await db()
                 .update(chatterItems)

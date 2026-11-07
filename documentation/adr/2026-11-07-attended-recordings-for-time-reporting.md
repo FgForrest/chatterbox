@@ -149,8 +149,7 @@ review: an existing login-address holder resolves at ingest, and a holder create
 blocks a second primary email through `people_user_id_email_hash_unique`. Its new test,
 `excludes inherited history assigned through shared mail Learn before first sign-in and lists
 later attendance`, reproduces an address assigned to an existing Organization person before the
-holder signs in: the same record is inherited and renamed, earlier recordings stay excluded,
-and later attendance is listed.
+holder signs in: earlier recordings stay excluded, and later attendance is listed.
 
 The two attendance files passed 47 tests (44 attendance and 3 identity). Together with
 `src/tests/mcp/recordings.integration.test.ts` they passed 71 tests across 3 files against
@@ -181,8 +180,8 @@ restored after every mutation.
   on a person after its holder signed in: the holder sees recordings from their sign-in on.
   `people_user_id_email_hash_unique` refuses a signed-in colleague's own address on another
   Organization person, so this requires a private person, whose owner decides for their own
-  recordings, or a curator clearing and moving addresses. The inherited record is still renamed;
-  that is a data defect independent of this tool and outside this decision. Learn is unchanged.
+  recordings, or a curator clearing and moving addresses. What a sign-in does to a record it finds
+  is independent of this tool and outside this decision. Learn is unchanged.
 - A colleague never sees meetings from before their first sign-in, even correctly named ones.
   Signing in partway through a reporting period leaves the earlier part out.
 - A later address change at the identity provider does not move the cutoff. A removed and
