@@ -43,7 +43,8 @@ export async function meetingAttachmentAudienceInTx(
         : await tx
               .select({ id: users.id, name: users.name })
               .from(users)
-              .where(inArray(users.id, [...intended.userIds]));
+              .where(inArray(users.id, [...intended.userIds]))
+              .orderBy(users.id);
     return {
         current,
         intended,
@@ -52,9 +53,9 @@ export async function meetingAttachmentAudienceInTx(
             organization: intended.organization,
             userIds: intended.organization
                 ? []
-                : [...intended.userIds].filter(
-                      (id) => id !== input.actorUserId,
-                  ),
+                : [...intended.userIds]
+                      .filter((id) => id !== input.actorUserId)
+                      .sort(),
             users: audienceUsers.filter(
                 (person) => person.id !== input.actorUserId,
             ),
