@@ -170,15 +170,20 @@ export type IdentityProviderErrorKind =
 export class IdentityProviderError extends Error {
     readonly kind: IdentityProviderErrorKind;
     readonly status: number | null;
+    readonly providerError?: string;
+    readonly providerDetail?: string;
 
     constructor(
         kind: IdentityProviderErrorKind,
         message: string,
         status: number | null = null,
+        provider?: { error?: string; detail?: string },
     ) {
         super(message);
         this.name = "IdentityProviderError";
         this.kind = kind;
         this.status = status;
+        this.providerError = provider?.error;
+        this.providerDetail = provider?.detail;
     }
 }

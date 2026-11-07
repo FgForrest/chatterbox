@@ -13,7 +13,7 @@ import {
     SignJWT,
     UnsecuredJWT,
 } from "jose";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 const ISSUER = "https://id.example.com/realms/acme";
 const CLIENT = "chatterbox";
@@ -37,6 +37,7 @@ vi.mock("@/lib/sso/almanac", () => ({ recordSsoUserInAlmanac: vi.fn() }));
 vi.mock("@/lib/mcp/config", () => ({
     issuerMetadata: vi.fn(async () => ({
         issuer: "https://id.example.com/realms/acme",
+        tokenEndpoint: "https://id.example.com/realms/acme/token",
         jwksUri:
             "https://id.example.com/realms/acme/protocol/openid-connect/certs",
     })),
@@ -49,9 +50,11 @@ vi.mock("jose", async (importOriginal) => {
     };
 });
 
+import { logSession } from "@/lib/auth/session-log";
 import { IdentityProviderError } from "@/lib/identity/ports";
 import { verifySsoLogin } from "@/lib/sso/auth-hooks";
 import {
+    refreshProviderTokens,
     SsoTokenError,
     verifyIdToken,
     verifyWebAccessToken,
@@ -210,6 +213,145 @@ describe("verifySsoLogin", () => {
             headers: expect.objectContaining({
                 location: expect.stringContaining("error=SSO_ACCESS_DENIED"),
             }),
+        });
+    });
+});
+
+describe("refreshProviderTokens diagnostics", () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+    });
+
+    it.each([
+        "refresh_token=example-refresh email=example@example.com",
+        "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJleGFtcGxlIn0.c2lnbmF0dXJl",
+    ])("discards token-shaped descriptions before storing or logging them: %s", async (description) => {
+        const info = vi.spyOn(console, "info").mockImplementation(() => {});
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () =>
+                Response.json(
+                    {
+                        error: "invalid_grant",
+                        error_description: description,
+                    },
+                    { status: 400 },
+                ),
+            ),
+        );
+        let failure: IdentityProviderError | undefined;
+        try {
+            await refreshProviderTokens("example-refresh");
+        } catch (error) {
+            if (!(error instanceof IdentityProviderError)) throw error;
+            failure = error;
+        }
+        expect(failure).toBeInstanceOf(IdentityProviderError);
+        expect(failure?.providerDetail).toBeUndefined();
+        logSession("ended", {
+            cause: "provider-refused",
+            providerError: failure?.providerError,
+            providerDetail: failure?.providerDetail,
+        });
+        expect(info).toHaveBeenCalledExactlyOnceWith(
+            "[session] ended cause=provider-refused providerError=invalid_grant",
+        );
+        expect(warn).not.toHaveBeenCalled();
+        const stored = JSON.stringify(failure);
+        const output = info.mock.calls.flat().join("\n");
+        for (const part of description.split(/[ .]/)) {
+            expect(stored).not.toContain(part);
+            expect(failure?.message).not.toContain(part);
+            expect(failure?.stack).not.toContain(part);
+            expect(output).not.toContain(part);
+        }
+    });
+
+    it("omits a credential-shaped error code from the error object", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () =>
+                Response.json(
+                    { error: "refresh_token=example-refresh" },
+                    { status: 400 },
+                ),
+            ),
+        );
+        await expect(
+            refreshProviderTokens("example-refresh"),
+        ).rejects.toMatchObject({
+            kind: "invalid_response",
+            providerError: undefined,
+            providerDetail: undefined,
+        });
+    });
+
+    it.each([
+        [
+            400,
+            "invalid_grant",
+            "reauthentication_required",
+            "The identity provider ended the sign-in",
+        ],
+        [
+            503,
+            "temporarily_unavailable",
+            "unavailable",
+            "The identity provider could not renew the sign-in",
+        ],
+        [
+            400,
+            "invalid_client",
+            "invalid_response",
+            "The identity provider could not renew the sign-in",
+        ],
+    ])("keeps provider diagnostics for HTTP %s %s without changing the error", async (status, code, kind, message) => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () =>
+                Response.json(
+                    {
+                        error: code,
+                        error_description: "Session not active",
+                        access_token: "example-private-access",
+                        refresh_token: "example-private-refresh",
+                        email: "example@example.com",
+                    },
+                    { status },
+                ),
+            ),
+        );
+        await expect(
+            refreshProviderTokens("example-refresh"),
+        ).rejects.toMatchObject({
+            kind,
+            message,
+            status,
+            providerError: code,
+            providerDetail: "Session not active",
+        });
+    });
+
+    it("omits non-string diagnostics", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () =>
+                Response.json(
+                    {
+                        error: "invalid_grant",
+                        error_description: { secret: "example" },
+                    },
+                    { status: 400 },
+                ),
+            ),
+        );
+        await expect(
+            refreshProviderTokens("example-refresh"),
+        ).rejects.toMatchObject({
+            providerError: "invalid_grant",
+            providerDetail: undefined,
         });
     });
 });

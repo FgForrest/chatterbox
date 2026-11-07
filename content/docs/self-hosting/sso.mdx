@@ -131,6 +131,14 @@ verified email on their next sign-in.
   Chatterbox within that window.
 - **Sign out** ends the Chatterbox session only. The provider's own session
   stays, so the next **Sign in** may go straight through without a prompt.
+- Chatterbox logs `[session] started`, `ended` and `renew-failed` with user and
+  session ids, reasons and available timings in minutes. Search by `user=` or
+  `session=`; `expiresAt` is the fixed deadline, `authAgeMin` / `sinceAuthMin`
+  show the provider sign-in's age, and a negative `refreshExpiresInMin` means
+  the refresh token has expired. `renew-failed` keeps the session; endings made
+  by an administrator, cleanup or the switch to single sign-on carry `count`.
+  Expired sessions are logged when read or cleaned up, so a
+  `started` line without an `ended` line can already be past `expiresAt`.
 - Personal API tokens are not sessions and keep working.
 
 ## The Almanac

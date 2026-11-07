@@ -522,6 +522,7 @@ describeWithKeycloak("access management (Keycloak)", () => {
             await userId("rex"),
         );
         const rexId = await userId("rex");
+        const info = vi.spyOn(console, "info");
         const before = await detail("root", subject("rex"));
         const response = await patch("root", subject("rex"), {
             remove: ["use"],
@@ -539,6 +540,17 @@ describeWithKeycloak("access management (Keycloak)", () => {
                 .from(sessions)
                 .where(eq(sessions.userId, rexId)),
         ).toEqual([]);
+        expect(
+            info.mock.calls.filter(([line]) =>
+                String(line).startsWith("[session] ended"),
+            ),
+        ).toEqual([
+            [`[session] ended user=${rexId} cause=access-withdrawn count=1`],
+        ]);
+        expect(info.mock.calls.flat().join("\n")).not.toContain(
+            cookies.rex ?? "example-cookie",
+        );
+        info.mockRestore();
         const providerSessions = await realm.admin.http.get<unknown[]>(
             adminPath`/users/${subject("rex")}/sessions`,
         );
@@ -661,9 +673,27 @@ describeWithKeycloak("access management (Keycloak)", () => {
     }
 
     it("ends someone's sessions on request and records it", async () => {
+        const info = vi.spyOn(console, "info");
         const response = await revoke("second", subject("cora"));
         expect(response.status).toBe(200);
         expect(await response.json()).toMatchObject({ revocation: "done" });
+        expect(
+            info.mock.calls.filter(([line]) =>
+                String(line).startsWith("[session] ended"),
+            ),
+        ).toEqual([
+            [
+                `[session] ended user=${await userId("cora")} cause=access-revoked count=1`,
+            ],
+        ]);
+        info.mockClear();
+        expect((await revoke("second", subject("cora"))).status).toBe(200);
+        expect(
+            info.mock.calls.filter(([line]) =>
+                String(line).startsWith("[session] ended"),
+            ),
+        ).toEqual([]);
+        info.mockRestore();
         expect(
             await db()
                 .select()
@@ -680,7 +710,7 @@ describeWithKeycloak("access management (Keycloak)", () => {
                         eq(accessChangeLog.action, "revoke-sessions"),
                     ),
                 ),
-        ).toHaveLength(1);
+        ).toHaveLength(2);
     });
 
     it("names someone whose sessions at the provider are still open until they end or access is back", async () => {
