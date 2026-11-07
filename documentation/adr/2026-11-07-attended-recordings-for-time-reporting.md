@@ -1,7 +1,7 @@
 ---
 title: Attended recordings disclose only title, start and duration for time reporting
 date: 2026-11-07
-updated: 2026-11-07 19:22
+updated: 2026-11-07 21:50
 status: accepted
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [340]
 areas: [src/lib/mcp/data/recordings.ts, src/lib/mcp/tools/recordings.ts, content/docs/self-hosting/mcp.mdx]
 supersedes: [2026-10-07-external-mcp-server]
 superseded-by: []
-relates: [2026-10-22-assignee-task-list]
+relates: [2026-10-22-assignee-task-list, 2026-11-07-first-sign-in-keeps-other-records]
 ---
 
 # Attended recordings disclose only title, start and duration for time reporting
@@ -181,7 +181,9 @@ restored after every mutation.
   `people_user_id_email_hash_unique` refuses a signed-in colleague's own address on another
   Organization person, so this requires a private person, whose owner decides for their own
   recordings, or a curator clearing and moving addresses. What a sign-in does to a record it finds
-  is independent of this tool and outside this decision. Learn is unchanged.
+  is independent of this tool: see
+  [2026-11-07-first-sign-in-keeps-other-records](2026-11-07-first-sign-in-keeps-other-records.md).
+  Learn is unchanged.
 - A colleague never sees meetings from before their first sign-in, even correctly named ones.
   Signing in partway through a reporting period leaves the earlier part out.
 - A later address change at the identity provider does not move the cutoff. A removed and
@@ -215,6 +217,8 @@ restored after every mutation.
   “An external role must never widen what a person sees in the app”, for this tool's title,
   start and duration disclosure. The rest of the earlier record remains in force, subject to its
   other documented partial supersessions.
+- [2026-11-07-first-sign-in-keeps-other-records](2026-11-07-first-sign-in-keeps-other-records.md): fixes
+  the record takeover this review exposed.
 
 ## Timeline
 

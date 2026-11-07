@@ -920,6 +920,30 @@ describeWithDatabase("single sign-on (PostgreSQL, fake IdP)", () => {
         }
     });
 
+    it.each([
+        "---",
+        "🙂",
+    ])("leaves another person's record alone for the provider name %s", async (name) => {
+        const email = `symbols-${lookupHash(name).slice(0, 12)}@example.test`;
+        const other = await knownPerson("Ivana Malá", email);
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+        await ssoLogin({
+            sub: `sub-${email}`,
+            email,
+            email_verified: true,
+            name,
+        });
+
+        warn.mockRestore();
+        const kept = await personById(other.id);
+        expect(decryptText(kept.displayName)).toBe("Ivana Malá");
+        expect(kept.primaryEmailHash).toBeNull();
+        const holder = required(await personByEmail(orgUserId, email));
+        expect(holder.id).not.toBe(other.id);
+        expect(decryptText(holder.displayName)).toBe(name);
+    });
+
     it("keeps a record the user created, for a first sign-in the stamp cannot tell", async () => {
         const email = "legacy@example.test";
         const userId = await passwordUser(email, "Legacy");
