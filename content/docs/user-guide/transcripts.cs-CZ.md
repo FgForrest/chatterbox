@@ -62,7 +62,6 @@ Změna jazyka sama nic znovu nespouští. Pokud se existující výstup jazykov�
 
 - Klikněte na jméno ve štítku, například **Mluvčí 2**, a vyberte, kdo to je, ze svého [Almanachu](almanac.md), vytvořte novou osobu nebo označte mluvčího jako **Neznámý**.
 - Přerušovaný štítek končící na **?**, například **Priya Raman?**, je návrh. Klikněte na **✓** pro potvrzení nebo **×** pro odmítnutí; odmítnuté jméno již nebude tomuto mluvčímu nabídnuto. **▶** přehraje okamžik, na jehož základě návrh vznikl. Pokud návrh nemá ukázku, přehraje další promluvu tohoto mluvčího.
-- **Hádaní mluvčích** nad přepisem jsou poznatky z Učení. Viz [Učení](learn.md).
 - Barevné **▶** má každý štítek, i ten, u kterého jste mluvčího ještě neurčili. Přehraje další promluvu tohoto mluvčího. Pravé tlačítko myši zůstává zkratkou. Kliknutím na potvrzené jméno vyberete jinou osobu nebo zvolíte **Otevřít v Almanachu**, **×** jméno odpojíte. Kliknutí na jméno neznámého mluvčího otevře stejný výběr.
 
 Zadaná jména se zobrazují všude tam, kde vystupuje přepis: ve shrnutí, exportech, zkopírovaném Markdown i v API.

@@ -19,7 +19,6 @@ import { TranscriptView } from "@/components/dashboard/transcript-view";
 import { HelpLink } from "@/components/help/help-button";
 import type { LearnMarks } from "@/components/learn/learn-marks";
 import { LearnReview } from "@/components/learn/learn-review";
-import { SpeakerGuesses } from "@/components/learn/speaker-guesses";
 import { SpeakerAccentContext } from "@/components/people/speaker-accent-context";
 import {
     confirmedAttributions,
@@ -396,8 +395,6 @@ export function TranscriptionPanel({
     // Reviews finished here: a review names speakers without a new
     // revision, so the speaker tags mount afresh to read them again.
     const [reviewsFinished, setReviewsFinished] = useState(0);
-    // Speakers named from Learn's guesses, read again the same way.
-    const [guessesAccepted, setGuessesAccepted] = useState(0);
 
     // The transcript's corrections, read edited by default. Only a Plaud or
     // Riffado transcript with stored turns has any; a mix has none.
@@ -530,19 +527,6 @@ export function TranscriptionPanel({
         Record<string, SpeakerAttributions>
     >({});
     const speakerAttributions = attributionsByKey[attributionKey] ?? {};
-    // Labels answered "nobody known", which no guess names either.
-    const [unknownByKey, setUnknownByKey] = useState<
-        Record<string, ReadonlySet<string>>
-    >({});
-    const answeredLabels = useMemo(
-        () =>
-            new Set([
-                ...Object.keys(speakerAttributions),
-                ...(unknownByKey[attributionKey] ?? []),
-            ]),
-        [speakerAttributions, unknownByKey, attributionKey],
-    );
-
     const nextSpeakerTurn = (
         voices: string | readonly string[],
         once = false,
@@ -600,16 +584,6 @@ export function TranscriptionPanel({
         },
         [attributionKey],
     );
-    const handleUnknownLabelsChange = useCallback(
-        (labels: ReadonlySet<string>) => {
-            setUnknownByKey((current) => ({
-                ...current,
-                [attributionKey]: labels,
-            }));
-        },
-        [attributionKey],
-    );
-
     const defaultSummarySource: SummarySource =
         activeTranscript?.source === "plaud" ? "plaud" : "riffado";
     const [summarySelection, setSummarySelection] = useState<{
@@ -825,23 +799,6 @@ export function TranscriptionPanel({
                     )}
                 </p>
             )}
-            {learnMarks &&
-                canLearn &&
-                activeTranscript &&
-                activeTranscript.source !== "mixed" && (
-                    <SpeakerGuesses
-                        key={`learn:${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}`}
-                        recordingId={recording.id}
-                        source={activeTranscript.source}
-                        view={view}
-                        shownVersion={activeTranscript.version}
-                        marks={learnMarks}
-                        answeredLabels={answeredLabels}
-                        onAccepted={() =>
-                            setGuessesAccepted((count) => count + 1)
-                        }
-                    />
-                )}
             {(!widgets || widgets.transcript.visible) && (
                 <div
                     className={
@@ -1124,7 +1081,7 @@ export function TranscriptionPanel({
                                 // another transcript to name: mount afresh, so
                                 // nothing of the last one's state, or its late
                                 // answers, reaches this one.
-                                key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}:${reviewsFinished}:${guessesAccepted}`}
+                                key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}:${reviewsFinished}`}
                                 recordingId={recording.id}
                                 source={activeTranscript.source}
                                 speakers={speakerTags}
@@ -1138,9 +1095,6 @@ export function TranscriptionPanel({
                                 }
                                 shownVersion={activeTranscript.version}
                                 onStale={onTranscriptStale}
-                                onUnknownLabelsChange={
-                                    handleUnknownLabelsChange
-                                }
                                 readOnly={readOnly}
                             />
                         )}

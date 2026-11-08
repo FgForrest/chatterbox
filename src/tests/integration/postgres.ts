@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
@@ -20,6 +22,9 @@ const LOCAL_DATABASE_HOSTS = new Set([
     "::1",
     "[::1]",
 ]);
+const DEFAULT_MIGRATIONS_FOLDER = fileURLToPath(
+    new URL("../../db/migrations", import.meta.url),
+);
 
 export function getTestDatabaseUrl(): string | null {
     const value = process.env.TEST_DATABASE_URL?.trim();
@@ -90,26 +95,73 @@ function makeDatabaseName(label: string): string {
 export async function migrateTestDatabase(
     adminUrl: string,
     db: TestDatabase,
-    migrationsFolder = "./src/db/migrations",
+    migrationsFolder = DEFAULT_MIGRATIONS_FOLDER,
 ): Promise<void> {
     await withMigrationSlot(adminUrl, () => migrate(db, { migrationsFolder }));
 }
 
 /**
- * A scratch database migrated with `migrationsFolder` (the full chain by
- * default), disposed by the caller.
+ * Creates an isolated scratch database, cloning the run's migrated template for
+ * the default migrations folder or applying custom migrations directly.
  */
 export async function createMigratedTestDatabase(
     adminUrl: string,
     label: string,
-    migrationsFolder = "./src/db/migrations",
+    migrationsFolder = DEFAULT_MIGRATIONS_FOLDER,
+): Promise<TestPostgresDatabase> {
+    assertSafeAdminUrl(adminUrl);
+    if (resolve(migrationsFolder) !== DEFAULT_MIGRATIONS_FOLDER) {
+        return createTestDatabase(adminUrl, label, migrationsFolder);
+    }
+    const templateName = process.env.VITEST_DATABASE_TEMPLATE;
+    if (!templateName) {
+        throw new Error(
+            "The migrated test database template is missing; run Vitest with vitest.config.ts",
+        );
+    }
+    return createTestDatabase(adminUrl, label, migrationsFolder, templateName);
+}
+
+/** Creates a migrated, connection-free template, disposed after the test run. */
+export async function createTestDatabaseTemplate(
+    adminUrl: string,
+): Promise<Pick<TestPostgresDatabase, "name" | "dispose">> {
+    const database = await createTestDatabase(
+        adminUrl,
+        "template",
+        DEFAULT_MIGRATIONS_FOLDER,
+    );
+    try {
+        await database.sql.end({ timeout: 5 });
+        const admin = postgres(adminUrl, { max: 1 });
+        try {
+            await admin`alter database ${admin(database.name)} with allow_connections false`;
+        } finally {
+            await admin.end();
+        }
+    } catch (error) {
+        await database.dispose();
+        throw error;
+    }
+    return { name: database.name, dispose: database.dispose };
+}
+
+async function createTestDatabase(
+    adminUrl: string,
+    label: string,
+    migrationsFolder: string,
+    templateName?: string,
 ): Promise<TestPostgresDatabase> {
     assertSafeAdminUrl(adminUrl);
 
     const name = makeDatabaseName(label);
     const admin = postgres(adminUrl, { max: 1 });
     try {
-        await admin`create database ${admin(name)}`;
+        if (templateName) {
+            await admin`create database ${admin(name)} template ${admin(templateName)}`;
+        } else {
+            await admin`create database ${admin(name)}`;
+        }
     } finally {
         await admin.end();
     }
@@ -132,7 +184,9 @@ export async function createMigratedTestDatabase(
     };
 
     try {
-        await migrateTestDatabase(adminUrl, db, migrationsFolder);
+        if (!templateName) {
+            await migrateTestDatabase(adminUrl, db, migrationsFolder);
+        }
     } catch (error) {
         await dispose();
         throw error;

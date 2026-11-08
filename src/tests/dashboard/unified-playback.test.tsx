@@ -11,7 +11,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TranscriptView } from "@/components/dashboard/transcript-view";
 import { NewRecordItem } from "@/components/learn/new-record-item";
 import { ReviewSpeaker } from "@/components/learn/review-speaker";
-import { SpeakerGuesses } from "@/components/learn/speaker-guesses";
 import { speakerAccent } from "@/components/people/speaker-accents";
 import { PlayAtButton } from "@/components/playback/play-at-button";
 import { PlayTurnButton } from "@/components/playback/play-turn-button";
@@ -311,45 +310,10 @@ describe("shared play shortcuts", () => {
         expect(screen.queryByRole("button")).toBeNull();
     });
 
-    it("gives Listen and Learn's bounded speaker turn the same pause and no-audio behaviour", () => {
+    it("pauses Learn's evidence and bounded speaker turn and hides both without audio", () => {
         const { playback } = createTestPlayback();
         const controls = (
             <>
-                <SpeakerGuesses
-                    recordingId="recording"
-                    source="riffado"
-                    marks={{
-                        speakers: {
-                            speaker_0: {
-                                itemId: "speaker",
-                                label: "speaker_0",
-                                name: "Neri Vosk",
-                                ticked: false,
-                                declined: false,
-                                answer: { personId: "person" },
-                                evidenceMs: [5000],
-                                onlyFirstName: false,
-                                recorder: false,
-                            },
-                            speaker_1: {
-                                itemId: "speaker-other",
-                                label: "speaker_1",
-                                name: "Luma Veln",
-                                ticked: false,
-                                declined: false,
-                                answer: { personId: "person-other" },
-                                evidenceMs: [9000],
-                                onlyFirstName: false,
-                                recorder: false,
-                            },
-                        },
-                        corrections: [],
-                        decide: vi.fn(),
-                        track: (work) => work,
-                    }}
-                    answeredLabels={new Set()}
-                    onAccepted={vi.fn()}
-                />
                 <ReviewSpeaker
                     label="speaker_0"
                     person={{ name: "Neri Vosk" }}
@@ -360,7 +324,7 @@ describe("shared play shortcuts", () => {
                     recorder={false}
                     onlyFirstName={false}
                     reason=""
-                    evidence={null}
+                    evidence={<PlayAtButton ms={5000} />}
                     waits={null}
                     onTick={vi.fn()}
                     onPick={vi.fn()}
@@ -372,17 +336,10 @@ describe("shared play shortcuts", () => {
         const view = render(
             <PlaybackProvider playback={playback}>{controls}</PlaybackProvider>,
         );
-        const otherGuess = screen.getByRole("button", {
-            name: "Play where Speaker 1 speaks",
-        });
-        expect(otherGuess.textContent).toBe("");
-        expect(otherGuess.title).toBe("Listen");
-        expect(otherGuess.className).toContain("px-2");
-        expect(otherGuess.className).toContain("border-r");
         fireEvent.click(
-            screen.getByRole("button", { name: "Play where Speaker 0 speaks" }),
+            screen.getByRole("button", { name: "Play from 00:05" }),
         );
-        fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+        fireEvent.click(screen.getByRole("button", { name: "Pause at 00:05" }));
         expect(playback.pause).toHaveBeenCalledOnce();
         fireEvent.click(
             screen.getByRole("button", { name: "Play a turn of Speaker 0" }),

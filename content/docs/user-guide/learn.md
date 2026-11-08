@@ -49,7 +49,7 @@ For a quick exit, use **Speakers and summary only** in the band above the sectio
 
 The band disappears after your first change outside Speakers and stays hidden after reloading. Confirming or declining a speaker does not hide it. The inline footer stays visible as you scroll. After quick finish the review disappears; **Undo** in the toast restores it for about eight seconds. Leaving the page commits immediately. This choice applies only to this item.
 
-You do not have to open the review: the proposals also appear in the transcript itself. A proposed correction is highlighted, and a proposed speaker shows as a name with **?**, each with a tick to accept it. **Speaker guesses** above the transcript lists the proposed names with **Accept all**.
+You do not have to open the review: the proposals also appear in the transcript itself. A proposed correction is highlighted, and a proposed speaker shows as a name with **?**, each with a tick to accept it.
 
 ## After the review
 

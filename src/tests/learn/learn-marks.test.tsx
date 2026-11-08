@@ -28,7 +28,7 @@ const item = (
 
 const STATE: LearnMarksSource & { items: [Item, Item, Item] } = {
     run: { status: "ready" },
-    names: { "e-tavesi": "Tavesi", "p-jan": "Jan Novotný" },
+    names: { "e-tavesi": "Tavesi", "p-jan": "Jan Brabec" },
     items: [
         item({
             id: "i-correction",
@@ -85,15 +85,8 @@ describe("Learn marks", () => {
         expect(marks?.speakers).toEqual({
             speaker_1: {
                 itemId: "i-speaker",
-                label: "speaker_1",
-                name: "Jan Novotný",
+                name: "Jan Brabec",
                 ticked: false,
-                declined: false,
-                answer: { personId: "p-jan" },
-                evidenceMs: [5_000],
-                onlyFirstName: false,
-                recorder: false,
-                reason: "introduces himself",
             },
         });
         expect(
@@ -128,9 +121,8 @@ describe("Learn marks", () => {
         expect(marks?.speakers).toEqual({
             speaker_1: expect.objectContaining({
                 itemId: "i-speaker",
-                name: "Jan Novotný",
+                name: "Jan Brabec",
                 ticked: false,
-                declined: true,
             }),
         });
         expect(marks?.corrections).toEqual([
@@ -141,7 +133,7 @@ describe("Learn marks", () => {
             }),
             expect.objectContaining({
                 itemId: "i-link",
-                suggestion: "Jan Novotný",
+                suggestion: "Jan Brabec",
                 ticked: false,
             }),
         ]);
@@ -181,18 +173,16 @@ describe("Learn marks", () => {
                 itemId: "i-speaker",
                 name: "Petr",
                 ticked: true,
-                answer: { personId: "p-petr" },
             }),
             speaker_2: expect.objectContaining({
                 itemId: "i-new",
                 name: "Jana Nová",
                 ticked: true,
-                answer: { displayName: "Jana Nová" },
             }),
         });
     });
 
-    it("name someone the review adds by the name it adds them under, with its record", () => {
+    it("name someone the review adds by the name it adds them under", () => {
         const marks = learnMarksFrom(
             {
                 ...STATE,
@@ -225,12 +215,10 @@ describe("Learn marks", () => {
         );
         expect(marks?.speakers.speaker_3).toMatchObject({
             name: "Ondřej Novák",
-            answer: { displayName: "Ondřej Novák", recordItemId: "i-record" },
-            onlyFirstName: true,
         });
     });
 
-    it("give a speaker mark its label as a speaker key", () => {
+    it("index a speaker mark by its normalized speaker key", () => {
         const marks = learnMarksFrom(
             {
                 ...STATE,
@@ -244,7 +232,13 @@ describe("Learn marks", () => {
             },
             vi.fn(),
         );
-        expect(marks?.speakers.speaker_4?.label).toBe("speaker_4");
+        expect(marks?.speakers).toEqual({
+            speaker_4: {
+                itemId: "i-padded",
+                name: "Jan Brabec",
+                ticked: false,
+            },
+        });
     });
 
     it("split a turn's text at the marks that still quote it, in order", () => {
@@ -281,7 +275,7 @@ describe("Learn marks", () => {
         render(
             <TranscriptView text="" storedTurns={TURNS} learnMarks={marks} />,
         );
-        expect(screen.getByText("Jan Novotný?")).toBeTruthy();
+        expect(screen.getByText("Jan Brabec?")).toBeTruthy();
         const ticked = screen.getByRole("button", {
             name: "Tavesy → Tavesi, ticked in the review: untick",
         });
@@ -289,7 +283,7 @@ describe("Learn marks", () => {
         expect(decide).toHaveBeenCalledWith("i-correction", "rejected");
         fireEvent.click(
             screen.getByRole("button", {
-                name: "Accept Jan Novotný for this speaker in the review",
+                name: "Accept Jan Brabec for this speaker in the review",
             }),
         );
         expect(decide).toHaveBeenCalledWith("i-speaker", "accepted");
@@ -307,7 +301,7 @@ describe("Learn marks", () => {
                 learnMarks={marks}
             />,
         );
-        expect(screen.queryByText("Jan Novotný?")).toBeNull();
+        expect(screen.queryByText("Jan Brabec?")).toBeNull();
         expect(screen.getByText("Jana")).toBeTruthy();
     });
     it("take the heard words however composed, but never half a character", () => {

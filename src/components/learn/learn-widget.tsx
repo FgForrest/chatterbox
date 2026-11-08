@@ -592,24 +592,18 @@ export function LearnWidget({
     useEffect(() => {
         if (kind !== "audio") return;
         onMarks?.(
-            learnMarksFrom(
-                state,
-                async (itemId, decision, choice) => {
-                    const item = state?.items.find(
-                        (other) => other.id === itemId,
-                    );
-                    if (!item) return;
-                    const kept = choice === undefined ? item.choice : choice;
-                    await decideRef.current(item, decision, kept);
-                    const linked = linkedRecordId(kept);
-                    if (linked && !(linked in (state?.names ?? {}))) {
-                        await load();
-                    }
-                },
-                track,
-            ),
+            learnMarksFrom(state, async (itemId, decision, choice) => {
+                const item = state?.items.find((other) => other.id === itemId);
+                if (!item) return;
+                const kept = choice === undefined ? item.choice : choice;
+                await decideRef.current(item, decision, kept);
+                const linked = linkedRecordId(kept);
+                if (linked && !(linked in (state?.names ?? {}))) {
+                    await load();
+                }
+            }),
         );
-    }, [kind, state, onMarks, load, track]);
+    }, [kind, state, onMarks, load]);
     useEffect(() => () => onMarks?.(null), [onMarks]);
 
     const finish = async () => {
