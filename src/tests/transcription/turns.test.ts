@@ -71,7 +71,13 @@ describe("turnsFromLabelledSegments", () => {
                 { speaker: "S2", startMs: 2000, endMs: 3000, text: "Zdravím." },
             ]),
         ).toEqual([
-            { speaker: "S1", startMs: 0, endMs: 2000, text: "Ahoj tady Jan." },
+            {
+                speaker: "S1",
+                startMs: 0,
+                endMs: 2000,
+                text: "Ahoj tady Jan.",
+                sentenceStartsMs: [0],
+            },
             { speaker: "S2", startMs: 2000, endMs: 3000, text: "Zdravím." },
         ]);
     });
@@ -124,7 +130,13 @@ describe("paragraphsFromTimedSegments", () => {
                 seg(2.5, 4, " Jak se máš?"),
             ]),
         ).toEqual([
-            { speaker: "", startMs: 0, endMs: 4000, text: "Ahoj. Jak se máš?" },
+            {
+                speaker: "",
+                startMs: 0,
+                endMs: 4000,
+                text: "Ahoj. Jak se máš?",
+                sentenceStartsMs: [0, 2500],
+            },
         ]);
     });
 

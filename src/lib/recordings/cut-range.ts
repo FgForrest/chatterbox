@@ -26,6 +26,17 @@ export function cutTranscript(
         .filter((turn) => turnStays(turn, range))
         .map((turn) => ({
             ...turn,
+            ...(turn.sentenceStartsMs
+                ? {
+                      sentenceStartsMs: turn.sentenceStartsMs.map(
+                          (ms) =>
+                              Math.max(
+                                  range.startMs,
+                                  Math.min(range.endMs, ms),
+                              ) - range.startMs,
+                      ),
+                  }
+                : {}),
             startMs: Math.max(turn.startMs, range.startMs) - range.startMs,
             endMs: Math.min(turn.endMs, range.endMs) - range.startMs,
         }));

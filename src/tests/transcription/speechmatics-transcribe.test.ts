@@ -421,6 +421,7 @@ describe("speechmatics-transcribe", () => {
                 startMs: 1200,
                 endMs: 2400,
                 text: "Ahoj taky",
+                sentenceStartsMs: [1200],
             },
             {
                 speaker: "speaker_1",
@@ -429,6 +430,68 @@ describe("speechmatics-transcribe", () => {
                 text: "Zacneme",
             },
         ]);
+    });
+
+    it("keeps word times after punctuation and a pause for a diarized job", async () => {
+        installFetch({
+            transcript: () =>
+                jsonResponse({
+                    results: [
+                        word("Hello", { speaker: "S1", start: 1, end: 2 }),
+                        punctuation("."),
+                        punctuation('"', { attaches_to: "next" }),
+                        word("Again", { speaker: "S1", start: 8, end: 9 }),
+                        punctuation("."),
+                    ],
+                }),
+        });
+        const result = await transcribe({ model: "enhanced+diarize" });
+        expect(result.turns?.[0].sentenceStartsMs).toEqual([1000, 8000]);
+        expectTextAndTurnsAgree(result.text, result.turns);
+    });
+
+    it.each([
+        "leading",
+        "embedded",
+    ])("keeps word starts with %s token whitespace", async (position) => {
+        installFetch({
+            transcript: () =>
+                jsonResponse({
+                    results:
+                        position === "leading"
+                            ? [
+                                  word("  Hello.", {
+                                      speaker: "S1",
+                                      start: 1,
+                                      end: 2,
+                                  }),
+                                  word("Again.", {
+                                      speaker: "S1",
+                                      start: 8,
+                                      end: 9,
+                                  }),
+                              ]
+                            : [
+                                  word("Hello.", {
+                                      speaker: "S1",
+                                      start: 1,
+                                      end: 2,
+                                  }),
+                                  word(" Again", {
+                                      speaker: "S1",
+                                      start: 8,
+                                      end: 8.5,
+                                  }),
+                                  word("now.", {
+                                      speaker: "S1",
+                                      start: 9,
+                                      end: 10,
+                                  }),
+                              ],
+                }),
+        });
+        const result = await transcribe({ model: "enhanced+diarize" });
+        expect(result.turns?.[0].sentenceStartsMs).toEqual([1000, 8000]);
     });
 
     it("renders text and turns from the same grouping", async () => {
@@ -467,6 +530,7 @@ describe("speechmatics-transcribe", () => {
 
         const result = await transcribe({ model: "enhanced" });
 
+        expect(result.text).toBe("Ahoj");
         expect(result.turns).toBeUndefined();
     });
 
@@ -485,6 +549,7 @@ describe("speechmatics-transcribe", () => {
         const result = await transcribe({ model: "standard+diarize" });
 
         expect(result.text).toBe("Sole voice.");
+        expect(result.turns).toBeUndefined();
     });
 
     it("uses the language pack's word delimiter, which is empty for Mandarin", async () => {

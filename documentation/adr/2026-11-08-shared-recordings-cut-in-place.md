@@ -1,11 +1,11 @@
 ---
 title: Shared recordings are cut in place and intended shares wait for cuts
 date: 2026-11-08
-updated: 2026-11-08 10:40
+updated: 2026-11-08 14:12
 status: accepted
 kind: fix
 issues: [327]
-prs: []
+prs: [346]
 areas: [src/lib/recordings, src/lib/pipeline, src/db/queries/async-jobs.ts, src/components/recordings/recording-cut.tsx]
 supersedes: [2026-11-03-destructive-recording-cut]
 superseded-by: []
@@ -71,4 +71,4 @@ Both self-host and hosted retain owner authorization and the same destructive-cu
 
 ## Timeline
 
-- 2026-11-08: decided and implemented.
+- **2026-11-08**: decided and implemented; PR #346 merged.

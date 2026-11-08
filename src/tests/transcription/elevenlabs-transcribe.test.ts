@@ -212,7 +212,7 @@ describe("elevenlabs-transcribe", () => {
             jsonResponse({
                 text: "single speaker recording",
                 language_code: "en",
-                words: [{ text: "single", type: "word" }],
+                words: [{ text: "single", type: "word", start: 1, end: 2 }],
             }),
         );
 
@@ -223,6 +223,7 @@ describe("elevenlabs-transcribe", () => {
         });
 
         expect(result.text).toBe("single speaker recording");
+        expect(result.turns).toBeUndefined();
     });
 
     it("maps a rejected key to a typed error", async () => {
@@ -330,7 +331,13 @@ describe("elevenLabsTranscribe turns", () => {
         });
 
         expect(result.turns).toEqual([
-            { speaker: "speaker_0", startMs: 0, endMs: 900, text: "Ahoj Jan" },
+            {
+                speaker: "speaker_0",
+                startMs: 0,
+                endMs: 900,
+                text: "Ahoj Jan",
+                sentenceStartsMs: [0],
+            },
             {
                 speaker: "speaker_1",
                 startMs: 1500,
@@ -339,6 +346,55 @@ describe("elevenLabsTranscribe turns", () => {
             },
         ]);
         expectTextAndTurnsAgree(result.text, result.turns);
+    });
+
+    it("keeps the first word after a pause for a diarized job", async () => {
+        stubJson({
+            text: "Hello. Again.",
+            words: [
+                spoken("Hello.", "speaker_0", 1, 2),
+                { text: " ", type: "spacing" },
+                spoken("Again.", "speaker_0", 8, 9),
+            ],
+        });
+        const result = await elevenLabsTranscribe({
+            apiKey: "k",
+            model: "scribe_v2+diarize",
+            file: audioFile(),
+        });
+        expect(result.turns?.[0].sentenceStartsMs).toEqual([1000, 8000]);
+        expectTextAndTurnsAgree(result.text, result.turns);
+    });
+
+    it.each([
+        "leading",
+        "embedded",
+    ])("keeps word starts with %s token whitespace", async (position) => {
+        stubJson({
+            text: "ignored",
+            words:
+                position === "leading"
+                    ? [
+                          spoken("  Hello.", "speaker_0", 1, 2),
+                          { text: " ", type: "spacing" },
+                          spoken("Again.", "speaker_0", 8, 9),
+                      ]
+                    : [
+                          spoken("Hello.", "speaker_0", 1, 2),
+                          spoken(" Again", "speaker_0", 8, 8.5),
+                          { text: " ", type: "spacing" },
+                          spoken("now.", "speaker_0", 9, 10),
+                      ],
+        });
+        const result = await elevenLabsTranscribe({
+            apiKey: "k",
+            model: "scribe_v2+diarize",
+            file: audioFile(),
+        });
+        expect(result.turns?.[0].text).toBe(
+            position === "leading" ? "Hello. Again." : "Hello. Again now.",
+        );
+        expect(result.turns?.[0].sentenceStartsMs).toEqual([1000, 8000]);
     });
 
     it("renders text and turns from the same grouping", async () => {
@@ -369,7 +425,15 @@ describe("elevenLabsTranscribe turns", () => {
     });
 
     it("returns no turns when diarization is not requested", async () => {
-        stubJson({ text: "Ahoj Jan", language_code: "cs", words: [] });
+        stubJson({
+            text: "Ahoj Jan",
+            language_code: "cs",
+            words: [
+                spoken("Ahoj", "speaker_0", 1, 2),
+                { text: " ", type: "spacing" },
+                spoken("Jan", "speaker_0", 8, 9),
+            ],
+        });
 
         const result = await elevenLabsTranscribe({
             apiKey: "k",
@@ -377,6 +441,7 @@ describe("elevenLabsTranscribe turns", () => {
             file: new File([new Uint8Array([1])], "a.mp3"),
         });
 
+        expect(result.text).toBe("Ahoj Jan");
         expect(result.turns).toBeUndefined();
     });
 });
