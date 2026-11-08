@@ -35,6 +35,7 @@ import {
     processingProfiles,
     recordingFolderAssignments,
     recordingFolders,
+    recordings,
     recordingTasks,
     taskHomeMoves,
     taskMentions,
@@ -114,6 +115,8 @@ import { addRecordingToFolder } from "@/lib/folders/folders";
 import { acceptCorrection } from "@/lib/knowledge/corrections";
 import { confirmedOverlays } from "@/lib/learn/llm-input";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { defaultProfileSettings } from "@/lib/profiles/settings";
+import type { StoredTrimProposal } from "@/lib/recordings/trim-proposal";
 import type { StorageProvider } from "@/lib/storage/types";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import { insertRecordings } from "@/tests/integration/items";
@@ -1379,6 +1382,83 @@ describeWithDatabase("backup and export scope (PostgreSQL)", () => {
         ).toHaveLength(3);
         const other = await archive({ kind: "personal", userId: BRAVO });
         expect(other.text).not.toContain("Historical profile");
+    });
+
+    it("backs up the owner trim decision and its old profile revision without publishing it in the Organization archive", async () => {
+        await db()
+            .insert(processingProfiles)
+            .values({
+                id: "trim-profile",
+                ownerUserId: ALICE,
+                scope: "personal",
+                channel: "audio",
+                name: encryptText("Trim recipe"),
+                currentRevisionId: "trim-new",
+            });
+        await db()
+            .insert(processingProfileRevisions)
+            .values(
+                ["trim-old", "trim-new"].map((id) => ({
+                    id,
+                    profileId: "trim-profile",
+                    settings: encryptText(
+                        JSON.stringify(defaultProfileSettings("audio")),
+                    ),
+                })),
+            );
+        const proposal: StoredTrimProposal = {
+            schemaVersion: 1,
+            id: "trim-private",
+            promptVersion: 1,
+            createdAt: new Date().toISOString(),
+            deadline: new Date(Date.now() + 14_400_000).toISOString(),
+            transcript: {
+                id: sharedTranscript,
+                source: "riffado",
+                revision: 0,
+            },
+            revisions: [{ id: sharedTranscript, revision: 0 }],
+            inputFingerprint: "source-private-hmac",
+            audio: { duration: 12000, fileMd5: "snapshot", cutAt: null },
+            profileRevisionId: "trim-old",
+            provider: {
+                credentialId: "trim-card",
+                provider: "Custom",
+                model: "local",
+                payerUserId: ALICE,
+            },
+            start: null,
+            end: {
+                firstRemovedSentenceId: "t0s0",
+                startMs: 10000,
+                reason: "PRIVATE-TRIM-REASON",
+            },
+        };
+        await db()
+            .update(recordings)
+            .set({ trimProposal: encryptJsonField(proposal) })
+            .where(eq(recordings.id, SHARED));
+        const owner = await archive({ kind: "personal", userId: ALICE });
+        const row = owner
+            .json("manifest.json")
+            .recordings.find((r: { id: string }) => r.id === SHARED);
+        expect(row.trim.proposal).toMatchObject({
+            id: proposal.id,
+            deadline: proposal.deadline,
+            end: { reason: "PRIVATE-TRIM-REASON" },
+        });
+        expect(row.trim.proposal).not.toHaveProperty("inputFingerprint");
+        expect(row.trim.inputDigest).toMatch(/^[a-f0-9]{64}$/);
+        expect(owner.json("profiles/profiles.json").revisions).toContainEqual(
+            expect.objectContaining({ id: "trim-old" }),
+        );
+        const organization = await archive({ kind: "organization", orgUserId });
+        expect(organization.text).not.toContain("PRIVATE-TRIM-REASON");
+        expect(
+            organization
+                .json("manifest.json")
+                .recordings.find((r: { id: string }) => r.id === SHARED),
+        ).not.toHaveProperty("trim");
     });
 
     it("renders a person's exports without the Organization's corrections", async () => {

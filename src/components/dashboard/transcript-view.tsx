@@ -340,7 +340,9 @@ export function TranscriptView({
         turns.forEach((turn, turnIndex) => {
             const paragraphCuts = cutsByTurn.get(turnIndex) ?? [];
             const stored =
-                bySentence || cut?.open ? storedTurns?.[turnIndex] : undefined;
+                bySentence || cut?.open || cut?.proposalPreview
+                    ? storedTurns?.[turnIndex]
+                    : undefined;
             const sentences = stored ? sentenceStarts(stored) : [];
             const msAt = new Map(sentences.map(({ at, ms }) => [at, ms]));
             const cuts = stored
@@ -394,6 +396,7 @@ export function TranscriptView({
         paragraphs,
         bySentence,
         cut?.open,
+        cut?.proposalPreview,
     ]);
     const rootRef = useRef<HTMLDivElement>(null);
     const follow = useTranscriptFollow({
@@ -773,14 +776,40 @@ export function TranscriptView({
                                             follow.active === chunk.sentence,
                                             follow.playing,
                                         );
+                                        const proposed =
+                                            !cut?.open &&
+                                            cut?.proposalPreview &&
+                                            chunk.startMs !== null &&
+                                            (chunk.startMs <
+                                                cut.proposalPreview.startMs ||
+                                                chunk.startMs >=
+                                                    cut.proposalPreview.endMs);
                                         return (
                                             <Fragment key={chunk.sentence}>
                                                 <span
+                                                    data-trim-proposed={
+                                                        proposed || undefined
+                                                    }
+                                                    title={
+                                                        proposed
+                                                            ? i18n(
+                                                                  "Proposed for removal",
+                                                              )
+                                                            : undefined
+                                                    }
                                                     data-sentence={
                                                         chunk.sentence
                                                     }
-                                                    className={`${bySentence ? "cursor-pointer" : ""} rounded-[3px] box-decoration-clone transition-colors ${wash} ${cut?.open && !removed && chunk.startMs !== null && (chunk.startMs < cut.range.startMs || chunk.startMs >= cut.range.endMs) ? "opacity-40 line-through" : ""}`}
+                                                    className={`${bySentence ? "cursor-pointer" : ""} rounded-[3px] box-decoration-clone transition-colors ${!cut?.open && cut?.proposalPreview && chunk.startMs !== null && (chunk.startMs < cut.proposalPreview.startMs || chunk.startMs >= cut.proposalPreview.endMs) ? "bg-amber-500/15 underline decoration-dotted decoration-amber-500 underline-offset-4" : wash} ${cut?.open && !removed && chunk.startMs !== null && (chunk.startMs < cut.range.startMs || chunk.startMs >= cut.range.endMs) ? "opacity-40 line-through" : ""}`}
                                                 >
+                                                    {proposed && (
+                                                        <span className="sr-only">
+                                                            {i18n(
+                                                                "Proposed for removal",
+                                                            )}
+                                                            :{" "}
+                                                        </span>
+                                                    )}
                                                     {renderPieces(body)}
                                                 </span>
                                                 {trailing}

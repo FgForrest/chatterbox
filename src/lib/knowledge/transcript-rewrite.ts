@@ -19,6 +19,7 @@
 
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { db } from "@/db";
+import { resolveTrimInTx } from "@/db/queries/trim-state";
 import { learnRuns, recordings, transcriptions } from "@/db/schema";
 import { remapTranscriptAttributionsInTx } from "@/lib/knowledge/attribution";
 import { recheckCorrectionsInTx } from "@/lib/knowledge/correction-recheck";
@@ -51,6 +52,25 @@ export async function transcriptRewrittenInTx(
         audioMd5?: string | null;
     },
 ): Promise<void> {
+    if (!args.cut) {
+        const [transcript] = await tx
+            .select({ recordingId: transcriptions.recordingId })
+            .from(transcriptions)
+            .where(
+                and(
+                    eq(transcriptions.id, args.transcriptionId),
+                    eq(transcriptions.userId, args.userId),
+                ),
+            )
+            .limit(1);
+        if (transcript)
+            await resolveTrimInTx(tx, {
+                userId: args.userId,
+                recordingId: transcript.recordingId,
+                reason: "content_changed",
+                force: true,
+            });
+    }
     const stampedAudioChanged = await stampTranscriptAudioInTx(
         tx,
         args.transcriptionId,
@@ -162,6 +182,12 @@ export async function stampNewTranscriptAudioInTx(
         audioMd5?: string | null;
     },
 ): Promise<void> {
+    await resolveTrimInTx(tx, {
+        userId,
+        recordingId,
+        reason: "content_changed",
+        force: true,
+    });
     await tx
         .update(transcriptions)
         .set({
@@ -214,6 +240,14 @@ export async function audioReplacedInTx(
         .where(eq(transcriptions.recordingId, recordingId))
         .orderBy(transcriptions.id)
         .for("update");
+    const ownerUserId = rows[0]?.userId;
+    if (ownerUserId)
+        await resolveTrimInTx(tx, {
+            userId: ownerUserId,
+            recordingId,
+            reason: "audio_changed",
+            force: true,
+        });
     const scopes: string[] = [];
     for (const row of rows) {
         // Unknown audio (a browser's) was made before this sync: from the

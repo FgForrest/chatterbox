@@ -51,6 +51,10 @@ Without a profile pin, transcription uses your transcription choice, the Organiz
 
 Automatic transcription, title generation, and their profile-specific providers are set under **Profiles**. Without a profile pin, titles use your title choice, your summary choice, the Organization title default, the Organization summary default, then your first enabled chat provider, then the Organization’s oldest enabled chat provider. Title templates you created or edited before profiles remain under **Templates from before profiles** and can be copied into a profile.
 
+## Trim proposal provider
+
+The **Trim proposal** role in **Transcription** chooses a provider card's Default Model. Resolution is: the Trim profile pin; your trim default; the Title profile pin and your title default; the Summary profile pin and your summary default; Organization trim, title and summary defaults; your oldest suitable enabled chat card; the Organization's oldest suitable enabled chat card. Title and Summary providers remain eligible even when their automatic steps are off. An explicit unavailable choice skips trim instead of trying another provider. Local OpenAI-compatible providers work without any cloud fallback. The call appears separately as **Trim proposal** in spending.
+
 ## Topics
 
 This section keeps the account-level topics provider default. A profile that

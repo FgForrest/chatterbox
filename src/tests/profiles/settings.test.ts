@@ -14,7 +14,7 @@ describe("profile settings", () => {
         const audio = defaultProfileSettings("audio");
 
         expect(audio).toMatchObject({
-            schemaVersion: 2,
+            schemaVersion: 3,
             steps: {
                 transcribe: { provider: null, quality: "balanced" },
                 title: { preset: "default", prompt: {}, fullPrompt: null },
@@ -117,34 +117,36 @@ describe("profile settings", () => {
 
         expect(parsed.steps.title.fullPrompt).toBeNull();
         expect(parsed.steps.topics.fullPrompt).toBeNull();
-        expect(parsed.schemaVersion).toBe(2);
+        expect(parsed.schemaVersion).toBe(3);
     });
 
-    it("upgrades disabled v1 steps to non-automatic v2 steps", () => {
+    it("upgrades disabled v1 steps to non-automatic v3 steps", () => {
         const audio = defaultProfileSettings("audio");
         const v1 = {
             ...audio,
             schemaVersion: 1,
             steps: Object.fromEntries(
-                Object.entries(audio.steps).map(([name, step]) => [
-                    name,
-                    name === "tasks"
-                        ? step
-                        : { ...step, enabled: name !== "summary" },
-                ]),
+                Object.entries(audio.steps)
+                    .filter(([name]) => name !== "trim")
+                    .map(([name, step]) => [
+                        name,
+                        name === "tasks"
+                            ? step
+                            : { ...step, enabled: name !== "summary" },
+                    ]),
             ),
         };
 
         const parsed = parseProfileSettings("audio", v1);
 
-        expect(parsed.schemaVersion).toBe(2);
+        expect(parsed.schemaVersion).toBe(3);
         expect(parsed.steps.summary.automatic).toBe(false);
         expect(parsed.steps.title.automatic).toBe(true);
         expect(parsed.steps.summary).not.toHaveProperty("enabled");
         expect(parsed.steps.tasks.enabled).toBe(true);
     });
 
-    it("round-trips v2 settings while preserving the tasks switch", () => {
+    it("round-trips v3 settings while preserving the tasks switch", () => {
         const settings = defaultProfileSettings("audio");
         settings.steps.summary.automatic = false;
         settings.steps.tasks.enabled = false;

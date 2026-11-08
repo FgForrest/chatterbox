@@ -62,6 +62,8 @@ Mezipaměti odvozené z obsahu, včetně vektorů obsahu úkolů, jsou odvozená
 
 Každý archiv zůstává ke stažení po dobu sedmi dnů. Záloha obsahuje vaše vlastní nahrávky, včetně sdílených, ale bez toho, co do nich přidali kolegové. Záloha účtu organizace obsahuje všechny sdílené nahrávky, včetně jejich vlastníka.
 
+Úplný osobní archiv obsahuje i návrh ořezu, který stále čeká na vaše rozhodnutí, s původní lhůtou. Archivy Organizace, stažené přijaté položky a exporty složek ho neobsahují.
+
 <span id="deleting-old-data-automatically" />
 
 ## Automatické mazání starých dat

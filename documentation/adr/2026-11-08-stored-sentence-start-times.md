@@ -1,7 +1,7 @@
 ---
 title: New transcripts store each sentence's start time, aligned with the sentence split, only when every sentence has its own timed unit
 date: 2026-11-08
-updated: 2026-11-08 16:52
+updated: 2026-11-08 19:20
 status: accepted
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [347]
 areas: [src/lib/transcription/turns.ts, src/lib/transcription/sentences.ts, src/lib/topics/timeline.ts, src/lib/transcription/elevenlabs-transcribe.ts, src/lib/transcription/speechmatics-transcribe.ts, src/lib/transcription/format.ts, src/lib/recordings/cut-range.ts]
 supersedes: []
 superseded-by: []
-relates: [2026-10-05-timed-turns-topics-and-paragraphs, 2026-10-07-sentence-playback-two-way-sync, 2026-11-08-recording-cut-sentence-boundaries]
+relates: [2026-10-05-timed-turns-topics-and-paragraphs, 2026-10-07-sentence-playback-two-way-sync, 2026-11-08-recording-cut-sentence-boundaries, 2026-11-08-ai-trim-proposal-before-learn]
 ---
 
 # New transcripts store each sentence's start time, aligned with the sentence split, only when every sentence has its own timed unit
@@ -137,6 +137,8 @@ A feature that needs word positions, or that wants turnless transcripts timed, n
   starts at stored times where they exist; its deferred "exact sentence times" item is this record.
 
 - [Sentence-boundary recording cuts](2026-11-08-recording-cut-sentence-boundaries.md): implements the deferred cut UI and keeps the retained subset of sentence starts.
+
+- [AI trim proposals before Learn](2026-11-08-ai-trim-proposal-before-learn.md): reuses this contract for whole-transcript suggestions and an owner decision before automatic work.
 
 ## Timeline
 

@@ -120,6 +120,16 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         );
     }
 
+    if (
+        body.isDefaultTrim === true &&
+        (isTranscriptionOnlyProvider(existing.provider) || effectiveDisabled)
+    )
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "Choose an enabled chat provider for trim",
+            400,
+        );
+
     if (baseUrl !== undefined) {
         const baseUrlCheck = await validateAiBaseUrl(baseUrl, {
             isHosted: env.IS_HOSTED,
@@ -229,6 +239,10 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         });
     }
 
+    if (body.isDefaultTrim === true)
+        await setDefaultProvider(session.user.id, "trim", id);
+    else if (body.isDefaultTrim === false)
+        await setDefaultProvider(session.user.id, "trim", null, { onlyIf: id });
     return NextResponse.json({ success: true });
 });
 

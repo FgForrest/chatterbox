@@ -36,6 +36,7 @@ const createSchema = z
         isDefaultLearn: z.boolean().optional(),
         isDefaultTopics: z.boolean().optional(),
         isDefaultTitle: z.boolean().optional(),
+        isDefaultTrim: z.boolean().optional(),
     })
     .strict()
     .refine((value) => value.apiKey || value.copyKeyFrom, {
@@ -113,6 +114,7 @@ export const POST = apiHandler(async (request: Request) => {
             learn: body.isDefaultLearn,
             topics: body.isDefaultTopics,
             title: body.isDefaultTitle,
+            trim: body.isDefaultTrim,
         },
     });
     return NextResponse.json({ provider });

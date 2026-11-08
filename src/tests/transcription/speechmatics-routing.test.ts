@@ -489,3 +489,7 @@ describe("Speechmatics credentials route to the Batch jobs API, not the OpenAI S
         ]);
     });
 });
+
+vi.mock("@/db/queries/trim-state", () => ({
+    resolveTrimInTx: vi.fn(async () => false),
+}));

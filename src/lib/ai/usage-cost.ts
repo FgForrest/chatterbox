@@ -18,6 +18,7 @@ export type AiOperation =
     | "transcription"
     | "summary"
     | "topics"
+    | "trim"
     | "learn"
     | "correction"
     | "title"

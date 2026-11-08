@@ -27,6 +27,9 @@ vi.mock("@/lib/tasks/archive", () => ({
     taskHomeMovesForArchive: vi.fn(async () => []),
     archivedAssigneeIds: vi.fn(() => []),
 }));
+vi.mock("@/lib/export/trim-proposal", () => ({
+    collectTrimProposals: vi.fn(async () => []),
+}));
 vi.mock("@/lib/export/meetings", () => ({
     collectArchivedMeetings: vi.fn(async () => archivedMeetings),
 }));

@@ -51,7 +51,14 @@ import { POST as handler30POST } from "@/app/api/recordings/[id]/topics/route";
 import { POST as handler31POST } from "@/app/api/recordings/[id]/transcribe/route";
 import { POST as handler32POST } from "@/app/api/recordings/[id]/transcription/from-browser/route";
 
+import { POST as declineTrim } from "@/app/api/recordings/[id]/trim-proposal/route";
+
 export const personWriteRoutes = [
+    {
+        path: "recordings/[id]/trim-proposal/route.ts",
+        method: "POST",
+        handler: declineTrim,
+    },
     {
         path: "recordings/[id]/cut/route.ts",
         method: "POST",

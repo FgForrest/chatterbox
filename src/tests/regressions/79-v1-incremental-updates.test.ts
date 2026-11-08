@@ -627,3 +627,7 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
         });
     });
 });
+
+vi.mock("@/db/queries/trim-state", () => ({
+    resolveTrimInTx: vi.fn(async () => false),
+}));

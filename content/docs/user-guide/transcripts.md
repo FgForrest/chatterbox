@@ -82,13 +82,17 @@ A lecture or a long monologue is split into paragraphs of about half a minute, a
 
 ## Cutting the start and end
 
-Only the owner can cut a recording. Open the scissors beside Download in the player or beside Re-transcribe in the transcript. Hover or focus a turn and choose **Start here** or **End here**. The same buttons in the pinned cut bar use the current playback position, snapped to a turn. Without a transcript they use the exact playback position.
+Only the owner can cut a recording. Open the scissors beside Re-transcribe in the transcript to open the cut panel. Type a start or end time, which snaps to the nearest sentence start, or hover or focus a paragraph gap and choose **Start here** or **End here**.
 
 Faded, struck-through turns and shaded ends of the scrubber show what will be deleted. Reset an edge with **×**, or choose **Cancel** to leave everything unchanged. **Cut…** opens the deletion confirmation. A shared recording stays in its Organization folders. Colleagues see the cut version, and its summary in the Organization is generated again. An intended share waits until the cut finishes and the regenerated summary is ready. If cutting is refused or fails, the bar keeps your chosen range and shows the reason.
 
 The cut is permanent: it deletes audio and transcript turns, and the remaining recording starts at 0:00. If retention already removed the audio, only transcripts are cut. Summaries, generated titles, topics, task proposals and Learn results are refreshed through the processing profile, without another transcription. Accepted tasks, confirmed Almanac knowledge, summary remarks, manually set titles and corrections on retained turns stay. Cutting is unavailable during transcription, while another cut is running, or when any transcript lacks turn times.
 
 The original remains in Plaud and in exports and backups made earlier. Chatterbox never imports the original audio, transcript or summary from Plaud again after a cut, including through Restore audio.
+
+### AI trim proposal
+
+Before Learn, an enabled audio profile reads the whole transcript and may offer **Trim off-topic talk?**. Amber marks show proposed removals while ordinary cut mode is closed; the text is still present and playable. Uncheck an edge to keep it. **Cut selected…** opens the same destructive confirmation with the reviewed transcript revisions. **Adjust in transcript** opens the panel with those edges; **Do not trim** continues uncut. Cancelling the panel leaves the original four-hour decision deadline in effect. A changed transcript invalidates the proposal. A completed manual or proposed cut settles trim on the retained input and does not propose another trim of that slice.
 
 ## Corrected words
 

@@ -205,6 +205,7 @@ const content = {
             isDefault = false,
         ) {
             const settings = defaultProfileSettings("audio");
+            settings.steps.trim.automatic = false;
             settings.steps.summary.automatic = true;
             settings.steps.topics.automatic = true;
             settings.steps.learn.automatic = false;
@@ -901,6 +902,7 @@ const content = {
                     .set({ source: "plaud" })
                     .where(eq(transcriptions.recordingId, ITEM));
                 const settings = defaultProfileSettings("audio");
+                settings.steps.trim.automatic = false;
                 settings.steps.transcribe.automatic = true;
                 settings.steps.transcribe.plaudTranscript = "also_transcribe";
                 await db()
@@ -1612,6 +1614,7 @@ const content = {
             false,
         ])("starts automatic Learn using the placement policy (automatic: %s)", async (automatic) => {
             const settings = defaultProfileSettings("audio");
+            settings.steps.trim.automatic = false;
             settings.steps.learn.automatic = true;
             await db()
                 .update(processingProfileRevisions)

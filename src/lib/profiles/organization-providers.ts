@@ -145,6 +145,7 @@ function publicProvider(
         isDefaultLearn: pointers?.learn === row.id,
         isDefaultTopics: pointers?.topics === row.id,
         isDefaultTitle: pointers?.title === row.id,
+        isDefaultTrim: pointers?.trim === row.id,
     };
 }
 
@@ -165,6 +166,7 @@ async function applyOrganizationDefaults(
         "learn",
         "topics",
         "title",
+        "trim",
     ];
     for (const role of roles) {
         const selected = defaults[role];
@@ -204,7 +206,13 @@ function validateOrganizationDefaults(
             400,
         );
     }
-    const chatRoles: ProviderRole[] = ["summary", "learn", "topics", "title"];
+    const chatRoles: ProviderRole[] = [
+        "summary",
+        "learn",
+        "topics",
+        "title",
+        "trim",
+    ];
     if (
         isTranscriptionOnlyProvider(provider) &&
         chatRoles.some((role) => defaults?.[role] === true)
@@ -568,6 +576,7 @@ export async function organizationProviderMemberDefaultCount(
                     sql`${userSettings.defaultProviders} ->> 'learn' = ${credentialId}`,
                     sql`${userSettings.defaultProviders} ->> 'topics' = ${credentialId}`,
                     sql`${userSettings.defaultProviders} ->> 'title' = ${credentialId}`,
+                    sql`${userSettings.defaultProviders} ->> 'trim' = ${credentialId}`,
                 ),
             ),
         );

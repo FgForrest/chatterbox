@@ -326,6 +326,7 @@ export function TranscriptionSection({
             />
             <ProviderRoleSelect purpose="transcription" />
             <ProviderRoleSelect purpose="title" />
+            <ProviderRoleSelect purpose="trim" />
             <ProfilesSettingsLink />
             <LegacyTemplateList
                 kind={TITLE_TEMPLATE_KIND}

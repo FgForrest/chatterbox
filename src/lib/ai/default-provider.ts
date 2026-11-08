@@ -12,6 +12,7 @@ import { isRiffadoIncludedProviderId } from "@/lib/transcription/included-provid
 export type ProviderRole =
     | "transcription"
     | "summary"
+    | "trim"
     | "learn"
     | "topics"
     | "title";
@@ -22,6 +23,7 @@ export interface DefaultProviderPointers {
     learn: string | null;
     topics: string | null;
     title: string | null;
+    trim?: string | null;
 }
 
 export interface DefaultProviderState {
@@ -102,6 +104,7 @@ function defaultProviderPointers(
             null,
         topics: providerPointer(settings?.defaultProviders, "topics"),
         title: providerPointer(settings?.defaultProviders, "title"),
+        trim: providerPointer(settings?.defaultProviders, "trim"),
     };
 }
 
@@ -198,7 +201,8 @@ export async function setDefaultProvider(
 
         if (pointers[role] !== value)
             await requestProviderRecoveryInTx(tx, userId);
-        if (role === "topics" || role === "title") return true;
+        if (role === "topics" || role === "title" || role === "trim")
+            return true;
         if (role === "transcription") {
             await tx
                 .update(apiCredentials)

@@ -92,7 +92,8 @@ function addDefaultFlag(
         | "isDefaultEnhancement"
         | "isDefaultLearn"
         | "isDefaultTopics"
-        | "isDefaultTitle",
+        | "isDefaultTitle"
+        | "isDefaultTrim",
     value: boolean,
     previous: boolean,
     mode: ProviderFormMode,
@@ -128,6 +129,7 @@ export function ProviderFormDialog({
     const [isDefaultLearn, setIsDefaultLearn] = useState(false);
     const [isDefaultTopics, setIsDefaultTopics] = useState(false);
     const [isDefaultTitle, setIsDefaultTitle] = useState(false);
+    const [isDefaultTrim, setIsDefaultTrim] = useState(false);
     const [defaultModelError, setDefaultModelError] = useState<string | null>(
         null,
     );
@@ -146,6 +148,7 @@ export function ProviderFormDialog({
             setIsDefaultLearn(false);
             setIsDefaultTopics(false);
             setIsDefaultTitle(false);
+            setIsDefaultTrim(false);
             setDefaultModelError(null);
             setPricing(EMPTY_PRICING);
             return;
@@ -164,6 +167,7 @@ export function ProviderFormDialog({
         setIsDefaultLearn(editing && source?.isDefaultLearn === true);
         setIsDefaultTopics(editing && source?.isDefaultTopics === true);
         setIsDefaultTitle(editing && source?.isDefaultTitle === true);
+        setIsDefaultTrim(editing && source?.isDefaultTrim === true);
         setDefaultModelError(null);
         setPricing(duplicating ? EMPTY_PRICING : pricingDraft(source?.rate));
     }, [duplicating, editing, open, source]);
@@ -188,6 +192,7 @@ export function ProviderFormDialog({
             setIsDefaultLearn(false);
             setIsDefaultTopics(false);
             setIsDefaultTitle(false);
+            setIsDefaultTrim(false);
         }
         if (preset.enhancementOnly) setIsDefaultTranscription(false);
     };
@@ -253,6 +258,13 @@ export function ProviderFormDialog({
             "isDefaultEnhancement",
             isDefaultEnhancement,
             source?.isDefaultEnhancement === true,
+            mode,
+        );
+        addDefaultFlag(
+            body,
+            "isDefaultTrim",
+            isDefaultTrim,
+            source?.isDefaultTrim === true,
             mode,
         );
         if (!personal) {
@@ -528,6 +540,33 @@ export function ProviderFormDialog({
                                     ? i18n("Use for summaries")
                                     : i18n(
                                           "Organization default for summaries",
+                                      )}
+                            </span>
+                        </label>
+                        <label
+                            className={
+                                transcriptionOnly
+                                    ? "flex items-center gap-2 opacity-60"
+                                    : "flex cursor-pointer items-center gap-2"
+                            }
+                        >
+                            <input
+                                type="checkbox"
+                                checked={isDefaultTrim && !transcriptionOnly}
+                                disabled={
+                                    saving ||
+                                    transcriptionOnly ||
+                                    sourceDisabled
+                                }
+                                onChange={(event) =>
+                                    setIsDefaultTrim(event.target.checked)
+                                }
+                            />
+                            <span>
+                                {personal
+                                    ? i18n("Use for trim proposals")
+                                    : i18n(
+                                          "Organization default for trim proposals",
                                       )}
                             </span>
                         </label>

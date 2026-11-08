@@ -39,6 +39,7 @@ export interface ProviderCardItem {
     isDefaultEnhancement?: boolean;
     isDefaultTopics?: boolean;
     isDefaultTitle?: boolean;
+    isDefaultTrim?: boolean;
     isDefaultLearn?: boolean;
     managed?: boolean;
     includedSeconds?: number;
@@ -144,7 +145,8 @@ function ProviderRow({
             provider.isDefaultEnhancement === true ||
             provider.isDefaultLearn === true ||
             provider.isDefaultTopics === true ||
-            provider.isDefaultTitle === true);
+            provider.isDefaultTitle === true ||
+            provider.isDefaultTrim === true);
     const actionLabel = disabled ? i18n("Enable") : i18n("Disable");
     const actionAria = disabled
         ? i18n("Enable {name}", { name: label })
@@ -216,6 +218,9 @@ function ProviderRow({
                     )}
                     {provider.isDefaultTopics && (
                         <RoleChip icon={ListTree} label={i18n("Topics")} />
+                    )}
+                    {provider.isDefaultTrim && (
+                        <RoleChip icon={Pencil} label={i18n("Trim proposal")} />
                     )}
                     {provider.isDefaultTitle && (
                         <RoleChip icon={Pencil} label={i18n("Titles")} />

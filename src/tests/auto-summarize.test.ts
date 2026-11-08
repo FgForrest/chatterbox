@@ -656,3 +656,7 @@ describe("Auto-summarize integration with transcribeRecording", () => {
         );
     });
 });
+
+vi.mock("@/db/queries/trim-state", () => ({
+    resolveTrimInTx: vi.fn(async () => false),
+}));

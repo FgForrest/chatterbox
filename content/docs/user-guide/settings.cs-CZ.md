@@ -53,6 +53,12 @@ Bez poskytovatele připnutého v profilu použije přepis Vaši volbu pro přepi
 
 Automatický přepis, vytváření názvů a poskytovatelé pro konkrétní profil se nastavují v sekci **Profily**. Názvy bez poskytovatele připnutého v profilu použijí Vaši volbu pro názvy, Vaši volbu pro shrnutí, výchozího poskytovatele Organizace pro názvy, výchozího poskytovatele Organizace pro shrnutí, poté Vašeho prvního povoleného poskytovatele chatu a nakonec nejstaršího povoleného poskytovatele chatu Organizace. Šablony názvů, které jste před zavedením profilů vytvořili nebo upravili, zůstávají pod **Šablony z doby před profily** a lze je zkopírovat do profilu.
 
+<span id="trim-proposal-provider" />
+
+## Poskytovatel návrhu ořezu
+
+Role **Návrh ořezu** v sekci **Přepis** používá výchozí model karty poskytovatele. Pořadí je: poskytovatel ořezu připnutý v profilu; Vaše výchozí volba ořezu; poskytovatel názvu připnutý v profilu a Vaše výchozí volba názvu; poskytovatel shrnutí připnutý v profilu a Vaše výchozí volba shrnutí; výchozí poskytovatelé Organizace pro ořez, název a shrnutí; Váš nejstarší vhodný povolený poskytovatel chatu; nejstarší vhodný povolený poskytovatel chatu Organizace. Poskytovatelé názvu a shrnutí se použijí, i když jsou jejich automatické kroky vypnuté. Nedostupná výslovná volba ořez přeskočí místo zkoušení jiného poskytovatele. Místní poskytovatelé s OpenAI-kompatibilním rozhraním fungují bez náhradního cloudového poskytovatele. Volání se ve výdajích zobrazí samostatně jako **Návrh ořezu**.
+
 ## Témata
 
 Tato sekce zachovává výchozího poskytovatele témat účtu. Profil bez

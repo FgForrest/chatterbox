@@ -221,7 +221,7 @@ function withoutDefaults(value: unknown): unknown {
 }
 
 /** The JSON object in a reply: the whole text, or the first `{`..last `}`. */
-function jsonIn(raw: string): unknown {
+export function jsonIn(raw: string): unknown {
     const trimmed = raw.trim();
     try {
         return JSON.parse(trimmed);

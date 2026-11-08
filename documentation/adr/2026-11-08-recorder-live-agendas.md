@@ -17,7 +17,7 @@ relates: []
 Agendas gain live invalidations and character-level text merging in the web editor and recorder API.
 The recorder can request the caller's next primary-calendar Meet event and announce the agenda of an
 active recording. PR #356 includes the server, web editor, recorder extension 0.9.0 and additive
-migration `0156_recorder_live_agendas.sql`.
+migration `0157_recorder_live_agendas.sql`.
 
 ## Why
 
@@ -114,7 +114,7 @@ Formatting and TypeScript checks pass.
 
 ## Consequences & open follow-ups
 
-Both deployment modes receive additive migration `0156_recorder_live_agendas.sql` without new environment
+Both deployment modes receive additive migration `0157_recorder_live_agendas.sql` without new environment
 variables or compose configuration. A text-merge failure rolls back the document and materialized column
 together. Older images ignore the derivative tables and new columns;
 their text writes cannot maintain existing Yjs history, so the next document read reconciles any
@@ -147,4 +147,4 @@ recording, notification clicks and the fallback window. The Chrome Web Store rel
 
 - **2026-11-08**: maintainer accepted scoped Meet joins, agenda-panel icon behavior, PostgreSQL live
   events and Yjs text collaboration. PR #356 implements the server, web editor, extension 0.9.0 and
-  migration 0156; real-click checks and the Store release remain.
+  migration 0157; real-click checks and the Store release remain.

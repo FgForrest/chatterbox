@@ -1,7 +1,7 @@
 ---
 title: Summaries and titles read the same transcript the pipeline chose, own first, then the user's edit, then Plaud's
 date: 2026-10-22
-updated: 2026-10-28 15:46
+updated: 2026-11-08 19:20
 status: superseded
 kind: fix
 issues: []
@@ -9,7 +9,7 @@ prs: [243]
 areas: [src/lib/summary/generate-summary.ts, src/lib/ai/generate-title.ts, src/lib/recordings/title-input.ts, src/lib/pipeline/facts.ts, src/lib/profiles/settings.ts, src/components/dashboard/transcription-panel.tsx]
 supersedes: []
 superseded-by: [2026-10-28-summary-edits-and-persistent-remarks]
-relates: [2026-10-19-processing-profiles-and-workflow, 2026-10-22-pipeline-steps-settle-their-jobs]
+relates: [2026-10-19-processing-profiles-and-workflow, 2026-10-22-pipeline-steps-settle-their-jobs, 2026-11-08-ai-trim-proposal-before-learn]
 ---
 
 # Summaries and titles read the same transcript the pipeline chose, own first, then the user's edit, then Plaud's
@@ -104,6 +104,8 @@ As merged in PR #243:
   the profile setting that makes Plaud's transcript the content.
 - [2026-10-22-pipeline-steps-settle-their-jobs](2026-10-22-pipeline-steps-settle-their-jobs.md): how
   the failed steps surfaced and settle.
+
+- [AI trim proposals before Learn](2026-11-08-ai-trim-proposal-before-learn.md): reuses this contract for whole-transcript suggestions and an owner decision before automatic work.
 
 ## Timeline
 

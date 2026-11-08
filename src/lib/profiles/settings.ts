@@ -145,9 +145,13 @@ const audioProfileSettingsV1Schema = z
 
 export const audioProfileSettingsSchema = z
     .object({
-        schemaVersion: z.literal(2),
+        schemaVersion: z.literal(3),
         steps: z
             .object({
+                trim: z
+                    .object(commonStepSchema)
+                    .strict()
+                    .default({ automatic: true, provider: null }),
                 transcribe: transcribeStepSchema,
                 ...sharedSteps,
                 summary: summaryStepSchema,
@@ -254,8 +258,9 @@ export function defaultProfileSettings(
         };
     }
     return {
-        schemaVersion: 2,
+        schemaVersion: 3,
         steps: {
+            trim: { automatic: true, provider: null },
             transcribe: {
                 automatic: false,
                 provider: null,
@@ -319,12 +324,19 @@ export function parseProfileSettings(
                 ];
             }),
         );
-        const upgraded = { schemaVersion: 2, steps: upgradedSteps };
+        const upgraded = {
+            schemaVersion: parsedChannel === "audio" ? 3 : 2,
+            steps: upgradedSteps,
+        };
         return parsedChannel === "audio"
             ? audioProfileSettingsSchema.parse(upgraded)
             : mailProfileSettingsSchema.parse(upgraded);
     }
     return parsedChannel === "audio"
-        ? audioProfileSettingsSchema.parse(value)
+        ? audioProfileSettingsSchema.parse(
+              version === 2 && typeof value === "object" && value !== null
+                  ? { ...value, schemaVersion: 3 }
+                  : value,
+          )
         : mailProfileSettingsSchema.parse(value);
 }

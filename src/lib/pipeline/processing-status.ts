@@ -13,6 +13,7 @@ import type {
     SummaryStepName,
 } from "@/lib/pipeline/types";
 import type { WorkflowActionCode } from "@/lib/pipeline/workflow-status";
+import { trimHolds } from "@/lib/recordings/trim-proposal";
 
 export interface ProcessingStep {
     state: PhaseState | "queued" | "stalled" | "manual";
@@ -52,7 +53,7 @@ export interface ProcessingPermissions {
     canProcessAgain?: boolean;
 }
 
-const phaseOrder: PhaseName[] = [
+const phaseOrder: Exclude<PhaseName, "trim">[] = [
     "categorize",
     "transcribe",
     "learn",
@@ -190,7 +191,7 @@ export function projectProcessing(
             phase,
             projectRecord(data.phases[phase], jobs, phase),
         ]),
-    ) as Record<PhaseName, ProcessingStep>;
+    ) as Record<Exclude<PhaseName, "trim">, ProcessingStep>;
     const summary = data.phases.summary;
     if (summary?.steps && Object.keys(summary.steps).length > 0) {
         const children = Object.fromEntries(
@@ -368,6 +369,40 @@ export function projectProcessing(
                     ? ["retry"]
                     : [];
     }
+    if (trimHolds(data.phases.trim)) {
+        const trim = projectRecord(data.phases.trim, jobs, "trim");
+        const cutting = jobs.find(
+            (job) =>
+                job.kind === "recording.cut" &&
+                ["pending", "processing"].includes(job.status),
+        );
+        steps.learn = cutting
+            ? {
+                  state: cutting.status === "processing" ? "running" : "queued",
+                  reason: "trim_cutting",
+                  waitingFor: { kind: "cut" },
+                  actions: [],
+              }
+            : {
+                  ...trim,
+                  reason:
+                      trim.waitingFor?.kind === "trimReview"
+                          ? "trim_review"
+                          : "trim_running",
+                  actions:
+                      permissions.canFile &&
+                      trim.waitingFor?.kind === "trimReview"
+                          ? ["reviewTrim"]
+                          : [],
+              };
+        if (!["queued", "running"].includes(steps.summary.state))
+            steps.summary = {
+                state: "waiting",
+                reason: "trim",
+                waitingFor: { kind: "trim" },
+                actions: [],
+            };
+    }
     const allSteps = Object.values(steps).flatMap((step) => [
         step,
         ...Object.values(step.steps ?? {}),
@@ -385,7 +420,9 @@ export function projectProcessing(
     const stalled = allSteps.some((step) => step.state === "stalled");
     const holds = allSteps
         .flatMap((step) =>
-            step.waitingFor?.kind === "learnReview" && step.waitingFor.until
+            ["learnReview", "trimReview"].includes(
+                step.waitingFor?.kind ?? "",
+            ) && step.waitingFor?.until
                 ? [Date.parse(step.waitingFor.until)]
                 : [],
         )

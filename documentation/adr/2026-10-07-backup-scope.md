@@ -1,14 +1,14 @@
 ---
 title: Backups and exports carry one scope, chosen by the account, personal or Organization, never both
 date: 2026-10-07
-updated: 2026-10-28 10:10
+updated: 2026-11-08 19:20
 status: superseded
 kind: feature
 issues: []
 prs: [89]
 areas: [src/lib/export/archive-scope.ts, src/lib/export/resolve-archive-scope.ts, src/lib/export/build-archive.ts, src/lib/export/document-sidecars.ts, src/app/api/backup]
 supersedes: []
-superseded-by: [2026-10-28-curator-organization-folder-exports]
+superseded-by: [2026-10-28-curator-organization-folder-exports, 2026-11-08-ai-trim-proposal-before-learn]
 relates: [2026-10-27-shared-folders-are-two-way, 2026-10-22-person-to-person-sharing, 2026-09-23-shared-organization-scope, 2026-10-07-tasks-from-summaries, 2026-10-27-meeting-agendas]
 ---
 
@@ -25,6 +25,8 @@ egress. Shipped in PR #89.
 a current curator may export an Organization folder subtree through their own connection using
 Organization content scope. Only that folder-export case changes; account-selected archive scope,
 personal folder exports and every other rule here still hold.
+
+**Superseded in part** by [AI trim proposals before Learn](2026-11-08-ai-trim-proposal-before-learn.md): A focused trim-decision import adapter now exists, without a general archive restore UI. Account-selected archive scopes and other export rules stay.
 
 ## Why
 

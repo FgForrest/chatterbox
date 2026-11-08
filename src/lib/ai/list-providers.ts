@@ -19,6 +19,7 @@ export interface ProviderListItem {
     isDefaultEnhancement: boolean;
     isDefaultTopics?: boolean;
     isDefaultTitle?: boolean;
+    isDefaultTrim?: boolean;
     /**
      * Whether Learn runs on it; absent where this instance has no Learn,
      * so the list offers the choice only where it means something.
@@ -106,6 +107,7 @@ export async function listUserProviders(
                 isDefaultEnhancement: row.id === pointers.summary,
                 isDefaultTopics: row.id === pointers.topics,
                 isDefaultTitle: row.id === pointers.title,
+                isDefaultTrim: row.id === pointers.trim,
                 ...(learn ? { isDefaultLearn: row.id === pointers.learn } : {}),
             };
         },
