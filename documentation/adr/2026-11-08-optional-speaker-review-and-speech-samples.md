@@ -1,10 +1,10 @@
 ---
 title: Show every unanswered speaker without making optional naming hold processing
 date: 2026-11-08
-updated: 2026-11-08 18:40
+updated: 2026-11-08 21:05
 status: accepted
 kind: feature
-issues: []
+issues: [354]
 prs: []
 areas: [src/lib/learn, src/lib/pipeline/presentation.ts, src/lib/transcript/speech-samples.ts, src/components/learn, src/components/dashboard/transcription-panel.tsx]
 supersedes: [2026-09-30-learn]
@@ -66,7 +66,10 @@ start outside it and clamping their ends. Only an unknown or zero duration falls
 turn end. Rank by duration capped at 20 seconds, less
 overlap, then earlier start. Play with 300 ms pre-roll for at most 12 seconds. Without a candidate,
 use the three longest individual turns of at least one second. Evidence clips end with their
-containing turn, capped at 15 seconds. Sentence-end cutting is deferred.
+containing turn, capped at 15 seconds. A stretch that fits plays to its end. Longer samples stop
+at the latest exact inner boundary between 6 and 12 seconds after the pre-rolled start, falling
+back to 12 seconds when none exists. Exact boundaries are merged turn ends and valid stored
+sentence starts after the first; character interpolation never supplies a cut point.
 
 ## Key technical details
 
@@ -85,7 +88,14 @@ containing turn, capped at 15 seconds. Sentence-end cutting is deferred.
   `not_now`; quick finish also omits them from skipped-item notices. Existing correction-pass
   holds still apply.
 - `speech-samples.ts` owns the exported selection constants, statistics, ordering and evidence
-  bounds. Speaker turns are grouped once for statistics; samples are cached per label and computed
+  bounds. Stretches retain sorted, deduplicated inner boundaries and sentence indexes; a boundary
+  cut quotes only played turns and sentences from `sentencesOf`. Sentence timing must align with
+  the text and lie inside the original turn before recording bounds are applied. A stretch whose
+  merged turns of one label overlap in time keeps no boundaries (12-second cut), because its
+  sentences have no single order to quote by. The dashboard's
+  `readTranscriptTurns` path carries sentence times through `TranscriptionPanel`, `LearnReview`
+  and `LearnWidget`; the existing sample quote UI needs no change. Evidence clips are unchanged.
+  Speaker turns are grouped once for statistics; samples are cached per label and computed
   only for visible review rows. Processing reads count non-speaker findings in SQL and decrypt only
   speaker payloads. No provider, storage adapter, schema or environment variable changes are needed.
 - Inline and dialog reviews share `LearnWidget`, `ReviewSpeaker` and `SpeakerClips`. The review
@@ -94,8 +104,12 @@ containing turn, capped at 15 seconds. Sentence-end cutting is deferred.
 
 ## Verification
 
-- `speech-samples.test.ts`: 17 cases for merging, boundary values, union overlap, thirds, fill,
+- `speech-samples.test.ts`: 40 cases for merging, boundary values, union overlap, thirds, fill,
   ranking, playback bounds, fallback, statistics, numeric label ordering and evidence quotes.
+  Sentence-end cases cover the latest stored boundary, merged turn ends, inclusive 6/12-second
+  bounds with pre-roll, too-early boundaries, invalid timing lengths and bounds, legacy transcripts,
+  matching played quotes, ordered indexes, overlapping turns of one label, recording bounds and long
+  fallback turns.
 - `every-speaker.test.ts` and `every-speaker.integration.test.ts`: 19 cases for unique rows,
   answered/mail guards, both Finish paths, optional-only automatic completion, known facts,
   summary release, pipeline counts and explicit unknown answers against disposable PostgreSQL.
@@ -108,16 +122,25 @@ containing turn, capped at 15 seconds. Sentence-end cutting is deferred.
   At 5/6/8 seconds, three-sample coverage is 94.12/92.16/86.27%; 10/12/15 words changes none of
   these shares. Measurement chooses the latest Riffado transcript per recording and deduplicates
   identical exports; these are availability measures, not listening-quality judgments.
+- Sentence-end before/after measurement: the same 12 recordings and 51 labels yield 146 selected
+  samples in both versions. Cuts at 12 seconds mid-stretch remain 91.78%, exact-boundary ends
+  remain 8.22%, and median played length remains 12 s. These transcripts predate stored sentence
+  starts, so the comparison measures turn-end cutting only. None of the selected samples has an
+  exact inner boundary in its 6-to-12-second window; this corpus therefore shows no improvement.
+  Expected effect on new transcripts, estimated by giving the same turns character-interpolated
+  sentence starts in place of stored ones (real sentence lengths, approximate positions): 63.01%
+  of samples end at a sentence boundary, 36.99% are still cut at 12 seconds, and the median played
+  length is 10.75 s (p10 7.04 s, p90 12 s).
 
 ## Consequences & open follow-ups
 
 Naming remains optional and human-confirmed. Short speakers remain ordinary rows. Existing waiting
 reviews can calculate listening samples without a new Learn run; newly appended coverage rows
 arrive on the next run. Timing inaccuracies, overlapping speakers and a label mixing several
-voices can still make samples misleading. There is no sentence-end cutting or acoustic analysis.
-Open follow-up: new transcripts now store sentence start times
-([Stored sentence start times](2026-11-08-stored-sentence-start-times.md)), which would let
-a sample stop at a sentence boundary instead of at 12 seconds.
+voices can still make samples misleading. Samples now use exact sentence ends from
+[stored sentence start times](2026-11-08-stored-sentence-start-times.md) and merged turn ends,
+within the approved playback window. Older transcripts gain only turn-end cutting; without an
+eligible boundary the 12-second cap can still stop mid-sentence. There is no acoustic analysis.
 
 Self-host receives the optional-row behavior without a deployment change. Hosted retains its
 existing Learn availability restriction; the shared playback code keeps the same transport API.

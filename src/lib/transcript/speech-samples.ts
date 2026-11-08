@@ -2,6 +2,10 @@ import {
     isPlaceholderSpeakerLabel,
     speakerKey,
 } from "@/lib/knowledge/speaker-label-rules";
+import {
+    sentencesOf,
+    validSentenceStarts,
+} from "@/lib/transcription/sentences";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
 export const STRETCH_GAP_MS = 1_500;
@@ -24,6 +28,8 @@ export interface SpeechStretch {
     text: string;
     words: number;
     overlap: number;
+    sentences: string[];
+    boundaries: { ms: number; sentenceIndex: number }[];
 }
 
 export interface SpeechSample extends SpeechStretch {
@@ -81,6 +87,36 @@ function wordCount(text: string): number {
     return text.match(/\S+/gu)?.length ?? 0;
 }
 
+function exactSentenceStarts(turn: TranscriptTurn): number[] | undefined {
+    const starts = validSentenceStarts(turn.text, turn.sentenceStartsMs);
+    return starts?.every((ms) => ms >= turn.startMs && ms <= turn.endMs)
+        ? starts
+        : undefined;
+}
+
+function sentenceParts(
+    turn: TranscriptTurn,
+): Pick<SpeechStretch, "sentences" | "boundaries"> {
+    const starts = exactSentenceStarts(turn);
+    return {
+        sentences: sentencesOf(turn.text).map((sentence) => sentence.text),
+        boundaries:
+            starts?.slice(1).map((ms, index) => ({
+                ms,
+                sentenceIndex: index + 1,
+            })) ?? [],
+    };
+}
+
+function innerBoundaries(stretch: SpeechStretch): SpeechStretch["boundaries"] {
+    const inside = stretch.boundaries
+        .filter(({ ms }) => ms > stretch.startMs && ms < stretch.endMs)
+        .sort((a, b) => a.ms - b.ms || a.sentenceIndex - b.sentenceIndex);
+    return [
+        ...new Map(inside.map((boundary) => [boundary.ms, boundary])).values(),
+    ];
+}
+
 /** Consecutive speech joined by short pauses, with union overlap from other labels. */
 export function speechStretches(
     turns: readonly TranscriptTurn[],
@@ -97,6 +133,7 @@ export function speechStretches(
     const key = speakerKey(label);
     const stretches: SpeechStretch[] = [];
     const other: { startMs: number; endMs: number }[] = [];
+    const overlapping = new Set<SpeechStretch>();
     let consecutive = false;
     for (const turn of ordered) {
         if (speakerKey(turn.speaker) !== key) {
@@ -113,6 +150,20 @@ export function speechStretches(
             last &&
             turn.startMs - last.endMs <= STRETCH_GAP_MS
         ) {
+            if (turn.startMs < last.endMs) overlapping.add(last);
+            last.boundaries.push({
+                ms: last.endMs,
+                sentenceIndex: last.sentences.length,
+            });
+            const parts = sentenceParts(turn);
+            last.boundaries.push(
+                ...parts.boundaries.map((boundary) => ({
+                    ...boundary,
+                    sentenceIndex:
+                        last.sentences.length + boundary.sentenceIndex,
+                })),
+            );
+            last.sentences.push(...parts.sentences);
             last.endMs = Math.max(last.endMs, turn.endMs);
             last.text = `${last.text} ${turn.text.trim()}`.trim();
             last.words += wordCount(turn.text);
@@ -123,11 +174,16 @@ export function speechStretches(
                 text: turn.text.trim(),
                 words: wordCount(turn.text),
                 overlap: 0,
+                ...sentenceParts(turn),
             });
         consecutive = true;
     }
     let from = 0;
     for (const stretch of stretches) {
+        // Overlapping turns of one label have no sentence order to cut by.
+        stretch.boundaries = overlapping.has(stretch)
+            ? []
+            : innerBoundaries(stretch);
         while (from < other.length && other[from].endMs <= stretch.startMs)
             from++;
         let overlapMs = 0;
@@ -158,10 +214,21 @@ function best(a: SpeechStretch, b: SpeechStretch): number {
 
 function playable(stretch: SpeechStretch): SpeechSample {
     const ms = Math.max(0, stretch.startMs - SAMPLE_PRE_ROLL_MS);
+    const limit = ms + SAMPLE_PLAY_LIMIT_MS;
+    const boundary =
+        stretch.endMs > limit
+            ? stretch.boundaries.findLast(
+                  ({ ms: end }) =>
+                      end >= ms + SAMPLE_MIN_DURATION_MS && end <= limit,
+              )
+            : undefined;
     return {
         ...stretch,
+        text: boundary
+            ? stretch.sentences.slice(0, boundary.sentenceIndex).join(" ")
+            : stretch.text,
         ms,
-        untilMs: Math.min(stretch.endMs, ms + SAMPLE_PLAY_LIMIT_MS),
+        untilMs: boundary?.ms ?? Math.min(stretch.endMs, limit),
     };
 }
 
@@ -193,6 +260,9 @@ export function speakerSpeechSamples(
                       ...turn,
                       startMs: Math.max(0, turn.startMs),
                       endMs: Math.min(durationMs, turn.endMs),
+                      sentenceStartsMs: exactSentenceStarts(turn)?.map((ms) =>
+                          Math.max(0, Math.min(durationMs, ms)),
+                      ),
                   },
               ]
             : [],
@@ -234,6 +304,7 @@ export function speakerSpeechSamples(
                 .slice(0, SAMPLE_COUNT)
                 .map((turn) => ({
                     ...turn,
+                    ...sentenceParts(turn),
                     words: wordCount(turn.text),
                     overlap: 0,
                 })),
