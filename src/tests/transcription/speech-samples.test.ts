@@ -211,9 +211,9 @@ describe("speech samples", () => {
         expect(
             speakerSpeechSamples([turn(0, 1000)], "speaker_0").samples,
         ).toHaveLength(1);
-        expect(
-            speakerSpeechSamples([turn(0, 999)], "speaker_0").samples,
-        ).toEqual([]);
+        expect(speakerSpeechSamples([turn(0, 999)], "speaker_0")).toMatchObject(
+            { samples: [], fallback: true, longestTurnMs: 999 },
+        );
     });
     it("handles empty input and missing labels without mutation", () => {
         expect(speakerSpeechSamples([], "speaker_0")).toEqual({
