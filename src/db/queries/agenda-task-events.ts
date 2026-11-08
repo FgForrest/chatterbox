@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { bumpAgendaInTx } from "@/db/queries/agenda-events";
+import { bumpAgendaIfPresentInTx } from "@/db/queries/agenda-events";
 import type { MeetingTx } from "@/db/queries/meetings";
 import { agendaTasks, meetingAgendas } from "@/db/schema";
 
@@ -20,5 +20,5 @@ export async function publishTaskAgendaEventsInTx(
         )
         .where(eq(agendaTasks.taskId, taskId))
         .orderBy(meetingAgendas.id);
-    for (const row of rows) await bumpAgendaInTx(tx, row);
+    for (const row of rows) await bumpAgendaIfPresentInTx(tx, row);
 }

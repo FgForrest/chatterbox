@@ -18,11 +18,20 @@ export async function publishAgendaEventInTx(
     );
 }
 
-/** Atomically advance the durable cursor and notify every listening process. */
+/** Advance and notify an agenda locked by the caller in this transaction; fail if it is missing. */
 export async function bumpAgendaInTx(
     tx: MeetingTx,
     agenda: { id: string; userId: string },
 ) {
+    if (!(await bumpAgendaIfPresentInTx(tx, agenda)))
+        throw new Error("Agenda update returned no row");
+}
+
+/** Advance and notify an existing agenda, skipping references deleted since they were read. */
+export async function bumpAgendaIfPresentInTx(
+    tx: MeetingTx,
+    agenda: { id: string; userId: string },
+): Promise<boolean> {
     const [row] = await tx
         .update(meetingAgendas)
         .set({
@@ -36,8 +45,9 @@ export async function bumpAgendaInTx(
             ),
         )
         .returning({ version: meetingAgendas.version });
-    if (!row) throw new Error("Agenda update returned no row");
+    if (!row) return false;
     await publishAgendaEventInTx(tx, agenda.id, String(row.version));
+    return true;
 }
 
 /** Lease stream capacity under a user row lock so app processes share the same cap. */

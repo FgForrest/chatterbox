@@ -20,6 +20,7 @@ import {
     meetingAgendas,
     recordingSessions,
     recordingTasks,
+    taskStatusTransitions,
     users,
 } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
@@ -102,6 +103,7 @@ vi.mock("@/lib/recording-sessions/route-gate", () => ({
 import { GET as webEvents } from "@/app/api/meetings/[id]/events/route";
 import { GET as recorderEvents } from "@/app/api/v1/recorder/agendas/[id]/events/route";
 import { db } from "@/db";
+import * as agendaEvents from "@/db/queries/agenda-events";
 import {
     bumpAgendaInTx,
     claimAgendaStream,
@@ -119,6 +121,7 @@ import {
     addPoint,
     changeAgendaTask,
     changePoint,
+    deleteMeeting,
     getMeeting,
     listMeetings,
 } from "@/lib/meetings/service";
@@ -318,6 +321,26 @@ suite("live agenda concurrency and access (PostgreSQL)", () => {
             await expect(
                 db.transaction((tx) => bumpAgendaInTx(tx, agenda)),
             ).rejects.toThrow("Agenda update returned no row");
+        const [stored] = await db
+            .select()
+            .from(meetingAgendas)
+            .where(eq(meetingAgendas.id, "agenda"));
+        expect(stored.version).toBe(0);
+    });
+
+    it("skips missing or mismatched owner-scoped agendas without publishing", async () => {
+        const messages = await agendaEventsDuring(async () => {
+            for (const agenda of [
+                { id: "missing", userId: "owner" },
+                { id: "agenda", userId: "stranger" },
+            ])
+                expect(
+                    await db.transaction((tx) =>
+                        agendaEvents.bumpAgendaIfPresentInTx(tx, agenda),
+                    ),
+                ).toBe(false);
+        });
+        expect(messages).toEqual([]);
         const [stored] = await db
             .select()
             .from(meetingAgendas)
@@ -741,7 +764,10 @@ suite("live agenda concurrency and access (PostgreSQL)", () => {
             await listener.unlisten();
         }
     });
-    it("invalidates a private reviewing agenda hidden from the authorized task writer", async () => {
+    it.each([
+        false,
+        true,
+    ])("invalidates two owners' reviewing agendas despite a concurrent delete (%s)", async (deleteAfterSelect) => {
         await insertRecordings(database.db, {
             id: "shared-recording",
             userId: "owner",
@@ -786,33 +812,93 @@ suite("live agenda concurrency and access (PostgreSQL)", () => {
             plannedStart: at,
             taskSourceItemId: "shared-recording",
         });
-        await db.insert(agendaTasks).values({
-            agendaId: "private-agenda",
-            userId: "editor",
-            taskId: "shared-task",
-            origin: "last_meeting",
-        });
+        await db.insert(agendaTasks).values([
+            {
+                agendaId: "private-agenda",
+                userId: "editor",
+                taskId: "shared-task",
+                origin: "last_meeting",
+            },
+            {
+                agendaId: "agenda",
+                userId: "owner",
+                taskId: "shared-task",
+                origin: "last_meeting",
+            },
+        ]);
         const before = await getMeeting("editor", "private-agenda");
         if (before.unchanged) throw new Error("Missing detail");
         expect(before.tasks.map((task) => task.id)).toContain("shared-task");
         await expect(
             getMeeting("owner", "private-agenda"),
         ).rejects.toMatchObject({ statusCode: 404 });
-        await updateTask(await taskViewerById("owner"), "shared-task", {
-            version: 0,
-            status: "done",
-        });
-        const [agenda] = await db
+        const bump = agendaEvents.bumpAgendaIfPresentInTx;
+        const bumpSpy = vi.spyOn(agendaEvents, "bumpAgendaIfPresentInTx");
+        if (deleteAfterSelect)
+            bumpSpy.mockImplementationOnce(async (tx, agenda) => {
+                await deleteMeeting("editor", "private-agenda");
+                return bump(tx, agenda);
+            });
+        let messages: unknown[];
+        try {
+            messages = await agendaEventsDuring(async () => {
+                await updateTask(await taskViewerById("owner"), "shared-task", {
+                    version: 0,
+                    status: "done",
+                });
+            });
+            expect(bumpSpy.mock.calls.map(([, agenda]) => agenda)).toEqual([
+                { id: "agenda", userId: "owner" },
+                { id: "private-agenda", userId: "editor" },
+            ]);
+            expect(
+                await Promise.all(
+                    bumpSpy.mock.results.map((result) => result.value),
+                ),
+            ).toEqual([true, !deleteAfterSelect]);
+        } finally {
+            bumpSpy.mockRestore();
+        }
+        expect(messages).toHaveLength(2);
+        expect(messages).toEqual(
+            expect.arrayContaining([
+                { agendaId: "agenda", cursor: "1" },
+                { agendaId: "private-agenda", cursor: "1" },
+            ]),
+        );
+        const [task] = await db
+            .select()
+            .from(recordingTasks)
+            .where(eq(recordingTasks.id, "shared-task"));
+        expect(task).toMatchObject({ status: "done", version: 1 });
+        expect(await db.select().from(taskStatusTransitions)).toMatchObject([
+            {
+                taskId: "shared-task",
+                fromStatus: "open",
+                toStatus: "done",
+                actorUserId: "owner",
+            },
+        ]);
+        const agendas = await db
             .select()
             .from(meetingAgendas)
-            .where(eq(meetingAgendas.id, "private-agenda"));
-        expect(agenda.version).toBe(1);
-        const after = await getMeeting(
-            "editor",
-            "private-agenda",
-            before.cursor,
+            .orderBy(meetingAgendas.id);
+        expect(agendas.map(({ id, version }) => ({ id, version }))).toEqual(
+            deleteAfterSelect
+                ? [{ id: "agenda", version: 1 }]
+                : [
+                      { id: "agenda", version: 1 },
+                      { id: "private-agenda", version: 1 },
+                  ],
         );
-        expect(after.unchanged).toBe(false);
+        if (!deleteAfterSelect) {
+            const after = await getMeeting(
+                "editor",
+                "private-agenda",
+                before.cursor,
+            );
+            expect(after.unchanged).toBe(false);
+        }
     });
     it("receives a real NOTIFY after the dedicated LISTEN is active", async () => {
         const received = vi.fn();
