@@ -78,6 +78,10 @@ import type { LearnObject } from "@/lib/learn/output";
 import { chooseLearnPath } from "@/lib/learn/provider";
 import { finishKnownFactsOnly } from "@/lib/learn/review";
 import { resolveLearnReviewLocale } from "@/lib/learn/review-language";
+import {
+    isUnmentionedSpeaker,
+    needsLearnReview,
+} from "@/lib/learn/review-policy";
 import { runBridgePass } from "@/lib/learn/run-bridge";
 import {
     type LearnEntityTypeChoice,
@@ -641,8 +645,12 @@ function counts(
     items: readonly ReviewCandidate[],
     extra: Record<string, number>,
 ): Record<string, number> {
-    const stats: Record<string, number> = { ...extra, items: items.length };
-    for (const item of items) {
+    const reviewable = items.filter((item) => !isUnmentionedSpeaker(item));
+    const stats: Record<string, number> = {
+        ...extra,
+        items: reviewable.length,
+    };
+    for (const item of reviewable) {
         stats[`items_${item.kind}`] = (stats[`items_${item.kind}`] ?? 0) + 1;
     }
     return stats;
@@ -1086,6 +1094,12 @@ async function runLearnJob({
                     );
                     if (index >= 0) items.splice(index, 1);
                 }
+                // Coverage rows exist only when a person will review other findings.
+                if (!items.some(needsLearnReview)) {
+                    for (let index = items.length - 1; index >= 0; index--)
+                        if (isUnmentionedSpeaker(items[index]))
+                            items.splice(index, 1);
+                }
                 const stats = counts(items, {
                     ...baseStats,
                     ...(fenceAttempt > 1
@@ -1223,7 +1237,7 @@ async function runLearnJob({
                         run,
                         profile.settings.steps.learn.correctAfterLearn,
                     ));
-                return { status, items: items.length, correcting };
+                return { status, items: stats.items, correcting };
             });
             if (outcome.status === "stale") continue;
             nudge();
@@ -1487,6 +1501,7 @@ async function runMailLearnJob(
             const lastAttempt = fenceAttempt >= FENCE_ATTEMPTS;
             const fence = await fenceOf(db, run, orgUserId);
             const frame: LearnRunFrame = {
+                kind: "mail",
                 ...(await knowledgeFrame(run)),
                 revision: run.transcriptRevision,
                 currentRevision: content.revision,

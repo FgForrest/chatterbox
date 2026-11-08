@@ -10,9 +10,10 @@ import {
     NAME_SPELLING_RULE,
     runFallbackPass,
 } from "@/lib/learn/run-fallback";
-import { type LearnRunFrame, validateLearnOutput } from "@/lib/learn/validate";
+import type { LearnRunFrame } from "@/lib/learn/validate";
 import { MAX_NEW_RECORDS } from "@/lib/learn/validate-new-records";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
+import { validateLearnProposals } from "@/tests/helpers/learn-proposals";
 
 const turns: TranscriptTurn[] = [
     {
@@ -74,7 +75,7 @@ describe("Learn new-record recall evidence", () => {
         ["TZ", "TZka"],
         ["NBI", "NBIem"],
     ])("keeps the acronym %s when its evidence uses the spoken form %s", (name, heard) => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({ newRecords: [record(name, "term")] }),
             {
                 ...frame,
@@ -103,7 +104,7 @@ describe("Learn new-record recall evidence", () => {
                 text: `${rare.map((one) => one.name).join(" ")} CHVEX. Velora Velora Velora.`,
             },
         ];
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [
                     ...rare,
@@ -219,7 +220,7 @@ describe("Learn new-record recall evidence", () => {
             ],
             turns,
         );
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({ newRecords: [record("ČVEX")], corrections }),
             frame,
         );
@@ -232,7 +233,7 @@ describe("Learn new-record recall evidence", () => {
     });
 
     it("requires grounded evidence even when a model gives a corrected spelling", () => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({ newRecords: [record("ČVEX")] }),
             frame,
         );
@@ -241,7 +242,7 @@ describe("Learn new-record recall evidence", () => {
     });
 
     it("keeps organizations named as folders and products that are the meeting subject", () => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [
                     record("CHVEX"),
@@ -260,7 +261,7 @@ describe("Learn new-record recall evidence", () => {
         ["úkoly", "term"],
         ["migraci a úkoly", "project"],
     ])("drops the generic word or topic phrase %s", (name, typeKey) => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({ newRecords: [record(name, typeKey)] }),
             frame,
         );

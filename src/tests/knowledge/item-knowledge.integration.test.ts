@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
     afterAll,
     beforeAll,
@@ -469,6 +469,16 @@ const url = getTestDatabaseUrl();
                 typeKey: "project",
                 name: "Shared project",
             });
+            const createdAt = new Date("2026-02-01T00:00:30Z");
+            await database.db
+                .update(knowledgeEntities)
+                .set({ createdAt })
+                .where(
+                    and(
+                        eq(knowledgeEntities.id, published.id),
+                        eq(knowledgeEntities.userId, "owner"),
+                    ),
+                );
             const privateType = await createPrivateType("owner", {
                 kind: "entity",
                 label: "Private category",
@@ -481,6 +491,7 @@ const url = getTestDatabaseUrl();
                 id: "new-person",
                 userId: "owner",
                 displayName: encryptText("New Person"),
+                createdAt,
             });
             let contentId = "transcript-item";
             if (kind === "mail") {

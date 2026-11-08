@@ -531,6 +531,18 @@ export function TranscriptionPanel({
         Record<string, SpeakerAttributions>
     >({});
     const speakerAttributions = attributionsByKey[attributionKey] ?? {};
+    const [unknownByKey, setUnknownByKey] = useState<
+        Record<string, ReadonlySet<string>>
+    >({});
+    const handleUnknownLabelsChange = useCallback(
+        (labels: ReadonlySet<string>) => {
+            setUnknownByKey((current) => ({
+                ...current,
+                [attributionKey]: labels,
+            }));
+        },
+        [attributionKey],
+    );
     const nextSpeakerTurn = (
         voices: string | readonly string[],
         once = false,
@@ -559,8 +571,8 @@ export function TranscriptionPanel({
         const index = matching[nextPosition];
         speakerCursorRef.current = { transcript, speaker, index };
         const { startMs, endMs } = turns[index];
-        setTranscriptExpanded(true);
-        setSpeakerJump({ index });
+        if (!once) setTranscriptExpanded(true);
+        if (!once || transcriptOpen) setSpeakerJump({ index });
         return {
             ms: startMs,
             endMs:
@@ -1091,6 +1103,9 @@ export function TranscriptionPanel({
                                 speakers={speakerTags}
                                 attributions={speakerAttributions}
                                 onAttributionsChange={handleAttributionsChange}
+                                onUnknownLabelsChange={
+                                    handleUnknownLabelsChange
+                                }
                                 view={view}
                                 nextSpeakerTurn={
                                     activeTranscript.turns?.length
@@ -1198,6 +1213,9 @@ export function TranscriptionPanel({
                                     : "riffado"
                             }
                             turns={activeTranscript.turns ?? []}
+                            durationMs={recording.duration}
+                            confirmedAttributions={speakerAttributions}
+                            unknownLabels={unknownByKey[attributionKey]}
                             nextSpeakerTurn={
                                 playback
                                     ? (label) => nextSpeakerTurn(label, true)

@@ -21,27 +21,43 @@ function insideActiveRange(target: PlayAtTarget | null, ms: number) {
 }
 
 /** Owns a play shortcut and toggles it against the shared player state. */
-export function usePlayAt(target?: PlayAtTarget) {
+export function usePlayAt(target?: PlayAtTarget, trackProgress = false) {
     const playback = usePlayback();
     const owner = useId();
     const started = useRef<PlayAtTarget | null>(null);
     const [observed, setObserved] = useState<{
         playback: typeof playback;
         playing: boolean;
+        progress: number;
     } | null>(null);
     useEffect(() => {
         return playback?.subscribe((state) => {
+            const range = started.current;
             const playing =
                 state.playing &&
                 state.owner === owner &&
-                insideActiveRange(started.current, state.ms);
+                insideActiveRange(range, state.ms);
+            const end = range?.untilMs ?? range?.endMs;
+            const progress =
+                trackProgress &&
+                playing &&
+                range &&
+                end !== undefined &&
+                end > range.ms
+                    ? Math.max(
+                          0,
+                          Math.min(1, (state.ms - range.ms) / (end - range.ms)),
+                      )
+                    : 0;
             setObserved((current) =>
-                current?.playback === playback && current.playing === playing
+                current?.playback === playback &&
+                current.playing === playing &&
+                current.progress === progress
                     ? current
-                    : { playback, playing },
+                    : { playback, playing, progress },
             );
         });
-    }, [playback, owner]);
+    }, [playback, owner, trackProgress]);
     const playing =
         observed?.playback === playback && observed?.playing === true;
     const toggle = (next = target) => {
@@ -51,7 +67,12 @@ export function usePlayAt(target?: PlayAtTarget) {
             playback?.play(next.ms, owner, next.untilMs);
         }
     };
-    return { available: playback !== null, playing, toggle };
+    return {
+        available: playback !== null,
+        playing,
+        toggle,
+        progress: observed?.playback === playback ? observed.progress : 0,
+    };
 }
 
 /** The shared filled transport icon used by every play shortcut. */

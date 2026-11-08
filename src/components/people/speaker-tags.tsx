@@ -33,6 +33,7 @@ interface SpeakerTagsProps {
     speakers: TranscriptSpeakerTag[];
     attributions: SpeakerAttributions;
     onAttributionsChange: (attributions: SpeakerAttributions) => void;
+    onUnknownLabelsChange?: (labels: ReadonlySet<string>) => void;
     /**
      * On the Organization view names come from, and go to, the Organization's
      * knowledge base, for everyone who can see the recording.
@@ -173,6 +174,7 @@ export function SpeakerTags({
     speakers,
     attributions,
     onAttributionsChange,
+    onUnknownLabelsChange,
     view,
     nextSpeakerTurn,
     shownVersion,
@@ -241,10 +243,11 @@ export function SpeakerTags({
             }
             onAttributionsChange(confirmedAttributions(body.speakers));
             setUnknownLabels(unknownSpeakerLabels(body.speakers));
+            onUnknownLabelsChange?.(unknownSpeakerLabels(body.speakers));
             setSuggestions(suggestedSpeakers(body.speakers));
             if (read) setVersion(read);
         },
-        [onAttributionsChange, shownId, shownRevision],
+        [onAttributionsChange, onUnknownLabelsChange, shownId, shownRevision],
     );
 
     const load = useCallback(
