@@ -14,7 +14,17 @@ import {
 import { taskViewerById } from "@/lib/tasks/access";
 import { getVisibleTasks } from "@/lib/tasks/tasks";
 
-/** Accepted agenda collaborators and, for task-source disclosure, pending direct invitees. */
+/** Outcome of agenda recording invitations; a skip without a person covers the whole batch. */
+export interface RecordingInvitationReport {
+    invited: string[];
+    skipped: { userId: string | null; reason: string }[];
+}
+
+/**
+ * Accepted agenda collaborators and, for the author's task-source disclosure, pending direct
+ * invitees. Only the author and accepted direct receivers learn who they are; shared-folder and
+ * Organization viewers get nobody.
+ */
 export async function agendaSharePeople(
     userId: string,
     id: string,
@@ -22,7 +32,8 @@ export async function agendaSharePeople(
 ) {
     await requirePersonSharing(userId);
     const access = await requireMeetingAccess(userId, id);
-    if (pending && access.agenda.userId !== userId)
+    const isAuthor = access.agenda.userId === userId;
+    if (pending && !isAuthor)
         throw new AppError(ErrorCode.NOT_FOUND, "Agenda not found", 404);
     const invitees = access.agenda.meetingItemId
         ? await db
@@ -45,10 +56,12 @@ export async function agendaSharePeople(
                   ),
               )
         : [];
+    if (!isAuthor && !invitees.some((person) => person.id === userId))
+        return { access, people: [], inactivePeople: [] };
     const people = invitees
         .filter((person) => person.active)
         .map(({ id, name }) => ({ id, name }));
-    if (access.agenda.userId !== userId) {
+    if (!isAuthor) {
         const [author] = await db
             .select({ id: users.id, name: users.name })
             .from(users)
@@ -143,11 +156,8 @@ export async function inviteAgendaPeopleToRecording(
     id: string,
     recordingId: string,
     taskSource = false,
-) {
-    const report: {
-        invited: string[];
-        skipped: { userId: string; reason: string }[];
-    } = { invited: [], skipped: [] };
+): Promise<RecordingInvitationReport> {
+    const report: RecordingInvitationReport = { invited: [], skipped: [] };
     const { access, people, inactivePeople } = await agendaSharePeople(
         userId,
         id,

@@ -1,11 +1,11 @@
 ---
 title: Agendas share co-editing through accepted person invitations while recordings require separate consent
 date: 2026-11-08
-updated: 2026-11-08 11:23
+updated: 2026-11-08 13:42
 status: proposed
 kind: feature
 issues: [329]
-prs: []
+prs: [348]
 areas: [src/lib/meetings, src/lib/sharing, src/db/queries/meetings.ts, src/db/queries/meeting-shares.ts, src/components/meetings, src/components/sharing, src/lib/export]
 supersedes: [2026-10-28-agendas-use-all-folder-placements, 2026-10-27-meeting-agendas]
 superseded-by: []
@@ -70,7 +70,9 @@ autocomplete, keyboard behavior and creation flow. Parent-folder choices use the
   calls ordinary invitations after the attach transaction commits. Invitations require that the recording
   is attached to this agenda; task-source invitations use the ordinary item-sharing endpoint.
   Skips are reported and never undo attachment. Automatic matching locks the agenda item before its
-  final direct-invitation check and holds that lock through absorption.
+  final direct-invitation check and holds that lock through absorption. Only the author and accepted
+  direct receivers learn who the direct receivers are: a shared-folder or Organization viewer who
+  attaches a recording gets no invitation offer and invites nobody.
 - A receiver-owned recording retains the non-author audience-containment check. Filing rechecks folder
   participation under its normal lock. Detach revives the original plan and its independent invitations.
 - Recording invitation shortcuts use only the receiver's accepted agenda filing. Banner dismissal is
@@ -128,3 +130,4 @@ rollback requires no migration. Browser-local dismissal does not follow users be
 ## Timeline
 
 - **2026-11-08**: D1–D7 and the shared autocomplete approved; implementation and validation prepared for review.
+- **2026-11-08**: PR #348 review: direct receivers disclosed only to the author and accepted receivers.

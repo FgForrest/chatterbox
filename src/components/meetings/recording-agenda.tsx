@@ -13,16 +13,15 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useAgendaRecordingPrivacy } from "@/hooks/use-library-preferences";
 import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 import { AgendaBody } from "./agenda-body";
-import { meetingRequest, meetingUrl, recordingAudienceConflict } from "./api";
+import { meetingRequest } from "./api";
 import {
     AttachmentAudience,
     AttachmentFilingNotice,
     AttachmentShareChoice,
-    useAttachmentShareChoice,
+    useAgendaAttachment,
 } from "./attachment-disclosure";
 import { CreateMeetingDialog } from "./create-meeting-dialog";
 import {
@@ -74,8 +73,11 @@ export function RecordingAgenda({
     const [candidates, setCandidates] = useState<AgendaCandidate[]>([]);
     const [next, setNext] = useState<NextMeeting["event"]>(null);
     const [chosen, setChosen] = useState("");
-    const choice = useAttachmentShareChoice(chosen, recording.id);
-    const privacy = useAgendaRecordingPrivacy(userId, recording.id);
+    const { choice, attach: attachChosen } = useAgendaAttachment(
+        chosen,
+        recording.id,
+        userId,
+    );
     const [dismissed, setDismissed] = useState(false);
     const [busy, setBusy] = useState(false);
     const [prepareOpen, setPrepareOpen] = useState(false);
@@ -151,42 +153,10 @@ export function RecordingAgenda({
         setBusy(true);
         setCandidates([]);
         try {
-            const result = await meetingRequest<{
-                recordingShare?: { skipped: { reason: string }[] };
-            }>(meetingUrl(chosen, "/attach"), "POST", {
-                recordingItemId: recording.id,
-                shareRecording: choice.shareRecording,
-            });
-            if (choice.shown && !choice.checked) privacy.dismiss();
-            if (
-                result.recordingShare?.skipped.some(
-                    (person) => person.reason === "organization",
-                )
-            )
-                toast.info(
-                    i18n("The Organization already sees the recording."),
-                );
-            else if (
-                result.recordingShare?.skipped.some(
-                    (person) => person.reason !== "already_visible_or_invited",
-                )
-            )
-                toast.info(
-                    i18n(
-                        "The agenda was attached. Some recording invitations could not be sent.",
-                    ),
-                );
-            await load(undefined, true);
-            onChanged();
-        } catch (error) {
-            setCandidates(previous);
-            toast.error(
-                recordingAudienceConflict(error)
-                    ? i18n(
-                          "This recording is shared with people who cannot see the agenda. Limit its sharing before attaching it.",
-                      )
-                    : i18n("Could not attach the agenda"),
-            );
+            if (await attachChosen(i18n("Could not attach the agenda"))) {
+                await load(undefined, true);
+                onChanged();
+            } else setCandidates(previous);
         } finally {
             setBusy(false);
         }

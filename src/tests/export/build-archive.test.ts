@@ -40,6 +40,7 @@ vi.mock("@/db/schema", async (importOriginal) => ({
     // the real recording and item tables.
     recordings: (await importOriginal<typeof Schema>()).recordings,
     chatterItems: (await importOriginal<typeof Schema>()).chatterItems,
+    meetingAgendas: (await importOriginal<typeof Schema>()).meetingAgendas,
     users: { id: "users.id", role: "users.role", email: "users.email" },
     folderShares: {
         __table: "folderShares",

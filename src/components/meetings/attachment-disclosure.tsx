@@ -2,8 +2,11 @@
 
 import { useExtracted, useFormatter } from "next-intl";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { usePersonSharing } from "@/components/sharing/person-sharing";
+import { useAgendaRecordingPrivacy } from "@/hooks/use-library-preferences";
 import { getPasswordManagerAttributes } from "@/lib/password-manager";
+import { meetingRequest, meetingUrl, recordingAudienceConflict } from "./api";
 import type { AgendaCandidate } from "./types";
 
 export function AttachmentAudience({
@@ -102,6 +105,57 @@ export function useAttachmentShareChoice(
                     : value,
             ),
     };
+}
+
+/**
+ * The one consented attach flow of both entry points: the invitation choice, the browser's
+ * "Keep private" answer and the skip notices. `attach` reports success and toasts its failure.
+ */
+export function useAgendaAttachment(
+    agendaId: string,
+    recordingId: string,
+    userId: string | undefined,
+) {
+    const i18n = useExtracted();
+    const choice = useAttachmentShareChoice(agendaId, recordingId);
+    const privacy = useAgendaRecordingPrivacy(userId, recordingId);
+    async function attach(failure: string) {
+        try {
+            const result = await meetingRequest<{
+                recordingShare?: { skipped: { reason: string }[] };
+            }>(meetingUrl(agendaId, "/attach"), "POST", {
+                recordingItemId: recordingId,
+                shareRecording: choice.shareRecording,
+            });
+            if (choice.shown && !choice.checked) privacy.dismiss();
+            const skipped = result.recordingShare?.skipped ?? [];
+            if (skipped.some((person) => person.reason === "organization"))
+                toast.info(
+                    i18n("The Organization already sees the recording."),
+                );
+            else if (
+                skipped.some(
+                    (person) => person.reason !== "already_visible_or_invited",
+                )
+            )
+                toast.info(
+                    i18n(
+                        "The agenda was attached. Some recording invitations could not be sent.",
+                    ),
+                );
+            return true;
+        } catch (error) {
+            toast.error(
+                recordingAudienceConflict(error)
+                    ? i18n(
+                          "This recording is shared with people who cannot see the agenda. Limit its sharing before attaching it.",
+                      )
+                    : failure,
+            );
+            return false;
+        }
+    }
+    return { choice, attach };
 }
 
 /** Explicit recording invitation choice, shared by both attachment entry points. */

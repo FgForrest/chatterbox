@@ -28,6 +28,7 @@ import {
     users,
 } from "@/db/schema";
 import { encryptText } from "@/lib/encryption/fields";
+import { ErrorCode } from "@/lib/errors";
 import { collectArchivedItemShares } from "@/lib/export/item-shares";
 import { collectArchivedMeetings } from "@/lib/export/meetings";
 import {
@@ -85,6 +86,7 @@ const {
     actor,
     arrivalPause,
     disclosure,
+    recordingInvitation,
     refreshes,
     readSnapshot,
 } = vi.hoisted(() => ({
@@ -106,6 +108,7 @@ const {
     actor: { id: "owner" },
     arrivalPause: { calls: 0, run: null as (() => Promise<void>) | null },
     disclosure: vi.fn(),
+    recordingInvitation: vi.fn(),
     readSnapshot: vi.fn(),
     refreshes: [] as (() => Promise<void>)[],
 }));
@@ -123,7 +126,14 @@ vi.mock("@/db/queries/meetings", async (original) => {
 vi.mock("@/lib/meetings/person-sharing", async (original) => {
     const actual = await original<typeof PersonSharing>();
     disclosure.mockImplementation(actual.agendaTaskShareDisclosure);
-    return { ...actual, agendaTaskShareDisclosure: disclosure };
+    recordingInvitation.mockImplementation(
+        actual.inviteAgendaPeopleToRecording,
+    );
+    return {
+        ...actual,
+        agendaTaskShareDisclosure: disclosure,
+        inviteAgendaPeopleToRecording: recordingInvitation,
+    };
 });
 vi.mock("next/server", async (original) => ({
     ...(await original<typeof NextServer>()),
@@ -213,6 +223,7 @@ describe.skipIf(!url)("agenda person shares (PostgreSQL)", () => {
         arrivalPause.run = null;
         arrivalPause.calls = 0;
         disclosure.mockClear();
+        recordingInvitation.mockClear();
         readSnapshot.mockClear();
         refreshes.length = 0;
         profile.mockReset().mockResolvedValue({ status: "unavailable" });
@@ -760,6 +771,74 @@ describe.skipIf(!url)("agenda person shares (PostgreSQL)", () => {
         await expect(
             attachAgenda("receiver", plan.id, "recording"),
         ).rejects.toMatchObject({ statusCode: 409 });
+    });
+
+    it.each([
+        "folder",
+        "organization",
+    ])("never discloses or invites direct receivers for a %s viewer's recording", async (audience) => {
+        const plan = await create();
+        const itemId = plan.meeting.meetingItemId as string;
+        await invite(itemId);
+        if (audience === "folder") {
+            const share = (
+                await inviteToFolder("owner", "owner-folder", ["other"])
+            )[0];
+            await changeFolderShare("other", share.id, {
+                action: "accept",
+                version: 0,
+                name: "Shared plans",
+            });
+        } else
+            await addRecordingToFolder({
+                userId: "owner",
+                recordingId: itemId,
+                folderId: "org-folder",
+            });
+        await recording("other", "other-recording");
+        expect(
+            (
+                await agendaRecordingShareOffer(
+                    "other",
+                    plan.id,
+                    "other-recording",
+                )
+            ).people,
+        ).toEqual([]);
+        expect(
+            await attachAgenda("other", plan.id, "other-recording", true),
+        ).toEqual({ recordingShare: { invited: [], skipped: [] } });
+        expect(await listItemShares("other", "other-recording")).toEqual([]);
+    });
+
+    it("keeps the attachment and logs when recording invitations fail unexpectedly", async () => {
+        const plan = await create();
+        await invite(plan.meeting.meetingItemId as string);
+        await recording();
+        recordingInvitation.mockRejectedValueOnce(
+            new Error("Invented invitation failure"),
+        );
+        const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            expect(
+                await attachAgenda("owner", plan.id, "recording", true),
+            ).toEqual({
+                recordingShare: {
+                    invited: [],
+                    skipped: [{ userId: null, reason: "unavailable" }],
+                },
+            });
+            expect(logged).toHaveBeenCalledWith(
+                "[meetings] recording invitations after attach failed",
+                { code: ErrorCode.INTERNAL_ERROR },
+            );
+        } finally {
+            logged.mockRestore();
+        }
+        expect(
+            (await detail("owner", plan.id)).attachedRecording?.visible,
+        ).toBe(true);
+        expect(await listItemShares("owner", "recording")).toEqual([]);
     });
 
     it("uses the caller's profile and providers even for an unfiled received agenda", async () => {

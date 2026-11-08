@@ -41,7 +41,10 @@ import { meetingAttachmentAudienceInTx } from "@/lib/meetings/attachment-audienc
 import { meetingFolderNavigation } from "@/lib/meetings/folders";
 import { meetingPipelineMessage } from "@/lib/meetings/messages";
 import { meetingOverlap } from "@/lib/meetings/model";
-import { inviteAgendaPeopleToRecording } from "@/lib/meetings/person-sharing";
+import {
+    inviteAgendaPeopleToRecording,
+    type RecordingInvitationReport,
+} from "@/lib/meetings/person-sharing";
 import { assertOrgScopeWritable, getOrgUserId } from "@/lib/org/config";
 import { recordIntendedPlacementInTx } from "@/lib/pipeline/share-intent";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
@@ -437,12 +440,21 @@ export async function attachAgenda(
                     recordingItemId,
                 ),
             };
-        } catch {
+        } catch (error) {
+            console.error(
+                "[meetings] recording invitations after attach failed",
+                {
+                    code:
+                        error instanceof AppError
+                            ? error.code
+                            : ErrorCode.INTERNAL_ERROR,
+                },
+            );
             return {
                 recordingShare: {
                     invited: [],
-                    skipped: [{ userId, reason: "unavailable" }],
-                },
+                    skipped: [{ userId: null, reason: "unavailable" }],
+                } satisfies RecordingInvitationReport,
             };
         }
     }
