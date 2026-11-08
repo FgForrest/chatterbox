@@ -81,8 +81,9 @@ vi.mock("@/lib/authz/curator", () => ({
     userCuratesOrganizationNow: async () => false,
     actsForOrganization: async () => false,
 }));
+const calendar = vi.hoisted(() => ({ event: vi.fn() }));
 vi.mock("@/lib/integrations/google/calendar-events", () => ({
-    getCalendarEvent: async () => null,
+    getCalendarEvent: calendar.event,
 }));
 vi.mock("@/lib/integrations/google/connection", () => ({
     getGoogleConnectionStatus: async () => null,
@@ -102,12 +103,17 @@ import { GET as webEvents } from "@/app/api/meetings/[id]/events/route";
 import { GET as recorderEvents } from "@/app/api/v1/recorder/agendas/[id]/events/route";
 import { db } from "@/db";
 import {
+    bumpAgendaInTx,
     claimAgendaStream,
     MAX_AGENDA_STREAMS_PER_USER,
     releaseAgendaStream,
     renewAgendaStream,
 } from "@/db/queries/agenda-events";
 import { openAgendaListener } from "@/db/queries/agenda-listener";
+import {
+    encryptCalendarSnapshot,
+    readMeetingCalendarSnapshot,
+} from "@/lib/meetings/calendar-snapshot";
 import { agendaRecordingBy } from "@/lib/meetings/recording-by";
 import {
     addPoint,
@@ -144,6 +150,7 @@ suite("live agenda concurrency and access (PostgreSQL)", () => {
         await database?.dispose();
     }, 60000);
     beforeEach(async () => {
+        calendar.event.mockReset().mockResolvedValue(null);
         principal.id = "owner";
         await db.delete(users);
         await db.insert(users).values([
@@ -231,6 +238,92 @@ suite("live agenda concurrency and access (PostgreSQL)", () => {
             folderId: null,
         });
     }
+
+    async function agendaEventsDuring(run: () => Promise<void>) {
+        const messages: string[] = [];
+        const marker = JSON.stringify({ marker: true });
+        const listener = await database.sql.listen(
+            "riffado_agenda",
+            (payload) => {
+                messages.push(payload);
+            },
+        );
+        try {
+            await run();
+            await database.sql.notify("riffado_agenda", marker);
+            await vi.waitFor(() => expect(messages.at(-1)).toBe(marker));
+            return messages.slice(0, -1).map((message) => JSON.parse(message));
+        } finally {
+            await listener.unlisten();
+        }
+    }
+
+    it.each([
+        "advanced",
+        "relinked",
+        "unchanged",
+    ])("publishes only a changed Calendar snapshot's returned cursor (%s)", async (scenario) => {
+        const event = {
+            id: "event",
+            title: "Planning",
+            start: at.toISOString(),
+            end: new Date(at.getTime() + 3600000).toISOString(),
+            attendees: [],
+        };
+        const [agenda] = await db
+            .update(meetingAgendas)
+            .set({
+                calendarEventId: event.id,
+                calendarSnapshot:
+                    scenario === "unchanged"
+                        ? encryptCalendarSnapshot(event)
+                        : null,
+            })
+            .where(eq(meetingAgendas.id, "agenda"))
+            .returning();
+        calendar.event.mockImplementationOnce(async () => {
+            await db
+                .update(meetingAgendas)
+                .set(
+                    scenario === "relinked"
+                        ? { calendarEventId: "replacement" }
+                        : { version: 7 },
+                )
+                .where(eq(meetingAgendas.id, "agenda"));
+            return event;
+        });
+        const messages = await agendaEventsDuring(async () => {
+            await readMeetingCalendarSnapshot(agenda);
+        });
+        expect(messages).toEqual(
+            scenario === "advanced"
+                ? [{ agendaId: "agenda", cursor: "8" }]
+                : [],
+        );
+        const [stored] = await db
+            .select()
+            .from(meetingAgendas)
+            .where(eq(meetingAgendas.id, "agenda"));
+        expect(stored.version).toBe(
+            scenario === "advanced" ? 8 : scenario === "unchanged" ? 7 : 0,
+        );
+        expect(stored.calendarSnapshot !== null).toBe(scenario !== "relinked");
+    });
+
+    it("rejects a cursor bump without a matching owner-scoped agenda", async () => {
+        for (const agenda of [
+            { id: "missing", userId: "owner" },
+            { id: "agenda", userId: "stranger" },
+        ])
+            await expect(
+                db.transaction((tx) => bumpAgendaInTx(tx, agenda)),
+            ).rejects.toThrow("Agenda update returned no row");
+        const [stored] = await db
+            .select()
+            .from(meetingAgendas)
+            .where(eq(meetingAgendas.id, "agenda"));
+        expect(stored.version).toBe(0);
+    });
 
     it("serializes simultaneous first fetches to one authoritative seed", async () => {
         const [a, b] = await Promise.all([
@@ -521,7 +614,32 @@ suite("live agenda concurrency and access (PostgreSQL)", () => {
                 sessionId: created.session.id,
                 agendaId: "agenda",
             }),
-        ).rejects.toMatchObject({ statusCode: 404 });
+        ).rejects.toMatchObject({
+            statusCode: 403,
+            message: "Recorder key mismatch",
+        });
+        for (const input of [
+            { userId: "owner", sessionId: "missing" },
+            { userId: "stranger", sessionId: created.session.id },
+        ])
+            await expect(
+                setRecordingSessionAgenda({
+                    ...input,
+                    apiKeyId: "key",
+                    agendaId: null,
+                }),
+            ).rejects.toMatchObject({ statusCode: 404 });
+        await expect(
+            setRecordingSessionAgenda({
+                userId: "owner",
+                apiKeyId: "wrong",
+                sessionId: created.session.id,
+                agendaId: "missing",
+            }),
+        ).rejects.toMatchObject({
+            statusCode: 403,
+            message: "Recorder key mismatch",
+        });
         await db
             .update(recordingSessions)
             .set({ status: "completed" })

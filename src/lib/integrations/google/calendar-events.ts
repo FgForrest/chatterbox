@@ -189,6 +189,7 @@ function upcomingCandidate(
         !!event.recurrence?.length ||
         (participantEmail !== undefined &&
             !event.organizer?.self &&
+            !event.attendeesOmitted &&
             !event.attendees?.some(
                 (attendee) =>
                     (attendee.self ||

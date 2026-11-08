@@ -94,7 +94,7 @@ export async function readMeetingCalendarSnapshot(
         );
         const { description: _description, ...snapshot } = event;
         const changed = JSON.stringify(cached) !== JSON.stringify(snapshot);
-        await db
+        const [updated] = await db
             .update(meetingAgendas)
             .set({
                 ...(changed
@@ -115,12 +115,13 @@ export async function readMeetingCalendarSnapshot(
                     eq(meetingAgendas.calendarRefreshedAt, now),
                     isNull(meetingAgendas.recordingItemId),
                 ),
-            );
-        if (changed)
+            )
+            .returning({ version: meetingAgendas.version });
+        if (changed && updated)
             await publishAgendaEventInTx(
                 db,
                 agenda.id,
-                String(agenda.version + 1),
+                String(updated.version),
             );
         return snapshot;
     } catch {

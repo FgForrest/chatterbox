@@ -114,6 +114,19 @@ export async function setRecordingSessionAgenda(input: {
     sessionId: string;
     agendaId: string | null;
 }): Promise<RecordingSessionRow> {
+    // Check session ownership first while keeping agenda locks before session locks.
+    const existing = await getRecordingSessionForUser(
+        input.sessionId,
+        input.userId,
+    );
+    if (!existing)
+        throw new AppError(
+            ErrorCode.NOT_FOUND,
+            "Recording session not found",
+            404,
+        );
+    if (existing.apiKeyId !== input.apiKeyId)
+        throw new AppError(ErrorCode.FORBIDDEN, "Recorder key mismatch", 403);
     const viewer = input.agendaId
         ? await meetingViewer(input.userId)
         : undefined;
@@ -132,7 +145,6 @@ export async function setRecordingSessionAgenda(input: {
                 and(
                     eq(recordingSessions.id, input.sessionId),
                     eq(recordingSessions.userId, input.userId),
-                    eq(recordingSessions.apiKeyId, input.apiKeyId),
                 ),
             )
             .for("update");
@@ -141,6 +153,12 @@ export async function setRecordingSessionAgenda(input: {
                 ErrorCode.NOT_FOUND,
                 "Recording session not found",
                 404,
+            );
+        if (session.apiKeyId !== input.apiKeyId)
+            throw new AppError(
+                ErrorCode.FORBIDDEN,
+                "Recorder key mismatch",
+                403,
             );
         if (session.status !== "open")
             throw new AppError(

@@ -60,6 +60,12 @@ import { useAgenda } from "./use-agenda";
 import { useAgendaText } from "./use-agenda-text";
 
 export type AgendaVariant = "meeting" | "live" | "recording";
+function taskAttribution(task: MeetingTask) {
+    return task.statusChangedAt &&
+        (!task.agendaUpdatedAt || task.statusChangedAt > task.agendaUpdatedAt)
+        ? { at: task.statusChangedAt, userId: task.statusChangedByUserId }
+        : { at: task.agendaUpdatedAt, userId: task.agendaUpdatedByUserId };
+}
 function elapsed(start: string | null, now: number) {
     const seconds = start
         ? Math.max(0, Math.floor((now - Date.parse(start)) / 1000))
@@ -448,12 +454,8 @@ export function AgendaBody({
                                             detail.authors.find(
                                                 (author) =>
                                                     author.id ===
-                                                    (task.statusChangedAt &&
-                                                    (!task.agendaUpdatedAt ||
-                                                        task.statusChangedAt >
-                                                            task.agendaUpdatedAt)
-                                                        ? task.statusChangedByUserId
-                                                        : task.agendaUpdatedByUserId),
+                                                    taskAttribution(task)
+                                                        .userId,
                                             )?.name
                                         }
                                         recording={task.recording}
@@ -1330,13 +1332,7 @@ function AgendaTaskRow({
                     )}
                     <AgendaAttribution
                         name={attribution}
-                        at={
-                            task.statusChangedAt &&
-                            (!task.agendaUpdatedAt ||
-                                task.statusChangedAt > task.agendaUpdatedAt)
-                                ? task.statusChangedAt
-                                : task.agendaUpdatedAt
-                        }
+                        at={taskAttribution(task).at}
                     />
                 </>
             }

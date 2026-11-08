@@ -117,6 +117,10 @@ export function normalizeMimeType(value: string): string {
     return value.split(";")[0].trim().toLowerCase();
 }
 
+/**
+ * Parse session creation. The released wire field `agendaId` selects the live
+ * agenda and is stored as `metadata.liveAgendaId`; it does not request attachment.
+ */
 export function parseCreateRecordingSessionBody(
     body: unknown,
 ): CreateRecordingSessionInput {
@@ -222,6 +226,10 @@ export function parseCreateRecordingSessionBody(
     };
 }
 
+/**
+ * Parse session completion. The released wire field `agendaId` selects the agenda
+ * to attach to the finished recording, independently of `metadata.liveAgendaId`.
+ */
 export function parseCompleteRecordingSessionBody(
     body: unknown,
 ): CompleteRecordingSessionInput {

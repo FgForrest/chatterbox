@@ -36,7 +36,8 @@ export async function bumpAgendaInTx(
             ),
         )
         .returning({ version: meetingAgendas.version });
-    await publishAgendaEventInTx(tx, agenda.id, String(row?.version ?? 0));
+    if (!row) throw new Error("Agenda update returned no row");
+    await publishAgendaEventInTx(tx, agenda.id, String(row.version));
 }
 
 /** Lease stream capacity under a user row lock so app processes share the same cap. */
