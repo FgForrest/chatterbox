@@ -69,7 +69,7 @@ function item(label: string, payload: Record<string, unknown> = {}) {
         },
     };
 }
-function review(frame: "inline" | "dialog") {
+function review(frame: "inline" | "dialog", reviewTurns = turns) {
     let items = [
         item("speaker_0", {
             personId: "p1",
@@ -111,7 +111,7 @@ function review(frame: "inline" | "dialog") {
             <LearnReview
                 recordingId="recording"
                 source="riffado"
-                turns={turns}
+                turns={reviewTurns}
                 frame={frame}
                 initialOpen
                 showTrigger={false}
@@ -160,6 +160,48 @@ describe.each([
         ).toBeTruthy();
         expect(screen.getByText("Where the name was heard")).toBeTruthy();
         expect(screen.getByText(/2 without a name/)).toBeTruthy();
+    });
+    it("explains sub-second replies without offering a sample button", async () => {
+        review(
+            frame,
+            turns.flatMap((turn) =>
+                turn.speaker === "speaker_3"
+                    ? [
+                          { ...turn, endMs: turn.startMs + 999 },
+                          {
+                              ...turn,
+                              startMs: 45000,
+                              endMs: 45500,
+                              text: "Yes.",
+                          },
+                      ]
+                    : [turn],
+            ),
+        );
+        const checkbox = await screen.findByRole("checkbox", {
+            name: "Accept Speaker 3 as ?",
+        });
+        const row = within(checkbox.closest(".grid") as HTMLElement);
+        expect(row.getByText("Speech samples")).toBeTruthy();
+        expect(
+            row.getByText("Only very short replies, each under 1 s."),
+        ).toBeTruthy();
+        expect(row.queryByRole("button", { name: /^Play from/ })).toBeNull();
+    });
+    it("omits speech samples when the speaker has no own turns", async () => {
+        review(
+            frame,
+            turns.filter((turn) => turn.speaker !== "speaker_3"),
+        );
+        const checkbox = await screen.findByRole("checkbox", {
+            name: "Accept Speaker 3 as ?",
+        });
+        const row = within(checkbox.closest(".grid") as HTMLElement);
+        expect(row.queryByText("Speech samples")).toBeNull();
+        expect(
+            row.queryByText("Only very short replies, each under 1 s."),
+        ).toBeNull();
+        expect(row.queryByRole("button", { name: /^Play from/ })).toBeNull();
     });
     it("excludes unanswered rows from totals and tick-all, then enables and ticks a chosen row", async () => {
         const { fetch } = review(frame);

@@ -30,7 +30,8 @@ export function SpeakerClips({
                     ))}
                 </div>
             )}
-            {samples.samples.length > 0 && (
+            {(samples.samples.length > 0 ||
+                (samples.fallback && samples.longestTurnMs > 0)) && (
                 <div className="flex flex-col gap-1.5 @min-[560px]/learn:flex-row @min-[560px]/learn:flex-wrap @min-[560px]/learn:items-start">
                     <span className="text-xs text-muted-foreground @min-[560px]/learn:w-28 @min-[560px]/learn:pt-2">
                         {i18n("Speech samples")}
@@ -49,16 +50,21 @@ export function SpeakerClips({
                         </div>
                         {samples.fallback && (
                             <p className="text-xs text-amber-700 dark:text-amber-400">
-                                {i18n(
-                                    "Only short replies; the longest is {seconds} s.",
-                                    {
-                                        seconds: String(
-                                            Math.round(
-                                                samples.longestTurnMs / 1000,
-                                            ),
-                                        ),
-                                    },
-                                )}
+                                {samples.longestTurnMs < 1000
+                                    ? i18n(
+                                          "Only very short replies, each under 1 s.",
+                                      )
+                                    : i18n(
+                                          "Only short replies; the longest is {seconds} s.",
+                                          {
+                                              seconds: String(
+                                                  Math.round(
+                                                      samples.longestTurnMs /
+                                                          1000,
+                                                  ),
+                                              ),
+                                          },
+                                      )}
                             </p>
                         )}
                     </div>

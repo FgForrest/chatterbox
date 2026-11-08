@@ -109,6 +109,7 @@ import {
     type SpeakerSamples,
     speakerEvidenceClip,
     speakerSpeechSamples,
+    speakingStats,
 } from "@/lib/transcript/speech-samples";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import { cn } from "@/lib/utils";
@@ -877,23 +878,7 @@ export function LearnWidget({
         }
         return grouped;
     }, [turns]);
-    const stats = useMemo(
-        () =>
-            new Map(
-                [...turnsByLabel].map(([label, own]) => [
-                    label,
-                    {
-                        durationMs: own.reduce(
-                            (sum, turn) =>
-                                sum + Math.max(0, turn.endMs - turn.startMs),
-                            0,
-                        ),
-                        replies: own.length,
-                    },
-                ]),
-            ),
-        [turnsByLabel],
-    );
+    const stats = useMemo(() => speakingStats(turns), [turns]);
     const samplesFor = useMemo(() => {
         const cache = new Map<string, SpeakerSamples>();
         return (label: string) => {

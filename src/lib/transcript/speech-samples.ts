@@ -1,4 +1,7 @@
-import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
+import {
+    isPlaceholderSpeakerLabel,
+    speakerKey,
+} from "@/lib/knowledge/speaker-label-rules";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
 export const STRETCH_GAP_MS = 1_500;
@@ -46,6 +49,7 @@ export function speakingStats(
 ): Map<string, SpeakingStats> {
     const stats = new Map<string, SpeakingStats>();
     for (const turn of turns) {
+        if (isPlaceholderSpeakerLabel(turn.speaker)) continue;
         const label = speakerKey(turn.speaker);
         const current = stats.get(label) ?? { durationMs: 0, replies: 0 };
         current.durationMs += Math.max(0, turn.endMs - turn.startMs);

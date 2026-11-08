@@ -249,6 +249,23 @@ it("sums speaking time, counts turns and orders ties by label number", () => {
     ).toBeGreaterThan(0);
 });
 
+it("skips placeholder labels while normalizing labels and counting non-positive turns", () => {
+    const stats = speakingStats([
+        turn(0, 1000, ""),
+        turn(1000, 1000, "   "),
+        turn(2000, 1000, "speaker"),
+        turn(3000, 1000, " Speaker "),
+        turn(4000, 3000, " speaker_0 "),
+        turn(7000, 0, "speaker_0"),
+        turn(7000, -1000, "speaker_0"),
+        turn(8000, 2000, "speaker_2"),
+    ]);
+    expect([...stats]).toEqual([
+        ["speaker_0", { durationMs: 3000, replies: 3 }],
+        ["speaker_2", { durationMs: 2000, replies: 1 }],
+    ]);
+});
+
 it("bounds evidence by its containing turn and fifteen seconds, including evidence inside a turn", () => {
     const turns = [turn(1000, 30000)];
     expect(speakerEvidenceClip(turns, 0)).toBeNull();
