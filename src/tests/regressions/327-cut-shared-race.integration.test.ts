@@ -975,5 +975,28 @@ describe.skipIf(!url)(
                     ),
             ).toHaveLength(1);
         });
+        it("scopes active summary jobs to their view and sees a cut from both views", async () => {
+            await database.db.insert(asyncJobs).values({
+                id: "private-summary",
+                userId: "owner",
+                subjectId: "recording",
+                kind: "summary",
+                status: "processing",
+            });
+            const orgFacts = () =>
+                gatherFacts("recording", "org", "owner", {
+                    legacyIfEmpty: false,
+                });
+            expect((await facts()).summary.jobActive).toBe(true);
+            const org = await orgFacts();
+            expect(org.summary.jobActive).toBe(false);
+            expect(org.summary.phaseJobActive).toBe(false);
+            expect(org.share?.cutJobActive).toBe(false);
+            await requestRecordingCut("owner", "recording", range);
+            const during = await orgFacts();
+            expect(during.share?.cutJobActive).toBe(true);
+            expect(during.summary.phaseJobActive).toBe(false);
+            expect((await facts()).share?.cutJobActive).toBe(true);
+        });
     },
 );

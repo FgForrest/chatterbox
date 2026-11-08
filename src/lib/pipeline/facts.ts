@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
@@ -307,15 +307,22 @@ export async function gatherFacts(
             .where(
                 and(
                     eq(asyncJobs.userId, userId),
-                    inArray(asyncJobs.kind, [
-                        SUMMARY_JOB_KIND,
-                        TOPICS_JOB_KIND,
-                        RECORDING_CUT_KIND,
-                    ]),
-                    inArray(asyncJobs.subjectId, [
-                        itemId,
-                        recordingJobSubject(itemId, view),
-                    ]),
+                    or(
+                        and(
+                            inArray(asyncJobs.kind, [
+                                SUMMARY_JOB_KIND,
+                                TOPICS_JOB_KIND,
+                            ]),
+                            eq(
+                                asyncJobs.subjectId,
+                                recordingJobSubject(itemId, view),
+                            ),
+                        ),
+                        and(
+                            eq(asyncJobs.kind, RECORDING_CUT_KIND),
+                            eq(asyncJobs.subjectId, itemId),
+                        ),
+                    ),
                     inArray(asyncJobs.status, ["pending", "processing"]),
                 ),
             ),
