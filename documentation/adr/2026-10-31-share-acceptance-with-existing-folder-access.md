@@ -1,7 +1,7 @@
 ---
 title: Item invitations acknowledge existing folder access and require extra filing only by choice
 date: 2026-10-31
-updated: 2026-10-31 18:00
+updated: 2026-11-08 09:15
 status: accepted
 kind: fix
 issues: []
@@ -9,7 +9,7 @@ prs: []
 areas: [src/lib/sharing/person-shares.ts, src/db/queries/item-shares.ts, src/db/queries/item-folder-audience.ts, src/components/sharing, src/components/dashboard/recording-row.tsx]
 supersedes: []
 superseded-by: []
-relates: [2026-10-22-person-to-person-sharing, 2026-10-27-shared-folders-are-two-way]
+relates: [2026-10-22-person-to-person-sharing, 2026-10-27-shared-folders-are-two-way, 2026-11-08-meeting-agendas-shared-with-people]
 ---
 
 # Item invitations acknowledge existing folder access and require extra filing only by choice
@@ -77,6 +77,8 @@ Previously downloaded content cannot be recalled. Hosted and local-only deployme
 sharing disabled; neither mode needs data conversion or a deployment change to roll back.
 
 ## Related work
+
+- [Agendas shared with people](2026-11-08-meeting-agendas-shared-with-people.md) extends accepted direct invitations to agendas, preserving independent access paths and receiver filing.
 
 - [Person-to-person sharing](2026-10-22-person-to-person-sharing.md): this adds audience disclosure
   and acceptance choices without reversing a stated rule of that record. Accepted consent,

@@ -6,6 +6,7 @@ import {
     meetingItemAudienceInTx,
 } from "@/db/queries/meeting-audience";
 import { restoreStandaloneAgendaInTx } from "@/db/queries/meeting-lifecycle";
+import { receivedMeetingFilings } from "@/db/queries/meeting-shares";
 import {
     findMeeting,
     listMeetingRows,
@@ -37,8 +38,10 @@ import { nudge } from "@/lib/jobs/nudge";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { meetingViewer, requireMeetingAccess } from "@/lib/meetings/access";
 import { meetingAttachmentAudienceInTx } from "@/lib/meetings/attachment-audience";
+import { meetingFolderNavigation } from "@/lib/meetings/folders";
 import { meetingPipelineMessage } from "@/lib/meetings/messages";
 import { meetingOverlap } from "@/lib/meetings/model";
+import { inviteAgendaPeopleToRecording } from "@/lib/meetings/person-sharing";
 import { assertOrgScopeWritable, getOrgUserId } from "@/lib/org/config";
 import { recordIntendedPlacementInTx } from "@/lib/pipeline/share-intent";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
@@ -191,6 +194,28 @@ async function candidatesInTx(
             orgUserId,
             folderIds: [...folderIds],
         });
+        // Keep agenda-before-item lock order and hold the invitation lock through absorption.
+        await tx
+            .select({ id: chatterItems.id })
+            .from(chatterItems)
+            .where(
+                and(
+                    eq(chatterItems.id, row.agenda.meetingItemId),
+                    eq(chatterItems.userId, row.agenda.userId),
+                ),
+            )
+            .for("update");
+        const [agendaDirectShare] = await tx
+            .select({ id: itemShares.id })
+            .from(itemShares)
+            .where(
+                and(
+                    eq(itemShares.itemId, row.agenda.meetingItemId),
+                    eq(itemShares.userId, row.agenda.userId),
+                    inArray(itemShares.state, ["pending", "accepted"]),
+                ),
+            )
+            .limit(1);
         const privateFolder =
             folders.every((folder) => folder.userId === userId) &&
             !sharedFolders;
@@ -205,6 +230,7 @@ async function candidatesInTx(
                 (inFolder || privateFolder) &&
                 !intent &&
                 !personShare &&
+                !agendaDirectShare &&
                 !assignments.some(
                     (assignment) =>
                         !folderIds.has(assignment.folderId) &&
@@ -296,7 +322,16 @@ async function absorbInTx(
                 requestPipeline: !arriving,
             });
         } else {
-            await lockCategorizableFolderInTx(tx, userId, folder.id);
+            try {
+                await lockCategorizableFolderInTx(tx, userId, folder.id);
+            } catch (error) {
+                if (
+                    error instanceof AppError &&
+                    (error.statusCode === 404 || error.statusCode === 403)
+                )
+                    continue;
+                throw error;
+            }
             await tx
                 .insert(recordingFolderAssignments)
                 .values({
@@ -372,6 +407,7 @@ export async function attachAgenda(
     userId: string,
     id: string,
     recordingItemId: string,
+    shareRecording = false,
 ) {
     const viewer = await meetingViewer(userId);
     await requireMeetingAccess(userId, id, "edit", { viewer });
@@ -392,6 +428,24 @@ export async function attachAgenda(
         }),
     );
     nudge();
+    if (shareRecording) {
+        try {
+            return {
+                recordingShare: await inviteAgendaPeopleToRecording(
+                    userId,
+                    id,
+                    recordingItemId,
+                ),
+            };
+        } catch {
+            return {
+                recordingShare: {
+                    invited: [],
+                    skipped: [{ userId, reason: "unavailable" }],
+                },
+            };
+        }
+    }
 }
 
 /** Automatic matching never moves or shares a recording; ambiguity is left for the card. */
@@ -497,25 +551,52 @@ async function attachArrivalInSavepoint(
 /** Matching agendas and the audience an explicit shared-folder attachment would reach. */
 export async function agendaCandidates(userId: string, itemId: string) {
     const viewer = await meetingViewer(userId);
-    return retryOnDeadlock(() =>
-        db.transaction(async (tx) =>
-            (
-                await candidatesInTx(tx, userId, itemId, viewer.orgUserId)
-            ).candidates.map((candidate) => ({
-                id: candidate.agenda.id,
-                title: decryptText(candidate.item.title),
-                start: candidate.agenda.plannedStart,
-                end: candidate.agenda.plannedEnd,
-                folders: candidate.folders.map((folder) => ({
-                    id: folder.id,
-                    name: decryptText(folder.name),
-                })),
-                overlapMs: candidate.overlapMs,
-                widensSharing: candidate.widensSharing,
-                audience: candidate.audience,
-            })),
+    const [result, navigation] = await Promise.all([
+        retryOnDeadlock(() =>
+            db.transaction((tx) =>
+                candidatesInTx(tx, userId, itemId, viewer.orgUserId),
+            ),
+        ),
+        meetingFolderNavigation(userId, viewer.orgUserId),
+    ]);
+    const filings = await receivedMeetingFilings(
+        userId,
+        result.candidates.flatMap((candidate) =>
+            candidate.agenda.meetingItemId
+                ? [candidate.agenda.meetingItemId]
+                : [],
         ),
     );
+    return result.candidates.map((candidate) => ({
+        id: candidate.agenda.id,
+        title: decryptText(candidate.item.title),
+        start: candidate.agenda.plannedStart,
+        end: candidate.agenda.plannedEnd,
+        folders: [
+            ...new Map(
+                [
+                    ...candidate.folders,
+                    ...filings.filter(
+                        (filing) =>
+                            filing.itemId === candidate.agenda.meetingItemId,
+                    ),
+                ].flatMap((folder) => {
+                    const visible = navigation.project(folder);
+                    return visible
+                        ? [
+                              [
+                                  visible.id,
+                                  { id: visible.id, name: visible.name },
+                              ] as const,
+                          ]
+                        : [];
+                }),
+            ).values(),
+        ],
+        overlapMs: candidate.overlapMs,
+        widensSharing: candidate.widensSharing,
+        audience: candidate.audience,
+    }));
 }
 
 /** Restore the standalone item; summaries and actual task changes remain untouched. */

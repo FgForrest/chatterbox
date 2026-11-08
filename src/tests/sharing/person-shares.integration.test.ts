@@ -652,6 +652,55 @@ describe.skipIf(!url)("person shares (PostgreSQL)", () => {
         expect(refused).toEqual([]);
     });
 
+    it("classifies every meeting write route for an accepted receiver", () => {
+        const root = join(__dirname, "../../app/api/meetings");
+        const rules: Record<
+            string,
+            | "own_folder"
+            | "own_archive"
+            | "manage"
+            | "edit_own_point"
+            | "edit"
+            | "own_recording"
+            | "organizer"
+            | "visible_task"
+        > = {
+            "route.ts:POST": "own_folder",
+            "restore/route.ts:POST": "own_archive",
+            "[id]/route.ts:PATCH": "manage",
+            "[id]/route.ts:DELETE": "manage",
+            "[id]/attach/route.ts:POST": "own_recording",
+            "[id]/recording-shares/route.ts:POST": "own_recording",
+            "[id]/calendar-export/route.ts:POST": "organizer",
+            "[id]/folders/[folderId]/route.ts:DELETE": "edit",
+            "[id]/points/route.ts:POST": "edit",
+            "[id]/points/[pointId]/route.ts:PATCH": "edit_own_point",
+            "[id]/points/[pointId]/route.ts:DELETE": "edit_own_point",
+            "[id]/suggestions/route.ts:POST": "edit",
+            "[id]/suggestions/route.ts:PATCH": "edit",
+            "[id]/suggestions/[sid]/route.ts:PATCH": "edit",
+            "[id]/tasks/route.ts:POST": "visible_task",
+            "[id]/tasks/[taskId]/route.ts:PATCH": "visible_task",
+            "[id]/tasks/[taskId]/route.ts:DELETE": "visible_task",
+        };
+        const scan = (directory: string): string[] =>
+            readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>
+                entry.isDirectory()
+                    ? scan(join(directory, entry.name))
+                    : entry.name === "route.ts"
+                      ? [join(directory, entry.name)]
+                      : [],
+            );
+        const found = scan(root).flatMap((file) =>
+            [
+                ...readFileSync(file, "utf8").matchAll(
+                    /export const (POST|PUT|PATCH|DELETE)\b/g,
+                ),
+            ].map((match) => `${relative(root, file)}:${match[1]}`),
+        );
+        expect(Object.keys(rules).sort()).toEqual(found.sort());
+    });
+
     it("archives only the owner's share list and restores consent by existing email", async () => {
         const [share] = await inviteToItem(owner, "audio-item", [receiver]);
         await changePersonShare(receiver, share.id, {

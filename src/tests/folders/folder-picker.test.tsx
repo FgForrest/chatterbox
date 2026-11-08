@@ -83,7 +83,9 @@ function picker(assignedIds = new Set<string>(), canCurate = false) {
 describe("searchable folder picker", () => {
     it("focuses search, groups the hierarchy and keeps assigned folders inert", () => {
         picker(new Set(["meetings"]));
-        expect(document.activeElement).toBe(screen.getByRole("combobox"));
+        expect(document.activeElement).toBe(
+            screen.getByPlaceholderText("Find a folder…"),
+        );
         expect(
             screen.getByText("Private", { selector: "[cmdk-group-heading]" }),
         ).toBeTruthy();
@@ -92,7 +94,7 @@ describe("searchable folder picker", () => {
                 selector: "[cmdk-group-heading]",
             }),
         ).toBeTruthy();
-        const option = screen.getByRole("option", { name: /Porády/ });
+        const option = screen.getByRole("option", { name: "Porády Private" });
         expect(option.getAttribute("aria-disabled")).toBe("true");
         expect(
             option.querySelector('[aria-label="Already in this folder"]'),
@@ -100,26 +102,30 @@ describe("searchable folder picker", () => {
         fireEvent.click(option);
         expect(onSelect).not.toHaveBeenCalled();
     });
-    it("keeps a fixed top while results change and indents the grouped tree without repeating paths", () => {
+    it("keeps its anchored placement while results change and shows folder paths", () => {
         picker();
-        const dialog = screen.getByRole("dialog");
-        expect(dialog.className).toContain("top-[15vh]");
-        expect(dialog.className).toContain("-translate-y-0");
+        const dialog = screen.getByRole("presentation", {
+            name: "Choose a folder",
+        });
+        expect(dialog.style.position).toBe("fixed");
+        const top = dialog.style.top;
         expect(
-            screen.getByRole("option", { name: "Vývoj" }).querySelector("span")
-                ?.style.paddingLeft,
-        ).toBe("24px");
-        fireEvent.change(screen.getByRole("combobox"), {
+            screen
+                .getByRole("option", { name: "Vývoj Private › Porády" })
+                .querySelector("span")?.style.paddingLeft,
+        ).toBe("");
+        expect(dialog.style.top).toBe(top);
+        fireEvent.change(screen.getByPlaceholderText("Find a folder…"), {
             target: { value: "vyvoj" },
         });
-        expect(dialog.className).toContain("top-[15vh]");
+        expect(dialog.style.position).toBe("fixed");
         expect(
             screen.getByRole("option", { name: "Vývoj Private › Porády" }),
         ).toBeTruthy();
     });
     it("finds names and paths without diacritics", () => {
         picker();
-        fireEvent.change(screen.getByRole("combobox"), {
+        fireEvent.change(screen.getByPlaceholderText("Find a folder…"), {
             target: { value: "porady" },
         });
         const matches = screen.getAllByRole("option");
@@ -130,7 +136,7 @@ describe("searchable folder picker", () => {
     });
     it("files with arrows and Enter, and closes with Escape", async () => {
         picker();
-        const input = screen.getByRole("combobox");
+        const input = screen.getByPlaceholderText("Find a folder…");
         fireEvent.change(input, { target: { value: "vyvoj" } });
         fireEvent.keyDown(input, { key: "ArrowDown" });
         fireEvent.keyDown(input, { key: "Enter" });
@@ -144,7 +150,7 @@ describe("searchable folder picker", () => {
         true,
     ])("offers creation and enforces the top-level Organization curator rule: %s", (canCurate) => {
         picker(new Set(), canCurate);
-        fireEvent.change(screen.getByRole("combobox"), {
+        fireEvent.change(screen.getByPlaceholderText("Find a folder…"), {
             target: { value: "Invented folder" },
         });
         fireEvent.click(
@@ -154,7 +160,11 @@ describe("searchable folder picker", () => {
         );
         const parents = screen.getByRole("combobox", { name: "Parent folder" });
         expect(parents.textContent).toContain("Private");
-        expect(parents.textContent).toContain("Organization › Klienti");
+        expect(
+            screen.getByRole("textbox", { name: "Folder name" }),
+        ).toHaveProperty("value", "Invented folder");
+        fireEvent.click(parents);
+        expect(screen.getByRole("option", { name: /Klienti/ })).toBeTruthy();
         expect(
             screen.queryByRole("option", {
                 name: "Organization",
@@ -176,7 +186,7 @@ describe("searchable folder picker", () => {
             throw new Error("Filing failed");
         });
         picker();
-        fireEvent.change(screen.getByRole("combobox"), {
+        fireEvent.change(screen.getByPlaceholderText("Find a folder…"), {
             target: { value: "Invented folder" },
         });
         fireEvent.click(
@@ -202,7 +212,7 @@ describe("searchable folder picker", () => {
         );
         vi.stubGlobal("fetch", fetchMock);
         picker();
-        fireEvent.change(screen.getByRole("combobox"), {
+        fireEvent.change(screen.getByPlaceholderText("Find a folder…"), {
             target: { value: "Invented folder" },
         });
         fireEvent.click(
@@ -210,13 +220,23 @@ describe("searchable folder picker", () => {
                 name: "Create folder “Invented folder”",
             }),
         );
+        expect(
+            screen.getByRole("textbox", { name: "Folder name" }),
+        ).toHaveProperty("value", "Invented folder");
+        fireEvent.click(
+            screen.getByRole("combobox", { name: "Parent folder" }),
+        );
+        fireEvent.click(screen.getByRole("option", { name: /^Vývoj/ }));
+        expect(
+            screen.getByRole("textbox", { name: "Folder name" }),
+        ).toHaveProperty("value", "Invented folder");
         fireEvent.click(screen.getByRole("button", { name: "Create folder" }));
         await waitFor(() => expect(onSelect).toHaveBeenCalledWith("created"));
         expect(fetchMock).toHaveBeenCalledWith(
             "/api/folders",
             expect.objectContaining({
                 body: JSON.stringify({
-                    parentId: "private",
+                    parentId: "child",
                     name: "Invented folder",
                 }),
             }),

@@ -6,7 +6,6 @@ import { useExtracted } from "next-intl";
 import { useRef, useState } from "react";
 import { FolderPicker } from "@/components/recordings/folder-picker";
 import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
-import { Button } from "@/components/ui/button";
 import type { RecordingFolder } from "@/types/folder";
 import type { MeetingDetail } from "./types";
 import type { AgendaController } from "./use-agenda";
@@ -161,24 +160,14 @@ export function AgendaFolderTags({
                 }
             />
             {own && assigned.size > 0 && (
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 rounded-full border border-dashed px-2.5 text-xs text-muted-foreground"
-                    onClick={() => {
-                        setSource(
-                            assigned.size === 1 ? [...assigned][0] : null,
-                        );
-                        setMoving(true);
-                    }}
-                >
-                    <FolderInput className="size-3.5" />
-                    {i18n("Move to…")}
-                </Button>
-            )}
-            {moving && (
                 <FolderPicker
-                    key={source ?? "source"}
+                    aria-label={i18n("Move to…")}
+                    actionTrigger={
+                        <>
+                            <FolderInput className="size-3.5" />
+                            {i18n("Move to…")}
+                        </>
+                    }
                     folders={
                         source
                             ? available
@@ -188,12 +177,18 @@ export function AgendaFolderTags({
                     }
                     assignedIds={source ? assigned : new Set()}
                     allowCreate={Boolean(source)}
-                    open
+                    open={moving}
                     onOpenChange={(open) => {
                         if (!open && selectingSource.current) {
                             selectingSource.current = false;
+                            setMoving(false);
+                            setTimeout(() => setMoving(true), 0);
                             return;
                         }
+                        if (open && !moving)
+                            setSource(
+                                assigned.size === 1 ? [...assigned][0] : null,
+                            );
                         setMoving(open);
                     }}
                     title={source ? i18n("Move to…") : i18n("Move from…")}

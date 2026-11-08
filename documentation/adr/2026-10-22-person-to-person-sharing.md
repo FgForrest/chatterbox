@@ -1,7 +1,7 @@
 ---
 title: Private recordings and mail reach colleagues only through accepted invitations, separately from Organization sharing
 date: 2026-10-22
-updated: 2026-10-31 18:00
+updated: 2026-11-08 09:15
 status: superseded
 kind: feature
 issues: [260]
@@ -9,7 +9,7 @@ prs: [262, 265]
 areas: [src/lib/sharing, src/db/queries/item-shares.ts, src/db/queries/task-visibility.ts, src/components/sharing, src/lib/mcp, src/lib/export, src/db/schema.ts]
 supersedes: [2026-10-07-tasks-from-summaries]
 superseded-by: [2026-10-27-shared-folders-are-two-way]
-relates: [2026-09-23-shared-organization-scope, 2026-10-07-backup-scope, 2026-10-31-share-acceptance-with-existing-folder-access]
+relates: [2026-09-23-shared-organization-scope, 2026-10-07-backup-scope, 2026-10-31-share-acceptance-with-existing-folder-access, 2026-11-08-meeting-agendas-shared-with-people]
 ---
 
 # Private recordings and mail reach colleagues only through accepted invitations, separately from Organization sharing
@@ -84,6 +84,8 @@ Use versioned direct invitations with pending, accepted, declined and removed st
 - General archive import remains separate work. The item and folder share restore endpoints are available for importers and report skipped entries rather than creating accounts or silently granting access.
 
 ## Related work
+
+- [Agendas shared with people](2026-11-08-meeting-agendas-shared-with-people.md) extends accepted direct invitations to agendas, preserving independent access paths and receiver filing.
 
 - [Share acceptance with existing folder access](2026-10-31-share-acceptance-with-existing-folder-access.md) adds explicit acceptance without extra filing and discloses folder audiences; existing participation and ownership rules remain.
 

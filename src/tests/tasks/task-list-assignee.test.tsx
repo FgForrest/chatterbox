@@ -383,3 +383,50 @@ it("bookmarks the All segment explicitly", async () => {
         { scroll: false },
     );
 });
+
+it("chooses and clears the folder filter while retaining other URL filters", async () => {
+    vi.stubGlobal(
+        "ResizeObserver",
+        class {
+            observe() {}
+            disconnect() {}
+            unobserve() {}
+        },
+    );
+    navigation.params = new URLSearchParams(
+        "tab=all&state=done&due=none&sort=due",
+    );
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+        if (String(input) === "/api/folders")
+            return Response.json({
+                folders: [
+                    {
+                        id: "folder-1",
+                        name: "Projects",
+                        kind: "custom",
+                        scope: "personal",
+                        parentId: null,
+                        sortOrder: 0,
+                        version: 0,
+                    },
+                ],
+            });
+        return Response.json({ tasks: [], assignees: [] });
+    });
+    const view = render(<TaskList organization={false} />);
+    await screen.findByText("Nothing here.");
+    fireEvent.click(screen.getByRole("combobox", { name: "Folder" }));
+    fireEvent.click(screen.getByRole("option", { name: "Projects" }));
+    expect(navigation.replace).toHaveBeenLastCalledWith(
+        "/tasks?tab=all&state=done&due=none&sort=due&folder=folder-1",
+        { scroll: false },
+    );
+    navigation.params.set("folder", "folder-1");
+    view.rerender(<TaskList organization={false} />);
+    fireEvent.click(screen.getByRole("combobox", { name: "Folder" }));
+    fireEvent.click(screen.getByRole("option", { name: "All folders" }));
+    expect(navigation.replace).toHaveBeenLastCalledWith(
+        "/tasks?tab=all&state=done&due=none&sort=due",
+        { scroll: false },
+    );
+});

@@ -12,6 +12,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FolderCombobox } from "@/components/recordings/folder-combobox";
 import { LibraryPreferencesContext } from "@/hooks/use-library-preferences";
+import { useListKeyboardNav } from "@/hooks/use-list-keyboard-nav";
 import * as navigation from "@/lib/folders/navigation";
 import { matchFolders } from "@/lib/folders/navigation";
 import type { RecordingFolder } from "@/types/folder";
@@ -103,6 +104,42 @@ function open() {
 }
 
 describe("FolderCombobox", () => {
+    it("typing j, k and / in folder search does not navigate the workstation list", () => {
+        const onNext = vi.fn(),
+            onPrev = vi.fn(),
+            onFocusSearch = vi.fn();
+        function Workstation() {
+            useListKeyboardNav({
+                onNext,
+                onPrev,
+                onFocusSearch,
+                onOpenPalette: vi.fn(),
+                onOpenShortcuts: vi.fn(),
+                onOpenSettings: vi.fn(),
+            });
+            return (
+                <FolderCombobox
+                    entries={entries}
+                    value=""
+                    onValueChange={onValueChange}
+                />
+            );
+        }
+        render(<Workstation />);
+        const { input } = open();
+        for (const key of ["j", "k", "/"]) {
+            expect(fireEvent.keyDown(input, { key })).toBe(true);
+            fireEvent.change(input, { target: { value: key } });
+            expect(input).toHaveProperty("value", key);
+            expect(document.activeElement).toBe(input);
+        }
+        expect(onNext).not.toHaveBeenCalled();
+        expect(onPrev).not.toHaveBeenCalled();
+        expect(onFocusSearch).not.toHaveBeenCalled();
+        fireEvent.keyDown(document.body, { key: "j" });
+        expect(onNext).toHaveBeenCalledOnce();
+    });
+
     it("opens with search focused and exposes the controlled listbox", () => {
         combobox();
         const { trigger, input } = open();

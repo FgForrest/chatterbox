@@ -76,11 +76,11 @@ afterEach(() => {
 
 describe("participant filing pickers", () => {
     it.each([
-        "dialog",
+        "filing",
         "inline",
     ])("offers the attachment name and person-share icon in the %s picker", async (variant) => {
         const select = vi.fn().mockResolvedValue(undefined);
-        if (variant === "dialog")
+        if (variant === "filing")
             render(
                 <FolderPicker
                     folders={folders}
@@ -232,7 +232,7 @@ describe("participant filing pickers", () => {
             expect(remove).toHaveBeenCalledWith("contribution", "source"),
         );
         expect(
-            screen.queryByRole("button", { name: "Add to folder" }),
+            screen.queryByRole("combobox", { name: "Add to folder" }),
         ).toBeNull();
     });
     it("keeps own-task filing limited to the caller's actual private folders", () => {

@@ -1,12 +1,28 @@
-import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import {
+    and,
+    asc,
+    eq,
+    inArray,
+    isNotNull,
+    isNull,
+    ne,
+    or,
+    sql,
+} from "drizzle-orm";
 import { db } from "@/db";
 import { queryItemFolderAudience } from "@/db/queries/item-folder-audience";
 import {
     activeShareRecipientCondition,
     queryVisibleItemFolders,
 } from "@/db/queries/item-shares";
-import { chatterItems, itemShares, recordingFolders, users } from "@/db/schema";
-import { contentKindColumn } from "@/lib/content/item-kinds";
+import { liveShareItemCondition } from "@/db/queries/meeting-shares";
+import {
+    chatterItems,
+    itemShares,
+    meetingAgendas,
+    recordingFolders,
+    users,
+} from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { notifyPersonShareChanged } from "@/lib/events/personal";
@@ -39,18 +55,19 @@ function conflict() {
 async function requireOwner(userId: string, itemId: string) {
     await requirePersonSharing(userId);
     const [item] = await db
-        .select({ id: chatterItems.id })
+        .select({ id: chatterItems.id, kind: chatterItems.kind })
         .from(chatterItems)
         .where(
             and(
                 eq(chatterItems.id, itemId),
                 eq(chatterItems.userId, userId),
-                isNull(chatterItems.deletedAt),
-                inArray(chatterItems.kind, ["audio", "mail"]),
+                liveShareItemCondition(),
+                inArray(chatterItems.kind, ["audio", "mail", "meeting"]),
             ),
         )
         .limit(1);
     if (!item) throw missing();
+    return item;
 }
 
 /** The owner's direct shares, including past responses. */
@@ -117,7 +134,7 @@ export async function inviteToItem(
     itemId: string,
     receiverIds: string[],
 ) {
-    await requireOwner(userId, itemId);
+    const ownedItem = await requireOwner(userId, itemId);
     const ids = [...new Set(receiverIds)];
     if (!ids.length || ids.length > 20 || ids.includes(userId))
         throw new AppError(
@@ -136,7 +153,7 @@ export async function inviteToItem(
                     eq(chatterItems.id, itemId),
                     eq(chatterItems.userId, userId),
                     isNull(chatterItems.deletedAt),
-                    inArray(chatterItems.kind, ["audio", "mail"]),
+                    inArray(chatterItems.kind, ["audio", "mail", "meeting"]),
                 ),
             )
             .for("update");
@@ -214,7 +231,10 @@ export async function inviteToItem(
     });
     await Promise.all(invitedIds.map(notifyPersonShareChanged));
     for (const receiverId of invitedIds)
-        void sendPersonShareInvitation(receiverId).catch(() => {
+        void sendPersonShareInvitation(
+            receiverId,
+            ownedItem.kind === "meeting" ? "meeting" : undefined,
+        ).catch(() => {
             console.error("[person-shares] invitation email failed");
         });
     return listItemShares(userId, itemId);
@@ -227,7 +247,9 @@ export async function listMyInvitations(userId: string) {
         .select({
             id: itemShares.id,
             itemId: itemShares.itemId,
-            kind: contentKindColumn(chatterItems.kind),
+            kind: chatterItems.kind,
+            plannedStart: meetingAgendas.plannedStart,
+            recorded: isNotNull(meetingAgendas.recordingItemId),
             title: chatterItems.title,
             ownerName: users.name,
             ownerEmail: users.email,
@@ -237,12 +259,19 @@ export async function listMyInvitations(userId: string) {
         .from(itemShares)
         .innerJoin(chatterItems, eq(chatterItems.id, itemShares.itemId))
         .innerJoin(users, eq(users.id, itemShares.userId))
+        .leftJoin(
+            meetingAgendas,
+            and(
+                eq(meetingAgendas.meetingItemId, chatterItems.id),
+                eq(meetingAgendas.userId, itemShares.userId),
+            ),
+        )
         .where(
             and(
                 eq(itemShares.receiverUserId, userId),
                 eq(itemShares.state, "pending"),
-                isNull(chatterItems.deletedAt),
-                inArray(chatterItems.kind, ["audio", "mail"]),
+                liveShareItemCondition(),
+                inArray(chatterItems.kind, ["audio", "mail", "meeting"]),
             ),
         )
         .orderBy(asc(itemShares.invitedAt));
@@ -255,9 +284,37 @@ export async function listMyInvitations(userId: string) {
         userId,
         rows.map((row) => row.itemId),
     );
+    const recordingIds = rows
+        .filter((row) => row.kind === "audio")
+        .map((row) => row.itemId);
+    const suggestions = recordingIds.length
+        ? await db
+              .select({
+                  recordingItemId: meetingAgendas.recordingItemId,
+                  folderId: recordingFolders.id,
+                  name: recordingFolders.name,
+              })
+              .from(meetingAgendas)
+              .innerJoin(
+                  itemShares,
+                  eq(itemShares.itemId, meetingAgendas.meetingItemId),
+              )
+              .innerJoin(
+                  recordingFolders,
+                  eq(recordingFolders.id, itemShares.filingFolderId),
+              )
+              .where(
+                  and(
+                      inArray(meetingAgendas.recordingItemId, recordingIds),
+                      eq(itemShares.receiverUserId, userId),
+                      eq(itemShares.state, "accepted"),
+                      eq(recordingFolders.userId, userId),
+                  ),
+              )
+        : [];
     return rows
         .filter(
-            (row): row is typeof row & { kind: "audio" | "mail" } =>
+            (row): row is typeof row & { kind: "audio" | "mail" | "meeting" } =>
                 row.kind !== null,
         )
         .map((row) => ({
@@ -267,6 +324,17 @@ export async function listMyInvitations(userId: string) {
                     ? mask(decryptText(row.title))
                     : decryptText(row.title),
             ownerName: row.ownerName || row.ownerEmail,
+            suggestedFolder: (() => {
+                const suggestion = suggestions.find(
+                    (suggestion) => suggestion.recordingItemId === row.itemId,
+                );
+                return suggestion
+                    ? {
+                          id: suggestion.folderId,
+                          name: decryptText(suggestion.name),
+                      }
+                    : null;
+            })(),
             visibleInFolders: visibleFolders
                 .filter((folder) => folder.itemId === row.itemId)
                 .map(({ id, name }) => ({ id, name })),
@@ -306,8 +374,8 @@ export async function changePersonShare(
                 and(
                     eq(chatterItems.id, reference.itemId),
                     eq(chatterItems.userId, reference.ownerId),
-                    isNull(chatterItems.deletedAt),
-                    inArray(chatterItems.kind, ["audio", "mail"]),
+                    liveShareItemCondition(),
+                    inArray(chatterItems.kind, ["audio", "mail", "meeting"]),
                 ),
             )
             .for("update");

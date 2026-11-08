@@ -2,6 +2,7 @@
 
 import { Folder, Users } from "lucide-react";
 import { useExtracted } from "next-intl";
+import { type ReactNode, type RefObject, useState } from "react";
 import {
     type FolderSearchEntry,
     FolderSearchList,
@@ -13,9 +14,22 @@ import { useLibraryPreferences } from "@/hooks/use-library-preferences";
 import { joinFolderPath } from "@/lib/folders/navigation";
 
 interface FolderComboboxProps {
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
+    anchorRef?: RefObject<HTMLButtonElement | null>;
+    actionTrigger?: ReactNode;
+    popupTitle?: string;
+    assignedIds?: ReadonlySet<string>;
+    sharing?: boolean;
+    createOnlyWhenEmpty?: boolean;
+    createForm?: (
+        query: string,
+        back: () => void,
+        close: () => void,
+    ) => ReactNode;
     entries: FolderSearchEntry[];
     value: string;
-    onValueChange: (folderId: string) => void;
+    onValueChange: (folderId: string) => void | Promise<void>;
     onCreate?: (query: string) => void;
     disabled?: boolean;
     "aria-label"?: string;
@@ -25,8 +39,17 @@ interface FolderComboboxProps {
     className?: string;
 }
 
-/** Inline folder choice with the same search and recent folders as FolderPicker. */
+/** Shared folder chooser with search, recent folders and optional creation. */
 export function FolderCombobox({
+    open,
+    onOpenChange,
+    anchorRef,
+    actionTrigger,
+    popupTitle,
+    assignedIds,
+    sharing,
+    createOnlyWhenEmpty,
+    createForm,
     entries,
     value,
     onValueChange,
@@ -39,6 +62,8 @@ export function FolderCombobox({
     className = "",
 }: FolderComboboxProps) {
     const i18n = useExtracted();
+    const [saving, setSaving] = useState(false);
+    const [creationQuery, setCreationQuery] = useState<string | null>(null);
     const label = useFolderLabel();
     const { rememberFolder } = useLibraryPreferences();
     const selected = entries.find((entry) => entry.folder.id === value);
@@ -47,6 +72,14 @@ export function FolderCombobox({
         : undefined;
     return (
         <Combobox
+            open={open}
+            onOpenChange={(value) => {
+                if (!value) setCreationQuery(null);
+                onOpenChange?.(value);
+            }}
+            anchorRef={anchorRef}
+            actionTrigger={actionTrigger}
+            popupTitle={popupTitle}
             aria-label={ariaLabel ?? i18n("Folder")}
             title={selectedPath}
             disabled={disabled}
@@ -74,36 +107,68 @@ export function FolderCombobox({
                             ? label(selected.folder)
                             : selectedPath) ??
                             placeholder ??
+                            (value === "" ? emptyChoiceLabel : undefined) ??
                             i18n("Choose a folder")}
                     </span>
                 </>
             }
         >
-            {({ query, onQueryChange, close, listRef }) => (
-                <FolderSearchList
-                    entries={entries}
-                    emptyChoiceLabel={emptyChoiceLabel}
-                    query={query}
-                    onQueryChange={onQueryChange}
-                    showPaths
-                    listRef={listRef}
-                    onEscape={close}
-                    onTab={close}
-                    onSelect={(folderId) => {
-                        if (folderId) rememberFolder(folderId);
-                        close();
-                        onValueChange(folderId);
-                    }}
-                    onCreate={
-                        onCreate
-                            ? (query) => {
-                                  close();
-                                  onCreate(query);
-                              }
-                            : undefined
-                    }
-                />
-            )}
+            {({ query, onQueryChange, close, listRef }) =>
+                creationQuery !== null && createForm ? (
+                    createForm(
+                        creationQuery,
+                        () => setCreationQuery(null),
+                        close,
+                    )
+                ) : (
+                    <FolderSearchList
+                        assignedIds={assignedIds}
+                        disabled={saving}
+                        sharing={sharing}
+                        createOnlyWhenEmpty={createOnlyWhenEmpty}
+                        createLabel={
+                            createOnlyWhenEmpty
+                                ? i18n("Create folder “{name}”", {
+                                      name: query.trim(),
+                                  })
+                                : undefined
+                        }
+                        entries={entries}
+                        emptyChoiceLabel={emptyChoiceLabel}
+                        query={query}
+                        onQueryChange={onQueryChange}
+                        showPaths
+                        listRef={listRef}
+                        onEscape={close}
+                        onTab={close}
+                        onSelect={async (folderId) => {
+                            if (saving || assignedIds?.has(folderId)) return;
+                            setSaving(true);
+                            try {
+                                const result = onValueChange(folderId);
+                                if (result) await result;
+                                if (folderId) rememberFolder(folderId);
+                                close();
+                            } catch {
+                            } finally {
+                                setSaving(false);
+                            }
+                        }}
+                        onCreate={
+                            createForm || onCreate
+                                ? (query) => {
+                                      if (createForm) {
+                                          setCreationQuery(query);
+                                          return;
+                                      }
+                                      close();
+                                      onCreate?.(query);
+                                  }
+                                : undefined
+                        }
+                    />
+                )
+            }
         </Combobox>
     );
 }

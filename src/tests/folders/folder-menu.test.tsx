@@ -165,6 +165,15 @@ const props: ComponentProps<typeof Workstation> = {
 };
 
 beforeEach(() => {
+    vi.stubGlobal(
+        "ResizeObserver",
+        class {
+            observe() {}
+            disconnect() {}
+            unobserve() {}
+        },
+    );
+    Element.prototype.scrollIntoView = vi.fn();
     refresh.mockClear();
     window.history.replaceState({}, "", "/dashboard");
 });
@@ -370,11 +379,12 @@ describe("folder row menu", () => {
         const destinations = screen.getByRole("combobox", {
             name: "Destination folder",
         });
+        fireEvent.click(destinations);
         expect(
-            Array.from((destinations as HTMLSelectElement).options).map(
-                (option) => option.value,
-            ),
-        ).toEqual([privateRoot.id]);
+            screen
+                .getAllByRole("option")
+                .map((option) => option.getAttribute("aria-label")),
+        ).toEqual(["Private"]);
         expect(fetchMock).not.toHaveBeenCalled();
     });
 

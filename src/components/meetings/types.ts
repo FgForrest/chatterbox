@@ -24,18 +24,31 @@ type Detail = Json<
 >;
 export type MeetingDetail = Omit<
     Detail,
-    "cursor" | "aiSuggestions" | "suggestionTasks" | "folderRecordingIds"
+    | "cursor"
+    | "aiSuggestions"
+    | "suggestionTasks"
+    | "folderRecordingIds"
+    | "shared"
+    | "receivedShare"
+    | "receivedFolders"
+    | "agendaTitle"
 > & {
     cursor?: string;
+    agendaTitle?: string;
+    shared?: Detail["shared"];
+    receivedShare?: Detail["receivedShare"];
+    receivedFolders?: Detail["receivedFolders"];
     suggestionTasks?: Detail["suggestionTasks"];
     folderRecordingIds?: string[];
     aiSuggestions: OptionalJob<Detail["aiSuggestions"]>;
 };
 export type MeetingPoint = MeetingDetail["points"][number];
 export type MeetingTask = MeetingDetail["tasks"][number];
-export type MeetingRowData = Json<
-    Awaited<ReturnType<typeof listMeetings>>[number]
->;
+type MeetingRow = Json<Awaited<ReturnType<typeof listMeetings>>[number]>;
+export type MeetingRowData = Omit<MeetingRow, "received" | "recorded"> & {
+    received?: boolean;
+    recorded?: boolean;
+};
 export type CalendarChoices = Json<
     Awaited<ReturnType<typeof meetingCalendarEvents>>
 >;

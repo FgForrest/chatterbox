@@ -350,7 +350,7 @@ suite("meeting planning server (PostgreSQL)", () => {
         });
     });
 
-    it("excludes private task notes and source pointers from a colleague's personal archive", async () => {
+    it("retains another author's absorbed agenda in the recording owner's archive without private task data", async () => {
         await recording("private-task-recording");
         await db.insert(recordingTasks).values({
             id: "private-task",
@@ -387,8 +387,14 @@ suite("meeting planning server (PostgreSQL)", () => {
             userId: "other",
         });
         expect(archive).toMatchObject([
-            { tasks: [], taskSourceItemId: null, snapshotSourceItemId: null },
+            {
+                recordingItemId: "colleague-recording",
+                tasks: [],
+                taskSourceItemId: null,
+                snapshotSourceItemId: null,
+            },
         ]);
+        expect(JSON.stringify(archive)).not.toContain("Confidential");
     });
 
     it("excludes private task notes and source pointers from an Organization archive", async () => {
@@ -518,6 +524,38 @@ suite("meeting planning server (PostgreSQL)", () => {
         ).toMatchObject({
             pin: { scope: "organization", credentialId: "org-cloud-provider" },
         });
+        const memberSettings = defaultProfileSettings("audio");
+        memberSettings.steps.summary.provider = {
+            scope: "personal",
+            credentialId: "member-local-provider",
+        };
+        const memberProfile = await createProfile({
+            ownerUserId: "other",
+            actor: localActor("other"),
+            scope: "personal",
+            channel: "audio",
+            name: "Member local profile",
+            settings: memberSettings,
+            isDefault: true,
+        });
+        await db
+            .insert(userSettings)
+            .values({
+                userId: "other",
+                defaultAudioProfileId: memberProfile.id,
+            })
+            .onConflictDoUpdate({
+                target: userSettings.userId,
+                set: { defaultAudioProfileId: memberProfile.id },
+            });
+        expect(
+            await agendaSuggestionsProvider("other", orgMeeting.id),
+        ).toMatchObject({
+            pin: { scope: "organization", credentialId: "org-cloud-provider" },
+        });
+        expect(providers.resolve).toHaveBeenLastCalledWith(
+            expect.objectContaining({ actorUserId: "other" }),
+        );
         const ownerMeeting = await prepareMeeting("other", {
             folderId: "other-folder",
             title: "Owner meeting",

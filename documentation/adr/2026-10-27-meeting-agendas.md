@@ -1,14 +1,14 @@
 ---
 title: Meeting agendas are co-edited plans absorbed by recordings, with safe attachment and manual Calendar export
 date: 2026-10-27
-updated: 2026-10-28 13:25
+updated: 2026-11-08 11:23
 status: superseded
 kind: feature
 issues: []
 prs: [293]
 areas: [src/lib/meetings, src/db/queries/meetings.ts, src/db/queries/folder-participants.ts, src/db/schema.ts, src/app/api/meetings, src/app/api/v1/recorder, src/lib/mcp/tools/meetings.ts, src/lib/export/meetings.ts, src/lib/integrations/google]
 supersedes: []
-superseded-by: [2026-10-28-agendas-use-all-folder-placements]
+superseded-by: [2026-10-28-agendas-use-all-folder-placements, 2026-11-08-meeting-agendas-shared-with-people]
 relates: [2026-10-27-shared-folders-are-two-way, 2026-10-12-calendar-meet-speaker-candidates, 2026-10-22-calendar-speaker-guesses-in-automatic-runs, 2026-10-07-tasks-from-summaries, 2026-10-22-meeting-recorder-banner, 2026-10-07-backup-scope]
 ---
 
@@ -20,6 +20,8 @@ The implementation includes the editor, Chrome side panel, AI suggestions, summa
 context, permissions, attachment, Calendar export, recorder APIs and MCP. It is awaiting integration.
 
 **Superseded in part:** [Multi-folder agenda filing](2026-10-28-agendas-use-all-folder-placements.md) changes the single-folder preparation and attachment behavior, and freezing automatic preparation across filing changes. The remaining rules still hold.
+
+**Superseded in part:** [Agendas shared with people](2026-11-08-meeting-agendas-shared-with-people.md) changes these rules: Accepted direct agenda receivers also receive recorder reminders before contributing a point. Absorbed agendas retain their independent direct invitations and backup additionally retains the author’s standalone plan when a receiver owns the recording. The original live-owned-anchor rule still retains the absorbed agenda in the recording owner’s archive. The remaining rules still hold.
 
 ## Why
 

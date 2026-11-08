@@ -166,43 +166,36 @@ export function RecordingFolderTags({
                 />
             ))}
             {(isOwn || hasMoveTarget) && (
-                <>
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 rounded-full border border-dashed px-2.5 text-xs text-muted-foreground"
-                        onClick={() => setPickerOpen(true)}
-                    >
-                        {moveSource ? (
-                            <FolderInput className="size-3.5" />
-                        ) : (
-                            <FolderPlus className="size-3.5" />
-                        )}
-                        {moveSource ? i18n("Move to…") : i18n("Add to folder")}
-                    </Button>
-                    {pickerOpen && (
-                        <FolderPicker
-                            folders={folders}
-                            canCurate={canCurate}
-                            onCreated={onFolderCreated}
-                            assignedIds={assignedIds}
-                            open={pickerOpen}
-                            onOpenChange={setPickerOpen}
-                            organizationOnly={organizationOnly || !isOwn}
-                            sharing={!organizationOnly && isOwn}
-                            onSelect={(folderId) =>
-                                moveSource && onMove
-                                    ? onMove(
-                                          recordingId,
-                                          moveSource.id,
-                                          folderId,
-                                      )
-                                    : onAdd(recordingId, folderId)
-                            }
-                        />
-                    )}
-                </>
+                <FolderPicker
+                    folders={folders}
+                    canCurate={canCurate}
+                    onCreated={onFolderCreated}
+                    assignedIds={assignedIds}
+                    open={pickerOpen}
+                    onOpenChange={setPickerOpen}
+                    organizationOnly={organizationOnly || !isOwn}
+                    sharing={!organizationOnly && isOwn}
+                    title={
+                        moveSource ? i18n("Move to…") : i18n("Add to folder")
+                    }
+                    actionTrigger={
+                        <>
+                            {moveSource ? (
+                                <FolderInput className="size-3.5" />
+                            ) : (
+                                <FolderPlus className="size-3.5" />
+                            )}
+                            {moveSource
+                                ? i18n("Move to…")
+                                : i18n("Add to folder")}
+                        </>
+                    }
+                    onSelect={(folderId) =>
+                        moveSource && onMove
+                            ? onMove(recordingId, moveSource.id, folderId)
+                            : onAdd(recordingId, folderId)
+                    }
+                />
             )}
             <Dialog
                 open={withdrawing !== null}

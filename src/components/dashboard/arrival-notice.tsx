@@ -18,6 +18,7 @@ export function ArrivalNotice({
     onClose,
     invitation = false,
     folderInvitation = false,
+    agendaInvitation = false,
 }: {
     recording: Recording;
     more: number;
@@ -26,6 +27,7 @@ export function ArrivalNotice({
     onClose: () => void;
     invitation?: boolean;
     folderInvitation?: boolean;
+    agendaInvitation?: boolean;
 }) {
     const i18n = useExtracted();
     const locale = useLocale();
@@ -69,11 +71,23 @@ export function ArrivalNotice({
                                               recording.ownerName ??
                                               i18n("A colleague"),
                                       })
-                                    : i18n("{owner} shared an item with you", {
-                                          owner:
-                                              recording.ownerName ??
-                                              i18n("A colleague"),
-                                      })
+                                    : agendaInvitation
+                                      ? i18n(
+                                            "{owner} shared an agenda with you",
+                                            {
+                                                owner:
+                                                    recording.ownerName ??
+                                                    i18n("A colleague"),
+                                            },
+                                        )
+                                      : i18n(
+                                            "{owner} shared an item with you",
+                                            {
+                                                owner:
+                                                    recording.ownerName ??
+                                                    i18n("A colleague"),
+                                            },
+                                        )
                                 : mail
                                   ? i18n("New email")
                                   : i18n("New recording")}

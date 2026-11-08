@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useAgendaRecordingPrivacy } from "@/hooks/use-library-preferences";
 import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 import { AgendaBody } from "./agenda-body";
@@ -20,12 +21,15 @@ import { meetingRequest, meetingUrl, recordingAudienceConflict } from "./api";
 import {
     AttachmentAudience,
     AttachmentFilingNotice,
+    AttachmentShareChoice,
+    useAttachmentShareChoice,
 } from "./attachment-disclosure";
 import { CreateMeetingDialog } from "./create-meeting-dialog";
 import {
     type AgendaSummaryState,
     RecordingAgendaContext,
 } from "./recording-agenda-context";
+import { RecordingShareBanner } from "./recording-share-banner";
 import type { AgendaCandidate, MeetingDetail, NextMeeting } from "./types";
 
 export function RecordingAgenda({
@@ -70,6 +74,8 @@ export function RecordingAgenda({
     const [candidates, setCandidates] = useState<AgendaCandidate[]>([]);
     const [next, setNext] = useState<NextMeeting["event"]>(null);
     const [chosen, setChosen] = useState("");
+    const choice = useAttachmentShareChoice(chosen, recording.id);
+    const privacy = useAgendaRecordingPrivacy(userId, recording.id);
     const [dismissed, setDismissed] = useState(false);
     const [busy, setBusy] = useState(false);
     const [prepareOpen, setPrepareOpen] = useState(false);
@@ -145,9 +151,31 @@ export function RecordingAgenda({
         setBusy(true);
         setCandidates([]);
         try {
-            await meetingRequest(meetingUrl(chosen, "/attach"), "POST", {
+            const result = await meetingRequest<{
+                recordingShare?: { skipped: { reason: string }[] };
+            }>(meetingUrl(chosen, "/attach"), "POST", {
                 recordingItemId: recording.id,
+                shareRecording: choice.shareRecording,
             });
+            if (choice.shown && !choice.checked) privacy.dismiss();
+            if (
+                result.recordingShare?.skipped.some(
+                    (person) => person.reason === "organization",
+                )
+            )
+                toast.info(
+                    i18n("The Organization already sees the recording."),
+                );
+            else if (
+                result.recordingShare?.skipped.some(
+                    (person) => person.reason !== "already_visible_or_invited",
+                )
+            )
+                toast.info(
+                    i18n(
+                        "The agenda was attached. Some recording invitations could not be sent.",
+                    ),
+                );
             await load(undefined, true);
             onChanged();
         } catch (error) {
@@ -276,6 +304,7 @@ export function RecordingAgenda({
                           ))}
                       </fieldset>
                       <AttachmentFilingNotice />
+                      <AttachmentShareChoice choice={choice} />
                       <div className="flex justify-end gap-2">
                           <Button
                               variant="ghost"
@@ -296,6 +325,14 @@ export function RecordingAgenda({
     const card = attached && (
         <Card>
             <CardContent>
+                {own && (
+                    <RecordingShareBanner
+                        agendaId={attached.id}
+                        title={attached.agendaTitle ?? attached.title}
+                        recordingId={recording.id}
+                        userId={userId}
+                    />
+                )}
                 {summaryState?.hasSummary && !attached.outcomeSummaryId && (
                     <p className="mb-3 text-xs text-muted-foreground">
                         {i18n(

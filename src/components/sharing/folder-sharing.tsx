@@ -13,7 +13,7 @@ import { useExtracted } from "next-intl";
 import { useId, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm-dialog";
-import { FolderSearchList } from "@/components/recordings/folder-search-list";
+import { FolderCombobox } from "@/components/recordings/folder-combobox";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -85,7 +85,6 @@ export function ReceivedFolderDialog({
     const nameId = useId();
     const [name, setName] = useState(initialName);
     const [parentId, setParentId] = useState(initialParentId);
-    const [query, setQuery] = useState("");
     const [saving, setSaving] = useState(false);
     const entries = useMemo(
         () =>
@@ -197,34 +196,15 @@ export function ReceivedFolderDialog({
                         <p className="text-sm font-medium">
                             {i18n("Place in")}
                         </p>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            aria-pressed={parentId === null}
-                            onClick={() => setParentId(null)}
-                        >
-                            {i18n("Private root")}
-                        </Button>
-                        <p className="text-sm text-muted-foreground">
-                            {parentId
-                                ? label(
-                                      folders.find(
-                                          (folder) => folder.id === parentId,
-                                      ) ?? {
-                                          name: "",
-                                          parentId: null,
-                                          kind: "private",
-                                          scope: "personal",
-                                      },
-                                  )
-                                : i18n("Private root")}
-                        </p>
-                        <FolderSearchList
+                        <FolderCombobox
+                            aria-label={i18n("Place in")}
                             entries={entries}
-                            query={query}
-                            onQueryChange={setQuery}
+                            value={parentId ?? ""}
+                            onValueChange={(value) =>
+                                setParentId(value || null)
+                            }
+                            emptyChoiceLabel={i18n("Private root")}
                             disabled={saving}
-                            onSelect={setParentId}
                         />
                         {action === "accept" && (
                             <div className="space-y-2 rounded-lg border bg-muted/20 p-3 text-sm">
