@@ -192,6 +192,183 @@ describe("speech samples", () => {
             speakerSpeechSamples([turn(1000, 6000)], "speaker_0").samples[0],
         ).toMatchObject({ ms: 700, untilMs: 7000 });
     });
+    it("cuts a long turn at the latest stored sentence end and quotes only played sentences", () => {
+        const timed = {
+            ...turn(1000, 30000),
+            text: "First sentence has enough words for a full listening sample. Second   sentence ends here! Third sentence continues. Fourth sentence finishes.",
+            sentenceStartsMs: [1000, 7000, 11000, 14000],
+        };
+        const sample = speakerSpeechSamples([timed], "speaker_0").samples[0];
+        expect(sample).toMatchObject({
+            ms: 700,
+            untilMs: 11000,
+            text: "First sentence has enough words for a full listening sample. Second sentence ends here!",
+        });
+    });
+    it("cuts at a merged turn end without stored sentence times", () => {
+        const first = { ...turn(1000, 8000), text: `${words()}.` };
+        const second = { ...turn(9500, 20000), text: "Unplayed words." };
+        expect(
+            speakerSpeechSamples([first, second], "speaker_0").samples[0],
+        ).toMatchObject({ ms: 700, untilMs: 9000, text: first.text });
+    });
+    it("quotes preceding turns and the played sentences of a later merged turn", () => {
+        const first = { ...turn(0, 7000), text: `${words()}.` };
+        const second = {
+            ...turn(7500, 20000),
+            text: "This sentence plays. This one does not.",
+            sentenceStartsMs: [7500, 10000],
+        };
+        expect(
+            speakerSpeechSamples([first, second], "speaker_0").samples[0],
+        ).toMatchObject({
+            untilMs: 10000,
+            text: `${first.text} This sentence plays.`,
+        });
+    });
+    it.each([
+        0, 1000,
+    ])("ignores a stored boundary before the minimum with a turn starting at %s", (startMs) => {
+        const timed = {
+            ...turn(startMs, 30000),
+            text: `${words()}. The rest continues.`,
+            sentenceStartsMs: [
+                startMs,
+                Math.max(0, startMs - SAMPLE_PRE_ROLL_MS) +
+                    SAMPLE_MIN_DURATION_MS -
+                    1,
+            ],
+        };
+        const sample = speakerSpeechSamples([timed], "speaker_0").samples[0];
+        expect(sample.untilMs - sample.ms).toBe(SAMPLE_PLAY_LIMIT_MS);
+        expect(sample.text).toBe(timed.text);
+    });
+    it.each([
+        [0, SAMPLE_MIN_DURATION_MS],
+        [0, SAMPLE_PLAY_LIMIT_MS],
+        [1000, SAMPLE_MIN_DURATION_MS],
+        [1000, SAMPLE_PLAY_LIMIT_MS],
+    ])("accepts an exact boundary at %s plus pre-rolled duration %s", (startMs, duration) => {
+        const ms = Math.max(0, startMs - SAMPLE_PRE_ROLL_MS);
+        const timed = {
+            ...turn(startMs, 30000),
+            text: `${words()}. Unplayed sentence.`,
+            sentenceStartsMs: [startMs, ms + duration],
+        };
+        expect(
+            speakerSpeechSamples([timed], "speaker_0").samples[0],
+        ).toMatchObject({
+            ms,
+            untilMs: ms + duration,
+            text: `${words()}.`,
+        });
+    });
+    it.each([
+        [1000],
+        [1000, 9000, 12000],
+        [0, 9000],
+        [1000, 32000],
+        [1000, Number.NaN],
+        [1000, Number.POSITIVE_INFINITY],
+        [9000, 1000],
+    ])("ignores invalid stored sentence times %j", (...sentenceStartsMs) => {
+        const timed = {
+            ...turn(1000, 30000),
+            text: `${words()}. The rest continues.`,
+            sentenceStartsMs,
+        };
+        expect(
+            speakerSpeechSamples([timed], "speaker_0").samples[0],
+        ).toMatchObject({ ms: 700, untilMs: 12700, text: timed.text });
+    });
+    it("does not interpolate sentence boundaries in legacy transcripts", () => {
+        const legacy = {
+            ...turn(0, 30000),
+            text: `${words()}. ${words()}. ${words()}.`,
+        };
+        expect(
+            speakerSpeechSamples([legacy], "speaker_0").samples[0],
+        ).toMatchObject({ ms: 0, untilMs: 12000, text: legacy.text });
+    });
+    it("plays a fitting stretch to its end despite earlier exact boundaries", () => {
+        const timed = {
+            ...turn(0, 11000),
+            text: `${words()}. Last sentence.`,
+            sentenceStartsMs: [0, 7000],
+        };
+        expect(
+            speakerSpeechSamples([timed], "speaker_0").samples[0],
+        ).toMatchObject({ untilMs: 11000, text: timed.text });
+    });
+    it("orders sentence ends and merged turn ends while retaining sentence indexes", () => {
+        const stretches = speechStretches(
+            [
+                {
+                    ...turn(0, 10000),
+                    text: "First sentence. Second sentence.",
+                    sentenceStartsMs: [0, 9000],
+                },
+                {
+                    ...turn(10500, 20000),
+                    text: "Third sentence. Fourth sentence. Fifth sentence.",
+                    sentenceStartsMs: [10500, 11000, 12000],
+                },
+            ],
+            "speaker_0",
+        );
+        expect(stretches[0].boundaries).toEqual([
+            { ms: 9000, sentenceIndex: 1 },
+            { ms: 10000, sentenceIndex: 2 },
+            { ms: 11000, sentenceIndex: 3 },
+            { ms: 12000, sentenceIndex: 4 },
+        ]);
+    });
+    it("cuts overlapping turns of one label at twelve seconds and quotes the whole stretch", () => {
+        const long = {
+            ...turn(0, 30000),
+            text: "A first sentence with several words in it. A later sentence.",
+            sentenceStartsMs: [0, 20000],
+        };
+        const inside = { ...turn(5000, 3000), text: "Inside." };
+        const after = { ...turn(9000, 26000), text: `${words()}.` };
+        const sample = speakerSpeechSamples([long, inside, after], "speaker_0")
+            .samples[0];
+        expect(sample).toMatchObject({
+            ms: 0,
+            untilMs: SAMPLE_PLAY_LIMIT_MS,
+            boundaries: [],
+            text: `${long.text} ${inside.text} ${after.text}`,
+        });
+    });
+    it("keeps exact boundaries within recording bounds without inventing a cut at its end", () => {
+        const timed = {
+            ...turn(-1000, 31000),
+            text: `${words()}. Second sentence. Third sentence.`,
+            sentenceStartsMs: [0, 9000, 20000],
+        };
+        expect(
+            speakerSpeechSamples([timed], "speaker_0", 15000).samples[0],
+        ).toMatchObject({
+            startMs: 0,
+            endMs: 15000,
+            untilMs: 9000,
+            text: `${words()}.`,
+            boundaries: [{ ms: 9000, sentenceIndex: 1 }],
+        });
+    });
+    it("uses exact sentence ends for long fallback turns as well", () => {
+        const timed = {
+            ...turn(0, 30000),
+            text: "Short sentence. Another sentence.",
+            sentenceStartsMs: [0, 8000],
+        };
+        const result = speakerSpeechSamples([timed], "speaker_0");
+        expect(result.fallback).toBe(true);
+        expect(result.samples[0]).toMatchObject({
+            untilMs: 8000,
+            text: "Short sentence.",
+        });
+    });
     it("falls back to the three longest individual turns of at least one second", () => {
         const result = speakerSpeechSamples(
             [
