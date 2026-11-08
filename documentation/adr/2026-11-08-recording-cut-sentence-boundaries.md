@@ -1,7 +1,7 @@
 ---
 title: Cut recordings at sentence starts, with typed times and paragraph-gap controls above the transcript
 date: 2026-11-08
-updated: 2026-11-08 18:35
+updated: 2026-11-08 19:20
 status: accepted
 kind: feature
 issues: [327]
@@ -9,7 +9,7 @@ prs: [352]
 areas: [src/lib/recordings, src/lib/knowledge/correction-recheck.ts, src/components/recordings/recording-cut.tsx, src/components/dashboard/transcript-view.tsx]
 supersedes: [2026-11-03-destructive-recording-cut, 2026-11-08-shared-recordings-cut-in-place]
 superseded-by: []
-relates: [2026-11-08-stored-sentence-start-times]
+relates: [2026-11-08-stored-sentence-start-times, 2026-11-08-ai-trim-proposal-before-learn]
 ---
 
 # Cut recordings at sentence starts, with typed times and paragraph-gap controls above the transcript
@@ -76,6 +76,8 @@ Legacy transcripts still use interpolated times, which can differ from the spoke
 - [Destructive recording cuts](2026-11-03-destructive-recording-cut.md) is superseded for midpoint retention and the player/inline cut controls. Destruction, accepted human decisions and the Plaud cut marker remain in force.
 - [Shared recordings cut in place](2026-11-08-shared-recordings-cut-in-place.md) is superseded for cut-control placement. Selection-preserving inline errors, owner-only changes, shared placements and the share/cut race protections remain in force.
 - [Stored sentence start times](2026-11-08-stored-sentence-start-times.md) supplies the common sentence clock and defers the turn split implemented here; all-or-nothing timing derivation remains unchanged.
+
+- [AI trim proposals before Learn](2026-11-08-ai-trim-proposal-before-learn.md): reuses this contract for whole-transcript suggestions and an owner decision before automatic work.
 
 ## Timeline
 

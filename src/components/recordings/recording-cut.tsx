@@ -40,6 +40,16 @@ import type { TranscriptTurn } from "@/lib/transcription/turns";
 import type { Recording } from "@/types/recording";
 
 interface CutState {
+    proposalPreview: CutRange | null;
+    proposalSource: string | null;
+    setProposalPreview: (range: CutRange | null) => void;
+    openWithRange: (input: {
+        range: CutRange;
+        revisions: { id: string; revision: number }[];
+        proposalId: string;
+        source?: string;
+        confirm: boolean;
+    }) => void;
     recording: Recording;
     owner: boolean;
     open: boolean;
@@ -88,6 +98,11 @@ export function RecordingCutProvider({
     const [cutting, setCutting] = useState(false);
     const [browserTranscribing, setBrowserTranscribing] = useState(false);
     const [confirming, setConfirming] = useState(false);
+    const [proposalPreview, setProposalPreview] = useState<CutRange | null>(
+        null,
+    );
+    const [proposalSource, setProposalSource] = useState<string | null>(null);
+    const proposalId = useRef<string | undefined>(undefined);
     const shownRevisions = useRef<
         { id: string; revision: number }[] | undefined
     >(undefined);
@@ -319,6 +334,10 @@ export function RecordingCutProvider({
     );
     const cancel = () => {
         setOpen(false);
+        setConfirming(false);
+        proposalId.current = undefined;
+        shownRevisions.current = undefined;
+        setProposalSource(null);
         setError(null);
         setRange({ startMs: 0, endMs: recording.duration });
     };
@@ -338,6 +357,9 @@ export function RecordingCutProvider({
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         ...range,
+                        ...(proposalId.current
+                            ? { trimProposalId: proposalId.current }
+                            : {}),
                         ...(shownRevisions.current
                             ? { revisions: shownRevisions.current }
                             : {}),
@@ -365,8 +387,40 @@ export function RecordingCutProvider({
         setRange({ startMs: 0, endMs: recording.duration });
         setActiveTurns(transcripts[0]?.turns ?? null);
         shownRevisions.current = undefined;
+        proposalId.current = undefined;
+        setProposalPreview(null);
+        setProposalSource(null);
     }
     const state: CutState = {
+        proposalPreview,
+        proposalSource,
+        setProposalPreview,
+        openWithRange: (input) => {
+            if (!owner || disabledReason) return;
+            if (
+                input.confirm ||
+                proposalId.current !== input.proposalId ||
+                !open
+            )
+                setRange(input.range);
+            proposalId.current = input.proposalId;
+            shownRevisions.current = input.revisions;
+            setProposalSource(input.source ?? null);
+            setError(null);
+            setOpen(true);
+            setConfirming(input.confirm);
+            if (!input.confirm)
+                requestAnimationFrame(() => {
+                    const boundary = document.querySelector<HTMLElement>(
+                        `[data-cut-boundary="${input.range.startMs || input.range.endMs}"]`,
+                    );
+                    boundary?.scrollIntoView({
+                        block: "center",
+                        behavior: "smooth",
+                    });
+                    boundary?.querySelector<HTMLElement>("button")?.focus();
+                });
+        },
         recording,
         owner,
         open,
@@ -379,6 +433,8 @@ export function RecordingCutProvider({
             if (owner && !disabledReason) {
                 if (open) cancel();
                 else {
+                    proposalId.current = undefined;
+                    setProposalSource(null);
                     setError(null);
                     setRange({ startMs: 0, endMs: recording.duration });
                     shownRevisions.current = transcripts.every(

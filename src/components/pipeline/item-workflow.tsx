@@ -669,6 +669,14 @@ export function ItemWorkflow({
                 loadPanel();
                 focusFiling();
                 break;
+            case "reviewTrim": {
+                const card = document.getElementById(
+                    `recording-trim-${itemId}`,
+                );
+                card?.scrollIntoView({ block: "center", behavior: "smooth" });
+                card?.focus();
+                break;
+            }
             case "reviewLearn":
                 onReviewLearn?.();
                 break;

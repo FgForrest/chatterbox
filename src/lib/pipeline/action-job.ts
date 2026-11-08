@@ -27,6 +27,7 @@ export const PIPELINE_ACTION_JOB_KIND = "pipeline.action";
 
 function shareWaitReason(result: IntendedShareOutcome): string | undefined {
     if (result.waitingForCut) return "cut";
+    if (result.waitingForTrim) return "trim";
     if (result.confirmationRequired) return "confirmation_required";
     if (result.problems.length > 0) return "gate_blocked";
     if (result.remaining) return "org_unavailable";

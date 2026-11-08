@@ -173,6 +173,7 @@ describeWithDatabase(
                     defaultModel: "mira-model",
                 });
             const settings = defaultProfileSettings("audio");
+            settings.steps.trim.automatic = false;
             settings.steps.transcribe.plaudTranscript = "use";
             settings.steps.learn.automatic = false;
             settings.steps.summary.automatic = true;
@@ -651,6 +652,7 @@ describeWithDatabase(
 
         it("still waits for own transcription in also_transcribe mode", async () => {
             const settings = defaultProfileSettings("audio");
+            settings.steps.trim.automatic = false;
             settings.steps.transcribe.plaudTranscript = "also_transcribe";
             await db()
                 .update(processingProfileRevisions)

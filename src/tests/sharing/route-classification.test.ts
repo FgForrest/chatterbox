@@ -99,6 +99,7 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     "recordings/[id]/peaks/route.ts": { POST: "access", PUT: "access" },
     "recordings/[id]/process-again/route.ts": { POST: "owner" },
     "recordings/[id]/erase/route.ts": { POST: "owner" },
+    "recordings/[id]/trim-proposal/route.ts": { POST: "view" },
     "recordings/[id]/cut/route.ts": { GET: "owner", POST: "owner" },
     "recordings/[id]/folders/route.ts": {
         POST: "folders",

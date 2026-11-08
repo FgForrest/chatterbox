@@ -353,3 +353,7 @@ describe("transcribeRecording — in-flight dedup", () => {
         expect(audioCreate).toHaveBeenCalledTimes(2);
     });
 });
+
+vi.mock("@/db/queries/trim-state", () => ({
+    resolveTrimInTx: vi.fn(async () => false),
+}));

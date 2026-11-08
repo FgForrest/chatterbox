@@ -47,6 +47,7 @@ import {
 import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
 import { env } from "@/lib/env";
 import { nudge } from "@/lib/jobs/nudge";
+import { JobDeferredError } from "@/lib/jobs/retryable";
 import { InvalidJobPayloadError, type JobHandler } from "@/lib/jobs/types";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { LEARN_CORRECT_JOB_KIND } from "@/lib/learn/correction-pass-queue";
@@ -180,6 +181,7 @@ export async function startAutomaticLearn(input: {
                 trigger: "auto",
             });
         } catch (error) {
+            if (error instanceof JobDeferredError) throw error;
             console.error(
                 `Automatic Learn could not start for item ${itemId}:`,
                 error,
@@ -201,6 +203,8 @@ export async function startAutomaticLearn(input: {
         await releaseAutoLearnHold(itemId);
         return { status: "started" };
     } catch (error) {
+        if (error instanceof JobDeferredError)
+            return { status: "deferred", delayMs: 1000 };
         console.error(`Automatic Learn skipped for item ${itemId}:`, error);
         return { status: "skipped", reason: "start_failed" };
     }

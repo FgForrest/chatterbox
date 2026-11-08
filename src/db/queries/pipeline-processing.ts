@@ -34,7 +34,7 @@ export async function loadPipelineProcessingJobs(
             where (j.id in (select jsonb_array_elements_text(${JSON.stringify(ids)}::jsonb))
                 or (j.user_id = ${ownerUserId} and j.subject_id in (${itemId}, ${`org:${itemId}`})
                     and j.status in ('pending', 'processing')
-                    and j.kind in ('transcription', 'summary', 'topics', 'title.generate', 'learn.run', 'learn.correct', 'learn.release')
+                    and j.kind in ('transcription', 'summary', 'topics', 'title.generate', 'learn.run', 'learn.correct', 'learn.release', 'trim.propose', 'recording.cut')
                     and coalesce(j.payload -> 'pipelineSteps', '[]'::jsonb) = '[]'::jsonb))
               and (j.user_id = ${ownerUserId} or coalesce(j.payload -> 'pipelineSteps', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('itemId', ${itemId}::text, 'userId', ${ownerUserId}::text)))
         ), fair as (
@@ -44,7 +44,7 @@ export async function loadPipelineProcessingJobs(
                 exists (select 1 from async_jobs running where running.kind = q.kind and running.user_id = q.user_id and running.status = 'processing') as blocked
             from async_jobs q
             where q.status = 'pending' and q.next_attempt_at <= now()
-              and q.kind in ('pipeline.action', 'pipeline.advance') and q.kind in (select kind from targets where status = 'pending')
+              and q.kind in ('pipeline.action', 'pipeline.advance', 'trim.propose', 'recording.cut') and q.kind in (select kind from targets where status = 'pending')
         )
         select j.id, j.kind, j.status, j.payload, j.result, j.error_code as "errorCode",
             (j.status = 'processing' and coalesce(j.heartbeat_at, j.started_at, j.updated_at)
@@ -52,7 +52,7 @@ export async function loadPipelineProcessingJobs(
             case when j.status = 'pending' and j.next_attempt_at > now()
                 then to_char(j.next_attempt_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') end as "retryAt",
             case when j.status <> 'pending' then 1
-            when j.kind in ('pipeline.action', 'pipeline.advance') then
+            when j.kind in ('pipeline.action', 'pipeline.advance', 'trim.propose', 'recording.cut') then
                 (1 + (select count(*) from fair ahead left join fair target on target.id = j.id
                     where ahead.kind = j.kind and ahead.id <> j.id and not ahead.blocked
                         and (target.id is null or target.blocked or ahead.user_rank < target.user_rank

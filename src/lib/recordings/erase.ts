@@ -2,6 +2,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { recordingItemJoin, touchRecording } from "@/db/items";
 import { deleteRecordingAgendaInTx } from "@/db/queries/meeting-lifecycle";
+import { resolveTrimInTx } from "@/db/queries/trim-state";
 import {
     aiEnhancements,
     asyncJobs,
@@ -233,6 +234,12 @@ export async function eraseLocalArtifact(
                 (scope === "audio" || locked.audioReapedAt !== null) &&
                 (scope === "transcript" || locked.contentReapedAt !== null) &&
                 (scope === "summary" || locked.summaryReapedAt !== null);
+            await resolveTrimInTx(tx, {
+                userId,
+                recordingId,
+                reason: "erased",
+                force: true,
+            });
             if (erasedAsWhole) {
                 await deleteRecordingAgendaInTx(tx, {
                     id: recordingId,

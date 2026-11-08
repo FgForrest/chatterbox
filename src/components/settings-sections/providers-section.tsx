@@ -55,6 +55,7 @@ function providerRoles(
     if (provider.isDefaultLearn) roles.push(i18n("Learn"));
     if (provider.isDefaultTopics) roles.push(i18n("Topics"));
     if (provider.isDefaultTitle) roles.push(i18n("Titles"));
+    if (provider.isDefaultTrim) roles.push(i18n("Trim proposal"));
     return roles;
 }
 

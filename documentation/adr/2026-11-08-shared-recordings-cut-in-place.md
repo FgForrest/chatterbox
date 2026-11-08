@@ -1,14 +1,14 @@
 ---
 title: Shared recordings are cut in place and intended shares wait for cuts
 date: 2026-11-08
-updated: 2026-11-08 15:40
+updated: 2026-11-08 19:20
 status: superseded
 kind: fix
 issues: [327]
 prs: [346]
 areas: [src/lib/recordings, src/lib/pipeline, src/db/queries/async-jobs.ts, src/components/recordings/recording-cut.tsx]
 supersedes: [2026-11-03-destructive-recording-cut]
-superseded-by: [2026-11-08-recording-cut-sentence-boundaries]
+superseded-by: [2026-11-08-recording-cut-sentence-boundaries, 2026-11-08-ai-trim-proposal-before-learn]
 relates: []
 ---
 
@@ -17,6 +17,8 @@ relates: []
 The owner cuts a shared recording in place from their private view. Organization folders keep the recording, colleagues see the retained content, and generated results are rebuilt through the existing owner-scoped pipeline. An intended Organization placement waits while a cut is pending or processing.
 
 **Superseded in part** by [sentence-boundary recording cuts](2026-11-08-recording-cut-sentence-boundaries.md): the cut controls move into a panel above the transcript, with typed sentence-snapped edges and paragraph-gap actions. Inline errors still retain the selection; sharing, locking, polling and all other rules remain in force.
+
+**Superseded in part** by [AI trim proposals before Learn](2026-11-08-ai-trim-proposal-before-learn.md): Intended sharing also waits for running or pending owner trim decisions. Already-shared content stays shared and cuts still commit in place.
 
 ## Why
 

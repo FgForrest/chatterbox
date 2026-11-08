@@ -48,6 +48,7 @@ import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
 import { plaudActionItemsFingerprint } from "@/lib/tasks/plaud-proposals";
 import { waitingTaskDecisions } from "@/lib/tasks/waiting-review";
 import { TOPICS_JOB_KIND } from "@/lib/topics/topics-job";
+import { readPreferredTranscript } from "@/lib/transcription/read-source";
 import { TRANSCRIPTION_JOB_KIND } from "@/lib/transcription/transcription-job";
 
 async function providerAvailable(
@@ -625,6 +626,14 @@ export async function gatherFacts(
     const profile = resolvedProfile
         ? {
               revisionId: resolvedProfile.revisionId,
+              trim:
+                  "trim" in resolvedProfile.settings.steps
+                      ? {
+                            automatic:
+                                !manualOnly &&
+                                resolvedProfile.settings.steps.trim.automatic,
+                        }
+                      : undefined,
               tasksEnabled: resolvedProfile.settings.steps.tasks.enabled,
               transcribe:
                   "transcribe" in resolvedProfile.settings.steps
@@ -735,7 +744,19 @@ export async function gatherFacts(
               : "riffado";
     const summaryContent =
         summarySource === "plaud" ? plaudTranscript : content;
+    const trimTranscript =
+        item.kind === "audio"
+            ? await readPreferredTranscript(itemId, userId)
+            : null;
     return {
+        trimContent: trimTranscript
+            ? {
+                  contentId: trimTranscript.id,
+                  contentSourceId: trimTranscript.source,
+                  contentRevision: trimTranscript.revision,
+                  timed: trimTranscript.turns !== null,
+              }
+            : null,
         item: {
             exists: true,
             deleted: item.deletedAt !== null,

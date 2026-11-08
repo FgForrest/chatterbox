@@ -8,6 +8,7 @@ import { and, eq, inArray, isNull, notExists, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { cancelAgendaSuggestionsForRecordingInTx } from "@/db/queries/agenda-suggestions";
 import { lockPipelineTargetsInTx } from "@/db/queries/pipeline-jobs";
+import { trimSnapshotMatches } from "@/db/queries/trim-proposal";
 import {
     agendaPoints,
     agendaSuggestions,
@@ -61,12 +62,14 @@ import {
 } from "@/lib/recordings/erase";
 import { buildRecordingStorageFilename } from "@/lib/recordings/filename";
 import { enqueueStorageReconciliationJob } from "@/lib/recordings/storage-reconciliation-job";
+import type { StoredTrimProposal } from "@/lib/recordings/trim-proposal";
 import { isRecordingShared } from "@/lib/sharing/shared";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { sharingOrgUserId } from "@/lib/sharing/writer";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import type { StorageProvider } from "@/lib/storage/types";
 import { lockItemTaskGraphInTx } from "@/lib/tasks/mentions";
+import { preferredTranscript } from "@/lib/transcription/preferred-source";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
@@ -168,6 +171,21 @@ export async function commitRecordingCut(
         payload,
         jobId,
     );
+    if (payload.trimProposalId) {
+        const proposal = decryptJsonField<StoredTrimProposal>(
+            recording.trimProposal,
+        );
+        if (
+            !proposal ||
+            proposal.id !== payload.trimProposalId ||
+            !(await trimSnapshotMatches({ recording, transcripts }, proposal))
+        )
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "The trim proposal changed. Reload the recording.",
+                409,
+            );
+    }
     if (
         recording.storagePath !== decryptText(payload.encryptedStoragePath) ||
         recording.fileMd5 !== payload.fileMd5 ||
@@ -239,6 +257,7 @@ export async function commitRecordingCut(
                 : { waveformPeaks: null }),
             duration: audio?.duration ?? payload.endMs - payload.startMs,
             cutAt: now,
+            trimProposal: null,
             updatedAt: now,
         })
         .where(
@@ -559,6 +578,7 @@ export async function commitRecordingCut(
                     "learn.run",
                     "learn.release",
                     "learn.correct",
+                    "trim.propose",
                     "pipeline.action",
                 ]),
                 inArray(asyncJobs.status, ["pending", "processing"]),
@@ -601,6 +621,19 @@ export async function commitRecordingCut(
         delete phases.summary;
         delete phases.taskReview;
         delete phases.share;
+        const preferred = preferredTranscript(transcripts);
+        if (processing.view === "private" && preferred)
+            phases.trim = {
+                state: "done",
+                reason: "cut_applied",
+                generation: processing.requestedGeneration,
+                at: now.toISOString(),
+                inputs: {
+                    contentId: preferred.id,
+                    contentSourceId: preferred.source,
+                    contentRevision: preferred.revision + 1,
+                },
+            };
         await tx
             .update(itemProcessing)
             .set({ phases, updatedAt: now })

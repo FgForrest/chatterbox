@@ -434,3 +434,7 @@ describe("issue #122 — OpenRouter transcription uses chat-completions", () => 
         expect(audioPart?.input_audio?.format).toBe("mp3");
     });
 });
+
+vi.mock("@/db/queries/trim-state", () => ({
+    resolveTrimInTx: vi.fn(async () => false),
+}));

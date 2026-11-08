@@ -6,6 +6,7 @@ export type PipelineView = "private" | "org";
 export type PhaseName =
     | "categorize"
     | "transcribe"
+    | "trim"
     | "learn"
     | "summary"
     | "taskReview"
@@ -48,7 +49,7 @@ export interface PhaseStepRecord {
     inputFingerprint?: string | null;
 }
 
-export type ProfileStepName = "transcribe" | "learn" | SummaryStepName;
+export type ProfileStepName = "transcribe" | "trim" | "learn" | SummaryStepName;
 
 export interface PlacementProfileBinding {
     profileId: string;
@@ -72,6 +73,7 @@ export interface PhaseRecord {
     at: string;
     steps?: Partial<Record<SummaryStepName, PhaseStepRecord>>;
     profileRevisionId?: string;
+    proposalId?: string;
     staleFingerprint?: string;
     problems?: ShareGateProblem[];
     profileChoice?: "manual" | "placement";
@@ -86,6 +88,7 @@ export type PipelinePhases = Partial<Record<PhaseName, PhaseRecord>>;
 export interface PipelineProfileFacts {
     revisionId: string;
     tasksEnabled?: boolean;
+    trim?: { automatic: boolean };
     learn?: {
         automatic: boolean;
     };
@@ -120,6 +123,7 @@ export interface PipelineFacts {
     legacyContinuation?: boolean;
     profileUnavailable?: boolean;
     content: (ContentRevisionInput & { timed: boolean }) | null;
+    trimContent?: (ContentRevisionInput & { timed: boolean }) | null;
     transcription?: {
         riffado: (ContentRevisionInput & { timed: boolean }) | null;
         plaud: (ContentRevisionInput & { timed: boolean }) | null;
@@ -207,6 +211,8 @@ export type PipelineAction =
           source: "plaud" | "riffado" | "mail";
           input: ContentRevisionInput;
       }
+    | { type: "queueTrim"; input: ContentRevisionInput }
+    | { type: "resolveTrim"; reason: "timed_out" | "profile_off" }
     | { type: "releaseLearnHold" }
     | { type: "releaseLearnTimeout" }
     | { type: "executeShares" }

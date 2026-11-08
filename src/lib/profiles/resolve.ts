@@ -17,6 +17,8 @@ import { mayUseProfile } from "@/lib/profiles/access";
 import { profileHistoryName } from "@/lib/profiles/history-name";
 import { ensureProfiles } from "@/lib/profiles/seed";
 import {
+    type AudioProfileSettings,
+    type MailProfileSettings,
     type ProfileChannel,
     type ProfileSettings,
     parseProfileSettings,
@@ -279,6 +281,21 @@ async function defaultProfile(input: {
 }
 
 /** Resolve the owner's current default profile when no item exists yet. */
+export function resolveDefaultProfile(
+    ownerUserId: string,
+    channel: "audio",
+    actorUserId?: string,
+): Promise<ResolvedItemProfile & { settings: AudioProfileSettings }>;
+export function resolveDefaultProfile(
+    ownerUserId: string,
+    channel: "mail",
+    actorUserId?: string,
+): Promise<ResolvedItemProfile & { settings: MailProfileSettings }>;
+export function resolveDefaultProfile(
+    ownerUserId: string,
+    channel: ProfileChannel,
+    actorUserId?: string,
+): Promise<ResolvedItemProfile>;
 export async function resolveDefaultProfile(
     ownerUserId: string,
     channel: ProfileChannel,

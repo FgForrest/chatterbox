@@ -3,7 +3,7 @@ import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import type { ProcessingStep } from "@/lib/pipeline/processing-status";
 import type { PhaseName } from "@/lib/pipeline/types";
 
-export type WorkflowStepId = "record" | "receive" | PhaseName;
+export type WorkflowStepId = "record" | "receive" | Exclude<PhaseName, "trim">;
 
 export type WorkflowStepState =
     | "done"
@@ -51,6 +51,9 @@ export type WorkflowMessageCode =
     | "manualTranscription"
     | "learnQueued"
     | "learnRunning"
+    | "trimCutting"
+    | "trimRunning"
+    | "trimReview"
     | "learnCorrecting"
     | "learnReview"
     | "manualLearnReview"
@@ -83,6 +86,7 @@ export type WorkflowActionCode =
     | "transcribe"
     | "summarize"
     | "reviewLearn"
+    | "reviewTrim"
     | "reviewTasks"
     | "shareNow"
     | "retry"
@@ -109,7 +113,7 @@ export interface WorkflowStatus {
     status: WorkflowStatusSentence | null;
 }
 
-const phaseOrder: PhaseName[] = [
+const phaseOrder: Exclude<PhaseName, "trim">[] = [
     "categorize",
     "transcribe",
     "learn",
@@ -141,7 +145,11 @@ function displayState(step: ProcessingStep): WorkflowStepState {
         )
     )
         return "next";
-    if (["learnReview", "taskReview"].includes(step.waitingFor?.kind ?? ""))
+    if (
+        ["learnReview", "trimReview", "taskReview"].includes(
+            step.waitingFor?.kind ?? "",
+        )
+    )
         return "review";
     return "waiting";
 }
@@ -206,6 +214,17 @@ function sentence(
     data: ItemProcessingPresentation,
 ): WorkflowStatusSentence | null {
     const action = step.actions[0];
+    if (step.reason === "trim_cutting")
+        return { actor: "working", message: "trimCutting" };
+    if (step.reason === "trim_running")
+        return { actor: "working", message: "trimRunning" };
+    if (step.waitingFor?.kind === "trimReview")
+        return {
+            actor: action === "reviewTrim" ? "yours" : "others",
+            message: "trimReview",
+            action,
+            params: { until: step.waitingFor.until },
+        };
     const withAction = (
         value: WorkflowStatusSentence,
     ): WorkflowStatusSentence => (action ? { ...value, action } : value);

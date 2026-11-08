@@ -21,6 +21,7 @@ import {
     varchar,
 } from "drizzle-orm/pg-core";
 import { nanoid } from "nanoid";
+import type { EncryptedJsonEnvelope } from "@/lib/encryption/fields";
 import type { PipelinePhases } from "@/lib/pipeline/types";
 
 export const userPlanEnum = pgEnum("user_plan", [
@@ -807,6 +808,7 @@ export const recordings = pgTable(
         // audio, a manual re-run rewrites the transcript or summary.
         audioReapedAt: timestamp("audio_reaped_at"),
         cutAt: timestamp("cut_at"),
+        trimProposal: jsonb("trim_proposal").$type<EncryptedJsonEnvelope>(),
         // DB-backed claim for the external remote-trash operation. The
         // retention worker runs in every app process, so this prevents two
         // processes from moving the same remote original concurrently.

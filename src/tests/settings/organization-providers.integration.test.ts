@@ -236,6 +236,7 @@ describeWithDatabase(
                     isDefaultLearn: true,
                     isDefaultTopics: true,
                     isDefaultTitle: true,
+                    isDefaultTrim: true,
                 }),
             );
             const created = await createdResponse.json();
@@ -250,6 +251,7 @@ describeWithDatabase(
                 learn: id,
                 topics: id,
                 title: id,
+                trim: id,
             });
 
             const listed = await listOrganizationProviders(request("GET"));
@@ -261,6 +263,7 @@ describeWithDatabase(
                 isDefaultLearn: true,
                 isDefaultTopics: true,
                 isDefaultTitle: true,
+                isDefaultTrim: true,
             });
 
             state.actorId = "member";
@@ -271,6 +274,20 @@ describeWithDatabase(
                 context(id),
             );
             expect(response.status).toBe(403);
+        });
+
+        it("rejects a transcription-only Organization trim default", async () => {
+            const response = await createOrganizationProvider(
+                request("POST", {
+                    provider: "ElevenLabs",
+                    apiKey: "test-key",
+                    isDefaultTrim: true,
+                }),
+            );
+            expect(response.status).toBe(400);
+            expect(
+                await databaseClient().select().from(apiCredentials),
+            ).toHaveLength(0);
         });
 
         it("refuses to assign an Organization role to a disabled provider", async () => {

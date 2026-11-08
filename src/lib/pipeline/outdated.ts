@@ -6,6 +6,7 @@ import type {
     PipelinePhases,
     SummaryStepName,
 } from "@/lib/pipeline/types";
+import { trimHolds } from "@/lib/recordings/trim-proposal";
 
 export type OutdatedReason =
     | "content_changed"
@@ -96,6 +97,11 @@ export function markPhasesOutdatedForProfileChange(
     at: string,
 ): PipelinePhases {
     const next = { ...phases };
+    if (trimHolds(phases.trim) && phases.trim)
+        next.trim = {
+            ...outdatedRecord(phases.trim, generation, at, "profile_changed"),
+            jobId: undefined,
+        };
     for (const phase of PROFILE_DOWNSTREAM_PHASES) {
         const record = phases[phase];
         if (record) {

@@ -1,7 +1,7 @@
 ---
 title: Learn proposes knowledge from transcripts for a person to confirm; knowledge stays encrypted and is searched in memory
 date: 2026-09-30
-updated: 2026-11-03 09:25
+updated: 2026-11-08 19:20
 status: superseded
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [69]
 areas: [src/lib/learn, src/lib/knowledge, src/lib/sharing/share-gate.ts, src/app/api/mcp/learn, src/lib/learn/auto-learn.ts]
 supersedes: [2026-09-14-speaker-identity-without-biometrics]
 superseded-by: [2026-10-01-almanac-and-new-records, 2026-10-02-almanac-guided-transcript-correction, 2026-11-02-quick-finish-of-reviews, 2026-11-03-destructive-recording-cut]
-relates: [2026-09-28-agent-bridge-cli-providers, 2026-09-30-self-hosted-embeddings, 2026-09-30-shared-recording-edited-by-organization, 2026-10-01-name-matching-across-word-forms, 2026-10-12-calendar-meet-speaker-candidates, 2026-10-20-learn-review-one-column, 2026-09-23-shared-organization-scope, 2026-09-13-durable-job-queue, 2026-10-22-recording-language-checked-by-learn]
+relates: [2026-09-28-agent-bridge-cli-providers, 2026-09-30-self-hosted-embeddings, 2026-09-30-shared-recording-edited-by-organization, 2026-10-01-name-matching-across-word-forms, 2026-10-12-calendar-meet-speaker-candidates, 2026-10-20-learn-review-one-column, 2026-09-23-shared-organization-scope, 2026-09-13-durable-job-queue, 2026-10-22-recording-language-checked-by-learn, 2026-11-08-ai-trim-proposal-before-learn]
 ---
 
 # Learn: knowledge from recordings, proposed by a model and confirmed by a person
@@ -273,6 +273,8 @@ share would bring it back; the refusal lifts when the Organization has a type of
 - `evaluation.md`: the thresholds and every evaluation round, per model and path, with the decision
   each round drove. The evaluation accounts and stack were deleted after PR #72 and the recordings
   are private, so the numbers cannot be regenerated.
+
+- [AI trim proposals before Learn](../2026-11-08-ai-trim-proposal-before-learn.md): reuses this contract for whole-transcript suggestions and an owner decision before automatic work.
 
 ## Timeline
 

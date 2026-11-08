@@ -190,8 +190,13 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
                 source: "riffado",
                 revision,
             });
-        if (!categorized) return;
         const profile = await resolveDefaultProfile(USER_ID, "audio");
+        profile.settings.steps.trim.automatic = false;
+        await db()
+            .update(processingProfileRevisions)
+            .set({ settings: JSON.stringify(profile.settings) })
+            .where(eq(processingProfileRevisions.id, profile.revisionId));
+        if (!categorized) return;
         await db().insert(recordingFolderAssignments).values({
             userId: USER_ID,
             itemId,
@@ -241,6 +246,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
             throw new Error("expected a frozen profile revision");
         }
         const settings = defaultProfileSettings("audio");
+        settings.steps.trim.automatic = false;
         settings.steps.title = { ...settings.steps.title, automatic: false };
         settings.steps.topics = {
             ...settings.steps.topics,

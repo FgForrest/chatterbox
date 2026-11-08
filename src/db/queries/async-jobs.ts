@@ -22,6 +22,7 @@ import {
     terminalStepOutcome,
     wakePipelineInTx,
 } from "@/db/queries/pipeline-jobs";
+import { lockTrimRecording, resolveTrimInTx } from "@/db/queries/trim-state";
 import {
     asyncJobs,
     chatterItems,
@@ -30,7 +31,9 @@ import {
     transcriptCorrectionPasses,
 } from "@/db/schema";
 import { retryOnDeadlock } from "@/lib/deadlock-retry";
+import { JobDeferredError } from "@/lib/jobs/deferred";
 import type { StepOutcome } from "@/lib/pipeline/outcome";
+import { trimHolds } from "@/lib/recordings/trim-proposal";
 
 export type AsyncJobStatus = "pending" | "processing" | "completed" | "failed";
 
@@ -186,6 +189,10 @@ export async function enqueueJob(
     const snapshot = input.subjectId
         ? await getActiveJob(input.kind, input.subjectId, executor)
         : null;
+    const downstream =
+        target && (target.phase === "learn" || target.phase === "summary");
+    if (downstream)
+        await lockTrimRecording(executor, target.userId, target.itemId);
     await lockPipelineTargetsInTx(executor, [
         ...(target ? [target] : []),
         ...(snapshot?.userId === input.userId
@@ -198,6 +205,50 @@ export async function enqueueJob(
             [target],
             input.payload?.trigger !== "manual" && target.existingOnly !== true,
         );
+    if (downstream) {
+        const manual =
+            input.payload?.trigger === "manual" || target.existingOnly === true;
+        const [processing] = await executor
+            .select({ phases: itemProcessing.phases })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, target.itemId),
+                    eq(itemProcessing.userId, target.userId),
+                    eq(itemProcessing.view, "private"),
+                ),
+            )
+            .limit(1);
+        if (
+            manual &&
+            input.userId === target.userId &&
+            (input.kind === "learn.run" || input.kind === "summary")
+        )
+            await resolveTrimInTx(executor, {
+                userId: target.userId,
+                recordingId: target.itemId,
+                reason: "bypassed_manual",
+            });
+        if (!manual) {
+            const [cut] = await executor
+                .select({ id: asyncJobs.id })
+                .from(asyncJobs)
+                .where(
+                    and(
+                        eq(asyncJobs.userId, target.userId),
+                        eq(asyncJobs.subjectId, target.itemId),
+                        eq(asyncJobs.kind, "recording.cut"),
+                        isActive(),
+                    ),
+                )
+                .limit(1);
+            if (trimHolds(processing?.phases.trim) || cut)
+                throw new JobDeferredError(
+                    1000,
+                    "Waiting for the trim decision or cut",
+                );
+        }
+    }
     const bind = async (
         result: EnqueueJobResult,
     ): Promise<EnqueueJobResult> => {
@@ -452,6 +503,7 @@ export async function claimDueJobs(
 ): Promise<ClaimedAsyncJob[]> {
     if (limit <= 0) return [];
     const result =
+        kind === "trim.propose" ||
         kind === "pipeline.advance" ||
         kind === "pipeline.action" ||
         kind === "agenda.suggestions" ||

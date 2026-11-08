@@ -58,6 +58,12 @@ export const POST = apiHandler(async (request: Request) => {
         copyKeyFrom,
     } = body;
     const rates = parseProviderRates(body);
+    if (body.isDefaultTrim === true && isTranscriptionOnlyProvider(provider))
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "Choose an enabled chat provider for trim",
+            400,
+        );
 
     if (!provider || (!apiKey && !copyKeyFrom)) {
         throw new AppError(
@@ -197,6 +203,10 @@ export const POST = apiHandler(async (request: Request) => {
                 transaction: tx,
             });
         }
+        if (body.isDefaultTrim === true)
+            await setDefaultProvider(session.user.id, "trim", created.id, {
+                transaction: tx,
+            });
         await requestProviderRecoveryInTx(tx, session.user.id);
         return {
             id: created.id,
@@ -206,6 +216,7 @@ export const POST = apiHandler(async (request: Request) => {
             maxOutputTokens: created.maxOutputTokens,
             isDefaultTranscription: Boolean(isDefaultTranscription),
             isDefaultEnhancement: Boolean(isDefaultEnhancement),
+            isDefaultTrim: body.isDefaultTrim === true,
         };
     });
 

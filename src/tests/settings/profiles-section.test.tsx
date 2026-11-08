@@ -596,7 +596,7 @@ describe("Settings Profiles", () => {
         ).toBeTruthy();
         expect(
             screen.getByText(
-                "Sets the same provider pin for Learn, Title, Topics, and Summary. Default uses your role choice, then your summary choice for following roles, then the Organization role and summary defaults, then your first enabled chat provider, then the Organization’s oldest enabled chat provider.",
+                "Sets the same provider pin for Trim proposal, Learn, Title, Topics, and Summary. Default uses your role choice, then your summary choice for following roles, then the Organization role and summary defaults, then your first enabled chat provider, then the Organization’s oldest enabled chat provider.",
             ),
         ).toBeTruthy();
     });

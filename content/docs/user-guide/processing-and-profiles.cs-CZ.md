@@ -17,7 +17,7 @@ Položku můžete také přetáhnout na složku ve stromu. Položky adresované 
 
 Po zařazení se v řádku pod názvem zobrazí štítky složek, **Přidat do složky**, zamýšlené složky Organizace a vpravo štítek profilu. Jeho nabídka umožňuje změnit profil nebo zvolit **Bez automatického zpracování**.
 
-Výběrem složky Organizace vytvoříte zamýšlené umístění. Položka zůstane během zpracování soukromá. Klepna ji automaticky nasdílí, jakmile projde kontrolami přepisu, mluvčích a Učení. Kontrola úkolů sdílení nezdržuje. Při volbě **Bez automatického zpracování** místo toho čeká: zamýšlená složka v řádku nabízí **Sdílet nyní** a tlačítko pro zrušení.
+Výběrem složky Organizace vytvoříte zamýšlené umístění. Položka zůstane během zpracování soukromá. Klepna ji automaticky nasdílí, jakmile projde kontrolami přepisu, mluvčích a Učení. Zamýšlené sdílení čeká během posuzování ořezu, rozhodování vlastníka i samotného ořezávání. Odmítnutí, uplynutí čtyř hodin nebo dokončený ořez toto čekání uvolní. Již sdílené nahrávky zůstávají sdílené. Kontrola úkolů sdílení nezdržuje. Při volbě **Bez automatického zpracování** místo toho čeká: zamýšlená složka v řádku nabízí **Sdílet nyní** a tlačítko pro zrušení.
 
 <span id="profiles-are-processing-recipes" />
 
@@ -27,7 +27,7 @@ Profil zpracování je recept pro jeden druh položky. Profily zobrazíte a upra
 
 ![Seznam profilů zpracování](images/profiles.png)
 
-Každý profil obsahuje kroky pro daný druh položky. Profily nahrávek mohou přepisovat, spouštět Učení, vytvářet název, psát shrnutí, hledat témata a úkoly. Profily pošty začínají Učením a kroky shrnutí. Každý placený krok má vlastní přepínač **Spouštět automaticky**. Automatický název se vytvoří jen jednou, z prvního dokončeného shrnutí. Opakované shrnutí či přepis, oprava pomocí Učení, změna profilu ani volba **Zpracovat znovu** jej nenahradí. Vypnutý krok lze stále spustit ručně.
+Každý profil obsahuje kroky pro daný druh položky. Profily nahrávek mohou přepisovat, navrhovat ořez okrajů, spouštět Učení, vytvářet název, psát shrnutí, hledat témata a úkoly. Profily pošty začínají Učením a kroky shrnutí. Každý placený krok má vlastní přepínač **Spouštět automaticky**. Automatický název se vytvoří jen jednou, z prvního dokončeného shrnutí. Opakované shrnutí či přepis, oprava pomocí Učení, změna profilu ani volba **Zpracovat znovu** jej nenahradí. Vypnutý krok lze stále spustit ručně.
 
 Profil obsahuje také volby pro danou práci: poskytovatele a model, jazyk přepisu, instrukce shrnutí, jazyk a formát výstupu a nastavení funkce **Vícenásobné shrnování**. **Automaticky (podle obsahu)** zachová jazyk položky. Úprava profilu vytvoří novou revizi; rozpracované položky si ponechají revizi, se kterou začaly.
 
@@ -38,6 +38,16 @@ V horní části seznamu zvolíte samostatné výchozí profily pro nahrávky a 
 **Profily Organizace** jsou sdílené recepty. Členové je mohou používat na soukromé položky a duplikovat do osobního profilu. Štítek **Vaše výchozí** označuje profil, který právě používáte; **Výchozí profil Organizace** označuje volbu Organizace. Když sledujete výchozí profil Organizace, tento profil má oba štítky. Kurátoři mohou vytvářet a upravovat verze Organizace.
 
 Pokud je konkrétní profil Organizace, který jste zvolili, archivován nebo k němu ztratíte přístup, Klepna Vaši volbu zachová a v Profilech, nastavení složky i kartě Zařazení ji označí jako nedostupnou. Nové zpracování se zastaví, dokud nezvolíte jiný výchozí profil. Před archivací profilu Organizace kurátor uvidí počet členů, kteří jej zvolili, a stejné upozornění.
+
+<span id="trim-before-learn" />
+
+## Ořez před Učením
+
+**Návrh ořezu** je zapnutý v každém zvukovém profilu, včetně starších revizí bez přepínače ořezu. Vypnete jej uložením nové revize. Volba **Bez automatického zpracování** jej potlačí a pošta jej nikdy nepoužívá. Aktualizace se nevrací ke starým nahrávkám: posuzují se nové příchozí položky, nové přepisy a výslovné **Zpracovat znovu**.
+
+Jediný požadavek AI přečte celý přednostní přepis včetně oprav a smí navrhnout jen začátek, konec nebo oba okraje. Nic se automaticky neořízne. Na místě Učení se zobrazí **Posuzuje ořez…** a potom **Čeká na ořez**, pokud oranžová karta potřebuje Vaše rozhodnutí. Další kroužek nepřibývá. Prázdný výsledek pokračuje ihned; nepodporované časování, limit kontextu nebo nepoužitelná odpověď zobrazí neblokující přeskočení. Volba modelu s delším kontextem a výslovné nové zpracování zopakují celý vstup.
+
+Návrh čeká čtyři hodiny od vytvoření. **Neořezávat** nebo vypršení lhůty pokračuje bez ořezu. **Oříznout vybrané…** otevře stávající potvrzení nevratného smazání; **Upravit v přepisu** předvyplní panel ořezu, aniž cokoli přijme. Otevření, úpravy ani zrušení lhůtu neobnovují. Ruční spuštění Učení nebo shrnutí vlastníkem přeskočí čekání bez ořezu. Ruční práce kurátora nerozhoduje za vlastníka.
 
 <span id="folder-default-profiles" />
 
@@ -68,7 +78,7 @@ Pruh pod názvem položky zobrazuje všechny kroky v jednom řádku a potřebné
 | **Nahrávka** nebo **Přijato** | Ukazuje, že nahrávka nebo e-mail dorazily. |
 | **Zařazení** | Čeká na složky a určí profil. |
 | **Přepis** | Vytvoří přepis nahrávky. U pošty se tato fáze nezobrazuje. |
-| **Učení** | Najde jména, opravy a fakta ke kontrole. |
+| **Učení** | U zvuku nejprve posoudí návrh ořezu, potom najde jména, opravy a fakta ke kontrole. |
 | **Shrnout** | Vytvoří shrnutí a témata zvolená profilem. První dokončené shrnutí může vytvořit jediný automatický název položky. |
 | **Kontrola úkolů** | Čeká na kontrolu navržených úkolů a jejich změn. |
 | **Sdílet** | Po splnění kontrol nasdílí zamýšlené umístění v Organizaci. |

@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
+import { resolveTrimInTx } from "@/db/queries/trim-state";
 import { itemProcessing } from "@/db/schema";
 import { nudge } from "@/lib/jobs/nudge";
 import { JobDeferredError } from "@/lib/jobs/retryable";
@@ -12,6 +13,7 @@ import { enqueuePipelineAction } from "@/lib/pipeline/action-job";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import type { PipelineAction, PipelineView } from "@/lib/pipeline/types";
+import { queueTrim } from "@/lib/recordings/trim-job";
 import { queueAutoSummary } from "@/lib/summary/auto-summary";
 import { queueAutoTopics } from "@/lib/topics/topics-job";
 import { enqueueTranscriptionJob } from "@/lib/transcription/transcription-job";
@@ -30,6 +32,19 @@ export async function executePipelineAction(
 ): Promise<void> {
     const { action, itemId, userId, view, generation } = input;
     switch (action.type) {
+        case "queueTrim":
+            await queueTrim(userId, itemId, action.input);
+            return;
+        case "resolveTrim":
+            await db.transaction((tx) =>
+                resolveTrimInTx(tx, {
+                    userId,
+                    recordingId: itemId,
+                    reason: action.reason,
+                }),
+            );
+            nudge();
+            return;
         case "queueSummary":
             if (action.strict) {
                 await queueAutoSummary(userId, itemId, action.presetId, {

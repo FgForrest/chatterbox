@@ -2,7 +2,8 @@ import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { retryLostPipelineStepsInTx } from "@/db/queries/pipeline-jobs";
-import { itemProcessing } from "@/db/schema";
+import { lockTrimRecording } from "@/db/queries/trim-state";
+import { itemProcessing, recordings } from "@/db/schema";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { nudge } from "@/lib/jobs/nudge";
@@ -29,6 +30,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     );
 
     const advance = await db.transaction(async (tx) => {
+        const recording = await lockTrimRecording(tx, userId, itemId);
         const [processing] = await tx
             .select({
                 manualOnly: itemProcessing.manualOnly,
@@ -64,7 +66,9 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         if (
             !processing ||
             effectiveManualOnly(processing) ||
-            !processAgainPending(processing.phases)
+            (!processAgainPending(processing.phases) &&
+                !processing.phases.trim &&
+                !("trim" in steps && steps.trim.automatic))
         ) {
             throw new AppError(
                 ErrorCode.CONFLICT,
@@ -80,6 +84,38 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         });
         if (!requested) {
             throw new AppError(ErrorCode.NOT_FOUND, "Item not found", 404);
+        }
+        if (recording) {
+            await tx
+                .update(recordings)
+                .set({ trimProposal: null })
+                .where(
+                    and(
+                        eq(recordings.id, itemId),
+                        eq(recordings.userId, userId),
+                    ),
+                );
+            await tx
+                .update(itemProcessing)
+                .set({
+                    phases: {
+                        ...processing.phases,
+                        trim: {
+                            at: new Date().toISOString(),
+                            state: "outdated",
+                            reason: "process_again",
+                            jobId: undefined,
+                            generation: requested.requestedGeneration,
+                        },
+                    },
+                })
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, itemId),
+                        eq(itemProcessing.userId, userId),
+                        eq(itemProcessing.view, "private"),
+                    ),
+                );
         }
         await updatePhaseInTx(tx, itemId, "private", userId, "categorize", {
             state: "done",

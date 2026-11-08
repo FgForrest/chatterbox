@@ -30,6 +30,7 @@ import type { ProfileScope, ProfileSettings, ProviderPin } from "./settings";
 export type ProcessingStep =
     | "transcription"
     | "summary"
+    | "trim"
     | "learn"
     | "topics"
     | "title";
@@ -184,6 +185,10 @@ function candidateChoice(
     if (candidate.source === "member-summary") {
         return { kind: "member-default", role: "summary" };
     }
+    if (candidate.source === "member-title")
+        return { kind: "member-default", role: "title" };
+    if (candidate.source === "organization-title")
+        return { kind: "organization-default", role: "title" };
     if (
         candidate.source === "member-fallback" ||
         candidate.source === "organization-fallback"
@@ -572,6 +577,7 @@ async function resolveUnpinned(
     readOnly: boolean,
     organizationDefaultsOnly = false,
     readOnlyAccess?: () => Promise<HolderAccess>,
+    inheritedPins?: { title: ProviderPin | null; summary: ProviderPin | null },
 ): Promise<ResolvedStepProviderSelection> {
     const actorState: DefaultProviderState = organizationDefaultsOnly
         ? {
@@ -603,8 +609,24 @@ async function resolveUnpinned(
         organizationState?.pointers ?? null,
         actorState.credentials,
         hasSeparateOrganization ? organizationState?.credentials : [],
+        inheritedPins,
     );
     if (candidate) {
+        if (candidate.source === "profile-pin") {
+            const pin: ProviderPin = {
+                credentialId: candidate.providerId,
+                scope: candidate.scope ?? "personal",
+            };
+            return pin.scope === "personal"
+                ? resolvePinnedPersonal({ step, pin, actorUserId })
+                : resolvePinnedOrganization({
+                      step,
+                      pin,
+                      actorUserId,
+                      readOnly,
+                      readOnlyAccess,
+                  });
+        }
         const choice = candidateChoice(candidate, step);
         const personal = actorState.credentials.find(
             (credential) => credential.id === candidate.providerId,
@@ -687,6 +709,7 @@ export async function resolveStepProviderSelection(input: {
     readOnly?: boolean;
     readOnlyAccess?: () => Promise<HolderAccess>;
     organizationDefaultsOnly?: boolean;
+    inheritedPins?: { title: ProviderPin | null; summary: ProviderPin | null };
 }): Promise<ResolvedStepProviderSelection> {
     if (input.pin?.scope === "personal") {
         return resolvePinnedPersonal({ ...input, pin: input.pin });
@@ -700,6 +723,7 @@ export async function resolveStepProviderSelection(input: {
         input.readOnly === true,
         input.readOnly === true && input.organizationDefaultsOnly === true,
         input.readOnlyAccess,
+        input.inheritedPins,
     );
 }
 
@@ -708,6 +732,7 @@ export async function resolveStepProvider(input: {
     step: ProcessingStep;
     pin: ProviderPin | null;
     actorUserId: string;
+    inheritedPins?: { title: ProviderPin | null; summary: ProviderPin | null };
 }): Promise<ResolvedStepProvider> {
     return decryptResolvedProvider(await resolveStepProviderSelection(input));
 }

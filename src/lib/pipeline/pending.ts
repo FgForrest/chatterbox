@@ -6,6 +6,7 @@ import {
     AssignedProfileUnavailableError,
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
+import { trimHolds } from "@/lib/recordings/trim-proposal";
 import { preferredTranscript } from "@/lib/transcription/preferred-source";
 
 export type PipelineQueueStep = "summary" | "topics";
@@ -36,7 +37,12 @@ export async function pipelineMayQueue(
         )
         .limit(1);
 
-    if (!item || item.summaryDueAt !== null || effectiveManualOnly(item))
+    if (
+        !item ||
+        item.summaryDueAt !== null ||
+        effectiveManualOnly(item) ||
+        trimHolds(item.phases?.trim)
+    )
         return false;
     const profile = await resolveItemProfile(itemId, "private", userId).catch(
         (error: unknown) => {

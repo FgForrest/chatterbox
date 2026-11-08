@@ -211,3 +211,7 @@ describe("recording artifact erasure", () => {
         );
     });
 });
+
+vi.mock("@/db/queries/trim-state", () => ({
+    resolveTrimInTx: vi.fn(async () => false),
+}));

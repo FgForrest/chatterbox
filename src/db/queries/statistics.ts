@@ -123,7 +123,7 @@ export async function loadStatistics(
     const payerScope = owner(aiUsageEvents.payerUserId);
     const knownStep = sql`case ${aiUsageEvents.operation}
         when 'transcription' then 0 when 'learn' then 1 when 'correction' then 1
-        when 'summary' then 2 when 'topics' then 3 when 'title' then 4 else 5 end`;
+        when 'summary' then 2 when 'topics' then 3 when 'title' then 4 when 'trim' then 6 else 5 end`;
 
     let snapshotOwners: SQL;
     let firstMeasurementScope: SQL;
@@ -423,6 +423,7 @@ export async function loadStatistics(
             "topicsCost",
             "titleCost",
             "otherCost",
+            "trimCost",
         ][step];
         if (costMetric) add(dayIndex, costMetric, cost);
         add(dayIndex, "mailCost", Number(row.mail_cost));

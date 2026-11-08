@@ -11,6 +11,7 @@ import type {
     PipelinePlan,
     SummaryStepName,
 } from "@/lib/pipeline/types";
+import { trimHolds } from "@/lib/recordings/trim-proposal";
 
 function sameInput(
     record: PhaseRecord | undefined,
@@ -28,6 +29,7 @@ function markPhase(
     phase:
         | "categorize"
         | "transcribe"
+        | "trim"
         | "learn"
         | "summary"
         | "taskReview"
@@ -473,6 +475,7 @@ function sameProblems(
 function planShare(facts: PipelineFacts, actions: PipelineAction[]): void {
     if (facts.categorization.intendedFolderIds.length === 0) return;
     if (facts.share?.cutJobActive) return;
+    if (trimHolds(facts.phases.trim)) return;
     if (facts.phases.share?.jobId || facts.phases.share?.state === "failed")
         return;
     if ((facts.phases.share?.generation ?? -1) >= facts.generation) return;
@@ -935,7 +938,8 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
     if (
         processAgainPending(facts.phases) &&
         !facts.manualOnly &&
-        profileHasAutomaticStep
+        profileHasAutomaticStep &&
+        facts.phases.trim?.state !== "outdated"
     ) {
         planShare(facts, actions);
         return { actions };
@@ -948,7 +952,9 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
         facts.item.kind === "audio"
             ? (riffadoTranscript ??
               (profileTranscription?.plaudTranscript === "use"
-                  ? plaudTranscript
+                  ? facts.trimContent?.contentSourceId === "mixed"
+                      ? facts.trimContent
+                      : plaudTranscript
                   : null))
             : facts.content;
 
@@ -1075,6 +1081,7 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
     if (
         facts.item.kind === "audio" &&
         content.contentSourceId !== "riffado" &&
+        content.contentSourceId !== "mixed" &&
         content.contentSourceId !== "plaud"
     ) {
         return { actions: [], reason: "gone" };
@@ -1158,6 +1165,10 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
 
     if (facts.manualOnly) {
         const learn = facts.phases.learn;
+        if (trimHolds(facts.phases.trim)) {
+            actions.push({ type: "resolveTrim", reason: "profile_off" });
+            return { actions };
+        }
         if (
             facts.summaryDueAt &&
             Date.parse(facts.summaryDueAt) < Date.parse(facts.at)
@@ -1242,6 +1253,47 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
         actions.push(...taskReviewActions(facts, true));
         planShare(facts, actions);
         return { actions };
+    }
+    if (facts.item.kind === "audio" && facts.profile?.trim) {
+        const trimInput = facts.trimContent ?? input;
+        const trim = facts.phases.trim;
+        const enabled = facts.profile.trim.automatic;
+        if (!enabled && trimHolds(trim)) {
+            actions.push({ type: "resolveTrim", reason: "profile_off" });
+            return { actions };
+        }
+        if (enabled) {
+            if (facts.transcription?.jobActive || facts.share?.cutJobActive)
+                return { actions };
+            if (
+                trim?.state === "waiting" &&
+                trim.waitingFor?.kind === "trimReview"
+            ) {
+                if (trim.waitingFor.until && trim.waitingFor.until <= facts.at)
+                    actions.push({ type: "resolveTrim", reason: "timed_out" });
+                return { actions };
+            }
+            if (trim?.jobId) return { actions };
+            const settled =
+                trim &&
+                ["done", "skipped", "failed"].includes(trim.state) &&
+                !["content_changed"].includes(trim.reason ?? "") &&
+                sameInput(trim, trimInput) &&
+                (minimumGeneration === undefined ||
+                    trim.generation >= minimumGeneration ||
+                    trim.reason === "cut_applied");
+            const completedBeforeTrim =
+                !trim &&
+                minimumGeneration === undefined &&
+                sameInput(facts.phases.summary, trimInput) &&
+                ["done", "skipped", "failed"].includes(
+                    facts.phases.summary?.state ?? "",
+                );
+            if (!settled && !completedBeforeTrim) {
+                actions.push({ type: "queueTrim", input: trimInput });
+                return { actions };
+            }
+        }
     }
     const learn = facts.phases.learn;
     if (learn?.jobId && !facts.learnRunOpen && !facts.learnCorrectionInFlight)

@@ -18,6 +18,7 @@ import {
     processingProfiles,
     recordingFolderAssignments,
     recordingFolders,
+    recordings,
     transcriptions,
     transcriptSpeakers,
     users,
@@ -99,6 +100,7 @@ import {
 } from "@/lib/encryption/fields";
 import { lockOrgTree } from "@/lib/folders/folders";
 import { lockOrgPeople } from "@/lib/knowledge/org-people";
+import { modelInput } from "@/lib/learn/llm-input";
 import {
     enqueuePipelineAction,
     pipelineActionJobHandler,
@@ -112,6 +114,7 @@ import {
     commitRecordingCut,
     recordingCutJobHandler,
 } from "@/lib/recordings/cut-job-handler";
+import type { StoredTrimProposal } from "@/lib/recordings/trim-proposal";
 import { requireRecordingView } from "@/lib/sharing/access";
 import { lockItemTaskGraphInTx } from "@/lib/tasks/mentions";
 import { insertRecordings } from "@/tests/integration/items";
@@ -220,6 +223,7 @@ describe.skipIf(!url)(
                 autoSummarize: true,
                 autoDetectTopics: true,
             });
+            settings.steps.trim.automatic = false;
             await db.insert(processingProfiles).values({
                 id: "profile",
                 ownerUserId: "owner",
@@ -311,6 +315,125 @@ describe.skipIf(!url)(
                 );
             });
         }
+        it("commits an accepted trim proposal and settles the retained revision without proposing again", async () => {
+            const db = database.db;
+            const [transcript] = await db
+                .select()
+                .from(transcriptions)
+                .where(eq(transcriptions.id, "transcript"));
+            const fingerprint = (await modelInput(transcript)).fingerprint;
+            if (!fingerprint) throw new Error("Missing input fingerprint");
+            const proposal: StoredTrimProposal = {
+                schemaVersion: 1,
+                id: "reviewed-trim",
+                promptVersion: 1,
+                createdAt: new Date().toISOString(),
+                deadline: new Date(Date.now() + 14_400_000).toISOString(),
+                transcript: {
+                    id: "transcript",
+                    source: "riffado",
+                    revision: 0,
+                },
+                revisions: [{ id: "transcript", revision: 0 }],
+                inputFingerprint: fingerprint,
+                audio: {
+                    duration: 10000,
+                    fileMd5: "a".repeat(32),
+                    cutAt: null,
+                },
+                profileRevisionId: "revision",
+                provider: {
+                    credentialId: "chat",
+                    provider: "Custom",
+                    model: "fake",
+                    payerUserId: "owner",
+                },
+                start: {
+                    firstKeptSentenceId: "t1s0",
+                    startMs: 2000,
+                    reason: "Unrelated opening",
+                },
+                end: {
+                    firstRemovedSentenceId: "t2s0",
+                    startMs: 8000,
+                    reason: "Unrelated ending",
+                },
+            };
+            await db
+                .update(recordings)
+                .set({ trimProposal: encryptJsonField(proposal) })
+                .where(
+                    and(
+                        eq(recordings.id, "recording"),
+                        eq(recordings.userId, "owner"),
+                    ),
+                );
+            const [processing] = await db
+                .select()
+                .from(itemProcessing)
+                .where(eq(itemProcessing.view, "private"));
+            await db
+                .update(itemProcessing)
+                .set({
+                    phases: {
+                        ...processing.phases,
+                        trim: {
+                            proposalId: proposal.id,
+                            state: "waiting",
+                            generation: 1,
+                            at: proposal.createdAt,
+                            inputs: {
+                                contentId: "transcript",
+                                contentSourceId: "riffado",
+                                contentRevision: 0,
+                            },
+                            waitingFor: {
+                                kind: "trimReview",
+                                until: proposal.deadline,
+                            },
+                        },
+                    },
+                })
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, "recording"),
+                        eq(itemProcessing.view, "private"),
+                    ),
+                );
+            await requestRecordingCut("owner", "recording", {
+                ...range,
+                revisions: [{ id: "transcript", revision: 0 }],
+                trimProposalId: proposal.id,
+            });
+            const [claimed] = await claimDueJobs("recording.cut", 1);
+            const job = {
+                ...claimed,
+                payload: recordingCutJobHandler.parsePayload(claimed.payload),
+            };
+            await commit(job);
+            const [retained] = await db
+                .select()
+                .from(transcriptions)
+                .where(eq(transcriptions.id, "transcript"));
+            expect(decryptText(retained.text)).toBe("S1: Kept words.");
+            const [recording] = await db
+                .select()
+                .from(recordings)
+                .where(eq(recordings.id, "recording"));
+            expect(recording.trimProposal).toBeNull();
+            const after = await facts();
+            expect(after.phases.trim).toMatchObject({
+                state: "done",
+                reason: "cut_applied",
+                inputs: { contentId: "transcript", contentRevision: 1 },
+            });
+            if (after.profile) after.profile.trim = { automatic: true };
+            expect(
+                planAdvance(after).actions.some(
+                    (action) => action.type === "queueTrim",
+                ),
+            ).toBe(false);
+        });
         it("resets the shared content and both stored views, then replans both export scopes", async () => {
             const db = database.db;
             await db.insert(recordingFolderAssignments).values({

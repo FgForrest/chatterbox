@@ -245,6 +245,10 @@ export function TranscriptionPanel({
     const [activeSource, setActiveSource] = useState<string | undefined>(
         undefined,
     );
+    useEffect(() => {
+        if (cut?.open && cut.proposalSource)
+            setActiveSource(cut.proposalSource);
+    }, [cut?.open, cut?.proposalSource]);
     const [openingReviewSource, setOpeningReviewSource] = useState<
         string | null
     >(null);
