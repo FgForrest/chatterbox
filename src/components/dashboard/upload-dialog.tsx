@@ -7,7 +7,7 @@ import {
     NewFolderForm,
     type NewFolderParent,
 } from "@/components/pipeline/new-folder-form";
-import { SharedFolderIcon } from "@/components/sharing/shared-folder-icon";
+import { FolderCombobox } from "@/components/recordings/folder-combobox";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -17,17 +17,10 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
 import { folderDisplayPath } from "@/lib/folders/labels";
 import type { FolderScope, RecordingFolder } from "@/types/folder";
 
-const FILE_LATER = "__file_later__";
+const FILE_LATER = "";
 
 export interface UploadFolderOption {
     id: string;
@@ -53,6 +46,7 @@ export function uploadFolderParents(
         .map((folder) => ({
             id: folder.id,
             path: folderDisplayPath(folder, byId, folderLabel),
+            folder,
         }));
 }
 
@@ -106,6 +100,7 @@ export function UploadDialog({
     const [folderId, setFolderId] = useState("");
     const [availableFolders, setAvailableFolders] = useState(folders);
     const [newFolderOpen, setNewFolderOpen] = useState(false);
+    const [newFolderName, setNewFolderName] = useState("");
 
     useEffect(() => setAvailableFolders(folders), [folders]);
 
@@ -151,36 +146,39 @@ export function UploadDialog({
                 </DialogHeader>
                 <div className="grid gap-2 text-sm">
                     <span className="font-medium">{i18n("Folder")}</span>
-                    <Select value={folderId} onValueChange={setFolderId}>
-                        <SelectTrigger
-                            id="upload-folder"
-                            className="w-full"
-                            aria-label={i18n("Folder")}
-                        >
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value={FILE_LATER}>
-                                {i18n("File later")}
-                            </SelectItem>
-                            {availableFolders.map((folder) => (
-                                <SelectItem key={folder.id} value={folder.id}>
-                                    {folder.receivedFolder && (
-                                        <SharedFolderIcon
-                                            folder={{
-                                                ...folder,
-                                                kind: "custom",
-                                                parentId: null,
-                                            }}
-                                        />
-                                    )}
-                                    {folder.path}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
+                    <FolderCombobox
+                        aria-label={i18n("Folder")}
+                        entries={availableFolders.map((folder) => ({
+                            folder: {
+                                ...folder,
+                                name: folder.name,
+                                kind: "custom",
+                                parentId: "",
+                            },
+                            path: folder.path.endsWith(` / ${folder.name}`)
+                                ? folder.path.slice(
+                                      0,
+                                      -` / ${folder.name}`.length,
+                                  )
+                                : "",
+                            depth: 0,
+                            nameMatch: true,
+                        }))}
+                        value={folderId}
+                        onValueChange={setFolderId}
+                        emptyChoiceLabel={i18n("File later")}
+                        onCreate={
+                            folderParents.length
+                                ? (query) => {
+                                      setNewFolderName(query);
+                                      setNewFolderOpen(true);
+                                  }
+                                : undefined
+                        }
+                    />
                     {newFolderOpen ? (
                         <NewFolderForm
+                            initialName={newFolderName}
                             parents={folderParents}
                             idPrefix="upload"
                             onCancel={() => setNewFolderOpen(false)}
@@ -191,7 +189,10 @@ export function UploadDialog({
                             type="button"
                             variant="outline"
                             className="w-full"
-                            onClick={() => setNewFolderOpen(true)}
+                            onClick={() => {
+                                setNewFolderName("");
+                                setNewFolderOpen(true);
+                            }}
                         >
                             {i18n("New folder")}
                         </Button>

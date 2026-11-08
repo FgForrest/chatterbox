@@ -2,6 +2,7 @@
 
 import { useExtracted } from "next-intl";
 import { useState } from "react";
+import { FolderCombobox } from "@/components/recordings/folder-combobox";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -12,11 +13,10 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { NativeSelect } from "@/components/ui/native-select";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { canManageOrganization } from "@/lib/folders/drag";
 import { descendantFolderIds } from "@/lib/folders/hierarchy";
-import { joinFolderPath, matchFolders } from "@/lib/folders/navigation";
+import { matchFolders } from "@/lib/folders/navigation";
 import { canCreateSubfolder } from "@/lib/folders/permissions";
 import type { RecordingFolder } from "@/types/folder";
 
@@ -120,27 +120,13 @@ export function FolderActionDialog({
                             disabled={saving}
                         />
                     ) : (
-                        <NativeSelect
+                        <FolderCombobox
                             aria-label={i18n("Destination folder")}
+                            entries={entries}
                             value={parentId}
-                            onChange={(event) =>
-                                setParentId(event.target.value)
-                            }
+                            onValueChange={setParentId}
                             disabled={saving}
-                            className="w-full"
-                        >
-                            {entries.map((entry) => (
-                                <option
-                                    key={entry.folder.id}
-                                    value={entry.folder.id}
-                                >
-                                    {joinFolderPath(
-                                        entry.path,
-                                        label(entry.folder),
-                                    )}
-                                </option>
-                            ))}
-                        </NativeSelect>
+                        />
                     )}
                     <DialogFooter>
                         <Button

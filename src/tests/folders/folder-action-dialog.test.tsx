@@ -8,7 +8,7 @@ import {
     waitFor,
 } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FolderActionDialog } from "@/components/dashboard/folder-action-dialog";
 import type { RecordingFolder } from "@/types/folder";
 
@@ -45,7 +45,21 @@ const received: RecordingFolder = {
         originalName: "Shared",
     },
 };
-afterEach(cleanup);
+beforeEach(() => {
+    vi.stubGlobal(
+        "ResizeObserver",
+        class {
+            observe() {}
+            disconnect() {}
+            unobserve() {}
+        },
+    );
+    Element.prototype.scrollIntoView = vi.fn();
+});
+afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+});
 function dialog(
     action: "create" | "move",
     target = folder,
@@ -178,16 +192,19 @@ describe("dedicated folder dialogs", () => {
         const select = screen.getByRole("combobox", {
             name: "Destination folder",
         });
+        fireEvent.click(select);
         expect(
             screen
                 .getAllByRole("option")
-                .map((option) => option.getAttribute("value")),
-        ).toEqual(["private", "other"]);
+                .map((option) => option.getAttribute("aria-label")),
+        ).toEqual(["Private", "Archive Private"]);
         expect(screen.getByRole("button", { name: "Move to…" })).toHaveProperty(
             "disabled",
             true,
         );
-        fireEvent.change(select, { target: { value: "other" } });
+        fireEvent.click(
+            screen.getByRole("option", { name: "Archive Private" }),
+        );
         fireEvent.click(screen.getByRole("button", { name: "Move to…" }));
         await waitFor(() =>
             expect(move).toHaveBeenCalledWith(folder.id, other.id),

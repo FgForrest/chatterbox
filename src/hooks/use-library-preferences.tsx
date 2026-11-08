@@ -47,6 +47,37 @@ export function useLibraryPreferences() {
     return useContext(LibraryPreferencesContext);
 }
 
+/** Remember a recording owner's explicit choice per account on this browser. */
+export function useAgendaRecordingPrivacy(
+    userId: string | undefined,
+    recordingId: string,
+) {
+    const key = userId
+        ? `klepna:agenda-recording-private:${userId}:${recordingId}`
+        : null;
+    const [state, setState] = useState<{
+        key: string | null;
+        dismissed: boolean;
+    }>({ key: null, dismissed: false });
+    useEffect(() => {
+        let dismissed = false;
+        try {
+            dismissed = !!key && localStorage.getItem(key) === "true";
+        } catch {}
+        setState({ key, dismissed });
+    }, [key]);
+    return {
+        ready: state.key === key,
+        dismissed: state.key === key && state.dismissed,
+        dismiss: () => {
+            setState({ key, dismissed: true });
+            try {
+                if (key) localStorage.setItem(key, "true");
+            } catch {}
+        },
+    };
+}
+
 export function useLibraryPreferencesState(
     userId: string | undefined,
     folders: RecordingFolder[],

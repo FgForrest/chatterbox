@@ -229,7 +229,13 @@ describe.each([
             within(screen.getByRole("group", { name: "Folders" })).getAllByRole(
                 "button",
             ),
-        ).toHaveLength(3);
+        ).toHaveLength(2);
+        expect(
+            within(screen.getByRole("group", { name: "Folders" })).getByRole(
+                "combobox",
+                { name: "Add to folder" },
+            ),
+        ).toBeTruthy();
         expect(
             screen.getByText("Invitees without tasks: Jitka Dvořáková +6"),
         ).toBeTruthy();
@@ -528,7 +534,7 @@ it("waits for a changed event link to be saved before permitting Calendar export
     ).toBe(false);
 });
 
-it("preserves organizer export from a linked absorbed agenda through read-only settings", () => {
+it("preserves organizer export from a linked absorbed agenda without showing settings", () => {
     render(
         frame(
             <AgendaBody
@@ -542,8 +548,9 @@ it("preserves organizer export from a linked absorbed agenda through read-only s
             />,
         ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Agenda settings" }));
-    expect(screen.getByLabelText("Title")).toHaveProperty("disabled", true);
+    expect(
+        screen.queryByRole("button", { name: "Agenda settings" }),
+    ).toBeNull();
     expect(screen.queryByRole("button", { name: "Delete agenda" })).toBeNull();
     expect(
         screen.getByRole("button", {

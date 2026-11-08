@@ -209,6 +209,7 @@ export async function matchRecorderAgendas(
         from: new Date(at.getTime() - 24 * 3600000),
         to: new Date(at.getTime() + 15 * 60000),
         includePast: true,
+        excludeAbsorbed: true,
     });
     const code = meetCode
         ? extractMeetCode({
@@ -221,6 +222,7 @@ export async function matchRecorderAgendas(
         from: new Date(at.getTime() - 24 * 3600000),
         to: new Date(at.getTime() + 15 * 60000),
         includePast: true,
+        excludeAbsorbed: true,
     });
     const byId = new Map(agendas.map((row) => [row.agenda.id, row.agenda]));
     scheduleRefresh?.(async () => {

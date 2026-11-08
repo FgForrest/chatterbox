@@ -17,12 +17,14 @@ import {
     receivedThroughFolderCondition,
 } from "@/db/queries/item-shares";
 import { meetingFolderVisibility } from "@/db/queries/meeting-folder-visibility";
+import { receivedMeetingCondition } from "@/db/queries/meeting-shares";
 import { taskVisible } from "@/db/queries/task-visibility";
 import {
     agendaPoints,
     agendaTasks,
     chatterItems,
     folderShares,
+    itemShares,
     meetingAgendas,
     receivedFolderAttachments,
     recordingFolderAssignments,
@@ -56,7 +58,10 @@ export function meetingVisibility(
             or(
                 and(
                     eq(item.kind, "meeting"),
-                    receivedThroughFolderCondition(userId, item.id),
+                    or(
+                        receivedThroughFolderCondition(userId, item.id),
+                        receivedMeetingCondition(userId, item.id),
+                    ),
                 ),
                 and(
                     inArray(item.kind, ["audio", "mail"]),
@@ -119,6 +124,7 @@ export async function findMeeting(
                 or(
                     eq(chatterItems.userId, userId),
                     receivedThroughFolderCondition(userId),
+                    receivedMeetingCondition(userId),
                     orgUserId ? sharedItemCondition(orgUserId) : undefined,
                 ),
             ),
@@ -142,11 +148,35 @@ export async function listMeetingRows(
         calendarEventId?: string;
         includePast?: boolean;
         includeAbsorbed?: boolean;
+        excludeAbsorbed?: boolean;
         limit?: number;
     } = {},
     executor: MeetingExecutor = db,
 ) {
     const taskItem = alias(chatterItems, "agenda_task_item");
+    const attachedItem = alias(chatterItems, "list_attached_item");
+    const recordingVisible = sql`exists (select 1 from ${chatterItems} list_attached_item
+        where ${attachedItem.id} = ${meetingAgendas.recordingItemId}
+          and ${meetingVisibility(userId, orgUserId, attachedItem)})`;
+    const visibleOriginalAbsorbed = and(
+        isNotNull(meetingAgendas.recordingItemId),
+        eq(chatterItems.kind, "meeting"),
+        or(
+            eq(chatterItems.userId, userId),
+            receivedThroughFolderCondition(userId),
+            receivedMeetingCondition(userId),
+            orgUserId ? sharedItemCondition(orgUserId) : undefined,
+        ),
+        sql`not (${recordingVisible})`,
+    );
+    let absorbedFilter: SQL | undefined;
+    if (input.excludeAbsorbed)
+        absorbedFilter = isNull(meetingAgendas.recordingItemId);
+    else if (!input.includeAbsorbed)
+        absorbedFilter = or(
+            isNull(meetingAgendas.recordingItemId),
+            visibleOriginalAbsorbed,
+        );
     const taskViewer = {
         userId,
         orgUserId,
@@ -178,25 +208,29 @@ export async function listMeetingRows(
             eq(
                 chatterItems.id,
                 input.includeAbsorbed
-                    ? sql`coalesce(${meetingAgendas.recordingItemId}, ${meetingAgendas.meetingItemId})`
+                    ? sql`case when ${recordingVisible} then ${meetingAgendas.recordingItemId} else ${meetingAgendas.meetingItemId} end`
                     : meetingAgendas.meetingItemId,
             ),
         )
         .where(
             and(
-                meetingVisibility(userId, orgUserId),
-                input.includeAbsorbed
-                    ? undefined
-                    : isNull(meetingAgendas.recordingItemId),
+                or(
+                    meetingVisibility(userId, orgUserId),
+                    visibleOriginalAbsorbed,
+                ),
+                absorbedFilter,
                 input.folderId
-                    ? sql`exists (select 1 from ${recordingFolderAssignments}
+                    ? sql`(exists (select 1 from ${recordingFolderAssignments}
                         inner join ${recordingFolders} on ${recordingFolders.id} = ${recordingFolderAssignments.folderId}
                         where ${recordingFolderAssignments.itemId} = ${chatterItems.id}
                         and ${meetingFolderVisibility(userId, orgUserId)} and (${recordingFolderAssignments.folderId} = ${input.folderId}
                         or ${recordingFolderAssignments.folderId} in (select ${folderShares.folderId} from ${receivedFolderAttachments}
                             inner join ${folderShares} on ${folderShares.id} = ${receivedFolderAttachments.shareId}
                             where ${receivedFolderAttachments.id} = ${input.folderId} and ${receivedFolderAttachments.userId} = ${userId}
-                              and ${folderShares.receiverUserId} = ${userId} and ${folderShares.state} = 'accepted')))`
+                              and ${folderShares.receiverUserId} = ${userId} and ${folderShares.state} = 'accepted')))
+                        or (${receivedMeetingCondition(userId)} and exists (select 1 from ${itemShares} filing
+                            where filing.item_id = ${chatterItems.id} and filing.receiver_user_id = ${userId}
+                            and filing.state = 'accepted' and filing.filing_folder_id = ${input.folderId})))`
                     : undefined,
                 input.overlapWith
                     ? sql`${meetingAgendas.plannedStart} < ${input.overlapWith.end.toISOString()}::timestamp and coalesce(${meetingAgendas.plannedEnd}, ${meetingAgendas.plannedStart} + interval '2 hours') > ${input.overlapWith.start.toISOString()}::timestamp`

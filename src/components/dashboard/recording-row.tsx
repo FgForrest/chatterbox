@@ -16,7 +16,7 @@ import {
     UserPlus,
 } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm-dialog";
 import { MailDeleteDialog } from "@/components/recordings/erase-recording-menu";
 import { FolderPicker } from "@/components/recordings/folder-picker";
@@ -122,6 +122,7 @@ export function RecordingRow({
     );
     const label = useFolderLabel();
     const [pickerOpen, setPickerOpen] = useState(false);
+    const actionsRef = useRef<HTMLButtonElement>(null);
     const source =
         sourceFolder?.kind === "custom"
             ? (folderLocations.find(
@@ -314,13 +315,19 @@ export function RecordingRow({
                         <Button
                             variant="ghost"
                             size="icon-sm"
+                            ref={actionsRef}
                             aria-label={i18n("Row actions")}
                             onClick={(e) => e.stopPropagation()}
                         >
                             <MoreHorizontal className="size-4" />
                         </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
+                    <DropdownMenuContent
+                        align="end"
+                        onCloseAutoFocus={(event) => {
+                            if (pickerOpen) event.preventDefault();
+                        }}
+                    >
                         <DropdownMenuItem onSelect={() => onSelect(recording)}>
                             <Play /> {i18n("Open")}
                         </DropdownMenuItem>
@@ -468,6 +475,7 @@ export function RecordingRow({
             </div>
             {onAssignRecording && pickerOpen && (
                 <FolderPicker
+                    anchorRef={actionsRef}
                     folders={folders}
                     canCurate={canCurate}
                     onCreated={onFolderCreated}

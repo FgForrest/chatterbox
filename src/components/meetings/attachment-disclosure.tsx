@@ -1,6 +1,12 @@
 "use client";
 
 import { useExtracted, useFormatter } from "next-intl";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { usePersonSharing } from "@/components/sharing/person-sharing";
+import { useAgendaRecordingPrivacy } from "@/hooks/use-library-preferences";
+import { getPasswordManagerAttributes } from "@/lib/password-manager";
+import { meetingRequest, meetingUrl, recordingAudienceConflict } from "./api";
 import type { AgendaCandidate } from "./types";
 
 export function AttachmentAudience({
@@ -36,8 +42,148 @@ export function AttachmentFilingNotice() {
     return (
         <p className="text-xs text-muted-foreground">
             {i18n(
-                "The recording will be filed into all of the agenda’s folders. Organization sharing may wait for the owner’s speaker review.",
+                "The recording will be filed into the agenda’s folders you can file into. Organization sharing may wait for the owner’s speaker review.",
             )}
         </p>
+    );
+}
+
+/** Load invitation consent for exactly one selected agenda and recording pair. */
+export function useAttachmentShareChoice(
+    agendaId: string,
+    recordingId: string,
+) {
+    const enabled = usePersonSharing();
+    const [offer, setOffer] = useState<{
+        agendaId: string;
+        recordingId: string;
+        people: { id: string; name: string | null }[];
+        checked: boolean;
+    } | null>(null);
+    useEffect(() => {
+        setOffer(null);
+        if (!enabled || !agendaId || !recordingId) return;
+        const abort = new AbortController();
+        void fetch(
+            `/api/meetings/${encodeURIComponent(agendaId)}/recording-shares?recordingItemId=${encodeURIComponent(recordingId)}`,
+            { signal: abort.signal },
+        )
+            .then(async (response) => {
+                if (response.ok) {
+                    const data = (await response.json()) as {
+                        people: { id: string; name: string | null }[];
+                    };
+                    if (!abort.signal.aborted)
+                        setOffer({
+                            agendaId,
+                            recordingId,
+                            people: data.people,
+                            checked: true,
+                        });
+                }
+            })
+            .catch(() => {});
+        return () => abort.abort();
+    }, [enabled, agendaId, recordingId]);
+    const current =
+        enabled &&
+        offer?.agendaId === agendaId &&
+        offer.recordingId === recordingId
+            ? offer
+            : null;
+    const shown = !!current?.people.length;
+    return {
+        people: current?.people ?? [],
+        shown,
+        checked: current?.checked ?? true,
+        shareRecording: shown && current?.checked === true,
+        onChange: (checked: boolean) =>
+            setOffer((value) =>
+                value?.agendaId === agendaId &&
+                value.recordingId === recordingId
+                    ? { ...value, checked }
+                    : value,
+            ),
+    };
+}
+
+/**
+ * The one consented attach flow of both entry points: the invitation choice, the browser's
+ * "Keep private" answer and the skip notices. `attach` reports success and toasts its failure.
+ */
+export function useAgendaAttachment(
+    agendaId: string,
+    recordingId: string,
+    userId: string | undefined,
+) {
+    const i18n = useExtracted();
+    const choice = useAttachmentShareChoice(agendaId, recordingId);
+    const privacy = useAgendaRecordingPrivacy(userId, recordingId);
+    async function attach(failure: string) {
+        try {
+            const result = await meetingRequest<{
+                recordingShare?: { skipped: { reason: string }[] };
+            }>(meetingUrl(agendaId, "/attach"), "POST", {
+                recordingItemId: recordingId,
+                shareRecording: choice.shareRecording,
+            });
+            if (choice.shown && !choice.checked) privacy.dismiss();
+            const skipped = result.recordingShare?.skipped ?? [];
+            if (skipped.some((person) => person.reason === "organization"))
+                toast.info(
+                    i18n("The Organization already sees the recording."),
+                );
+            else if (
+                skipped.some(
+                    (person) => person.reason !== "already_visible_or_invited",
+                )
+            )
+                toast.info(
+                    i18n(
+                        "The agenda was attached. Some recording invitations could not be sent.",
+                    ),
+                );
+            return true;
+        } catch (error) {
+            toast.error(
+                recordingAudienceConflict(error)
+                    ? i18n(
+                          "This recording is shared with people who cannot see the agenda. Limit its sharing before attaching it.",
+                      )
+                    : failure,
+            );
+            return false;
+        }
+    }
+    return { choice, attach };
+}
+
+/** Explicit recording invitation choice, shared by both attachment entry points. */
+export function AttachmentShareChoice({
+    choice,
+}: {
+    choice: ReturnType<typeof useAttachmentShareChoice>;
+}) {
+    const i18n = useExtracted();
+    if (!choice.shown) return null;
+    return (
+        <label className="flex items-start gap-2 text-sm">
+            <input
+                type="checkbox"
+                {...getPasswordManagerAttributes()}
+                checked={choice.checked}
+                onChange={(event) => choice.onChange(event.target.checked)}
+            />
+            <span>
+                {i18n("Share the recording with these people too: {names}", {
+                    names: choice.people
+                        .map((person) => person.name ?? i18n("Someone"))
+                        .join(", "),
+                })}
+                <span className="block text-xs text-muted-foreground">
+                    {i18n("They will receive an invitation.")}
+                </span>
+            </span>
+        </label>
     );
 }

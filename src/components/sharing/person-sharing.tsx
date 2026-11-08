@@ -2,6 +2,7 @@
 
 import {
     AudioLines,
+    CalendarClock,
     Check,
     FolderInput,
     FolderOutput,
@@ -22,6 +23,7 @@ import {
     useState,
 } from "react";
 import { toast } from "sonner";
+import { useOptionalConfirm } from "@/components/confirm-dialog";
 import { ArrivalNotice } from "@/components/dashboard/arrival-notice";
 import {
     closeCornerNotice,
@@ -61,8 +63,15 @@ import type { Recording } from "@/types/recording";
 
 type Share = Awaited<ReturnType<typeof listItemShares>>[number];
 type FolderAudience = Awaited<ReturnType<typeof listItemFolderAudience>>;
+type ItemInvitation = Awaited<ReturnType<typeof listMyInvitations>>[number];
 export type Invitation =
-    | Awaited<ReturnType<typeof listMyInvitations>>[number]
+    | (Omit<ItemInvitation, "suggestedFolder" | "plannedStart" | "recorded"> &
+          Partial<
+              Pick<
+                  ItemInvitation,
+                  "suggestedFolder" | "plannedStart" | "recorded"
+              >
+          >)
     | Awaited<ReturnType<typeof listMyFolderInvitations>>[number];
 const SharingContext = createContext(false);
 const SharingRefreshContext = createContext<() => void>(() => {});
@@ -127,11 +136,13 @@ export function PersonShareDialog({
     onChanged,
     allowInvite = true,
     inline = false,
+    absorbed = false,
 }: {
     itemId: string;
     title: string;
-    kind: "audio" | "mail" | "folder";
+    kind: "audio" | "mail" | "meeting" | "folder";
     inline?: boolean;
+    absorbed?: boolean;
     open: boolean;
     onOpenChange: (open: boolean) => void;
     onChanged?: (shares: Share[], folderAudience: FolderAudience) => void;
@@ -144,6 +155,12 @@ export function PersonShareDialog({
             ? `/api/folders/${encodeURIComponent(itemId)}/shares`
             : `/api/items/${encodeURIComponent(itemId)}/shares`;
     const [shares, setShares] = useState<Share[]>([]);
+    const [taskDisclosure, setTaskDisclosure] = useState<{
+        count: number;
+        title: string;
+        recordingItemId: string;
+        canInvite: boolean;
+    } | null>(null);
     const [folderAudience, setFolderAudience] = useState<FolderAudience>([]);
     const [managingFolder, setManagingFolder] = useState<{
         id: string;
@@ -155,6 +172,7 @@ export function PersonShareDialog({
     >([]);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [invitationsSkipped, setInvitationsSkipped] = useState(false);
     const load = useCallback(async () => {
         const response = await fetch(endpoint);
         if (!response.ok)
@@ -167,7 +185,9 @@ export function PersonShareDialog({
         const data = (await response.json()) as {
             shares: Share[];
             folderAudience?: FolderAudience;
+            agendaTasks?: typeof taskDisclosure;
         };
+        setTaskDisclosure(data.agendaTasks ?? null);
         setShares(data.shares);
         setFolderAudience(data.folderAudience ?? []);
         onChanged?.(data.shares, data.folderAudience ?? []);
@@ -251,13 +271,94 @@ export function PersonShareDialog({
         <>
             <h3 className="flex items-center gap-2">
                 <UserPlus className="size-5 text-person-share" />
-                {kind === "folder"
-                    ? i18n("Share folder")
-                    : kind === "mail"
-                      ? i18n("Share email")
-                      : i18n("Share recording")}
+                {kind === "meeting"
+                    ? i18n("Share agenda")
+                    : kind === "folder"
+                      ? i18n("Share folder")
+                      : kind === "mail"
+                        ? i18n("Share email")
+                        : i18n("Share recording")}
             </h3>
             <p className="text-sm text-muted-foreground">{title}</p>
+            {absorbed && (
+                <p className="text-sm text-muted-foreground">
+                    {i18n(
+                        "This agenda is recorded. Share the recording to invite more people.",
+                    )}
+                </p>
+            )}
+            {taskDisclosure && (
+                <div className="rounded border p-3 text-sm">
+                    <p>
+                        {i18n(
+                            "Invited people will not see {count, plural, one {# task} other {# tasks}} from the task-source recording “{title}”, which is not shared with them.",
+                            {
+                                count: taskDisclosure.count,
+                                title: taskDisclosure.title,
+                            },
+                        )}
+                    </p>
+                    {taskDisclosure.canInvite && (
+                        <Button
+                            disabled={busy}
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                                void act(async () => {
+                                    const response = await fetch(
+                                        `/api/meetings/${encodeURIComponent(itemId)}/recording-shares`,
+                                        {
+                                            method: "POST",
+                                            headers: {
+                                                "Content-Type":
+                                                    "application/json",
+                                            },
+                                            body: JSON.stringify({
+                                                recordingItemId:
+                                                    taskDisclosure.recordingItemId,
+                                                taskSource: true,
+                                            }),
+                                        },
+                                    );
+                                    if (!response.ok)
+                                        throw new Error(
+                                            await getApiErrorMessage(
+                                                response,
+                                                i18n(
+                                                    "Could not update sharing",
+                                                ),
+                                            ),
+                                        );
+                                    const result = (await response.json()) as {
+                                        recordingShare: {
+                                            skipped: {
+                                                userId: string;
+                                                reason: string;
+                                            }[];
+                                        };
+                                    };
+                                    setInvitationsSkipped(
+                                        result.recordingShare.skipped.some(
+                                            (person) =>
+                                                person.reason !==
+                                                "already_visible_or_invited",
+                                        ),
+                                    );
+                                })
+                            }
+                        >
+                            {i18n("Invite them to the recording too")}
+                        </Button>
+                    )}
+                </div>
+            )}
+            {invitationsSkipped && (
+                <output className="block text-sm text-muted-foreground">
+                    {i18n(
+                        "Some people could not be invited. Existing access and invitations were kept.",
+                    )}
+                </output>
+            )}
             {allowInvite && (
                 <Input
                     type="search"
@@ -481,13 +582,17 @@ export function PersonShareDialog({
                     ? i18n(
                           "The folder and its items stay yours. Sharing with people does not share them with the Organization.",
                       )
-                    : allowInvite
+                    : absorbed
                       ? i18n(
-                            "This stays your private item. The Organization will not see it. People who see it through a folder stop seeing it when you take it out of that folder.",
+                            "Agenda shares remain in place. Sharing the recording requires a separate invitation.",
                         )
-                      : i18n(
-                            "The Organization already sees this item. Existing person shares and their filing stay in place.",
-                        )}
+                      : allowInvite
+                        ? i18n(
+                              "This stays your private item. The Organization will not see it. People who see it through a folder stop seeing it when you take it out of that folder.",
+                          )
+                        : i18n(
+                              "The Organization already sees this item. Existing person shares and their filing stay in place.",
+                          )}
             </p>
             <p className="text-xs text-muted-foreground">
                 {i18n("Everyone must accept their invitation.")}
@@ -530,11 +635,13 @@ export function PersonShareDialog({
             <Dialog open={open} onOpenChange={onOpenChange}>
                 <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
                     <DialogTitle className="sr-only">
-                        {kind === "folder"
-                            ? i18n("Share folder")
-                            : kind === "mail"
-                              ? i18n("Share email")
-                              : i18n("Share recording")}
+                        {kind === "meeting"
+                            ? i18n("Share agenda")
+                            : kind === "folder"
+                              ? i18n("Share folder")
+                              : kind === "mail"
+                                ? i18n("Share email")
+                                : i18n("Share recording")}
                     </DialogTitle>
                     <DialogDescription className="sr-only">
                         {title}
@@ -558,11 +665,13 @@ export function OwnerSharingActions({
     open,
     onOpenChange,
     onCountChange,
+    absorbed = false,
 }: {
     itemId: string;
     title: string;
-    kind: "audio" | "mail";
+    kind: "audio" | "mail" | "meeting";
     copyLink: () => Promise<void>;
+    absorbed?: boolean;
     shared: boolean;
     children?: ReactNode;
     open: boolean;
@@ -638,12 +747,13 @@ export function OwnerSharingActions({
     );
     return (
         <>
-            {(!shared ||
-                (shares !== null &&
-                    shares.length > 0 &&
-                    active.length === 0)) && (
+            {(!shared || (shares !== null && shares.length > 0)) && (
                 <ActionTooltip
-                    label={shared ? i18n("Manage sharing") : i18n("Share")}
+                    label={
+                        shared || absorbed
+                            ? i18n("Manage sharing")
+                            : i18n("Share")
+                    }
                 >
                     <Button
                         variant="ghost"
@@ -654,7 +764,9 @@ export function OwnerSharingActions({
                                 : undefined
                         }
                         aria-label={
-                            shared ? i18n("Manage sharing") : i18n("Share")
+                            shared || absorbed
+                                ? i18n("Manage sharing")
+                                : i18n("Share")
                         }
                         onClick={() => setDialogOpen(true)}
                     >
@@ -755,7 +867,8 @@ export function OwnerSharingActions({
                 open={dialogOpen}
                 onOpenChange={setDialogOpen}
                 onChanged={sharingChanged}
-                allowInvite={!shared}
+                allowInvite={!shared && !absorbed}
+                absorbed={absorbed}
             />
         </>
     );
@@ -795,7 +908,9 @@ function InvitationCard({
     onAccept,
     onFile,
     onDecline,
+    onAcceptFolder,
 }: {
+    onAcceptFolder: (id: string) => void;
     invitation: Invitation;
     onAccept: () => void;
     onFile: () => void;
@@ -810,7 +925,9 @@ function InvitationCard({
             ? FolderInput
             : invitation.kind === "mail"
               ? Mail
-              : AudioLines;
+              : invitation.kind === "meeting"
+                ? CalendarClock
+                : AudioLines;
     return (
         <article
             className={`space-y-3 rounded-lg border p-4 ${paths.length ? "border-person-share/40 bg-person-share/5" : "bg-muted/20"}`}
@@ -821,12 +938,29 @@ function InvitationCard({
                 />
                 <div className="min-w-0">
                     <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        {invitation.kind === "folder"
-                            ? i18n("Folder")
-                            : invitation.kind === "mail"
-                              ? i18n("Email")
-                              : i18n("Recording")}
+                        {invitation.kind === "meeting"
+                            ? i18n("Agenda")
+                            : invitation.kind === "folder"
+                              ? i18n("Folder")
+                              : invitation.kind === "mail"
+                                ? i18n("Email")
+                                : i18n("Recording")}
                     </p>
+                    {invitation.kind === "meeting" && (
+                        <p className="text-xs text-muted-foreground">
+                            {invitation.recorded
+                                ? i18n("Recorded")
+                                : invitation.plannedStart
+                                  ? format.dateTime(
+                                        new Date(invitation.plannedStart),
+                                        {
+                                            dateStyle: "medium",
+                                            timeStyle: "short",
+                                        },
+                                    )
+                                  : i18n("No scheduled time")}
+                        </p>
+                    )}
                     <h3 className="font-medium [overflow-wrap:anywhere]">
                         {invitation.title}
                     </h3>
@@ -854,41 +988,62 @@ function InvitationCard({
                 </p>
             )}
             <p className="text-sm leading-relaxed">
-                {invitation.kind === "folder"
-                    ? i18n(
-                          "It becomes a new folder in your tree. You see everything directly in it, including what is added later.",
-                      )
-                    : paths.length
-                      ? invitation.kind === "mail"
-                          ? i18n(
-                                "{owner} also shared it with you separately. Accepting adds nothing new, it only keeps the email if it leaves {folder}.",
-                                {
-                                    owner: invitation.ownerName,
-                                    folder: paths
-                                        .map((folder) => folder.name)
-                                        .join(", "),
-                                },
-                            )
-                          : i18n(
-                                "{owner} also shared it with you separately. Accepting adds nothing new, it only keeps the recording if it leaves {folder}.",
-                                {
-                                    owner: invitation.ownerName,
-                                    folder: paths
-                                        .map((folder) => folder.name)
-                                        .join(", "),
-                                },
-                            )
-                      : invitation.kind === "mail"
+                {invitation.kind === "meeting"
+                    ? invitation.recorded
                         ? i18n(
-                              "You can read the email and summary and complete tasks assigned to you. Besides you, only {owner} and the people they invite see it.",
-                              { owner: invitation.ownerName },
+                              "The agenda is recorded. Its points and notes are read-only. Recordings and their tasks keep their own sharing.",
                           )
                         : i18n(
-                              "You can read the transcript and summary and complete tasks assigned to you. Besides you, only {owner} and the people they invite see it.",
-                              { owner: invitation.ownerName },
-                          )}
+                              "You can co-edit the agenda. Recordings and their tasks keep their own sharing.",
+                          )
+                    : invitation.kind === "folder"
+                      ? i18n(
+                            "It becomes a new folder in your tree. You see everything directly in it, including what is added later.",
+                        )
+                      : paths.length
+                        ? invitation.kind === "mail"
+                            ? i18n(
+                                  "{owner} also shared it with you separately. Accepting adds nothing new, it only keeps the email if it leaves {folder}.",
+                                  {
+                                      owner: invitation.ownerName,
+                                      folder: paths
+                                          .map((folder) => folder.name)
+                                          .join(", "),
+                                  },
+                              )
+                            : i18n(
+                                  "{owner} also shared it with you separately. Accepting adds nothing new, it only keeps the recording if it leaves {folder}.",
+                                  {
+                                      owner: invitation.ownerName,
+                                      folder: paths
+                                          .map((folder) => folder.name)
+                                          .join(", "),
+                                  },
+                              )
+                        : invitation.kind === "mail"
+                          ? i18n(
+                                "You can read the email and summary and complete tasks assigned to you. Besides you, only {owner} and the people they invite see it.",
+                                { owner: invitation.ownerName },
+                            )
+                          : i18n(
+                                "You can read the transcript and summary and complete tasks assigned to you. Besides you, only {owner} and the people they invite see it.",
+                                { owner: invitation.ownerName },
+                            )}
             </p>
             <div className="flex flex-wrap gap-2">
+                {invitation.kind === "audio" && invitation.suggestedFolder && (
+                    <Button
+                        size="sm"
+                        onClick={() =>
+                            invitation.suggestedFolder &&
+                            onAcceptFolder(invitation.suggestedFolder.id)
+                        }
+                    >
+                        {i18n("Accept into {folder}", {
+                            folder: invitation.suggestedFolder.name,
+                        })}
+                    </Button>
+                )}
                 <Button size="sm" onClick={onAccept}>
                     {paths.length ? i18n("Accept") : i18n("Accept…")}
                 </Button>
@@ -957,7 +1112,11 @@ export function PersonInvitations({
                 <ArrivalNotice
                     recording={{
                         id: newest.itemId,
-                        kind: newest.kind === "folder" ? "audio" : newest.kind,
+                        kind:
+                            newest.kind === "folder" ||
+                            newest.kind === "meeting"
+                                ? "audio"
+                                : newest.kind,
                         filename: newest.title,
                         startTime: String(newest.invitedAt),
                         duration: 0,
@@ -967,6 +1126,7 @@ export function PersonInvitations({
                     }}
                     invitation
                     folderInvitation={newest.kind === "folder"}
+                    agendaInvitation={newest.kind === "meeting"}
                     more={list.length - 1}
                     dateTimeFormat="relative"
                     onOpen={() => openList(list)}
@@ -1110,13 +1270,20 @@ export function PersonInvitations({
                     </DialogTitle>
                     <DialogDescription>
                         {i18n(
-                            "Colleagues share their private folders, recordings and email with you. You see the content once you accept. The Organization does not.",
+                            "Colleagues share their private folders, agendas, recordings and email with you. You see the content once you accept. The Organization does not.",
                         )}
                     </DialogDescription>
                     {invitations.map((invitation) => (
                         <InvitationCard
                             key={invitation.id}
                             invitation={invitation}
+                            onAcceptFolder={(folderId) =>
+                                void respond(
+                                    invitation,
+                                    "accept",
+                                    folderId,
+                                ).catch(() => {})
+                            }
                             onAccept={() => {
                                 if (
                                     invitation.kind !== "folder" &&
@@ -1173,6 +1340,7 @@ export function PersonInvitations({
                     item={{
                         ...filing,
                         visibleInFolders: filing.visibleInFolders ?? [],
+                        recorded: filing.recorded === true,
                     }}
                     folders={folders}
                     onFolderCreated={onFolderCreated}
@@ -1195,14 +1363,29 @@ export function ReceivedItemBanner({
     folders,
     onFolderCreated,
     shared = false,
+    readOnly = false,
+    onRemoved,
+    onFiled,
 }: {
-    recording: Recording;
+    recording: Partial<Omit<Recording, "kind">> &
+        Pick<
+            Recording,
+            | "id"
+            | "filename"
+            | "ownerName"
+            | "receivedFolderIds"
+            | "receivedShare"
+        > & { kind?: "audio" | "mail" | "meeting" };
     folders: RecordingFolder[];
     onFolderCreated?: (folder: CreatedFolder) => void;
     shared?: boolean;
+    readOnly?: boolean;
+    onRemoved?: () => void;
+    onFiled?: () => void;
 }) {
     const i18n = useExtracted();
     const refresh = useDashboardRefresh();
+    const confirm = useOptionalConfirm();
     const [filing, setFiling] = useState(false);
     const [saving, setSaving] = useState(false);
     const paths = (recording.receivedFolderIds ?? []).flatMap((id) => {
@@ -1225,6 +1408,7 @@ export function ReceivedItemBanner({
                 folderId,
             );
             refresh();
+            onFiled?.();
         } catch (error) {
             toast.error(
                 error instanceof Error
@@ -1239,26 +1423,49 @@ export function ReceivedItemBanner({
     return (
         <div className="space-y-2">
             <p className="rounded-lg border border-person-share/30 bg-person-share/10 p-3 text-sm">
-                {shared
-                    ? i18n(
-                          "{owner} shares this item with you. The Organization can also see it. You can read it and complete tasks assigned to you.",
-                          { owner: recording.ownerName ?? i18n("A colleague") },
-                      )
-                    : recording.kind === "mail"
+                {recording.kind === "meeting"
+                    ? readOnly
+                        ? i18n(
+                              "{owner} shares this recorded agenda with you. Its points and notes are read-only. Recordings and tasks keep their own sharing.",
+                              {
+                                  owner:
+                                      recording.ownerName ??
+                                      i18n("A colleague"),
+                              },
+                          )
+                        : i18n(
+                              "{owner} shares this agenda with you. You can co-edit its points and notes. Recordings and tasks keep their own sharing.",
+                              {
+                                  owner:
+                                      recording.ownerName ??
+                                      i18n("A colleague"),
+                              },
+                          )
+                    : shared
                       ? i18n(
-                            "Private email from {owner}, shared with you. You can read it and complete tasks assigned to you. The Organization cannot see it.",
+                            "{owner} shares this item with you. The Organization can also see it. You can read it and complete tasks assigned to you.",
                             {
                                 owner:
-                                    recording.ownerName ?? i18n("a colleague"),
+                                    recording.ownerName ?? i18n("A colleague"),
                             },
                         )
-                      : i18n(
-                            "Private recording from {owner}, shared with you. You can read it and complete tasks assigned to you. The Organization cannot see it.",
-                            {
-                                owner:
-                                    recording.ownerName ?? i18n("a colleague"),
-                            },
-                        )}
+                      : recording.kind === "mail"
+                        ? i18n(
+                              "Private email from {owner}, shared with you. You can read it and complete tasks assigned to you. The Organization cannot see it.",
+                              {
+                                  owner:
+                                      recording.ownerName ??
+                                      i18n("a colleague"),
+                              },
+                          )
+                        : i18n(
+                              "Private recording from {owner}, shared with you. You can read it and complete tasks assigned to you. The Organization cannot see it.",
+                              {
+                                  owner:
+                                      recording.ownerName ??
+                                      i18n("a colleague"),
+                              },
+                          )}
             </p>
             {recording.receivedFolderIds?.map((id) => {
                 const folder = folders.find((folder) => folder.id === id);
@@ -1298,6 +1505,52 @@ export function ReceivedItemBanner({
                     })}
                 </Button>
             )}
+            {recording.kind === "meeting" &&
+                recording.receivedShare &&
+                confirm && (
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={saving}
+                        onClick={() => {
+                            const share = recording.receivedShare;
+                            if (!share) return;
+                            void confirm({
+                                title: i18n("Remove and end sharing?"),
+                                description: paths.length
+                                    ? i18n(
+                                          "You will still see it in {folder}.",
+                                          {
+                                              folder: paths
+                                                  .map((folder) => folder.name)
+                                                  .join(", "),
+                                          },
+                                      )
+                                    : shared
+                                      ? i18n(
+                                            "The Organization still gives you access to this agenda.",
+                                        )
+                                      : i18n(
+                                            "You will lose access to this item. The owner's item is kept.",
+                                        ),
+                                confirmLabel: i18n("Remove and end sharing"),
+                                destructive: true,
+                                onConfirm: async () => {
+                                    await changeShare(
+                                        share.id,
+                                        share.version,
+                                        "remove",
+                                        i18n("Could not update sharing"),
+                                    );
+                                    refresh();
+                                    onRemoved?.();
+                                },
+                            });
+                        }}
+                    >
+                        {i18n("Remove and end sharing")}
+                    </Button>
+                )}
             {recording.receivedShare && (
                 <ReceivedItemDialog
                     key={`${recording.id}:${filing}`}
@@ -1306,6 +1559,7 @@ export function ReceivedItemBanner({
                         kind: recording.kind ?? "audio",
                         ownerName: recording.ownerName ?? i18n("A colleague"),
                         visibleInFolders: paths,
+                        recorded: readOnly,
                     }}
                     folders={folders}
                     action="file"

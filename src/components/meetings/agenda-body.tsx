@@ -9,6 +9,7 @@ import {
     PencilLine,
     Play,
     Square,
+    UserPlus,
     WandSparkles,
     X,
 } from "lucide-react";
@@ -26,6 +27,11 @@ import {
     useState,
 } from "react";
 import { ItemHeader } from "@/components/items/item-header";
+import {
+    PersonShareDialog,
+    ReceivedItemBanner,
+    usePersonSharing,
+} from "@/components/sharing/person-sharing";
 import { announceTasksChanged } from "@/components/tasks/task-api";
 import { TaskRow } from "@/components/tasks/task-row";
 import { Button } from "@/components/ui/button";
@@ -42,7 +48,7 @@ import type { TaskChange, TaskView } from "@/lib/tasks/tasks";
 import { cn } from "@/lib/utils";
 import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
-import { AgendaExport } from "./agenda-export";
+import { AgendaCalendarExport, AgendaExport } from "./agenda-export";
 import { AgendaFolderTags } from "./agenda-folder-tags";
 import { AttachRecordingDialog } from "./attach-recording-dialog";
 import { MeetingSettings } from "./meeting-settings";
@@ -95,6 +101,8 @@ export function AgendaBody({
     const [collapsed, setCollapsed] = useState(variant === "recording");
     const [olderOpen, setOlderOpen] = useState(false);
     const [attachOpen, setAttachOpen] = useState(false);
+    const [shareOpen, setShareOpen] = useState(false);
+    const personSharing = usePersonSharing();
     const [now, setNow] = useState(Date.now());
     const suggestionsReasonId = useId();
     const sourceRecordings = useMemo(() => {
@@ -746,13 +754,37 @@ export function AgendaBody({
                     <ItemHeader
                         itemId={detail.meetingItemId ?? detail.id}
                         kind="meeting"
+                        isOwn={detail.userId === userId}
+                        shared={detail.shared}
+                        sharingManageOnly={readOnly}
+                        received={Boolean(detail.receivedShare)}
+                        view={
+                            detail.shared
+                                ? "org"
+                                : detail.userId !== userId
+                                  ? "received"
+                                  : undefined
+                        }
+                        ownerName={
+                            detail.authors.find(
+                                (author) => author.id === detail.userId,
+                            )?.name
+                        }
                         title={detail.title}
                         metadata={meetingMetadata}
                         readOnly
                         action={
                             <>
                                 <AgendaExport detail={detail} disabled={busy} />
-                                {(!readOnly || detail.calendarEventId) && (
+                                {(!detail.permissions.manage || readOnly) &&
+                                    detail.calendarEventId &&
+                                    detail.canExportCalendar !== false && (
+                                        <AgendaCalendarExport
+                                            detail={detail}
+                                            disabled={busy}
+                                        />
+                                    )}
+                                {detail.permissions.manage && !readOnly && (
                                     <MeetingSettings
                                         detail={detail}
                                         recordings={recordings}
@@ -808,7 +840,24 @@ export function AgendaBody({
                         }
                         folders={
                             <AgendaFolderTags
-                                detail={detail}
+                                detail={
+                                    detail.receivedShare
+                                        ? {
+                                              ...detail,
+                                              folders: detail.folders.filter(
+                                                  (folder) =>
+                                                      folder.id !==
+                                                          detail.receivedShare
+                                                              ?.filingFolderId ||
+                                                      detail.receivedFolders?.some(
+                                                          (path) =>
+                                                              path.id ===
+                                                              folder.id,
+                                                      ),
+                                              ),
+                                          }
+                                        : detail
+                                }
                                 userId={userId}
                                 folders={folders}
                                 disabled={busy || readOnly}
@@ -817,6 +866,34 @@ export function AgendaBody({
                             />
                         }
                     />
+                    {detail.receivedShare && (
+                        <ReceivedItemBanner
+                            readOnly={readOnly}
+                            recording={{
+                                id: detail.meetingItemId ?? detail.id,
+                                filename: detail.title,
+                                kind: "meeting",
+                                ownerName: detail.authors.find(
+                                    (author) => author.id === detail.userId,
+                                )?.name,
+                                receivedShare: detail.receivedShare,
+                                receivedFolderIds: detail.receivedFolders?.map(
+                                    (folder) => folder.id,
+                                ),
+                            }}
+                            folders={folders}
+                            shared={detail.shared}
+                            onFiled={() => void agenda.reload().catch(() => {})}
+                            onRemoved={() => {
+                                onChanged?.();
+                                if (
+                                    !detail.shared &&
+                                    !detail.receivedFolders?.length
+                                )
+                                    onDeleted?.();
+                            }}
+                        />
+                    )}
                     {live && (
                         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-meeting/30 bg-meeting/5 p-3 text-sm">
                             <time className="font-mono tabular-nums">
@@ -881,6 +958,31 @@ export function AgendaBody({
                     />
                 </button>
             )}
+            {variant === "recording" &&
+                readOnly &&
+                personSharing &&
+                detail.userId === userId &&
+                detail.meetingItemId && (
+                    <>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShareOpen(true)}
+                        >
+                            <UserPlus className="size-4 text-person-share" />
+                            {i18n("Manage agenda sharing")}
+                        </Button>
+                        <PersonShareDialog
+                            itemId={detail.meetingItemId}
+                            title={detail.agendaTitle ?? detail.title}
+                            kind="meeting"
+                            open={shareOpen}
+                            onOpenChange={setShareOpen}
+                            allowInvite={false}
+                            absorbed
+                        />
+                    </>
+                )}
             {detail.attachedRecording?.visible === false && (
                 <output className="block rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
                     {i18n(
@@ -1116,6 +1218,7 @@ export function AgendaBody({
             {attachOpen && (
                 <AttachRecordingDialog
                     detail={detail}
+                    userId={userId}
                     recordings={recordings.filter(
                         (recording) =>
                             recording.kind !== "mail" &&

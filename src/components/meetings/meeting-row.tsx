@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock } from "lucide-react";
+import { CalendarClock, FolderInput } from "lucide-react";
 import { useExtracted, useFormatter } from "next-intl";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -61,15 +61,25 @@ export function MeetingRow({
                               })
                             : i18n("No scheduled time")}
                     </span>
+                    {meeting.received && (
+                        <FolderInput
+                            className="size-3 text-person-share"
+                            aria-label={i18n("Shared with you by {owner}", {
+                                owner:
+                                    meeting.author.name ?? i18n("a colleague"),
+                            })}
+                        />
+                    )}
                     <span className="rounded-full bg-meeting/10 px-2 py-0.5 text-meeting">
-                        {meeting.recordingItemId
+                        {meeting.recorded || meeting.recordingItemId
                             ? i18n("Recorded")
                             : meeting.state === "live"
                               ? i18n("In progress")
                               : meeting.state === "held"
                                 ? i18n("Agenda without recording")
                                 : i18n("Preparing")}
-                        {!meeting.recordingItemId &&
+                        {!meeting.recorded &&
+                            !meeting.recordingItemId &&
                             meeting.state === "live" &&
                             meeting.liveStartedAt &&
                             ` · ${String(Math.floor(liveMinutes / 60)).padStart(2, "0")}:${String(liveMinutes % 60).padStart(2, "0")}`}

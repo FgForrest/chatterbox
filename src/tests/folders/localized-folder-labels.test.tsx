@@ -5,7 +5,7 @@ import type * as NextIntl from "next-intl";
 import type { PropsWithChildren } from "react";
 import type { TranslationValues } from "use-intl/core";
 import { IntlProvider, useTranslations } from "use-intl/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialogProvider } from "@/components/confirm-dialog";
 import { FirstLevelFolderDialog } from "@/components/dashboard/first-level-folder-dialog";
 import { FolderSettingsPanel } from "@/components/dashboard/folder-settings-panel";
@@ -84,6 +84,17 @@ function Czech({ children }: PropsWithChildren) {
     );
 }
 
+beforeEach(() => {
+    vi.stubGlobal(
+        "ResizeObserver",
+        class {
+            observe() {}
+            disconnect() {}
+            unobserve() {}
+        },
+    );
+    Element.prototype.scrollIntoView = vi.fn();
+});
 afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
@@ -277,7 +288,7 @@ describe("localized folder labels", () => {
         render(<Upload />, { wrapper: Czech });
         expect(
             screen.getByRole("combobox", { name: cs("Folder") }).textContent,
-        ).toBe("Soukromé / Private / Notes");
+        ).toBe("Soukromé / Private › Notes");
         fireEvent.click(screen.getByRole("button", { name: cs("New folder") }));
         fireEvent.click(
             screen.getByRole("combobox", { name: cs("Parent folder") }),
