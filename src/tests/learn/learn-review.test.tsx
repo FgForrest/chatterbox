@@ -851,13 +851,13 @@ describe("LearnReview", () => {
             name: "Tick all: Speakers",
         }) as HTMLInputElement;
         expect(all.indeterminate).toBe(true);
-        expect(screen.getByText("1 of 3 selected")).toBeTruthy();
+        expect(screen.getByText(/1 of 2 selected/)).toBeTruthy();
         fireEvent.click(all);
-        await screen.findByText("2 of 3 selected");
+        await screen.findByText(/2 of 2 selected/);
         expect(all.checked).toBe(true);
         expect(all.indeterminate).toBe(false);
         fireEvent.click(all);
-        await screen.findByText("0 of 3 selected");
+        await screen.findByText(/0 of 2 selected/);
         expect(
             fetch.mock.calls
                 .filter(
@@ -956,7 +956,7 @@ describe("LearnReview", () => {
         }) as HTMLInputElement;
         expect(accept.disabled).toBe(true);
         expect(
-            screen.getByRole("button", { name: "Someone else…" }),
+            screen.getByRole("button", { name: "Choose a person…" }),
         ).toBeTruthy();
         fireEvent.click(screen.getByRole("button", { name: "Unknown" }));
         await waitFor(() =>
