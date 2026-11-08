@@ -24,6 +24,7 @@ import { effectiveManualOnly } from "@/lib/pipeline/effective-profile";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { RECORDING_CUT_KIND } from "@/lib/recordings/cut";
+import { trimHolds } from "@/lib/recordings/trim-proposal";
 import type { ShareGateProblem } from "@/lib/sharing/share-gate";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -100,6 +101,7 @@ export interface IntendedShareOutcome {
     remaining: boolean;
     confirmationRequired: boolean;
     waitingForCut?: boolean;
+    waitingForTrim?: boolean;
 }
 
 /** Execute intended shares and report whether an intent was fulfilled or remains. */
@@ -182,6 +184,9 @@ export async function executeIntendedSharesWithOutcome(
                 await lockOrgTree(tx);
                 await lockOrgPeople(tx);
                 await lockItemForFolderMutation(tx, itemId, ownerUserId);
+                await lockPipelineTargetsInTx(tx, [
+                    { itemId, userId: ownerUserId },
+                ]);
                 if (claim) {
                     await lockPipelineTargetsInTx(tx, [
                         { itemId, userId: ownerUserId },
@@ -269,6 +274,13 @@ export async function executeIntendedSharesWithOutcome(
                         ),
                     )
                     .limit(1);
+                if (trimHolds(processing?.phases.trim))
+                    return {
+                        problems: [],
+                        shared: false,
+                        confirmationRequired: false,
+                        waitingForTrim: true,
+                    };
                 if (
                     effectiveManualOnly(processing) &&
                     current.confirmedAt === null
@@ -344,6 +356,14 @@ export async function executeIntendedSharesWithOutcome(
                 waitingForCut: true,
             };
         }
+        if ("waitingForTrim" in result && result.waitingForTrim)
+            return {
+                problems: [],
+                shared,
+                remaining: true,
+                confirmationRequired: false,
+                waitingForTrim: true,
+            };
         if (result.shared)
             console.info(
                 `[share] filed item=${itemId} folder=${intent.folderId}`,

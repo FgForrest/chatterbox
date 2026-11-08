@@ -13,6 +13,7 @@ import {
     terminalStepOutcome,
     wakePipelineInTx,
 } from "@/db/queries/pipeline-jobs";
+import { lockTrimRecording, resolveTrimInTx } from "@/db/queries/trim-state";
 import { asyncJobs, itemProcessing } from "@/db/schema";
 import { JOB_STALE_MS } from "@/lib/jobs/timing";
 import type { StepOutcome } from "@/lib/pipeline/outcome";
@@ -104,6 +105,8 @@ export async function reconcilePipelineSteps(
     let count = 0;
     for (const candidate of rows) {
         const result = await pipelineJobTransaction(async (tx) => {
+            if (candidate.phases.trim)
+                await lockTrimRecording(tx, candidate.userId, candidate.itemId);
             const ids = leaves(candidate.phases).flatMap(({ record }) =>
                 record.jobId ? [record.jobId] : [],
             );
@@ -297,6 +300,23 @@ export async function reconcilePipelineSteps(
                             repaired++;
                     }
                 } else {
+                    if (
+                        phase === "trim" &&
+                        record.waitingFor?.kind === "trimReview"
+                    ) {
+                        if (
+                            record.waitingFor.until &&
+                            record.waitingFor.until <= now.toISOString() &&
+                            (await resolveTrimInTx(tx, {
+                                userId: row.userId,
+                                recordingId: row.itemId,
+                                reason: "timed_out",
+                                now,
+                            }))
+                        )
+                            repaired++;
+                        continue;
+                    }
                     if (
                         record.waitingFor &&
                         (!record.waitingFor.until ||

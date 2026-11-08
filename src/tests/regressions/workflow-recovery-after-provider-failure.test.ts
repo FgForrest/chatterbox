@@ -212,6 +212,7 @@ suite("workflow recovery after provider failure (PostgreSQL)", () => {
         });
         const profile = await resolveDefaultProfile(userId, "audio");
         const settings = defaultProfileSettings("audio");
+        settings.steps.trim.automatic = false;
         settings.steps.transcribe.automatic = true;
         settings.steps.learn.automatic = learn;
         settings.steps.summary.automatic = true;

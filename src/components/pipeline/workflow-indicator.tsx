@@ -398,6 +398,12 @@ export function WorkflowStrip({
                 );
             case "learnQueued":
                 return i18n("Queued. Learn starts shortly.");
+            case "trimCutting":
+                return i18n("Cutting recording…");
+            case "trimRunning":
+                return i18n("Assessing trim…");
+            case "trimReview":
+                return i18n("Waiting for trim");
             case "learnRunning":
                 return kind === "mail"
                     ? i18n("Learn is reading the message with your Almanac.")
@@ -512,6 +518,8 @@ export function WorkflowStrip({
                 return i18n("Transcribe");
             case "summarize":
                 return i18n("Summarize");
+            case "reviewTrim":
+                return i18n("Review trim");
             case "reviewLearn":
                 return i18n("Review Learn");
             case "reviewTasks":
@@ -524,9 +532,23 @@ export function WorkflowStrip({
                 return i18n("Re-process");
         }
     };
+    const displayedState = (step: WorkflowStep) =>
+        step.id === "learn" &&
+        step.current &&
+        workflow.status?.message === "trimReview"
+            ? i18n("Waiting for trim")
+            : step.id === "learn" &&
+                step.current &&
+                workflow.status?.message === "trimRunning"
+              ? i18n("Assessing trim…")
+              : step.id === "learn" &&
+                  step.current &&
+                  workflow.status?.message === "trimCutting"
+                ? i18n("Cutting recording…")
+                : stateLabel(step.state);
     const labels = workflow.steps.map((step) => ({
         name: stepLabel(step.id),
-        state: stateLabel(step.state),
+        state: displayedState(step),
     }));
     const needsPersonIndex = workflow.steps.findIndex((step) =>
         ["next", "review", "outdated"].includes(step.state),
@@ -618,7 +640,7 @@ export function WorkflowStrip({
                                 )}
                                 data-current={step.current}
                                 aria-current={step.current ? "step" : undefined}
-                                aria-label={`${stepLabel(step.id)}, ${stateLabel(step.state)}`}
+                                aria-label={`${stepLabel(step.id)}, ${displayedState(step)}`}
                                 tabIndex={
                                     step.state === "skipped" ? 0 : undefined
                                 }

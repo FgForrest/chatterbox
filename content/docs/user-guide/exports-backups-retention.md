@@ -52,6 +52,8 @@ Content-derived caches, including task content vectors, are derived data and are
 
 Each archive stays downloadable for seven days. A backup holds your own recordings, the shared ones included, without what colleagues added to them. The organization account's backup holds every shared recording, with its owner.
 
+A full personal archive also holds a trim proposal still waiting for your decision, with its original deadline. Organization archives, received-item downloads and folder exports leave it out.
+
 ## Deleting old data automatically
 
 ![Auto-delete old data](images/settings-retention.png)

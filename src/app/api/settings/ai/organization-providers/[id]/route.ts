@@ -34,6 +34,7 @@ const updateSchema = z
         isDefaultLearn: z.boolean().optional(),
         isDefaultTopics: z.boolean().optional(),
         isDefaultTitle: z.boolean().optional(),
+        isDefaultTrim: z.boolean().optional(),
     })
     .strict()
     .refine((value) => Object.keys(value).length > 0, {
@@ -114,6 +115,7 @@ export const PUT = apiHandler<IdContext>(async (request, routeContext) => {
             learn: body.isDefaultLearn,
             topics: body.isDefaultTopics,
             title: body.isDefaultTitle,
+            trim: body.isDefaultTrim,
         },
     });
     return NextResponse.json({ success: true });

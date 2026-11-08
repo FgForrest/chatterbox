@@ -18,6 +18,7 @@ import {
     processingProfiles,
     recordingFolderAssignments,
     recordingFolders,
+    recordings,
     transcriptions,
     transcriptSpeakers,
     users,
@@ -92,6 +93,7 @@ import {
     failJobAttempt,
     settleTerminalJobInTx,
 } from "@/db/queries/async-jobs";
+import { resolveTrimInTx } from "@/db/queries/trim-state";
 import {
     decryptText,
     encryptJsonField,
@@ -99,6 +101,7 @@ import {
 } from "@/lib/encryption/fields";
 import { lockOrgTree } from "@/lib/folders/folders";
 import { lockOrgPeople } from "@/lib/knowledge/org-people";
+import { modelInput } from "@/lib/learn/llm-input";
 import {
     enqueuePipelineAction,
     pipelineActionJobHandler,
@@ -112,6 +115,7 @@ import {
     commitRecordingCut,
     recordingCutJobHandler,
 } from "@/lib/recordings/cut-job-handler";
+import type { StoredTrimProposal } from "@/lib/recordings/trim-proposal";
 import { requireRecordingView } from "@/lib/sharing/access";
 import { lockItemTaskGraphInTx } from "@/lib/tasks/mentions";
 import { insertRecordings } from "@/tests/integration/items";
@@ -220,6 +224,7 @@ describe.skipIf(!url)(
                 autoSummarize: true,
                 autoDetectTopics: true,
             });
+            settings.steps.trim.automatic = false;
             await db.insert(processingProfiles).values({
                 id: "profile",
                 ownerUserId: "owner",
@@ -311,6 +316,203 @@ describe.skipIf(!url)(
                 );
             });
         }
+        it.each([
+            "accepted",
+            "timed_out",
+        ])("commits a cut after a %s trim proposal and reruns Learn and summary on the retained revision", async (decision) => {
+            const db = database.db;
+            const automatic = seededAudioProfileSettings({
+                autoLearn: true,
+                autoSummarize: true,
+                autoDetectTopics: true,
+            });
+            await db
+                .update(processingProfileRevisions)
+                .set({ settings: encryptText(JSON.stringify(automatic)) })
+                .where(eq(processingProfileRevisions.id, "revision"));
+            await db.insert(recordingFolders).values({
+                id: "own-root",
+                userId: "owner",
+                kind: "private",
+                name: encryptText("Private"),
+                nameHash: "own-root",
+            });
+            await db.insert(recordingFolders).values({
+                id: "own-folder",
+                parentId: "own-root",
+                userId: "owner",
+                name: encryptText("Meetings"),
+                nameHash: "own-meetings",
+            });
+            await db.insert(recordingFolderAssignments).values({
+                itemId: "recording",
+                userId: "owner",
+                folderId: "own-folder",
+            });
+            const [transcript] = await db
+                .select()
+                .from(transcriptions)
+                .where(eq(transcriptions.id, "transcript"));
+            const fingerprint = (await modelInput(transcript)).fingerprint;
+            if (!fingerprint) throw new Error("Missing input fingerprint");
+            const proposal: StoredTrimProposal = {
+                schemaVersion: 1,
+                id: "reviewed-trim",
+                promptVersion: 1,
+                createdAt: new Date().toISOString(),
+                deadline: new Date(Date.now() + 14_400_000).toISOString(),
+                transcript: {
+                    id: "transcript",
+                    source: "riffado",
+                    revision: 0,
+                },
+                revisions: [{ id: "transcript", revision: 0 }],
+                inputFingerprint: fingerprint,
+                audio: {
+                    duration: 10000,
+                    fileMd5: "a".repeat(32),
+                    cutAt: null,
+                },
+                profileRevisionId: "revision",
+                provider: {
+                    credentialId: "chat",
+                    provider: "Custom",
+                    model: "fake",
+                    payerUserId: "owner",
+                },
+                start: {
+                    firstKeptSentenceId: "t1s0",
+                    startMs: 2000,
+                    reason: "Unrelated opening",
+                },
+                end: {
+                    firstRemovedSentenceId: "t2s0",
+                    startMs: 8000,
+                    reason: "Unrelated ending",
+                },
+            };
+            await db
+                .update(recordings)
+                .set({ trimProposal: encryptJsonField(proposal) })
+                .where(
+                    and(
+                        eq(recordings.id, "recording"),
+                        eq(recordings.userId, "owner"),
+                    ),
+                );
+            const [processing] = await db
+                .select()
+                .from(itemProcessing)
+                .where(eq(itemProcessing.view, "private"));
+            await db
+                .update(itemProcessing)
+                .set({
+                    phases: {
+                        ...processing.phases,
+                        learn: {
+                            state: "done",
+                            reason: "released",
+                            generation: 1,
+                            at: proposal.createdAt,
+                            inputs: {
+                                contentId: "transcript",
+                                contentSourceId: "riffado",
+                                contentRevision: 0,
+                            },
+                        },
+                        trim: {
+                            proposalId: proposal.id,
+                            state: "waiting",
+                            generation: 1,
+                            at: proposal.createdAt,
+                            inputs: {
+                                contentId: "transcript",
+                                contentSourceId: "riffado",
+                                contentRevision: 0,
+                            },
+                            waitingFor: {
+                                kind: "trimReview",
+                                until: proposal.deadline,
+                            },
+                        },
+                    },
+                })
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, "recording"),
+                        eq(itemProcessing.view, "private"),
+                    ),
+                );
+            if (decision === "timed_out")
+                await db.transaction((tx) =>
+                    resolveTrimInTx(tx, {
+                        userId: "owner",
+                        recordingId: "recording",
+                        reason: "timed_out",
+                        now: new Date(proposal.deadline),
+                    }),
+                );
+            await requestRecordingCut("owner", "recording", {
+                ...range,
+                revisions: [{ id: "transcript", revision: 0 }],
+                ...(decision === "accepted"
+                    ? { trimProposalId: proposal.id }
+                    : {}),
+            });
+            const [claimed] = await claimDueJobs("recording.cut", 1);
+            const job = {
+                ...claimed,
+                payload: recordingCutJobHandler.parsePayload(claimed.payload),
+            };
+            await commit(job);
+            await completeJob({ jobId: job.id, claimToken: job.claimToken });
+            const [retained] = await db
+                .select()
+                .from(transcriptions)
+                .where(eq(transcriptions.id, "transcript"));
+            expect(decryptText(retained.text)).toBe("S1: Kept words.");
+            const [recording] = await db
+                .select()
+                .from(recordings)
+                .where(eq(recordings.id, "recording"));
+            expect(recording.trimProposal).toBeNull();
+            const after = await facts();
+            expect(after.phases.trim).toMatchObject({
+                state: "done",
+                reason: "cut_applied",
+                inputs: { contentId: "transcript", contentRevision: 1 },
+            });
+            if (!after.profile || !after.content)
+                throw new Error("Missing retained input or profile");
+            expect(after.profile.trim?.automatic).toBe(true);
+            expect(after.profile.learn?.automatic).toBe(true);
+            after.learnAvailability = "available";
+            const plan = planAdvance(after);
+            expect(plan.actions.map((action) => action.type)).not.toContain(
+                "queueTrim",
+            );
+            expect(plan.actions).toContainEqual({
+                type: "startAutoLearn",
+                input: {
+                    contentId: "transcript",
+                    contentSourceId: "riffado",
+                    contentRevision: 1,
+                },
+                source: "riffado",
+            });
+            after.phases.learn = {
+                state: "done",
+                reason: "released",
+                generation: after.generation,
+                inputs: after.content,
+                at: new Date().toISOString(),
+            };
+            expect(planAdvance(after).actions).toContainEqual({
+                type: "queueSummary",
+                presetId: null,
+                strict: true,
+            });
+        });
         it("resets the shared content and both stored views, then replans both export scopes", async () => {
             const db = database.db;
             await db.insert(recordingFolderAssignments).values({

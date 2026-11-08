@@ -586,3 +586,7 @@ describe("ElevenLabs credentials route to Scribe, not the OpenAI SDK", () => {
         logged.mockRestore();
     });
 });
+
+vi.mock("@/db/queries/trim-state", () => ({
+    resolveTrimInTx: vi.fn(async () => false),
+}));

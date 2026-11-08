@@ -2,21 +2,30 @@ import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { enqueueJobInTx } from "@/db/queries/async-jobs";
-import { asyncJobs, recordings, transcriptions } from "@/db/schema";
-import { encryptText } from "@/lib/encryption/fields";
+import { trimSnapshotMatches } from "@/db/queries/trim-proposal";
+import {
+    asyncJobs,
+    itemProcessing,
+    recordings,
+    transcriptions,
+} from "@/db/schema";
+import { decryptJsonField, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { nudge } from "@/lib/jobs/nudge";
+import { RECORDING_CUT_KIND } from "@/lib/recordings/cut-kind";
 import {
     type CutRange,
     cutTranscript,
     validCutRange,
 } from "@/lib/recordings/cut-range";
+import type { StoredTrimProposal } from "@/lib/recordings/trim-proposal";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { sharingOrgUserId } from "@/lib/sharing/writer";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 
-export const RECORDING_CUT_KIND = "recording.cut";
+export { RECORDING_CUT_KIND } from "@/lib/recordings/cut-kind";
 export const cutRequestSchema = z.object({
+    trimProposalId: z.string().min(1).optional(),
     startMs: z.number().int().nonnegative(),
     endMs: z.number().int().positive(),
     revisions: z
@@ -150,6 +159,42 @@ export async function requestRecordingCut(
             recordingId,
             range,
         );
+        if (range.trimProposalId) {
+            const [processing] = await tx
+                .select({ phases: itemProcessing.phases })
+                .from(itemProcessing)
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, recordingId),
+                        eq(itemProcessing.userId, userId),
+                        eq(itemProcessing.view, "private"),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            const phase = processing?.phases.trim;
+            const proposal = decryptJsonField<StoredTrimProposal>(
+                recording.trimProposal,
+            );
+            if (
+                !proposal ||
+                phase?.state !== "waiting" ||
+                phase.waitingFor?.kind !== "trimReview" ||
+                phase.proposalId !== range.trimProposalId ||
+                proposal.id !== range.trimProposalId ||
+                Date.parse(proposal.deadline) <= Date.now() ||
+                !range.revisions ||
+                !(await trimSnapshotMatches(
+                    { recording, transcripts },
+                    proposal,
+                ))
+            )
+                throw new AppError(
+                    ErrorCode.CONFLICT,
+                    "The trim proposal changed or expired. Reload the recording.",
+                    409,
+                );
+        }
         if (
             range.revisions &&
             (range.revisions.length !== transcripts.length ||

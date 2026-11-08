@@ -12,7 +12,8 @@ type Executor = typeof db | Tx;
 /** Join condition from a recording to its item (same id, same owner). */
 export const recordingItemJoin = eq(chatterItems.id, recordings.id);
 
-const recordingOwnColumns = getTableColumns(recordings);
+const { trimProposal: _trimProposal, ...recordingOwnColumns } =
+    getTableColumns(recordings);
 
 /**
  * A recording's own columns with what its item holds, for a select over
@@ -51,10 +52,12 @@ export function toRecordingResponseRow<
     title,
     occurredAt,
     contentReapedAt,
+    trimProposal: _trimProposal,
     kind: _kind,
     ...rest
 }: T & {
     kind?: string;
+    trimProposal?: unknown;
 }) {
     return {
         ...rest,
@@ -142,7 +145,7 @@ export async function markRecordingDeleted(
 ): Promise<void> {
     await executor
         .update(recordings)
-        .set({ deletedAt: input.at, updatedAt: input.at })
+        .set({ deletedAt: input.at, trimProposal: null, updatedAt: input.at })
         .where(
             and(
                 eq(recordings.id, input.id),

@@ -37,6 +37,7 @@ export const METRICS = [
     "otherCost",
     "startedRecordings",
     "audioCost",
+    "trimCost",
 ] as const;
 
 export type Metric = (typeof METRICS)[number];

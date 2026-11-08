@@ -22,6 +22,7 @@ import { PlaybackProvider } from "@/components/playback/playback-context";
 import { EraseRecordingMenu } from "@/components/recordings/erase-recording-menu";
 import { RecordingCutProvider } from "@/components/recordings/recording-cut";
 import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
+import { TrimProposalCard } from "@/components/recordings/trim-proposal-card";
 import { ReceivedItemBanner } from "@/components/sharing/person-sharing";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -439,6 +440,10 @@ export function WorkstationDetailPane({
                                         }}
                                     />
                                 )}
+                                <TrimProposalCard
+                                    processing={processing}
+                                    userId={userId}
+                                />
                                 <RecordingAgenda
                                     key={currentRecording.id}
                                     recording={currentRecording}

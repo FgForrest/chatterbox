@@ -11,6 +11,7 @@ import {
 } from "drizzle-orm";
 import { db } from "@/db";
 import { loadPipelineProcessingJobs } from "@/db/queries/pipeline-processing";
+import { readOwnerTrimProposal } from "@/db/queries/trim-proposal";
 import {
     aiEnhancements,
     asyncJobs,
@@ -53,6 +54,7 @@ import type {
 } from "@/lib/pipeline/types";
 import { profileHistoryName } from "@/lib/profiles/history-name";
 import { parseProfileSettings } from "@/lib/profiles/settings";
+import type { StoredTrimProposal } from "@/lib/recordings/trim-proposal";
 import { isRecordingShared } from "@/lib/sharing/shared";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
@@ -85,12 +87,13 @@ export interface ProcessingPhaseFailure {
 }
 
 export interface ItemProcessingPresentation {
+    trimProposal?: StoredTrimProposal | null;
     itemId: string;
     kind: "audio" | "mail";
     legacy: boolean;
     manualOnly: boolean;
     phases: PipelinePhases;
-    steps: Record<PhaseName, ProcessingStep>;
+    steps: Record<Exclude<PhaseName, "trim">, ProcessingStep>;
     nextCheckAt: string;
     nextCheckInMs: number;
     profile:
@@ -742,7 +745,7 @@ export async function loadPrivateItemProcessing(
         );
     });
 
-    const phases = settleTaskReviewPhase(
+    let phases = settleTaskReviewPhase(
         item.phases ?? {},
         taskReviewWaiting,
         summaryCurrent,
@@ -753,10 +756,40 @@ export async function loadPrivateItemProcessing(
         automatic !== null &&
         Object.values(automatic).some(Boolean) &&
         processAgainPending(item.phases ?? {});
+    const ownerTrim =
+        viewerUserId === ownerUserId &&
+        view === "private" &&
+        item.kind === "audio";
+    const trimProposal =
+        ownerTrim &&
+        phases.trim?.state === "waiting" &&
+        phases.trim.waitingFor?.kind === "trimReview"
+            ? await readOwnerTrimProposal(ownerUserId, itemId)
+            : null;
+    if (
+        ownerTrim &&
+        !trimProposal &&
+        phases.trim?.state === "waiting" &&
+        phases.trim.waitingFor?.kind === "trimReview"
+    ) {
+        const [current] = await db
+            .select({ phases: itemProcessing.phases })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, itemId),
+                    eq(itemProcessing.userId, ownerUserId),
+                    eq(itemProcessing.view, "private"),
+                ),
+            )
+            .limit(1);
+        if (current) phases = { ...phases, trim: current.phases.trim };
+    }
     const presentation: Omit<
         ItemProcessingPresentation,
         "steps" | "nextCheckAt" | "nextCheckInMs"
     > = {
+        ...(ownerTrim ? { trimProposal } : {}),
         itemId,
         kind: item.kind,
         legacy,

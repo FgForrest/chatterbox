@@ -245,6 +245,10 @@ export function TranscriptionPanel({
     const [activeSource, setActiveSource] = useState<string | undefined>(
         undefined,
     );
+    useEffect(() => {
+        if (cut?.open && cut.proposalSource)
+            setActiveSource(cut.proposalSource);
+    }, [cut?.open, cut?.proposalSource]);
     const [openingReviewSource, setOpeningReviewSource] = useState<
         string | null
     >(null);
@@ -693,9 +697,13 @@ export function TranscriptionPanel({
     }, [followReleased, onTranscriptStale]);
 
     useWorkflowWidgetOpen(
-        (!widgets || widgets.transcript.visible) && !transcriptLine
-            ? transcriptWidgetId
-            : undefined,
+        !widgets || widgets.transcript.visible ? transcriptWidgetId : undefined,
+        (source) => {
+            if (source && transcriptList.some((t) => t.source === source))
+                setActiveSource(source);
+            setWorkflowTranscriptExpanded(true);
+            setTranscriptExpanded(true);
+        },
     );
     const [resummarizeAction, setResummarizeAction] = useState<{
         run: () => void;

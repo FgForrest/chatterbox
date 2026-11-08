@@ -60,6 +60,10 @@ import {
 import { collectArchivedFolderShares } from "@/lib/export/folder-shares";
 import { collectArchivedItemShares } from "@/lib/export/item-shares";
 import { collectArchivedMeetings } from "@/lib/export/meetings";
+import {
+    type ArchivedTrimProposal,
+    collectTrimProposals,
+} from "@/lib/export/trim-proposal";
 import { collectCareArchive } from "@/lib/knowledge/care-archive";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import { collectArchivedMail } from "@/lib/mail/archive";
@@ -83,6 +87,7 @@ export interface ArchiveResult {
 }
 
 interface ManifestRecording {
+    trim?: ArchivedTrimProposal;
     id: string;
     confirmedLanguage: string | null;
     cutAt?: string | null;
@@ -187,6 +192,10 @@ export async function buildAndUploadExportArchive(input: {
         .where(archivedRecordingCondition(scope));
 
     const recordingIds = userRecordings.map((r) => r.id);
+    const trimProposals = await collectTrimProposals(scope, recordingIds);
+    const trimByRecording = new Map(
+        trimProposals.map((trim) => [trim.recordingId, trim]),
+    );
 
     const userUsage = await db
         .select()
@@ -443,6 +452,9 @@ export async function buildAndUploadExportArchive(input: {
         const folder = folderName(recording);
         const entry: ManifestRecording = {
             id: recording.id,
+            ...(trimByRecording.has(recording.id)
+                ? { trim: trimByRecording.get(recording.id) }
+                : {}),
             confirmedLanguage: recording.confirmedLanguage ?? null,
             cutAt: recording.cutAt?.toISOString() ?? null,
             calendarEventId: recording.calendarEventId,
@@ -1127,6 +1139,13 @@ export async function buildAndUploadExportArchive(input: {
             ].flatMap((choice) => (choice.profileId ? [choice.profileId] : [])),
         ),
         revisionIds: new Set([
+            ...trimProposals.flatMap((trim) =>
+                trim.proposal
+                    ? [trim.proposal.profileRevisionId]
+                    : trim.marker?.profileRevisionId
+                      ? [trim.marker.profileRevisionId]
+                      : [],
+            ),
             ...[
                 ...userTranscriptions,
                 ...userEnhancements,

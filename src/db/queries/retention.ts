@@ -11,6 +11,7 @@ import {
 } from "drizzle-orm";
 import { db } from "@/db";
 import { recordingItemJoin, touchRecording } from "@/db/items";
+import { resolveTrimInTx } from "@/db/queries/trim-state";
 import {
     aiEnhancements,
     chatterItems,
@@ -543,6 +544,12 @@ export async function reapAudioForRecording(
     return db.transaction(async (tx) => {
         if (!(await lockGovernedInTx(tx, recordingId, governor))) return false;
         await removeFile();
+        await resolveTrimInTx(tx, {
+            userId: ownerUserId,
+            recordingId,
+            reason: "audio_reaped",
+            force: true,
+        });
         await tx
             .update(recordings)
             .set({ audioReapedAt: at, updatedAt: at })
@@ -569,6 +576,12 @@ export async function deleteTranscriptsForRecording(
 ): Promise<number> {
     return db.transaction(async (tx) => {
         if (!(await lockGovernedInTx(tx, recordingId, governor))) return 0;
+        await resolveTrimInTx(tx, {
+            userId: ownerUserId,
+            recordingId,
+            reason: "content_reaped",
+            force: true,
+        });
         // Facts said only here decay with the transcript.
         const knowledge = await knowledgeOnRecordingInTx(tx, recordingId);
         const rows = await tx

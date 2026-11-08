@@ -1,11 +1,13 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { aiEnhancements, recordings } from "@/db/schema";
+import { aiEnhancements, itemProcessing, recordings } from "@/db/schema";
 import { decryptJsonField } from "@/lib/encryption/fields";
+import { JobDeferredError } from "@/lib/jobs/deferred";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import type { PhaseRecord, PipelineView } from "@/lib/pipeline/types";
+import { trimHolds } from "@/lib/recordings/trim-proposal";
 import { contentWriterScope, sharingOrgUserId } from "@/lib/sharing/writer";
 import { readPlaudTaskSource } from "@/lib/summary/read-summary";
 import { taskViewerById } from "@/lib/tasks/access";
@@ -70,6 +72,20 @@ export async function applyPlaudActionItemProposals(input: {
                 ),
             )
             .for("update");
+        const [processing] = await tx
+            .select({ phases: itemProcessing.phases })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, input.itemId),
+                    eq(itemProcessing.userId, input.userId),
+                    eq(itemProcessing.view, "private"),
+                ),
+            )
+            .for("update")
+            .limit(1);
+        if (trimHolds(processing?.phases.trim))
+            throw new JobDeferredError(30_000, "Waiting for trim decision");
         const { scopeUserId } = await contentWriterScope(tx, {
             recordingId: input.itemId,
             ownerUserId: input.userId,

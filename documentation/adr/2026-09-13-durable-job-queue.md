@@ -1,14 +1,14 @@
 ---
 title: Work that must outlive its process runs from a generic Postgres job table, not inside the request
 date: 2026-09-13
-updated: 2026-10-22 22:30
-status: accepted
+updated: 2026-11-08 19:20
+status: superseded
 kind: infrastructure
 issues: []
 prs: [17, 18, 19, 20, 23]
 areas: [src/lib/jobs, src/db/queries/async-jobs.ts, src/lib/summary, src/app/api/jobs, content/docs/reference/architecture.mdx]
 supersedes: []
-superseded-by: []
+superseded-by: [2026-11-08-ai-trim-proposal-before-learn]
 relates: [2026-10-19-processing-profiles-and-workflow, 2026-10-22-pipeline-steps-settle-their-jobs, 2026-09-30-learn]
 ---
 
@@ -22,6 +22,8 @@ instance reclaims a job whose heartbeat stopped. The table is not summary-shaped
 handler from a registry, and every later long-running feature (Learn, topics, titles, transcription,
 exports, the processing pipeline) became a handler on it rather than another table and worker.
 Multi-pass summarization, shipped the same day, was the first user and the reason it hurt.
+
+**Superseded in part** by [AI trim proposals before Learn](2026-11-08-ai-trim-proposal-before-learn.md): The new trim inference kind uses per-user fair claims alongside pipeline and cut jobs. Summary and Learn claiming stays oldest first.
 
 ## Why
 

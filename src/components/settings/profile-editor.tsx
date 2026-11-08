@@ -48,7 +48,13 @@ import type {
 
 type EditorMode = "basic" | "advanced";
 type PromptLocale = "en" | "cs-CZ";
-type CommonStepName = "transcribe" | "learn" | "title" | "topics" | "summary";
+type CommonStepName =
+    | "transcribe"
+    | "trim"
+    | "learn"
+    | "title"
+    | "topics"
+    | "summary";
 
 interface CommonStep {
     automatic: boolean;
@@ -107,6 +113,8 @@ function getCommonStep(
             ? settings.steps.transcribe
             : null;
     }
+    if (name === "trim")
+        return "trim" in settings.steps ? settings.steps.trim : null;
     if (name === "topics") {
         return "topics" in settings.steps ? settings.steps.topics : null;
     }
@@ -138,6 +146,7 @@ function useStepLabels(): Record<CommonStepName | "tasks", string> {
     const i18n = useExtracted();
     return {
         transcribe: i18n("Transcribe"),
+        trim: i18n("Trim proposal"),
         learn: i18n("Learn"),
         title: i18n("Title"),
         topics: i18n("Topics"),
@@ -829,6 +838,7 @@ function BasicEditor({
     const stepLabels = useStepLabels();
     const settings = profile.settings;
     const textSteps: CommonStepName[] = [
+        ...(profile.channel === "audio" ? (["trim"] as const) : []),
         "learn",
         "title",
         ...(profile.channel === "audio" ? (["topics"] as const) : []),
@@ -845,7 +855,9 @@ function BasicEditor({
     const summary = settings.steps.summary;
     const fullPromptActive = Boolean(summary.fullPrompt?.trim());
     const automationSteps = [
-        ...(profile.channel === "audio" ? (["transcribe"] as const) : []),
+        ...(profile.channel === "audio"
+            ? (["transcribe", "trim"] as const)
+            : []),
         "learn" as const,
         "title" as const,
         ...(profile.channel === "audio" ? (["topics"] as const) : []),
@@ -907,7 +919,7 @@ function BasicEditor({
                 />
                 <p className="text-xs text-muted-foreground">
                     {i18n(
-                        "Sets the same provider pin for Learn, Title, Topics, and Summary. Default uses your role choice, then your summary choice for following roles, then the Organization role and summary defaults, then your first enabled chat provider, then the Organization’s oldest enabled chat provider.",
+                        "Sets the same provider pin for Trim proposal, Learn, Title, Topics, and Summary. Default uses your role choice, then your summary choice for following roles, then the Organization role and summary defaults, then your first enabled chat provider, then the Organization’s oldest enabled chat provider.",
                     )}
                 </p>
             </div>
@@ -1046,7 +1058,9 @@ function AdvancedEditor({
     const stepLabels = useStepLabels();
     const settings = profile.settings;
     const steps: (CommonStepName | "tasks")[] = [
-        ...(profile.channel === "audio" ? (["transcribe"] as const) : []),
+        ...(profile.channel === "audio"
+            ? (["transcribe", "trim"] as const)
+            : []),
         "learn",
         "title",
         ...(profile.channel === "audio" ? (["topics"] as const) : []),

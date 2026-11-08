@@ -1,7 +1,7 @@
 ---
 title: Cutting a recording deletes the cut part; there is no hide mode
 date: 2026-11-03
-updated: 2026-11-08 15:40
+updated: 2026-11-08 19:20
 status: superseded
 kind: feature
 issues: [327]
@@ -9,7 +9,7 @@ prs: []
 areas: [src/lib/recordings, src/components/recordings/recording-cut.tsx, src/lib/sync/sync-recordings.ts, src/db/schema.ts]
 supersedes: [2026-09-30-learn]
 superseded-by: [2026-11-08-shared-recordings-cut-in-place, 2026-11-08-recording-cut-sentence-boundaries]
-relates: []
+relates: [2026-11-08-ai-trim-proposal-before-learn]
 ---
 
 # Cutting a recording deletes the cut part; there is no hide mode
@@ -69,6 +69,8 @@ Delete the cut parts. Only the owner can request the operation. A shared recordi
 ## Related work
 
 [Learn](2026-09-30-learn/README.md) is superseded only for "Facts die with their transcript": a destructive cut preserves confirmed private facts as manual assertions when their last supported evidence is removed. The rest holds, including normal Organization withdrawal.
+
+- [AI trim proposals before Learn](2026-11-08-ai-trim-proposal-before-learn.md): reuses this contract for whole-transcript suggestions and an owner decision before automatic work.
 
 ## Timeline
 

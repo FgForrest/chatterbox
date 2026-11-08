@@ -108,16 +108,17 @@ describe("profile editor Czech labels", () => {
             screen.getAllByRole("switch", {
                 name: "Spouštět automaticky",
             }),
-        ).toHaveLength(5);
+        ).toHaveLength(6);
         fireEvent.click(screen.getByRole("tab", { name: "Pokročilé" }));
         expect(
             screen.getAllByRole("switch", {
                 name: "Spouštět automaticky",
             }),
-        ).toHaveLength(5);
+        ).toHaveLength(6);
 
         for (const label of [
             "Přepis",
+            "Návrh ořezu",
             "Učení",
             "Název",
             "Témata",

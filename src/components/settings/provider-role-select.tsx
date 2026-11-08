@@ -27,7 +27,13 @@ import {
     providerPointersFromFlags,
 } from "@/lib/ai/provider-resolution-order";
 
-type Role = "transcription" | "topics" | "learning" | "summary" | "title";
+type Role =
+    | "trim"
+    | "transcription"
+    | "topics"
+    | "learning"
+    | "summary"
+    | "title";
 type PickerProvider = ProviderListItem & { scope?: "organization" };
 
 const FOLLOW_SUMMARY = "__follow-summary__";
@@ -35,6 +41,7 @@ const ORGANIZATION_DEFAULT = "__organization-default__";
 const NOT_CHOSEN = "__not-chosen__";
 
 const endpoints: Record<Role, string> = {
+    trim: "/api/settings/ai/providers/default-trim",
     transcription: "/api/settings/ai/providers/default-transcription",
     topics: "/api/settings/ai/providers/default-topics",
     learning: "/api/settings/ai/providers/default-learn",
@@ -168,8 +175,13 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
     );
     let value = NOT_CHOSEN;
     if (candidate?.source === "member-role") value = candidate.providerId;
-    if (candidate?.source === "member-summary") value = FOLLOW_SUMMARY;
     if (
+        candidate?.source === "member-summary" ||
+        candidate?.source === "member-title"
+    )
+        value = FOLLOW_SUMMARY;
+    if (
+        candidate?.source === "organization-title" ||
         candidate?.source === "organization-role" ||
         candidate?.source === "organization-summary"
     ) {
@@ -233,6 +245,7 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
     if (purpose === "topics") label = i18n("Topics provider");
     if (purpose === "learning") label = i18n("Learning provider");
     if (purpose === "title") label = i18n("Title provider");
+    if (purpose === "trim") label = i18n("Trim proposal");
     return (
         <div className="space-y-2">
             <Label htmlFor={`${purpose}-provider`}>{label}</Label>
@@ -263,6 +276,11 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
                                           providerLabel(candidateProvider),
                                   })
                                 : i18n("Unavailable: deleted provider")}
+                        </SelectItem>
+                    )}
+                    {purpose === "trim" && (
+                        <SelectItem value={FOLLOW_SUMMARY}>
+                            {i18n("Title, then Summary")}
                         </SelectItem>
                     )}
                     {followsSummary &&
@@ -334,7 +352,14 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
                     )}
                 </SelectContent>
             </Select>
-            {organization.length > 0 && !loading && (
+            {purpose === "trim" && (
+                <p className="text-xs text-muted-foreground">
+                    {i18n(
+                        "Without a trim choice, use Title, then Summary, then the Organization trim, title and summary defaults, then the oldest enabled chat provider. A broken choice skips trim.",
+                    )}
+                </p>
+            )}
+            {organization.length > 0 && !loading && purpose !== "trim" && (
                 <p className="text-xs text-muted-foreground">
                     {purpose === "transcription"
                         ? i18n(

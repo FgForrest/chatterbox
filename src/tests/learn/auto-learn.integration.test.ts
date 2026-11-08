@@ -448,6 +448,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         const profileOwner = input.ownerUserId ?? OWNER;
         const resolved = await resolveDefaultProfile(profileOwner, "audio");
         const settings = resolved.settings;
+        settings.steps.trim.automatic = false;
         if (!("transcribe" in settings.steps)) {
             throw new Error("audio profile");
         }

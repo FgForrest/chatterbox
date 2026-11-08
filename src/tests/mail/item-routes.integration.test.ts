@@ -678,6 +678,7 @@ describeWithDatabase("mail item routes (PostgreSQL)", () => {
             });
         const profile = await resolveDefaultProfile(OWNER, kind);
         const settings = defaultProfileSettings(kind);
+        if ("trim" in settings.steps) settings.steps.trim.automatic = false;
         settings.steps.learn.automatic = true;
         settings.steps.learn.provider = {
             credentialId,
