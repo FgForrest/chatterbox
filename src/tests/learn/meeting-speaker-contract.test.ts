@@ -8,8 +8,9 @@ import {
 import { runBridgePass } from "@/lib/learn/run-bridge";
 import { runFallbackPass, SPEAKER_RULE } from "@/lib/learn/run-fallback";
 import { speakerPromptContext } from "@/lib/learn/speaker-prompt-context";
-import { type LearnRunFrame, validateLearnOutput } from "@/lib/learn/validate";
+import type { LearnRunFrame } from "@/lib/learn/validate";
 import { mergeMeetingTerms } from "@/lib/transcription/meeting-terms";
+import { validateLearnProposals } from "@/tests/helpers/learn-proposals";
 
 vi.mock("@/db", () => ({ db: {} }));
 vi.mock("@/lib/env", () => ({ env: { IS_HOSTED: false } }));
@@ -61,7 +62,7 @@ describe("meeting speaker guesses", () => {
     it.each([
         0, 0.2, 0.49, 0.7, 1,
     ])("caps every review payload's confidence without raising %s", (confidence) => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             answer([
                 {
                     ...knownGuess(),
@@ -82,7 +83,7 @@ describe("meeting speaker guesses", () => {
     it("accepts a bounded guess without evidence and stores it unticked", () => {
         const parsed = parseLearnOutput(JSON.stringify(answer([knownGuess()])));
         expect(parsed.ok).toBe(true);
-        const result = validateLearnOutput(answer([knownGuess()]), frame);
+        const result = validateLearnProposals(answer([knownGuess()]), frame);
         expect(result.items).toMatchObject([
             {
                 kind: "speaker",
@@ -114,13 +115,13 @@ describe("meeting speaker guesses", () => {
             { ...knownGuess(), personId: null, rosterName: "Unknown Vosk" },
             { ...knownGuess(), personId: null, rosterName: "Mira Luvin" },
         ]) {
-            expect(validateLearnOutput(answer([speaker]), frame).items).toEqual(
-                [],
-            );
+            expect(
+                validateLearnProposals(answer([speaker]), frame).items,
+            ).toEqual([]);
         }
     });
     it("creates an unticked new-person proposal tied to an exact roster name", () => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             answer([
                 { ...knownGuess(), personId: null, rosterName: "Míra Luvin" },
             ]),
@@ -150,19 +151,19 @@ describe("meeting speaker guesses", () => {
     });
     it("uses at most one label per person, including previously confirmed people", () => {
         expect(
-            validateLearnOutput(
+            validateLearnProposals(
                 answer([knownGuess(), knownGuess("speaker_1")]),
                 frame,
             ).items,
         ).toHaveLength(1);
         expect(
-            validateLearnOutput(answer([knownGuess()]), {
+            validateLearnProposals(answer([knownGuess()]), {
                 ...frame,
                 answeredLabels: new Map([["speaker_2", "p1"]]),
             }).items,
         ).toEqual([]);
         expect(
-            validateLearnOutput(
+            validateLearnProposals(
                 answer([
                     knownGuess(),
                     {
@@ -194,7 +195,7 @@ describe("meeting speaker guesses", () => {
                 reason: "Named in the transcript.",
             }),
         );
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             {
                 ...answer([
                     ...names.map((rosterName, index) => ({
@@ -253,7 +254,9 @@ describe("meeting speaker guesses", () => {
             evidence: [],
             reason: "Named",
         };
-        expect(validateLearnOutput(answer([speaker]), frame).dropped).toEqual({
+        expect(
+            validateLearnProposals(answer([speaker]), frame).dropped,
+        ).toEqual({
             badTime: 1,
         });
     });
@@ -385,7 +388,7 @@ it("requires nullable guess fields in the bridge schema and accepts null on evid
 });
 
 it("preserves evidence-backed proposals for a second label and transcript provenance", () => {
-    const result = validateLearnOutput(
+    const result = validateLearnProposals(
         answer([
             {
                 label: "speaker_1",
@@ -427,13 +430,13 @@ it.each([
               evidence: ["00:00"],
               reason: "Named",
           };
-    expect(validateLearnOutput(answer([speaker]), rejectedFrame)).toMatchObject(
-        { items: [], dropped: { dismissed: 1 } },
-    );
+    expect(
+        validateLearnProposals(answer([speaker]), rejectedFrame),
+    ).toMatchObject({ items: [], dropped: { dismissed: 1 } });
 });
 
 it("counts a roster-only proposal without guess metadata as a drop", () => {
-    const result = validateLearnOutput(
+    const result = validateLearnProposals(
         answer([
             {
                 label: "speaker_0",
@@ -458,7 +461,7 @@ it("retains only Calendar and Meet clues supported by the matching roster", () =
             ["almanac", "calendar", "meet"],
         ],
     ] as const) {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             answer([
                 {
                     ...knownGuess(),

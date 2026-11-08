@@ -203,7 +203,7 @@ describe.each(["audio", "mail"] as const)("Czech %s Learn review", (kind) => {
             expect(screen.getByText("Mluvčí 0")).toBeTruthy();
             fireEvent.click(
                 screen.getByRole("button", {
-                    name: translatedSourceMessage("cs-CZ", "Someone else…"),
+                    name: translatedSourceMessage("cs-CZ", "Choose a person…"),
                 }),
             );
             expect(

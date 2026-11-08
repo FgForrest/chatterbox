@@ -82,9 +82,13 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { useDeferredReviewCommit } from "@/hooks/use-deferred-review-commit";
 import { followJob } from "@/lib/jobs/client";
 import {
-    labelsFromTurns,
+    isPlaceholderSpeakerLabel,
     speakerKey,
 } from "@/lib/knowledge/speaker-label-rules";
+import {
+    resolveSpeakerAttribution,
+    type SpeakerAttributions,
+} from "@/lib/knowledge/speaker-references";
 import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
 import type {
     MailNewRecordPayload,
@@ -93,12 +97,20 @@ import type {
 } from "@/lib/learn/mail-candidates";
 import { refsIn } from "@/lib/learn/new-refs";
 import type { SpeakerProposalContext } from "@/lib/learn/output";
+import { needsLearnReview } from "@/lib/learn/review-policy";
 import type { MailDetail } from "@/lib/mail/detail";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import type { WorkflowWidgetFrame } from "@/lib/pipeline/workflow-widgets";
 import { recordingLanguageName } from "@/lib/recordings/language";
 import type { RecordingView } from "@/lib/sharing/view";
 import { withRecordingView } from "@/lib/sharing/view";
+import {
+    compareSpeakingLabels,
+    type SpeakerSamples,
+    speakerEvidenceClip,
+    speakerSpeechSamples,
+    speakingStats,
+} from "@/lib/transcript/speech-samples";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import { cn } from "@/lib/utils";
 
@@ -117,6 +129,7 @@ interface SpeakerPayload extends SpeakerProposalContext {
     reason: string;
     onlyFirstName?: boolean;
     recorder?: boolean;
+    unmentioned?: boolean;
 }
 
 /** A speaker item's payload. */
@@ -171,6 +184,13 @@ interface ReviewState {
 }
 
 const POLL_MS = 3_000;
+const EMPTY_TURNS: readonly TranscriptTurn[] = [];
+const EMPTY_SAMPLES: SpeakerSamples = {
+    samples: [],
+    fallback: false,
+    longestTurnMs: 0,
+    longestStretchMs: 0,
+};
 
 /**
  * Learn on a transcript or message, and review what it proposed: the button
@@ -187,7 +207,10 @@ export function LearnWidget({
     recordingId,
     view,
     source = "riffado",
-    turns = [],
+    turns = EMPTY_TURNS,
+    durationMs,
+    confirmedAttributions = {},
+    unknownLabels,
     mailDetail,
     nextSpeakerTurn,
     onFinished,
@@ -205,8 +228,11 @@ export function LearnWidget({
     view?: RecordingView;
     source?: "plaud" | "riffado";
     turns?: readonly TranscriptTurn[];
+    durationMs?: number | null;
+    confirmedAttributions?: SpeakerAttributions;
+    unknownLabels?: ReadonlySet<string>;
     mailDetail?: MailDetail;
-    /** Select a speaker's next turn and reveal it in the transcript. */
+    /** Select a speaker's next turn without moving the review. */
     nextSpeakerTurn?: (label: string) => PlayAtTarget | null;
     /** The transcript's speakers and corrections changed: reload them. */
     onFinished?: () => void;
@@ -410,9 +436,8 @@ export function LearnWidget({
                     i18n(
                         "Learn found {count, plural, one {# suggestion} other {# suggestions}} to review",
                         {
-                            count: (next?.items ?? []).filter(
-                                (item) => item.kind !== "known_fact",
-                            ).length,
+                            count: (next?.items ?? []).filter(needsLearnReview)
+                                .length,
                         },
                     ),
                 );
@@ -842,17 +867,49 @@ export function LearnWidget({
         return describeItem(item);
     }
 
+    const turnsByLabel = useMemo(() => {
+        const grouped = new Map<string, TranscriptTurn[]>();
+        for (const turn of turns) {
+            if (isPlaceholderSpeakerLabel(turn.speaker)) continue;
+            const label = speakerKey(turn.speaker);
+            const own = grouped.get(label);
+            if (own) own.push(turn);
+            else grouped.set(label, [turn]);
+        }
+        return grouped;
+    }, [turns]);
+    const stats = useMemo(() => speakingStats(turns), [turns]);
+    const samplesFor = useMemo(() => {
+        const cache = new Map<string, SpeakerSamples>();
+        return (label: string) => {
+            const key = speakerKey(label);
+            let samples = cache.get(key);
+            if (!samples) {
+                samples = speakerSpeechSamples(turns, key, durationMs);
+                cache.set(key, samples);
+            }
+            return samples;
+        };
+    }, [turns, durationMs]);
     const groups = useMemo(() => {
         const items = state?.items ?? [];
         return {
             language: items.filter((item) => item.kind === "language"),
             records: items.filter((item) => item.kind === "new_record"),
-            speakers: items.filter((item) => item.kind === "speaker"),
+            speakers: items
+                .filter((item) => item.kind === "speaker")
+                .sort((a, b) =>
+                    compareSpeakingLabels(
+                        speakerPayload(a).label,
+                        speakerPayload(b).label,
+                        stats,
+                    ),
+                ),
             corrections: items.filter((item) => item.kind === "correction"),
             facts: items.filter((item) => item.kind === "fact"),
             phrases: items.filter((item) => item.kind === "relation_phrase"),
         };
-    }, [state]);
+    }, [state, stats]);
     const speakerItems = useMemo(
         () =>
             new Map(
@@ -864,7 +921,10 @@ export function LearnWidget({
         [groups],
     );
     // Colours by the order speakers first speak, as on the transcript.
-    const speakingOrder = useMemo(() => labelsFromTurns(turns), [turns]);
+    const speakingOrder = useMemo(
+        () => [...turnsByLabel.keys()],
+        [turnsByLabel],
+    );
     const accentOf = (label: string) =>
         speakerAccent(speakingOrder.indexOf(speakerKey(label)));
 
@@ -874,8 +934,11 @@ export function LearnWidget({
     const sharedReview = finished ? state?.run?.sharedReview : undefined;
     const stopped = status === "cancelled" || status === "superseded";
     const failed = status === "failed" || (stopped && !showTrigger);
-    const count = (state?.items ?? []).filter(
-        (item) => item.kind !== "known_fact",
+    const count = (state?.items ?? []).filter(needsLearnReview).length;
+    const selectionTotal = (state?.items ?? []).filter(
+        (item) =>
+            item.kind !== "known_fact" &&
+            !(item.kind === "speaker" && speakerPerson(item) === null),
     ).length;
     const learned = finished ? learnedCount(state?.items ?? []) : 0;
     const pending = status === "queued" || status === "running";
@@ -1105,7 +1168,7 @@ export function LearnWidget({
     ).length;
     const finishFooter = useLearnFinishFooter({
         selected,
-        total: count,
+        total: selectionTotal,
         busy: finishing || saving > 0,
         onFinish: () => void finish(),
     });
@@ -1199,6 +1262,14 @@ export function LearnWidget({
     };
     const quickAvailable = !nonSpeakerChanged && !state?.run?.reviewChanged;
     const automaticSummary = state?.quickFinish?.automaticSummary ?? false;
+    const namedSpeakerItems = groups.speakers.filter(
+        (item) => speakerPerson(item) !== null,
+    );
+    const alreadyNamed = speakingOrder.filter(
+        (label) =>
+            resolveSpeakerAttribution(confirmedAttributions, label) ||
+            unknownLabels?.has(label),
+    );
     const skipTasks = state?.quickFinish?.skipTasks ?? false;
     const quickTitle = automaticSummary
         ? kind === "mail"
@@ -1271,7 +1342,7 @@ export function LearnWidget({
                 skipped: String(sharedReview.skipped),
             });
         }
-    } else if (count === 0) {
+    } else if ((state?.items.length ?? 0) === 0) {
         finishedFacts = i18n("Nothing was applied");
         finishedTriggerLabel = i18n("Learned: nothing new");
     } else if (learned === 0) {
@@ -1454,7 +1525,11 @@ export function LearnWidget({
             title: i18n("New kind of relation"),
             items: groups.phrases,
         },
-    ].filter((section) => section.items.length > 0);
+    ].filter(
+        (section) =>
+            section.items.length > 0 ||
+            (section.key === "speakers" && alreadyNamed.length > 0),
+    );
     const sectionProps = (key: string) => {
         const section = sections.find((section) => section.key === key);
         const items = section?.items ?? [];
@@ -1463,6 +1538,11 @@ export function LearnWidget({
             id: `${sectionPrefix}-${key}`,
             title,
             count: items.length,
+            total: key === "speakers" ? namedSpeakerItems.length : items.length,
+            unnamed:
+                key === "speakers"
+                    ? groups.speakers.length - namedSpeakerItems.length
+                    : 0,
             selected: items.filter(
                 (item) =>
                     ticked(item) &&
@@ -1580,7 +1660,7 @@ export function LearnWidget({
                                           "What Learn found in this message. Ticked items are applied when you finish; unticked ones are not proposed again.",
                                       )
                                     : i18n(
-                                          "What Learn found in this transcript. Ticked items are applied when you finish; unticked ones are not proposed again.",
+                                          "What Learn found in this transcript. Ticked items are applied when you finish; unticked suggestions are not proposed again. Speakers left without a name are offered again next time.",
                                       )}
                                 {folderName ? ` · ${folderName}` : ""}
                             </>
@@ -1644,8 +1724,10 @@ export function LearnWidget({
                                                                 (item) =>
                                                                     item.decision ===
                                                                         "accepted" &&
-                                                                    !item.choice
-                                                                        ?.unknown &&
+                                                                    speakerPerson(
+                                                                        item,
+                                                                    ) !==
+                                                                        null &&
                                                                     waitingFor(
                                                                         item,
                                                                     ).length ===
@@ -1653,8 +1735,7 @@ export function LearnWidget({
                                                             ).length,
                                                         ),
                                                         total: String(
-                                                            groups.speakers
-                                                                .length,
+                                                            namedSpeakerItems.length,
                                                         ),
                                                     },
                                                 )}
@@ -1714,95 +1795,170 @@ export function LearnWidget({
                                     ))}
                                 </ReviewSection>
                             )}
-                            {kind === "audio" && groups.speakers.length > 0 && (
-                                <ReviewSection {...sectionProps("speakers")}>
-                                    {groups.speakers.map((item) => {
-                                        const payload = speakerPayload(item);
-                                        const person = speakerPerson(item);
-                                        const unknown = Boolean(
-                                            person && "unknown" in person,
-                                        );
-                                        const playable =
-                                            nextSpeakerTurn &&
-                                            turns.some(
-                                                (turn) =>
-                                                    speakerKey(turn.speaker) ===
-                                                    speakerKey(payload.label),
+                            {kind === "audio" &&
+                                (groups.speakers.length > 0 ||
+                                    alreadyNamed.length > 0) && (
+                                    <ReviewSection
+                                        {...sectionProps("speakers")}
+                                    >
+                                        <p className="text-xs text-muted-foreground">
+                                            {i18n(
+                                                "Sorted by speaking time. Tick all selects only rows that already have a name or an unknown answer.",
+                                            )}
+                                        </p>
+                                        {groups.speakers.map((item) => {
+                                            const payload =
+                                                speakerPayload(item);
+                                            const person = speakerPerson(item);
+                                            const unknown = Boolean(
+                                                person && "unknown" in person,
                                             );
-                                        return (
-                                            <ReviewSpeaker
-                                                key={item.id}
-                                                label={payload.label}
-                                                person={person}
-                                                accent={accentOf(payload.label)}
-                                                ticked={
-                                                    ticked(item) &&
-                                                    waitingFor(item).length ===
-                                                        0
-                                                }
-                                                blocked={blockedItem(item)}
-                                                disabled={finishing}
-                                                recorder={Boolean(
-                                                    payload.recorder &&
-                                                        !item.choice,
-                                                )}
-                                                onlyFirstName={Boolean(
-                                                    payload.onlyFirstName &&
-                                                        payload.personId,
-                                                )}
-                                                reason={payload.reason}
-                                                source={payload.source}
-                                                guess={payload.guess}
-                                                evidence={distinctPlayTimes(
-                                                    payload.evidenceMs,
-                                                ).map((ms) => (
+                                            const playable =
+                                                nextSpeakerTurn &&
+                                                turnsByLabel.has(
+                                                    speakerKey(payload.label),
+                                                );
+                                            return (
+                                                <ReviewSpeaker
+                                                    key={item.id}
+                                                    label={payload.label}
+                                                    person={person}
+                                                    accent={accentOf(
+                                                        payload.label,
+                                                    )}
+                                                    ticked={
+                                                        ticked(item) &&
+                                                        waitingFor(item)
+                                                            .length === 0
+                                                    }
+                                                    blocked={blockedItem(item)}
+                                                    disabled={finishing}
+                                                    recorder={Boolean(
+                                                        payload.recorder &&
+                                                            !item.choice,
+                                                    )}
+                                                    onlyFirstName={Boolean(
+                                                        payload.onlyFirstName &&
+                                                            payload.personId,
+                                                    )}
+                                                    reason={payload.reason}
+                                                    unmentioned={
+                                                        payload.unmentioned
+                                                    }
+                                                    stats={
+                                                        stats.get(
+                                                            speakerKey(
+                                                                payload.label,
+                                                            ),
+                                                        ) ?? {
+                                                            durationMs: 0,
+                                                            replies: 0,
+                                                        }
+                                                    }
+                                                    samples={
+                                                        (frame === "inline" &&
+                                                            !collapseReady) ||
+                                                        open
+                                                            ? samplesFor(
+                                                                  payload.label,
+                                                              )
+                                                            : EMPTY_SAMPLES
+                                                    }
+                                                    source={payload.source}
+                                                    guess={payload.guess}
+                                                    evidence={distinctPlayTimes(
+                                                        payload.evidenceMs,
+                                                    ).flatMap((ms) => {
+                                                        const clip =
+                                                            speakerEvidenceClip(
+                                                                turns,
+                                                                ms,
+                                                                payload.personId
+                                                                    ? state
+                                                                          ?.names[
+                                                                          payload
+                                                                              .personId
+                                                                      ]
+                                                                    : payload.newRef
+                                                                      ? recordName(
+                                                                            payload.newRef,
+                                                                        )
+                                                                      : undefined,
+                                                            );
+                                                        return clip
+                                                            ? [clip]
+                                                            : [];
+                                                    })}
+                                                    waits={waitsNote(item)}
+                                                    onTick={(checked) =>
+                                                        void decide(
+                                                            item,
+                                                            checked
+                                                                ? "accepted"
+                                                                : "rejected",
+                                                        )
+                                                    }
+                                                    onPick={() =>
+                                                        setPicking(item)
+                                                    }
+                                                    onUnknown={() =>
+                                                        void (unknown
+                                                            ? decide(
+                                                                  item,
+                                                                  "rejected",
+                                                                  null,
+                                                              )
+                                                            : decide(
+                                                                  item,
+                                                                  "accepted",
+                                                                  {
+                                                                      unknown: true,
+                                                                  },
+                                                              ))
+                                                    }
+                                                    nextTurn={
+                                                        playable
+                                                            ? () =>
+                                                                  nextSpeakerTurn(
+                                                                      speakerKey(
+                                                                          payload.label,
+                                                                      ),
+                                                                  )
+                                                            : undefined
+                                                    }
+                                                />
+                                            );
+                                        })}
+                                        {alreadyNamed.length > 0 && (
+                                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                                <span>
+                                                    {i18n("Already named:")}
+                                                </span>
+                                                {alreadyNamed.map((label) => (
                                                     <span
-                                                        key={ms}
-                                                        className="mr-1"
+                                                        key={label}
+                                                        className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2 py-1 text-foreground"
                                                     >
-                                                        {playAt(ms)}
+                                                        <span
+                                                            className={`size-1.5 rounded-full ${accentOf(label).dot}`}
+                                                        />
+                                                        {speakerLabel(label)} ·{" "}
+                                                        {resolveSpeakerAttribution(
+                                                            confirmedAttributions,
+                                                            label,
+                                                        )?.name ??
+                                                            i18n("unknown")}
                                                     </span>
                                                 ))}
-                                                waits={waitsNote(item)}
-                                                onTick={(checked) =>
-                                                    void decide(
-                                                        item,
-                                                        checked
-                                                            ? "accepted"
-                                                            : "rejected",
-                                                    )
-                                                }
-                                                onPick={() => setPicking(item)}
-                                                onUnknown={() =>
-                                                    void (unknown
-                                                        ? decide(
-                                                              item,
-                                                              "rejected",
-                                                              null,
-                                                          )
-                                                        : decide(
-                                                              item,
-                                                              "accepted",
-                                                              {
-                                                                  unknown: true,
-                                                              },
-                                                          ))
-                                                }
-                                                nextTurn={
-                                                    playable
-                                                        ? () =>
-                                                              nextSpeakerTurn(
-                                                                  speakerKey(
-                                                                      payload.label,
-                                                                  ),
-                                                              )
-                                                        : undefined
-                                                }
-                                            />
-                                        );
-                                    })}
-                                </ReviewSection>
-                            )}
+                                                <span>
+                                                    {i18n(
+                                                        "Change them in the transcript.",
+                                                    )}
+                                                </span>
+                                            </div>
+                                        )}
+                                    </ReviewSection>
+                                )}
                             {groups.records.length > 0 && (
                                 <ReviewSection {...sectionProps("records")}>
                                     {groups.records.map((item) => (
@@ -2202,6 +2358,8 @@ function ReviewSection({
     id,
     title,
     count,
+    total = count,
+    unnamed = 0,
     selected,
     sticky,
     toggle,
@@ -2210,6 +2368,8 @@ function ReviewSection({
     id: string;
     title: string;
     count: number;
+    total?: number;
+    unnamed?: number;
     selected: number;
     sticky: boolean;
     toggle?: GroupToggle;
@@ -2236,8 +2396,17 @@ function ReviewSection({
                 <span className="ml-auto text-xs tabular-nums text-muted-foreground">
                     {i18n("{selected} of {total} selected", {
                         selected: String(selected),
-                        total: String(count),
+                        total: String(total),
                     })}
+                    {unnamed > 0 && (
+                        <>
+                            {" "}
+                            ·{" "}
+                            {i18n("{count} without a name", {
+                                count: String(unnamed),
+                            })}
+                        </>
+                    )}
                 </span>
             </div>
             {children}

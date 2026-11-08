@@ -7,9 +7,9 @@ import {
     type LearnRunFrame,
     MAX_NEW_FACTS,
     occurrences,
-    validateLearnOutput,
 } from "@/lib/learn/validate";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
+import { validateLearnProposals } from "@/tests/helpers/learn-proposals";
 
 const TURNS: TranscriptTurn[] = [
     {
@@ -117,7 +117,7 @@ const janLeadsOrion = {
 
 describe("validateLearnOutput", () => {
     it("rejects everything when the transcript changed since the run read it", () => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({ corrections: [correctTavesi()] }),
             frame({ currentRevision: 4 }),
         );
@@ -126,7 +126,7 @@ describe("validateLearnOutput", () => {
 
     describe("speakers", () => {
         it("suggests a person for an unanswered label, with its times snapped to the transcript", () => {
-            const { items } = validateLearnOutput(
+            const { items } = validateLearnProposals(
                 output({
                     speakers: [
                         {
@@ -182,7 +182,7 @@ describe("validateLearnOutput", () => {
                     text: "Jo, Kráťo, pošli.",
                 },
             ];
-            const { items } = validateLearnOutput(
+            const { items } = validateLearnProposals(
                 output({
                     speakers: [
                         {
@@ -248,7 +248,7 @@ describe("validateLearnOutput", () => {
                 ["p-kratochvil", { name: "Michal Kratochvíl" }],
                 ["p-kovar", { name: "Michal Kovář" }],
             ]);
-            const { items, dropped } = validateLearnOutput(
+            const { items, dropped } = validateLearnProposals(
                 output({
                     speakers: [
                         {
@@ -277,7 +277,7 @@ describe("validateLearnOutput", () => {
         });
 
         it("names the person who made the recording on their role, without hearing their name", () => {
-            const { items } = validateLearnOutput(
+            const { items } = validateLearnProposals(
                 output({
                     speakers: [
                         {
@@ -322,7 +322,7 @@ describe("validateLearnOutput", () => {
                 evidence: [evidence],
                 reason: "leads",
             });
-            const twice = validateLearnOutput(
+            const twice = validateLearnProposals(
                 output({
                     speakers: [
                         asRecorder("speaker_1", "00:19"),
@@ -334,7 +334,7 @@ describe("validateLearnOutput", () => {
             expect(twice.items).toEqual([]);
             expect(twice.dropped).toMatchObject({ conflicting: 2 });
 
-            const answered = validateLearnOutput(
+            const answered = validateLearnProposals(
                 output({ speakers: [asRecorder("speaker_2", "01:01")] }),
                 frame({
                     turns,
@@ -349,7 +349,7 @@ describe("validateLearnOutput", () => {
         });
 
         it("joins a label's suggestions: a name beats not-identified, and names that disagree give nothing", () => {
-            const { items, dropped } = validateLearnOutput(
+            const { items, dropped } = validateLearnProposals(
                 output({
                     speakers: [
                         {
@@ -383,7 +383,7 @@ describe("validateLearnOutput", () => {
             ]);
             expect(dropped).toEqual({});
 
-            const split = validateLearnOutput(
+            const split = validateLearnProposals(
                 output({
                     speakers: [
                         {
@@ -407,7 +407,7 @@ describe("validateLearnOutput", () => {
         });
 
         it("drops one for a label a person answered, an unknown label or someone out of scope, and joins the rest per label", () => {
-            const { items, dropped } = validateLearnOutput(
+            const { items, dropped } = validateLearnProposals(
                 output({
                     speakers: [
                         {
@@ -461,7 +461,7 @@ describe("validateLearnOutput", () => {
 
     describe("corrections", () => {
         it("proposes no person by a first name alone, and no link to a name said as it is", () => {
-            const { items, dropped } = validateLearnOutput(
+            const { items, dropped } = validateLearnProposals(
                 output({
                     corrections: [
                         // "Honzo" is not how Jan is written: kept.
@@ -495,7 +495,7 @@ describe("validateLearnOutput", () => {
         });
 
         it("groups a correction heard several times into one item per target", () => {
-            const { items } = validateLearnOutput(
+            const { items } = validateLearnProposals(
                 output({
                     corrections: [correctTavesi(0), correctTavesi(1)],
                 }),
@@ -533,7 +533,7 @@ describe("validateLearnOutput", () => {
                     text: "Tavesy znovu, ne Tavesyho ani tavesy.",
                 },
             ];
-            const { items } = validateLearnOutput(
+            const { items } = validateLearnProposals(
                 output({ corrections: [correctTavesi(1)] }),
                 frame({ turns }),
             );
@@ -559,7 +559,7 @@ describe("validateLearnOutput", () => {
                     text: "Díky Honzo.",
                 },
             ];
-            const { items } = validateLearnOutput(
+            const { items } = validateLearnProposals(
                 output({
                     corrections: [
                         {
@@ -581,18 +581,18 @@ describe("validateLearnOutput", () => {
             const confirmed = new Set([
                 heardAsKey({ entityId: "e-tavesi" }, "Tavesy", "cs", "openai"),
             ]);
-            const ticked = validateLearnOutput(
+            const ticked = validateLearnProposals(
                 output({ corrections: [correctTavesi()] }),
                 frame({ confirmedHeardAs: confirmed }),
             );
             expect(ticked.items[0]?.preTicked).toBe(true);
-            const otherProvider = validateLearnOutput(
+            const otherProvider = validateLearnProposals(
                 output({ corrections: [correctTavesi()] }),
                 frame({ confirmedHeardAs: confirmed, provider: "elevenlabs" }),
             );
             expect(otherProvider.items[0]?.preTicked).toBe(false);
             // Never a person, whatever was confirmed (namesakes).
-            const person = validateLearnOutput(
+            const person = validateLearnProposals(
                 output({
                     corrections: [
                         {
@@ -618,7 +618,7 @@ describe("validateLearnOutput", () => {
         });
 
         it("keeps a link as spoken, and drops what is not at its place, out of scope, pointless or overlapping", () => {
-            const { items, dropped } = validateLearnOutput(
+            const { items, dropped } = validateLearnProposals(
                 output({
                     corrections: [
                         {
@@ -683,7 +683,7 @@ describe("validateLearnOutput", () => {
 
     describe("facts", () => {
         it("proposes a new fact unticked, depending on the speaker it is about", () => {
-            const { items } = validateLearnOutput(
+            const { items } = validateLearnProposals(
                 output({ facts: [janLeadsOrion] }),
                 frame(),
             );
@@ -705,7 +705,7 @@ describe("validateLearnOutput", () => {
         });
 
         it("ticks a known fact mentioned again", () => {
-            const { items } = validateLearnOutput(
+            const { items } = validateLearnProposals(
                 output({
                     facts: [
                         {
@@ -731,7 +731,7 @@ describe("validateLearnOutput", () => {
         });
 
         it("drops a sensitive fact, one that does not fit its relation, or names someone out of scope", () => {
-            const { items, dropped } = validateLearnOutput(
+            const { items, dropped } = validateLearnProposals(
                 output({
                     facts: [
                         { ...janLeadsOrion, sensitivity: "health" },
@@ -772,7 +772,7 @@ describe("validateLearnOutput", () => {
         });
 
         it("makes an unknown relation a phrase to review, never a fact", () => {
-            const { items } = validateLearnOutput(
+            const { items } = validateLearnProposals(
                 output({
                     facts: [
                         {
@@ -801,7 +801,7 @@ describe("validateLearnOutput", () => {
                 relationKey: "has_role",
                 object: { literal: `role ${i}` },
             }));
-            const { items, dropped } = validateLearnOutput(
+            const { items, dropped } = validateLearnProposals(
                 output({ facts }),
                 frame(),
             );
@@ -810,7 +810,7 @@ describe("validateLearnOutput", () => {
         });
 
         it("drops a time the transcript does not reach", () => {
-            const { items, dropped } = validateLearnOutput(
+            const { items, dropped } = validateLearnProposals(
                 output({ facts: [{ ...janLeadsOrion, start: "09:00" }] }),
                 frame(),
             );
@@ -829,7 +829,7 @@ describe("validateLearnOutput", () => {
                 end: "00:18",
                 sensitivity: "none" as const,
             };
-            const { items } = validateLearnOutput(
+            const { items } = validateLearnProposals(
                 output({
                     relationPhrases: [
                         phrase,
@@ -851,13 +851,13 @@ describe("validateLearnOutput", () => {
     });
 
     it("drops what a person dismissed before, on every run", () => {
-        const first = validateLearnOutput(
+        const first = validateLearnProposals(
             output({ corrections: [correctTavesi()] }),
             frame(),
         );
         const fingerprint = first.items[0]?.fingerprint ?? "";
         expect(fingerprint).not.toBe("");
-        const again = validateLearnOutput(
+        const again = validateLearnProposals(
             output({ corrections: [correctTavesi()] }),
             frame({ dismissed: new Set([fingerprint]) }),
         );
@@ -866,7 +866,7 @@ describe("validateLearnOutput", () => {
     });
 
     it("treats a transcript's instructions as data: an answer following them validates to nothing", () => {
-        const { items } = validateLearnOutput(
+        const { items } = validateLearnProposals(
             output({
                 corrections: [
                     {
@@ -899,7 +899,7 @@ describe("validateLearnOutput", () => {
         ]);
 
         it("pre-ticks a confirmed correction only when it writes the entity's name", () => {
-            const { items } = validateLearnOutput(
+            const { items } = validateLearnProposals(
                 output({
                     corrections: [
                         {
@@ -914,7 +914,7 @@ describe("validateLearnOutput", () => {
         });
 
         it("spans the whole line a fact is said in, and drops a span that quotes nothing", () => {
-            const { items, dropped } = validateLearnOutput(
+            const { items, dropped } = validateLearnProposals(
                 output({
                     facts: [
                         janLeadsOrion,
@@ -938,7 +938,7 @@ describe("validateLearnOutput", () => {
                     ["speaker_1", null],
                 ]),
             });
-            const { dropped } = validateLearnOutput(
+            const { dropped } = validateLearnProposals(
                 output({
                     facts: [
                         // About speaker_1, whom a person marked unknown.
@@ -958,7 +958,7 @@ describe("validateLearnOutput", () => {
             const knownFacts = new Map([
                 [factKey("p:p-alice", "leads", "e:e-orion"), "f-alice"],
             ]);
-            const byLabel = validateLearnOutput(
+            const byLabel = validateLearnProposals(
                 output({
                     facts: [
                         {
@@ -989,7 +989,7 @@ describe("validateLearnOutput", () => {
                     }),
                 }),
             ]);
-            const pending = validateLearnOutput(
+            const pending = validateLearnProposals(
                 output({
                     facts: [
                         {
@@ -1020,7 +1020,7 @@ describe("validateLearnOutput", () => {
                 end: "00:18",
                 sensitivity: "health" as const,
             };
-            const { items, dropped } = validateLearnOutput(
+            const { items, dropped } = validateLearnProposals(
                 output({
                     relationPhrases: [
                         phrase,
@@ -1059,7 +1059,7 @@ describe("validateLearnOutput", () => {
         });
 
         it("keeps a dismissed correction from claiming its words", () => {
-            const first = validateLearnOutput(
+            const first = validateLearnProposals(
                 output({ corrections: [correctTavesi()] }),
                 frame(),
             );
@@ -1067,7 +1067,7 @@ describe("validateLearnOutput", () => {
                 ...correctTavesi(),
                 replacement: "Tavesi Ltd",
             };
-            const { items } = validateLearnOutput(
+            const { items } = validateLearnProposals(
                 output({ corrections: [correctTavesi(), other] }),
                 frame({
                     dismissed: new Set([first.items[0]?.fingerprint ?? ""]),
@@ -1085,11 +1085,11 @@ describe("validateLearnOutput", () => {
                 evidence: ["00:18"],
                 reason: "",
             };
-            const one = validateLearnOutput(
+            const one = validateLearnProposals(
                 output({ speakers: [speaker] }),
                 frame({ transcriptKey: "t-1@3" }),
             );
-            const other = validateLearnOutput(
+            const other = validateLearnProposals(
                 output({ speakers: [speaker] }),
                 frame({
                     transcriptKey: "t-2@0",
@@ -1102,7 +1102,7 @@ describe("validateLearnOutput", () => {
 
     describe("after the Phase 4 review", () => {
         it("ties a fact about a speaker to that speaker, answered or not", () => {
-            const pending = validateLearnOutput(
+            const pending = validateLearnProposals(
                 output({ facts: [{ ...janLeadsOrion, speakerLabel: null }] }),
                 frame(),
             );
@@ -1116,7 +1116,7 @@ describe("validateLearnOutput", () => {
                     }),
                 }),
             ]);
-            const answered = validateLearnOutput(
+            const answered = validateLearnProposals(
                 output({
                     facts: [
                         {
@@ -1138,7 +1138,7 @@ describe("validateLearnOutput", () => {
 
         it("proposes nothing on words a confirmed correction already covers", () => {
             const first = at(0, "Tavesy");
-            const { items, dropped } = validateLearnOutput(
+            const { items, dropped } = validateLearnProposals(
                 output({ corrections: [correctTavesi(0), correctTavesi(1)] }),
                 frame({
                     corrected: [
@@ -1162,7 +1162,7 @@ describe("validateLearnOutput", () => {
         });
 
         it("drops a fact another scope knows, instead of copying it into this one", () => {
-            const { items, dropped } = validateLearnOutput(
+            const { items, dropped } = validateLearnProposals(
                 output({
                     facts: [
                         {
@@ -1210,13 +1210,13 @@ describe("validateLearnOutput", () => {
                 ]),
             });
             expect(
-                validateLearnOutput(output({ facts: [worksForTavesi] }), one)
+                validateLearnProposals(output({ facts: [worksForTavesi] }), one)
                     .items[0]?.payload,
             ).toMatchObject({
                 replaces: { factId: "f-acme", object: { entityId: "e-acme" } },
             });
             // Many values: nothing is replaced.
-            const many = validateLearnOutput(
+            const many = validateLearnProposals(
                 output({ facts: [worksForTavesi] }),
                 frame({ currentFacts: one.currentFacts }),
             );

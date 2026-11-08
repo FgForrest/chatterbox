@@ -117,13 +117,18 @@ import {
 import { GET as getRecording } from "@/app/api/recordings/[id]/route";
 import { POST as regenerateTitle } from "@/app/api/recordings/[id]/title/route";
 import { encrypt } from "@/lib/encryption";
-import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import {
+    decryptJsonField,
+    encryptJsonField,
+    encryptText,
+} from "@/lib/encryption/fields";
 import { buildAndUploadExportArchive } from "@/lib/export/build-archive";
 import { getRecordingMarkdownDocument } from "@/lib/export/document-sidecars";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
 import { releaseAutoLearnHold } from "@/lib/learn/auto-learn";
 import { learnJobHandler } from "@/lib/learn/learn-job-handler";
 import { decideReviewItem, finishReview, loadReview } from "@/lib/learn/review";
+import { isUnmentionedSpeaker } from "@/lib/learn/review-policy";
 import * as readableTranscripts from "@/lib/mcp/data/transcripts";
 import { loadReadableTranscript } from "@/lib/mcp/data/transcripts";
 import { TRANSCRIPT_TOOLS } from "@/lib/mcp/tools/transcripts";
@@ -286,7 +291,9 @@ suite("confirmed language with PostgreSQL", () => {
         expect(await releaseAutoLearnHold(REC)).toBe(false);
         const access = await requireRecordingView(OWNER, REC, "private");
         const review = await loadReview(access);
-        expect(review.items).toMatchObject([
+        expect(
+            review.items.filter((item) => !isUnmentionedSpeaker(item)),
+        ).toMatchObject([
             {
                 kind: "language",
                 preTicked: true,
@@ -319,7 +326,15 @@ suite("confirmed language with PostgreSQL", () => {
             status: "finished",
             items: 0,
         });
-        expect(await db().select().from(learnReviewItems)).toHaveLength(0);
+        expect(
+            (await db().select().from(learnReviewItems)).filter(
+                (item) =>
+                    !isUnmentionedSpeaker({
+                        ...item,
+                        payload: decryptJsonField(item.payload),
+                    }),
+            ),
+        ).toHaveLength(0);
         expect(
             (await db().select().from(recordings))[0]?.confirmedLanguage,
         ).toBeNull();
@@ -335,14 +350,20 @@ suite("confirmed language with PostgreSQL", () => {
         await learn("cs", 1);
         const access = await requireRecordingView(OWNER, REC, "private");
         const review = await loadReview(access);
-        const item = review.items[0];
+        const item = review.items.find((row) => row.kind === "language");
+        if (!item) throw new Error("Language item missing");
         const draft = await decideReviewItem(access, item.id, {
             decision: "accepted",
             version: item.version,
             choice: { language },
         });
         await finishReview(access, OWNER, {
-            versions: { [item.id]: draft.version },
+            versions: Object.fromEntries(
+                (await loadReview(access)).items.map((row) => [
+                    row.id,
+                    row.id === item.id ? draft.version : row.version,
+                ]),
+            ),
         });
         expect(
             (await db().select().from(recordings))[0]?.confirmedLanguage,
@@ -355,7 +376,10 @@ suite("confirmed language with PostgreSQL", () => {
     ])("dismisses rejection without writing a language, even with choice %j", async (choice) => {
         await learn("cs", 0.97);
         const access = await requireRecordingView(OWNER, REC, "private");
-        const item = (await loadReview(access)).items[0];
+        const item = (await loadReview(access)).items.find(
+            (row) => row.kind === "language",
+        );
+        if (!item) throw new Error("Language item missing");
         const before = (await db().select().from(recordings))[0];
         const draft = await decideReviewItem(access, item.id, {
             decision: "rejected",
@@ -363,14 +387,21 @@ suite("confirmed language with PostgreSQL", () => {
             choice,
         });
         const result = await finishReview(access, OWNER, {
-            versions: { [item.id]: draft.version },
+            versions: Object.fromEntries(
+                (await loadReview(access)).items.map((row) => [
+                    row.id,
+                    row.id === item.id ? draft.version : row.version,
+                ]),
+            ),
         });
         expect(result).toMatchObject({ applied: 0, dismissed: 1, skipped: [] });
         expect(result.confirmedLanguageChanged).toBeUndefined();
         expect((await db().select().from(recordings))[0]).toEqual(before);
-        expect((await db().select().from(learnReviewItems))[0]?.outcome).toBe(
-            "rejected",
-        );
+        expect(
+            (await db().select().from(learnReviewItems)).find(
+                (row) => row.kind === "language",
+            )?.outcome,
+        ).toBe("rejected");
         expect(await db().select().from(learnDismissals)).toHaveLength(1);
         expect(emitEvent).not.toHaveBeenCalled();
         expect(notifyIfShared).not.toHaveBeenCalled();
@@ -412,7 +443,15 @@ suite("confirmed language with PostgreSQL", () => {
         expect(
             (await db().select().from(learnRuns))[0]?.stats,
         ).not.toHaveProperty("items_language");
-        expect(await db().select().from(learnReviewItems)).toHaveLength(0);
+        expect(
+            (await db().select().from(learnReviewItems)).filter(
+                (item) =>
+                    !isUnmentionedSpeaker({
+                        ...item,
+                        payload: decryptJsonField(item.payload),
+                    }),
+            ),
+        ).toHaveLength(0);
     });
 
     it.each([
