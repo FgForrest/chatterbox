@@ -93,6 +93,7 @@ import {
     failJobAttempt,
     settleTerminalJobInTx,
 } from "@/db/queries/async-jobs";
+import { resolveTrimInTx } from "@/db/queries/trim-proposal";
 import {
     decryptText,
     encryptJsonField,
@@ -315,8 +316,39 @@ describe.skipIf(!url)(
                 );
             });
         }
-        it("commits an accepted trim proposal and settles the retained revision without proposing again", async () => {
+        it.each([
+            "accepted",
+            "timed_out",
+        ])("commits a cut after a %s trim proposal and reruns Learn and summary on the retained revision", async (decision) => {
             const db = database.db;
+            const automatic = seededAudioProfileSettings({
+                autoLearn: true,
+                autoSummarize: true,
+                autoDetectTopics: true,
+            });
+            await db
+                .update(processingProfileRevisions)
+                .set({ settings: encryptText(JSON.stringify(automatic)) })
+                .where(eq(processingProfileRevisions.id, "revision"));
+            await db.insert(recordingFolders).values({
+                id: "own-root",
+                userId: "owner",
+                kind: "private",
+                name: encryptText("Private"),
+                nameHash: "own-root",
+            });
+            await db.insert(recordingFolders).values({
+                id: "own-folder",
+                parentId: "own-root",
+                userId: "owner",
+                name: encryptText("Meetings"),
+                nameHash: "own-meetings",
+            });
+            await db.insert(recordingFolderAssignments).values({
+                itemId: "recording",
+                userId: "owner",
+                folderId: "own-folder",
+            });
             const [transcript] = await db
                 .select()
                 .from(transcriptions)
@@ -377,6 +409,17 @@ describe.skipIf(!url)(
                 .set({
                     phases: {
                         ...processing.phases,
+                        learn: {
+                            state: "done",
+                            reason: "released",
+                            generation: 1,
+                            at: proposal.createdAt,
+                            inputs: {
+                                contentId: "transcript",
+                                contentSourceId: "riffado",
+                                contentRevision: 0,
+                            },
+                        },
                         trim: {
                             proposalId: proposal.id,
                             state: "waiting",
@@ -400,10 +443,21 @@ describe.skipIf(!url)(
                         eq(itemProcessing.view, "private"),
                     ),
                 );
+            if (decision === "timed_out")
+                await db.transaction((tx) =>
+                    resolveTrimInTx(tx, {
+                        userId: "owner",
+                        recordingId: "recording",
+                        reason: "timed_out",
+                        now: new Date(proposal.deadline),
+                    }),
+                );
             await requestRecordingCut("owner", "recording", {
                 ...range,
                 revisions: [{ id: "transcript", revision: 0 }],
-                trimProposalId: proposal.id,
+                ...(decision === "accepted"
+                    ? { trimProposalId: proposal.id }
+                    : {}),
             });
             const [claimed] = await claimDueJobs("recording.cut", 1);
             const job = {
@@ -411,6 +465,7 @@ describe.skipIf(!url)(
                 payload: recordingCutJobHandler.parsePayload(claimed.payload),
             };
             await commit(job);
+            await completeJob({ jobId: job.id, claimToken: job.claimToken });
             const [retained] = await db
                 .select()
                 .from(transcriptions)
@@ -427,12 +482,36 @@ describe.skipIf(!url)(
                 reason: "cut_applied",
                 inputs: { contentId: "transcript", contentRevision: 1 },
             });
-            if (after.profile) after.profile.trim = { automatic: true };
-            expect(
-                planAdvance(after).actions.some(
-                    (action) => action.type === "queueTrim",
-                ),
-            ).toBe(false);
+            if (!after.profile || !after.content)
+                throw new Error("Missing retained input or profile");
+            expect(after.profile.trim?.automatic).toBe(true);
+            expect(after.profile.learn?.automatic).toBe(true);
+            after.learnAvailability = "available";
+            const plan = planAdvance(after);
+            expect(plan.actions.map((action) => action.type)).not.toContain(
+                "queueTrim",
+            );
+            expect(plan.actions).toContainEqual({
+                type: "startAutoLearn",
+                input: {
+                    contentId: "transcript",
+                    contentSourceId: "riffado",
+                    contentRevision: 1,
+                },
+                source: "riffado",
+            });
+            after.phases.learn = {
+                state: "done",
+                reason: "released",
+                generation: after.generation,
+                inputs: after.content,
+                at: new Date().toISOString(),
+            };
+            expect(planAdvance(after).actions).toContainEqual({
+                type: "queueSummary",
+                presetId: null,
+                strict: true,
+            });
         });
         it("resets the shared content and both stored views, then replans both export scopes", async () => {
             const db = database.db;

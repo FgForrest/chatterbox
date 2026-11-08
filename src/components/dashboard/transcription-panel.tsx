@@ -697,9 +697,13 @@ export function TranscriptionPanel({
     }, [followReleased, onTranscriptStale]);
 
     useWorkflowWidgetOpen(
-        (!widgets || widgets.transcript.visible) && !transcriptLine
-            ? transcriptWidgetId
-            : undefined,
+        !widgets || widgets.transcript.visible ? transcriptWidgetId : undefined,
+        (source) => {
+            if (source && transcriptList.some((t) => t.source === source))
+                setActiveSource(source);
+            setWorkflowTranscriptExpanded(true);
+            setTranscriptExpanded(true);
+        },
     );
     const [resummarizeAction, setResummarizeAction] = useState<{
         run: () => void;

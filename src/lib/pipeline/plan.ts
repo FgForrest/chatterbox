@@ -1257,6 +1257,10 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
     if (facts.item.kind === "audio" && facts.profile?.trim) {
         const trimInput = facts.trimContent ?? input;
         const trim = facts.phases.trim;
+        const evaluationGeneration =
+            categorize?.reason === "process_again"
+                ? categorize.generation
+                : undefined;
         const enabled = facts.profile.trim.automatic;
         if (!enabled && trimHolds(trim)) {
             actions.push({ type: "resolveTrim", reason: "profile_off" });
@@ -1279,15 +1283,14 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
                 ["done", "skipped", "failed"].includes(trim.state) &&
                 !["content_changed"].includes(trim.reason ?? "") &&
                 sameInput(trim, trimInput) &&
-                (minimumGeneration === undefined ||
-                    trim.generation >= minimumGeneration ||
+                (evaluationGeneration === undefined ||
+                    trim.generation >= evaluationGeneration ||
                     trim.reason === "cut_applied");
             const completedBeforeTrim =
                 !trim &&
-                minimumGeneration === undefined &&
-                sameInput(facts.phases.summary, trimInput) &&
-                ["done", "skipped", "failed"].includes(
-                    facts.phases.summary?.state ?? "",
+                evaluationGeneration === undefined &&
+                (["learn", "summary", "taskReview"] as const).some((phase) =>
+                    sameInput(facts.phases[phase], trimInput),
                 );
             if (!settled && !completedBeforeTrim) {
                 actions.push({ type: "queueTrim", input: trimInput });

@@ -12,6 +12,7 @@ import {
     apiCredentials,
     asyncJobs,
     itemProcessing,
+    learnRuns,
     mailPendingShares,
     recordingFolders,
     recordings,
@@ -35,6 +36,7 @@ const mocks = vi.hoisted(() => {
             status?: number;
         },
         complete: vi.fn(),
+        summary: vi.fn(),
         profile: vi.fn(),
         provider: vi.fn(),
         caller: { id: "owner" },
@@ -83,6 +85,15 @@ vi.mock("@/lib/org/config", () => ({
     isOrgScopeVisible: () => true,
     assertOrgScopeWritable: () => {},
 }));
+vi.mock("@/lib/summary/generate-summary", () => ({
+    generateSummaryForRecording: mocks.summary,
+}));
+vi.mock("@/lib/recordings/title-after-summary", () => ({
+    updateTitleAfterSummary: async () => ({ kind: "skipped", reason: "fake" }),
+}));
+vi.mock("@/lib/webhooks/emit", () => ({
+    emitEvent: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
 vi.mock("@/lib/profiles/resolve", () => ({
     resolveItemProfile: mocks.profile,
@@ -105,8 +116,14 @@ vi.mock("openai", () => ({
     },
 }));
 
+import { POST as processAgain } from "@/app/api/recordings/[id]/process-again/route";
 import { POST as decline } from "@/app/api/recordings/[id]/trim-proposal/route";
-import { claimDueJobs, completeJob, enqueueJob } from "@/db/queries/async-jobs";
+import {
+    claimDueJobs,
+    completeJob,
+    enqueueJob,
+    prepareClaimedPipelineJob,
+} from "@/db/queries/async-jobs";
 import { reconcilePipelineSteps } from "@/db/queries/pipeline-reconciler";
 import { reapAudioForRecording } from "@/db/queries/retention";
 import {
@@ -122,16 +139,24 @@ import {
 import { AppError, ErrorCode } from "@/lib/errors";
 import { collectTrimProposals } from "@/lib/export/trim-proposal";
 import { importTrimProposalInTx } from "@/lib/export/trim-proposal-import";
+import * as learnInput from "@/lib/learn/llm-input";
 import { executeIntendedSharesWithOutcome } from "@/lib/pipeline/share-intent";
 import { defaultProfileSettings } from "@/lib/profiles/settings";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { requestRecordingCut } from "@/lib/recordings/cut";
+import {
+    commitRecordingCut,
+    recordingCutJobHandler,
+} from "@/lib/recordings/cut-job-handler";
 import {
     queueTrim,
     TRIM_JOB_KIND,
     trimJobHandler,
 } from "@/lib/recordings/trim-job";
 import type { StoredTrimProposal } from "@/lib/recordings/trim-proposal";
+import { summaryJobHandler } from "@/lib/summary/summary-job-handler";
+import { lockItemTaskGraphInTx } from "@/lib/tasks/mentions";
+import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 import { insertRecordings } from "@/tests/integration/items";
 
 const turns = [
@@ -343,7 +368,51 @@ describe.skipIf(!admin)("durable private trim proposals", () => {
         const request = mocks.complete.mock.calls[0][0];
         expect(request.messages[1].content).toContain("Unrelated closing");
         expect(request.messages[0].content).toContain("Czech");
-        expect(request.max_tokens).toBe(1024);
+        expect(request.max_tokens).toBe(4096);
+    });
+    it.each([
+        (reply: string) => `\`\`\`json\n${reply}\n\`\`\``,
+        (reply: string) => `Here is the proposal:
+${reply}`,
+    ])("accepts wrapped JSON without a repair call %#", async (wrap) => {
+        const response = await mocks.complete();
+        response.choices[0].message.content = wrap(
+            response.choices[0].message.content,
+        );
+        mocks.complete.mockClear().mockResolvedValue(response);
+        await run();
+        expect((await current()).processing.phases.trim?.state).toBe("waiting");
+        expect((await current()).proposal?.start?.startMs).toBe(3000);
+        expect(mocks.complete).toHaveBeenCalledOnce();
+    });
+    it.each([
+        null,
+        2048,
+    ])("budgets reasoning output while respecting a card cap of %s", async (cap) => {
+        const resolved = await mocks.provider();
+        resolved.credential.defaultModel = "gpt-5";
+        resolved.credential.maxOutputTokens = cap;
+        mocks.provider.mockResolvedValue(resolved);
+        await run();
+        expect(mocks.complete.mock.calls[0][0].max_completion_tokens).toBe(
+            cap ?? 4096,
+        );
+        expect(mocks.complete.mock.calls[0][0].max_tokens).toBeUndefined();
+    });
+    it("silently skips when no usable chat provider exists", async () => {
+        mocks.provider.mockRejectedValue(
+            new AppError(
+                ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
+                "No chat provider",
+                400,
+                { providerSelection: "absent" },
+            ),
+        );
+        await run();
+        expect((await current()).processing.phases.trim?.reason).toBe(
+            "no_provider",
+        );
+        expect(mocks.complete).not.toHaveBeenCalled();
     });
     it("continues on empty and malformed output without creating a proposal", async () => {
         mocks.complete.mockResolvedValue({
@@ -376,7 +445,7 @@ describe.skipIf(!admin)("durable private trim proposals", () => {
         await run();
         expect(mocks.complete).not.toHaveBeenCalled();
         expect((await current()).processing.phases.trim?.reason).toBe(
-            "no_provider",
+            "provider_unavailable",
         );
     });
     it.each([
@@ -456,6 +525,73 @@ describe.skipIf(!admin)("durable private trim proposals", () => {
         });
         expect(trimJobHandler.maxAttempts).toBe(2);
         expect(mocks.complete).toHaveBeenCalledOnce();
+    });
+    it("accepts different Plaud sentence starts and cuts its text by sentence start", async () => {
+        await db()
+            .update(recordings)
+            .set({ audioReapedAt: new Date() })
+            .where(eq(recordings.id, "recording"));
+        const plaudTurns = [
+            {
+                speaker: "S1",
+                startMs: 0,
+                endMs: 10000,
+                text: "Secondary opening. Secondary budget. Secondary closing.",
+                sentenceStartsMs: [0, 4000, 8500],
+            },
+        ];
+        await db()
+            .insert(transcriptions)
+            .values({
+                id: "plaud-transcript",
+                recordingId: "recording",
+                userId: "owner",
+                source: "plaud",
+                text: encryptText(plaudTurns[0].text),
+                turns: encryptJsonField(plaudTurns),
+                provider: "Plaud",
+                model: "fake",
+            });
+        await run();
+        const proposal = (await current()).proposal;
+        expect(proposal?.start?.startMs).toBe(3000);
+        await requestRecordingCut("owner", "recording", {
+            startMs: 3000,
+            endMs: 10000,
+            trimProposalId: proposal?.id,
+            revisions: [
+                { id: "transcript", revision: 0 },
+                { id: "plaud-transcript", revision: 0 },
+            ],
+        });
+        const [cut] = await claimDueJobs("recording.cut", 1);
+        await db().transaction(async (tx) => {
+            await lockItemTaskGraphInTx(tx, {
+                itemId: "recording",
+                ownerUserId: "owner",
+            });
+            await commitRecordingCut(
+                tx,
+                "owner",
+                cut.id,
+                recordingCutJobHandler.parsePayload(cut.payload),
+                null,
+                null,
+                cut.claimToken,
+            );
+        });
+        const [secondary] = await db()
+            .select()
+            .from(transcriptions)
+            .where(eq(transcriptions.id, "plaud-transcript"));
+        expect(readTranscriptTurns(secondary)).toMatchObject([
+            {
+                text: "Secondary budget. Secondary closing.",
+                startMs: 1000,
+                endMs: 7000,
+                sentenceStartsMs: [1000, 5500],
+            },
+        ]);
     });
     it("refuses confirmation after a transcript revision changes", async () => {
         await run();
@@ -626,6 +762,353 @@ describe.skipIf(!admin)("durable private trim proposals", () => {
             "bypassed_manual",
         );
         expect((await current()).proposal).toBeNull();
+    });
+    async function executeSummary(
+        job: Awaited<ReturnType<typeof claimDueJobs>>[number],
+    ) {
+        if (!(await prepareClaimedPipelineJob(job.id, job.claimToken)))
+            return false;
+        const result = await summaryJobHandler.run({
+            userId: job.userId,
+            jobId: job.id,
+            claimToken: job.claimToken,
+            payload: summaryJobHandler.parsePayload(job.payload),
+            attempt: job.attempts,
+            maxAttempts: job.maxAttempts,
+            signal: new AbortController().signal,
+            reportProgress: vi.fn(),
+        });
+        if (result)
+            await completeJob({
+                jobId: job.id,
+                claimToken: job.claimToken,
+                result,
+            });
+        return true;
+    }
+    it.each([
+        "declined",
+        "timed_out",
+        "cut_applied",
+    ])("defers a queued-before-hold summary without spending an attempt, then runs after %s", async (reason) => {
+        if (reason === "cut_applied")
+            await db()
+                .update(recordings)
+                .set({ audioReapedAt: new Date() })
+                .where(eq(recordings.id, "recording"));
+        const queued = await enqueueJob({
+            userId: "owner",
+            kind: "summary",
+            subjectId: "recording",
+            payload: { recordingId: "recording", trigger: "auto" },
+        });
+        const response = await processAgain(
+            new Request(
+                "http://localhost/api/recordings/recording/process-again",
+                { method: "POST" },
+            ),
+            { params: Promise.resolve({ id: "recording" }) },
+        );
+        expect(response.status).toBe(200);
+        await run();
+        const proposal = (await current()).proposal;
+        expect((await current()).processing.phases.trim?.state).toBe("waiting");
+        const [job] = await claimDueJobs("summary", 1);
+        expect(job.id).toBe(queued.job.id);
+        mocks.summary.mockResolvedValue({
+            committed: true,
+            ownerUserId: "owner",
+            summary: "Budget summary",
+            keyPoints: [],
+            actionItems: [],
+            provider: "Custom",
+            model: "fake",
+        });
+        expect(await executeSummary(job)).toBe(false);
+        expect(mocks.summary).not.toHaveBeenCalled();
+        const [deferred] = await db()
+            .select()
+            .from(asyncJobs)
+            .where(eq(asyncJobs.id, job.id));
+        expect(deferred).toMatchObject({
+            status: "pending",
+            attempts: 0,
+            claimToken: null,
+        });
+        if (reason === "cut_applied") {
+            await requestRecordingCut("owner", "recording", {
+                startMs: 3000,
+                endMs: 10000,
+                trimProposalId: proposal?.id,
+                revisions: [{ id: "transcript", revision: 0 }],
+            });
+            const [cut] = await claimDueJobs("recording.cut", 1);
+            await db().transaction(async (tx) => {
+                await lockItemTaskGraphInTx(tx, {
+                    itemId: "recording",
+                    ownerUserId: "owner",
+                });
+                await commitRecordingCut(
+                    tx,
+                    "owner",
+                    cut.id,
+                    recordingCutJobHandler.parsePayload(cut.payload),
+                    null,
+                    null,
+                    cut.claimToken,
+                );
+            });
+            await completeJob({ jobId: cut.id, claimToken: cut.claimToken });
+            const [cancelled] = await db()
+                .select()
+                .from(asyncJobs)
+                .where(eq(asyncJobs.id, job.id));
+            expect(cancelled.status).toBe("failed");
+            const [retained] = await db()
+                .select()
+                .from(transcriptions)
+                .where(eq(transcriptions.id, "transcript"));
+            expect(retained.revision).toBe(1);
+            expect(
+                readTranscriptTurns(retained)?.map((t) => t.text),
+            ).not.toContain(turns[0].text);
+            await enqueueJob({
+                userId: "owner",
+                kind: "summary",
+                subjectId: "recording",
+                payload: { recordingId: "recording", trigger: "auto" },
+            });
+        } else {
+            await db().transaction((tx) =>
+                resolveTrimInTx(tx, {
+                    userId: "owner",
+                    recordingId: "recording",
+                    reason,
+                    ...(reason === "timed_out"
+                        ? { now: new Date(proposal?.deadline ?? "") }
+                        : {}),
+                }),
+            );
+            await db()
+                .update(asyncJobs)
+                .set({ nextAttemptAt: new Date(0) })
+                .where(eq(asyncJobs.id, job.id));
+        }
+        expect((await current()).processing.phases.trim?.reason).toBe(reason);
+        const [released] = await claimDueJobs("summary", 1);
+        expect(await executeSummary(released)).toBe(true);
+        expect(mocks.summary).toHaveBeenCalledOnce();
+    });
+    it.each([
+        "topics",
+        "pipeline.action",
+        "learn.run",
+    ])("defers previously queued automatic %s", async (kind) => {
+        const queued = await enqueueJob({
+            userId: "owner",
+            kind,
+            subjectId: "recording",
+            payload: { recordingId: "recording", trigger: "auto" },
+            pipeline: {
+                itemId: "recording",
+                userId: "owner",
+                phase: kind === "learn.run" ? "learn" : "summary",
+                ...(kind === "learn.run"
+                    ? {}
+                    : { step: kind === "topics" ? "topics" : "summary" }),
+            },
+        });
+        await run();
+        const [job] = await claimDueJobs(kind, 1);
+        expect(await prepareClaimedPipelineJob(job.id, job.claimToken)).toBe(
+            false,
+        );
+        const [deferred] = await db()
+            .select()
+            .from(asyncJobs)
+            .where(eq(asyncJobs.id, queued.job.id));
+        expect(deferred).toMatchObject({ status: "pending", attempts: 0 });
+    });
+    it.each([
+        "owner",
+        "other",
+    ])("allows a queued manual summary by %s without inferring curator consent", async (actor) => {
+        await db()
+            .update(itemProcessing)
+            .set({
+                phases: {
+                    summary: {
+                        state: "done",
+                        generation: 1,
+                        at: new Date().toISOString(),
+                        inputs: content,
+                        steps: {
+                            summary: {
+                                ...content,
+                                state: "done",
+                                generation: 1,
+                            },
+                        },
+                    },
+                },
+            })
+            .where(
+                and(
+                    eq(itemProcessing.itemId, "recording"),
+                    eq(itemProcessing.userId, "owner"),
+                ),
+            );
+        await enqueueJob({
+            userId: actor,
+            kind: "summary",
+            subjectId: "recording",
+            payload: { recordingId: "recording", trigger: "manual" },
+            pipeline: {
+                itemId: "recording",
+                userId: "owner",
+                phase: "summary",
+                step: "summary",
+                existingOnly: true,
+            },
+        });
+        await run();
+        const [job] = await claimDueJobs("summary", 1);
+        expect(await prepareClaimedPipelineJob(job.id, job.claimToken)).toBe(
+            true,
+        );
+        expect((await current()).processing.phases.trim?.reason).toBe(
+            actor === "owner" ? "bypassed_manual" : "review_pending",
+        );
+        expect((await current()).proposal === null).toBe(actor === "owner");
+    });
+    it.each([
+        "owner",
+        "other",
+    ])("reads a queued manual Learn trigger from its run for %s", async (actor) => {
+        await db()
+            .update(itemProcessing)
+            .set({
+                phases: {
+                    learn: {
+                        state: "done",
+                        generation: 1,
+                        at: new Date().toISOString(),
+                        inputs: content,
+                    },
+                },
+            })
+            .where(
+                and(
+                    eq(itemProcessing.itemId, "recording"),
+                    eq(itemProcessing.userId, "owner"),
+                ),
+            );
+        await db().insert(learnRuns).values({
+            id: "manual-run",
+            itemId: "recording",
+            userId: "owner",
+            scopeUserId: "owner",
+            actorUserId: actor,
+            view: "private",
+            trigger: "manual",
+            transcriptionId: "transcript",
+            transcriptRevision: 0,
+            vocabularyVersion: 1,
+            inputs: content,
+        });
+        await enqueueJob({
+            userId: actor,
+            kind: "learn.run",
+            subjectId: "recording",
+            payload: { runId: "manual-run" },
+            pipeline: {
+                itemId: "recording",
+                userId: "owner",
+                phase: "learn",
+                existingOnly: true,
+            },
+        });
+        await run();
+        const [job] = await claimDueJobs("learn.run", 1);
+        expect(await prepareClaimedPipelineJob(job.id, job.claimToken)).toBe(
+            true,
+        );
+        expect((await current()).processing.phases.trim?.reason).toBe(
+            actor === "owner" ? "bypassed_manual" : "review_pending",
+        );
+    });
+    it("also defers a pre-deployment unbound automatic summary", async () => {
+        await db()
+            .insert(asyncJobs)
+            .values({
+                id: "unbound-summary",
+                userId: "owner",
+                kind: "summary",
+                subjectId: "recording",
+                payload: { recordingId: "recording", trigger: "auto" },
+            });
+        await run();
+        const [job] = await claimDueJobs("summary", 1);
+        expect(await prepareClaimedPipelineJob(job.id, job.claimToken)).toBe(
+            false,
+        );
+        const [deferred] = await db()
+            .select()
+            .from(asyncJobs)
+            .where(eq(asyncJobs.id, job.id));
+        expect(deferred).toMatchObject({
+            status: "pending",
+            attempts: 0,
+            claimToken: null,
+        });
+    });
+    it.each([
+        { fileMd5: "changed" },
+        { duration: 11000 },
+        { cutAt: new Date(0) },
+    ])("resolves changed audio metadata after a locked reread: %j", async (change) => {
+        await run();
+        await db()
+            .update(recordings)
+            .set(change)
+            .where(eq(recordings.id, "recording"));
+        expect(await readOwnerTrimProposal("owner", "recording")).toBeNull();
+        expect((await current()).processing.phases.trim?.reason).toBe(
+            "content_changed",
+        );
+    });
+    it("polls a valid proposal without rendering content or waiting on the recording writer", async () => {
+        await run();
+        const render = vi.spyOn(learnInput, "modelInput");
+        let release: () => void = () => {};
+        let ready: () => void = () => {};
+        const gate = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const locked = new Promise<void>((resolve) => {
+            ready = resolve;
+        });
+        const writer = db().transaction(async (tx) => {
+            await lockTrimRecording(tx, "owner", "recording");
+            ready();
+            await gate;
+        });
+        await locked;
+        try {
+            const read = readOwnerTrimProposal("owner", "recording");
+            const result = await Promise.race([
+                read,
+                new Promise<null>((resolve) =>
+                    setTimeout(() => resolve(null), 1000),
+                ),
+            ]);
+            expect(result?.id).toBe((await current()).proposal?.id);
+            expect(render).not.toHaveBeenCalled();
+        } finally {
+            release();
+            await writer;
+            render.mockRestore();
+        }
     });
     it("reconciles expiry as a decision without a lost repair or another inference", async () => {
         await run();

@@ -52,7 +52,7 @@ Content-derived caches, including task content vectors, are derived data and are
 
 Each archive stays downloadable for seven days. A backup holds your own recordings, the shared ones included, without what colleagues added to them. The organization account's backup holds every shared recording, with its owner.
 
-A full personal archive also includes an outstanding trim proposal, its original decision deadline and the evaluated or resolved trim marker. Organization archives, received-item downloads and folder document exports omit this private decision. The trim restore adapter validates restored audio and transcripts, remaps identifiers and encrypts with the destination keys. Expired or mismatched proposals resolve without cutting. There is no general archive-import screen.
+A full personal archive also holds a trim proposal still waiting for your decision, with its original deadline. Organization archives, received-item downloads and folder exports leave it out.
 
 ## Deleting old data automatically
 
@@ -73,6 +73,5 @@ Where your instance receives mail, **Auto-delete old mail** below it does the sa
 - **Mail summary**: the summary and the tasks proposed from it.
 
 The mail stays in your pile with its sender, recipients and subject, and says what was removed. While a mail is shared into the Organization, the Organization's mail policy applies to it instead of yours.
-
 
 Next: [Settings](settings.md)

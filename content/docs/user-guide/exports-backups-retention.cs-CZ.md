@@ -62,7 +62,7 @@ Mezipaměti odvozené z obsahu, včetně vektorů obsahu úkolů, jsou odvozená
 
 Každý archiv zůstává ke stažení po dobu sedmi dnů. Záloha obsahuje vaše vlastní nahrávky, včetně sdílených, ale bez toho, co do nich přidali kolegové. Záloha účtu organizace obsahuje všechny sdílené nahrávky, včetně jejich vlastníka.
 
-Úplný osobní archiv zahrnuje také čekající návrh ořezu, jeho původní lhůtu pro rozhodnutí a záznam o dokončeném posouzení nebo rozhodnutí. Archivy Organizace, stažené přijaté položky a dokumentové exporty složek toto soukromé rozhodnutí neobsahují. Adaptér obnovy ořezu ověří obnovený zvuk a přepisy, přemapuje identifikátory a použije šifrovací klíče cílové instalace. Prošlé nebo neodpovídající návrhy uzavře bez ořezu. Obecná obrazovka pro import archivu není k dispozici.
+Úplný osobní archiv obsahuje i návrh ořezu, který stále čeká na vaše rozhodnutí, s původní lhůtou. Archivy Organizace, stažené přijaté položky a exporty složek ho neobsahují.
 
 <span id="deleting-old-data-automatically" />
 

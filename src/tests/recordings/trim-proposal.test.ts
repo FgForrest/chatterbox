@@ -88,16 +88,18 @@ describe("whole-transcript trim boundaries", () => {
                 10000,
             ),
         ).toThrow());
-    it("rejects overlapping retained speech", () =>
+    it("rejects overlapping speech in the preferred transcript", () => {
+        const overlapping = [{ ...turns[0], endMs: 4000 }, ...turns.slice(1)];
         expect(() =>
             validateTrimOutput(
                 { start, end: null },
-                anchors,
-                turns,
-                [turns, [{ ...turns[0], endMs: 4000 }]],
+                trimAnchors(overlapping),
+                overlapping,
+                [overlapping],
                 10000,
             ),
-        ).toThrow());
+        ).toThrow("unsafe_overlap");
+    });
     it("drops a zero length edge", () =>
         expect(
             validateTrimOutput(
@@ -388,6 +390,79 @@ describe("trim pipeline gate", () => {
         expect(planAdvance(f).actions.map((a) => a.type)).toContain(
             "queueTrim",
         );
+    });
+    it("does not backfill an expired pre-upgrade Learn review on a reconciler wake", () => {
+        const f = facts();
+        f.phases.transcribe = {
+            state: "done",
+            reason: "content-available",
+            inputs: f.content ?? undefined,
+            generation: 1,
+            at: f.at,
+        };
+        f.phases.learn = {
+            state: "waiting",
+            reason: "review_pending",
+            inputs: f.content ?? undefined,
+            generation: 1,
+            at: "2026-11-04T00:00:00Z",
+            waitingFor: { kind: "learnReview", until: "2026-11-07T00:00:00Z" },
+        };
+        f.learnRunReadyForReview = true;
+        f.summaryDueAt = "2026-11-07T00:00:00Z";
+        const actions = planAdvance(f).actions.map((a) => a.type);
+        expect(actions).not.toContain("queueTrim");
+        expect(actions).toContain("releaseLearnTimeout");
+    });
+    it("grandfathers an unchanged legacy Learn release even with a downstream minimum generation", () => {
+        const f = facts();
+        f.legacyContinuation = true;
+        f.phases.categorize = {
+            state: "done",
+            reason: "legacy",
+            generation: 1,
+            at: f.at,
+        };
+        f.phases.learn = {
+            state: "done",
+            reason: "released",
+            inputs: f.content ?? undefined,
+            generation: 2,
+            at: f.at,
+        };
+        expect(planAdvance(f).actions.map((a) => a.type)).not.toContain(
+            "queueTrim",
+        );
+    });
+    it.each([
+        "learn",
+        "summary",
+        "taskReview",
+    ] as const)("grandfathers every state of an existing %s input, but admits new transcriptions", (phase) => {
+        for (const state of [
+            "pending",
+            "running",
+            "waiting",
+            "done",
+            "skipped",
+            "failed",
+            "outdated",
+        ] as const) {
+            const f = facts();
+            f.phases[phase] = {
+                state,
+                inputs: f.content ?? undefined,
+                generation: 1,
+                at: f.at,
+            };
+            expect(planAdvance(f).actions.map((a) => a.type)).not.toContain(
+                "queueTrim",
+            );
+            if (f.content) f.content = { ...f.content, contentRevision: 2 };
+            expect(planAdvance(f).actions.map((a) => a.type)).toContain(
+                "queueTrim",
+            );
+        }
     });
     it("does not reevaluate unchanged transcript content after audio replacement", () => {
         const f = facts();

@@ -13,6 +13,7 @@ import {
     useState,
 } from "react";
 import { toast } from "sonner";
+import { openWidget } from "@/components/pipeline/workflow-widget";
 import { usePlayback } from "@/components/playback/playback-context";
 import {
     AlertDialog,
@@ -409,17 +410,26 @@ export function RecordingCutProvider({
             setError(null);
             setOpen(true);
             setConfirming(input.confirm);
-            if (!input.confirm)
+            if (!input.confirm) {
+                openWidget(
+                    `recording-transcription-${recording.id}`,
+                    input.source,
+                );
                 requestAnimationFrame(() => {
-                    const boundary = document.querySelector<HTMLElement>(
-                        `[data-cut-boundary="${input.range.startMs || input.range.endMs}"]`,
-                    );
+                    const boundary = document
+                        .getElementById(
+                            `recording-transcription-${recording.id}`,
+                        )
+                        ?.querySelector<HTMLElement>(
+                            `[data-cut-boundary="${input.range.startMs || input.range.endMs}"]`,
+                        );
                     boundary?.scrollIntoView({
                         block: "center",
                         behavior: "smooth",
                     });
                     boundary?.querySelector<HTMLElement>("button")?.focus();
                 });
+            }
         },
         recording,
         owner,

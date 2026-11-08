@@ -1,18 +1,11 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
     lockTrimRecording,
     resolveTrimInTx,
     type TrimTx,
 } from "@/db/queries/trim-state";
-
-export {
-    lockTrimRecording,
-    resolveTrimInTx,
-    type TrimTx,
-} from "@/db/queries/trim-state";
-
-import { transcriptions } from "@/db/schema";
+import { recordings, transcriptions } from "@/db/schema";
 import { decryptJsonField } from "@/lib/encryption/fields";
 import { modelInput } from "@/lib/learn/llm-input";
 import {
@@ -21,6 +14,12 @@ import {
     validateTrimOutput,
 } from "@/lib/recordings/trim-proposal";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
+
+export {
+    lockTrimRecording,
+    resolveTrimInTx,
+    type TrimTx,
+} from "@/db/queries/trim-state";
 
 /** Read all inputs under the recording writer lock, including secondary transcripts. */
 export async function readTrimSnapshot(
@@ -95,28 +94,70 @@ export async function readOwnerTrimProposal(
     recordingId: string,
 ): Promise<StoredTrimProposal | null> {
     return db.transaction(async (tx) => {
-        const snapshot = await readTrimSnapshot(tx, userId, recordingId);
-        if (!snapshot) return null;
-        const proposal = decryptJsonField<StoredTrimProposal>(
-            snapshot.recording.trimProposal,
-        );
-        if (!proposal) return null;
-        if (!(await trimSnapshotMatches(snapshot, proposal))) {
-            await resolveTrimInTx(tx, {
-                userId,
-                recordingId,
-                reason: "content_changed",
-            });
-            return null;
-        }
-        if (Date.parse(proposal.deadline) <= Date.now()) {
-            await resolveTrimInTx(tx, {
-                userId,
-                recordingId,
-                reason: "timed_out",
-            });
-            return null;
-        }
-        return proposal;
+        const read = async () => {
+            const [recording] = await tx
+                .select({
+                    trimProposal: recordings.trimProposal,
+                    fileMd5: recordings.fileMd5,
+                    duration: recordings.duration,
+                    cutAt: recordings.cutAt,
+                })
+                .from(recordings)
+                .where(
+                    and(
+                        eq(recordings.id, recordingId),
+                        eq(recordings.userId, userId),
+                        isNull(recordings.deletedAt),
+                    ),
+                )
+                .limit(1);
+            const proposal = decryptJsonField<StoredTrimProposal>(
+                recording?.trimProposal,
+            );
+            if (!recording || !proposal) return { proposal: null };
+            const revisions = await tx
+                .select({
+                    id: transcriptions.id,
+                    revision: transcriptions.revision,
+                })
+                .from(transcriptions)
+                .where(
+                    and(
+                        eq(transcriptions.recordingId, recordingId),
+                        eq(transcriptions.userId, userId),
+                    ),
+                );
+            const changed =
+                recording.fileMd5 !== proposal.audio.fileMd5 ||
+                recording.duration !== proposal.audio.duration ||
+                (recording.cutAt?.toISOString() ?? null) !==
+                    proposal.audio.cutAt ||
+                revisions.length !== proposal.revisions.length ||
+                revisions.some(
+                    (revision) =>
+                        !proposal.revisions.some(
+                            (expected) =>
+                                expected.id === revision.id &&
+                                expected.revision === revision.revision,
+                        ),
+                );
+            const reason = changed
+                ? "content_changed"
+                : Date.parse(proposal.deadline) <= Date.now()
+                  ? "timed_out"
+                  : undefined;
+            return { proposal, reason };
+        };
+        const current = await read();
+        if (!current.proposal || !current.reason) return current.proposal;
+        if (!(await lockTrimRecording(tx, userId, recordingId))) return null;
+        const locked = await read();
+        if (!locked.proposal || !locked.reason) return locked.proposal;
+        await resolveTrimInTx(tx, {
+            userId,
+            recordingId,
+            reason: locked.reason,
+        });
+        return null;
     });
 }

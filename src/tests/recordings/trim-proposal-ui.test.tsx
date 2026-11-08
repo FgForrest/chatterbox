@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptView } from "@/components/dashboard/transcript-view";
+import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
 import {
     RecordingCutPanel,
     RecordingCutProvider,
@@ -22,6 +23,13 @@ import type { StoredTrimProposal } from "@/lib/recordings/trim-proposal";
 import { processingFixture } from "@/tests/pipeline/processing-fixture";
 import type { Recording } from "@/types/recording";
 
+vi.mock("@/components/summary/summary-widget", () => ({
+    SummaryWidget: () => null,
+}));
+vi.mock("@/components/learn/learn-review", () => ({ LearnReview: () => null }));
+vi.mock("@/components/dashboard/transcribe-in-browser-button", () => ({
+    TranscribeInBrowserButton: () => null,
+}));
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 const fetchMock = vi.fn();
 const turns = [
@@ -289,18 +297,125 @@ describe("owner trim card", () => {
         expect(workflow.status?.message).toBe("trimCutting");
         expect(projected.steps.learn.waitingFor?.kind).toBe("cut");
     });
-    it("exposes an explicit manual summary action while trim waits", async () => {
+    it("shows one absolute-deadline line and keeps manual runs in their widgets", () => {
         view();
-        fireEvent.click(screen.getByText("Process without trimming"));
-        fireEvent.click(
-            screen.getByRole("button", { name: "Summarize without trimming" }),
-        );
-        await waitFor(() =>
-            expect(fetchMock).toHaveBeenCalledWith(
-                expect.stringContaining("/summary?source=riffado&view=private"),
-                expect.objectContaining({ method: "POST" }),
+        expect(
+            screen.getByText(
+                "Without a decision, Chatterbox continues without a cut at 4:00 AM. You can still cut later; Learn and the summary then run again.",
             ),
+        ).toBeTruthy();
+        expect(screen.queryByText(/minutes remaining/)).toBeNull();
+        expect(
+            screen.queryByText(/Running Learn or a summary yourself/),
+        ).toBeNull();
+        expect(screen.queryByText("Process without trimming")).toBeNull();
+        expect(
+            screen.getByText("Suggested by Custom · local-model. Paid by you."),
+        ).toBeTruthy();
+    });
+    it.each([
+        "no_provider",
+        "unsupported_cut",
+    ])("silently continues after %s", (reason) => {
+        const data = processing();
+        data.trimProposal = null;
+        data.phases.trim = {
+            state: "skipped",
+            reason,
+            generation: 1,
+            at: proposal.createdAt,
+        };
+        view({}, data);
+        expect(screen.queryByRole("status")).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "Try trim proposal again" }),
+        ).toBeNull();
+    });
+    it("shows a broken explicit provider choice with retry", () => {
+        const data = processing();
+        data.trimProposal = null;
+        data.phases.trim = {
+            state: "skipped",
+            reason: "provider_unavailable",
+            generation: 1,
+            at: proposal.createdAt,
+        };
+        view({}, data);
+        expect(screen.getByText(/Check the trim provider/)).toBeTruthy();
+        expect(
+            screen.getByRole("button", { name: "Try trim proposal again" }),
+        ).toBeTruthy();
+    });
+    it("expands the default collapsed workflow transcript, selects its source and focuses the mounted boundary", async () => {
+        const data = processing();
+        render(
+            <RecordingCutProvider
+                recording={recording}
+                transcripts={[
+                    {
+                        turns,
+                        version: { transcriptionId: "transcript", revision: 2 },
+                    },
+                    {
+                        turns,
+                        version: {
+                            transcriptionId: "plaud-transcript",
+                            revision: 0,
+                        },
+                    },
+                ]}
+                transcribing={false}
+                shared
+                onChanged={vi.fn()}
+            >
+                <TrimProposalCard processing={data} userId="owner" />
+                <TranscriptionPanel
+                    recording={recording}
+                    processing={data}
+                    transcripts={[
+                        {
+                            source: "plaud",
+                            text: "Other transcript.",
+                            turns: [{ ...turns[0], text: "Other transcript." }],
+                            version: {
+                                transcriptionId: "plaud-transcript",
+                                revision: 0,
+                            },
+                        },
+                        {
+                            source: "riffado",
+                            text: turns.map((t) => t.text).join(" "),
+                            turns,
+                            version: {
+                                transcriptionId: "transcript",
+                                revision: 2,
+                            },
+                        },
+                    ]}
+                    isTranscribing={false}
+                    onTranscribe={vi.fn()}
+                />
+            </RecordingCutProvider>,
         );
+        expect(deriveWorkflowWidgets(data).transcript.collapsed).toBe(true);
+        expect(
+            screen.queryByRole("region", { name: "Transcript content" }),
+        ).toBeNull();
+        fireEvent.click(
+            screen.getByRole("button", { name: "Adjust in transcript" }),
+        );
+        await waitFor(() => {
+            expect(
+                screen.getByRole("region", { name: "Transcript content" }),
+            ).toBeTruthy();
+            const boundary = document.querySelector<HTMLElement>(
+                '[data-cut-boundary="3000"]',
+            );
+            expect(boundary).not.toBeNull();
+            expect(boundary?.contains(document.activeElement)).toBe(true);
+            expect(boundary?.scrollIntoView).toHaveBeenCalled();
+        });
+        expect(screen.getByText("Budget decision.")).toBeTruthy();
     });
     it("tells a shared reader that the trim decision belongs to someone else", () => {
         const data = projectProcessing(

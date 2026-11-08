@@ -653,18 +653,6 @@ export async function prepareClaimedPipelineJob(
             )
             .limit(1);
         if (!job) return false;
-        if (jobBindings(job.payload).length > 0) {
-            const locked = await lockClaimedPipelineJobInTx(
-                tx,
-                jobId,
-                claimToken,
-            );
-            if (!locked) return false;
-            if ((await currentPipelineJobBindingsInTx(tx, locked)).length > 0)
-                return true;
-            await settleSupersededJobInTx(tx, jobId, locked.userId);
-            return false;
-        }
         let pipeline: PipelineJobTarget | undefined;
         if (job.kind === "learn.run" && typeof job.payload.runId === "string") {
             const [run] = await tx
@@ -714,16 +702,120 @@ export async function prepareClaimedPipelineJob(
                 userId: job.userId,
                 phase: "learn",
             };
+        if (
+            job.kind === "pipeline.action" &&
+            typeof job.payload.itemId === "string" &&
+            typeof job.payload.action === "object" &&
+            job.payload.action !== null &&
+            "type" in job.payload.action &&
+            job.payload.action.type === "applyPlaudTasks"
+        )
+            pipeline = {
+                itemId: job.payload.itemId,
+                userId: job.userId,
+                phase: "summary",
+                step: "summary",
+            };
         const target = pipelineJobTarget(job, pipeline);
-        if (target)
-            await lockPipelineTargetsInTx(
-                tx,
-                [target],
-                target.existingOnly !== true &&
-                    job.payload.trigger !== "manual",
-            );
+        const bindings = jobBindings(job.payload);
+        const targets = bindings.length ? bindings : target ? [target] : [];
+        const downstream = targets.filter(
+            (entry) => entry.phase === "learn" || entry.phase === "summary",
+        );
+        // Recording locks must precede processing/job locks, including already-bound claims.
+        for (const entry of [...downstream].sort((a, b) =>
+            a.itemId < b.itemId ? -1 : a.itemId > b.itemId ? 1 : 0,
+        ))
+            await lockTrimRecording(tx, entry.userId, entry.itemId);
+        await lockPipelineTargetsInTx(
+            tx,
+            targets,
+            bindings.length === 0 &&
+                target?.existingOnly !== true &&
+                job.payload.trigger !== "manual",
+        );
         const current = await lockClaimedPipelineJobInTx(tx, jobId, claimToken);
         if (!current) return false;
+        if (
+            jobBindings(current.payload).some(
+                (binding) =>
+                    !targets.some(
+                        (entry) =>
+                            entry.itemId === binding.itemId &&
+                            entry.userId === binding.userId,
+                    ),
+            )
+        )
+            throw new PipelineBindingsChangedError();
+        if (
+            bindings.length > 0 &&
+            (await currentPipelineJobBindingsInTx(tx, current)).length === 0
+        ) {
+            await settleSupersededJobInTx(tx, jobId, current.userId);
+            return false;
+        }
+        const manual =
+            job.payload.trigger === "manual" || pipeline?.existingOnly === true;
+        for (const entry of downstream) {
+            if (
+                manual &&
+                current.userId === entry.userId &&
+                (job.kind === "learn.run" || job.kind === "summary")
+            )
+                await resolveTrimInTx(tx, {
+                    userId: entry.userId,
+                    recordingId: entry.itemId,
+                    reason: "bypassed_manual",
+                });
+            if (manual) continue;
+            const [processing] = await tx
+                .select({ phases: itemProcessing.phases })
+                .from(itemProcessing)
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, entry.itemId),
+                        eq(itemProcessing.userId, entry.userId),
+                        eq(itemProcessing.view, "private"),
+                    ),
+                )
+                .limit(1);
+            const [cut] = await tx
+                .select({ id: asyncJobs.id })
+                .from(asyncJobs)
+                .where(
+                    and(
+                        eq(asyncJobs.userId, entry.userId),
+                        eq(asyncJobs.subjectId, entry.itemId),
+                        eq(asyncJobs.kind, "recording.cut"),
+                        isActive(),
+                    ),
+                )
+                .limit(1);
+            if (trimHolds(processing?.phases.trim) || cut) {
+                const now = new Date();
+                await tx
+                    .update(asyncJobs)
+                    .set({
+                        status: "pending",
+                        claimToken: null,
+                        heartbeatAt: null,
+                        startedAt: null,
+                        attempts: sql`greatest(0, ${asyncJobs.attempts} - 1)`,
+                        nextAttemptAt: new Date(now.getTime() + 1000),
+                        updatedAt: now,
+                    })
+                    .where(
+                        and(
+                            eq(asyncJobs.id, current.id),
+                            eq(asyncJobs.userId, current.userId),
+                            eq(asyncJobs.claimToken, claimToken),
+                            eq(asyncJobs.status, "processing"),
+                        ),
+                    );
+                return false;
+            }
+        }
+        if (bindings.length > 0) return true;
         if (job.kind === "learn.correct" && pipeline) {
             const [processing] = await tx
                 .select({ phases: itemProcessing.phases })

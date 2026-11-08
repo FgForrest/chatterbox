@@ -121,18 +121,16 @@ export function validateTrimOutput(
             snapCutEdge(turns, value.startMs, edge, duration) !== value.startMs
         )
             throw new Error("invalid_output");
-        for (const transcript of allTurns) {
-            for (const turn of transcript) {
-                const starts = sentenceStarts(turn);
-                if (
-                    starts.some(
-                        (start, i) =>
-                            start.ms < value.startMs &&
-                            (starts[i + 1]?.ms ?? turn.endMs) > value.startMs,
-                    )
+        for (const turn of turns) {
+            const starts = sentenceStarts(turn);
+            if (
+                starts.some(
+                    (start, i) =>
+                        start.ms < value.startMs &&
+                        (starts[i + 1]?.ms ?? turn.endMs) > value.startMs,
                 )
-                    throw new Error("unsafe_overlap");
-            }
+            )
+                throw new Error("unsafe_overlap");
         }
     }
     if (output.start?.startMs === 0) output.start = null;

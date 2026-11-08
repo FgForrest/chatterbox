@@ -33,6 +33,7 @@ import { nudge } from "@/lib/jobs/nudge";
 import { JobDeferredError } from "@/lib/jobs/retryable";
 import { InvalidJobPayloadError, type JobHandler } from "@/lib/jobs/types";
 import { correctionOverlay, modelInput } from "@/lib/learn/llm-input";
+import { jsonIn } from "@/lib/learn/output";
 import { effectiveManualOnly } from "@/lib/pipeline/effective-profile";
 import {
     type PipelineJobResult,
@@ -312,14 +313,19 @@ export const trimJobHandler: JobHandler<TrimPayload> = {
                     summary: profile.settings.steps.summary.provider,
                 },
             });
-        } catch {
-            return skip("no_provider");
+        } catch (error) {
+            return skip(
+                error instanceof AppError &&
+                    error.details?.providerSelection === "absent"
+                    ? "no_provider"
+                    : "provider_unavailable",
+            );
         }
         if (
             resolved.kind !== "credential" ||
             !resolved.credential.defaultModel?.trim()
         )
-            return skip("no_provider");
+            return skip("provider_unavailable");
         const rate = await consumeRateLimitBucket(`auto-trim:user:${userId}`, {
             limit: env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR,
             windowMs: 60 * 60 * 1000,
@@ -336,7 +342,7 @@ export const trimJobHandler: JobHandler<TrimPayload> = {
             .limit(1);
         const credential = resolved.credential;
         const model = credential.defaultModel;
-        if (!model) return skip("no_provider");
+        if (!model) return skip("provider_unavailable");
         const client = new OpenAI({
             apiKey: credential.apiKey,
             baseURL: credential.baseUrl ?? undefined,
@@ -371,7 +377,7 @@ export const trimJobHandler: JobHandler<TrimPayload> = {
                                 },
                                 { role: "user", content: rendered },
                             ],
-                            maxTokens: 1024,
+                            maxTokens: 4096,
                             maxOutputTokens: credential.maxOutputTokens,
                         }),
                         { signal: ctx.signal },
@@ -416,7 +422,7 @@ export const trimJobHandler: JobHandler<TrimPayload> = {
         let edges: ReturnType<typeof validateTrimOutput>;
         try {
             edges = validateTrimOutput(
-                JSON.parse(response.choices[0]?.message.content ?? ""),
+                jsonIn(response.choices[0]?.message.content ?? ""),
                 anchors,
                 turns,
                 allTurns,
