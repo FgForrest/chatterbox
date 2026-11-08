@@ -11,6 +11,7 @@ import {
 } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ConfirmDialogProvider } from "@/components/confirm-dialog";
 import { ItemHeader } from "@/components/items/item-header";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import {
@@ -145,7 +146,11 @@ const invitation = (id: string) => ({
     visibleInFolders: [],
 });
 
-describe.each(["audio", "mail"] as const)("received %s dialog", (kind) => {
+describe.each([
+    "audio",
+    "mail",
+    "meeting",
+] as const)("received %s dialog", (kind) => {
     describe.each([
         "ordinary",
         "already-visible",
@@ -176,7 +181,12 @@ describe.each(["audio", "mail"] as const)("received %s dialog", (kind) => {
             );
             expect(
                 screen.getByRole("dialog", {
-                    name: kind === "mail" ? "Accept email" : "Accept recording",
+                    name:
+                        kind === "meeting"
+                            ? "Accept agenda"
+                            : kind === "mail"
+                              ? "Accept email"
+                              : "Accept recording",
                 }),
             ).toBeTruthy();
             expect(
@@ -199,7 +209,7 @@ describe.each(["audio", "mail"] as const)("received %s dialog", (kind) => {
                 onSave={save}
             />,
         );
-        fireEvent.click(screen.getByRole("option", { name: "New folder…" }));
+        fireEvent.click(folderOption("New folder…"));
         fireEvent.change(screen.getByRole("textbox", { name: "Folder name" }), {
             target: { value: "New project" },
         });
@@ -244,9 +254,11 @@ describe.each(["audio", "mail"] as const)("received %s dialog", (kind) => {
             expect(submit).toHaveProperty("disabled", true);
             expect(
                 screen.getByText(
-                    kind === "mail"
-                        ? "You can read the email and summary."
-                        : "You can read the transcript and summary.",
+                    kind === "meeting"
+                        ? "You can co-edit the agenda. Recordings and their tasks keep their own sharing."
+                        : kind === "mail"
+                          ? "You can read the email and summary."
+                          : "You can read the transcript and summary.",
                 ),
             ).toBeTruthy();
             expect(
@@ -260,12 +272,8 @@ describe.each(["audio", "mail"] as const)("received %s dialog", (kind) => {
             expect(
                 screen.queryByRole("option", { name: sharedFolder.name }),
             ).toBeNull();
-            expect(
-                screen.getByRole("option", { name: "New folder…" }),
-            ).toBeTruthy();
-            fireEvent.click(
-                screen.getByRole("option", { name: ownFolder.name }),
-            );
+            expect(folderOption("New folder…")).toBeTruthy();
+            fireEvent.click(folderOption(ownFolder.name));
             expect(save).not.toHaveBeenCalled();
             fireEvent.click(submit);
             await waitFor(() =>
@@ -337,9 +345,7 @@ describe.each(["audio", "mail"] as const)("received %s dialog", (kind) => {
                     name: action === "accept" ? "Accept" : "Save",
                 }),
             ).toHaveProperty("disabled", true);
-            fireEvent.click(
-                screen.getByRole("option", { name: ownFolder.name }),
-            );
+            fireEvent.click(folderOption(ownFolder.name));
             fireEvent.click(
                 screen.getByRole("button", {
                     name: action === "accept" ? "Accept" : "Save",
@@ -385,12 +391,22 @@ describe.each(["audio", "mail"] as const)("received %s dialog", (kind) => {
             fireEvent.click(
                 screen.getByRole("radio", { name: /Also in another folder/ }),
             );
-            expect(
-                screen.getByRole("option", { name: ownFolder.name }),
-            ).toBeTruthy();
+            expect(folderOption(ownFolder.name)).toBeTruthy();
         });
     });
 });
+
+function folderOption(name: string) {
+    const matcher = {
+        name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+    };
+    if (!screen.queryByRole("option", matcher)) {
+        const trigger = screen.getByRole("combobox", { name: "Folder" });
+        if (trigger.getAttribute("aria-expanded") !== "true")
+            fireEvent.click(trigger);
+    }
+    return screen.getByRole("option", matcher);
+}
 
 function invitations(initial: ReturnType<typeof invitation>[]) {
     return render(
@@ -519,9 +535,7 @@ describe("person sharing controls", () => {
                 screen.getAllByRole("button", { name: "Accept…" })[0],
             );
             if (kind !== "folder")
-                fireEvent.click(
-                    screen.getByRole("option", { name: ownFolder.name }),
-                );
+                fireEvent.click(folderOption(ownFolder.name));
             await act(async () => {
                 fireEvent.click(
                     screen.getByRole("button", {
@@ -601,9 +615,7 @@ describe("person sharing controls", () => {
                     );
             };
             openDialog();
-            fireEvent.click(
-                screen.getByRole("option", { name: "New folder…" }),
-            );
+            fireEvent.click(folderOption("New folder…"));
             fireEvent.change(
                 screen.getByRole("textbox", { name: "Folder name" }),
                 { target: { value: created.name } },
@@ -618,15 +630,17 @@ describe("person sharing controls", () => {
                 ),
             );
             expect(
-                screen.getAllByRole("option", { name: created.name }),
+                screen
+                    .getAllByRole("combobox", { name: "Folder" })
+                    .filter((element) =>
+                        element.textContent?.includes(created.name),
+                    ),
             ).toHaveLength(1);
             fireEvent.click(screen.getByRole("button", { name: "Back" }));
             if (surface === "invitation")
                 fireEvent.click(screen.getByRole("button", { name: "Close" }));
             openDialog();
-            expect(
-                screen.getByRole("option", { name: created.name }),
-            ).toBeTruthy();
+            expect(folderOption(created.name)).toBeTruthy();
         });
     });
 
@@ -762,9 +776,7 @@ describe("person sharing controls", () => {
         expect(
             screen.getByRole("radio", { name: /Also in another folder/ }),
         ).toHaveProperty("checked", true);
-        expect(
-            screen.getByRole("option", { name: ownFolder.name }),
-        ).toBeTruthy();
+        expect(folderOption(ownFolder.name)).toBeTruthy();
         expect(screen.getByRole("button", { name: "Accept" })).toHaveProperty(
             "disabled",
             true,
@@ -1181,11 +1193,7 @@ describe("person sharing controls", () => {
             "disabled",
             true,
         );
-        await act(async () =>
-            fireEvent.click(
-                screen.getByRole("option", { name: "My private folder" }),
-            ),
-        );
+        fireEvent.click(folderOption("My private folder"));
         await act(async () =>
             fireEvent.click(screen.getByRole("button", { name: "Accept" })),
         );
@@ -1508,4 +1516,186 @@ describe("person sharing controls", () => {
         expect(enMessages.HyiDcy).toBe("Invitations");
         expect(enMessages.eCzP2A).toBe("Invitations ({count})");
     });
+});
+
+describe.each([
+    "author",
+    "receiver",
+    "organization",
+] as const)("agenda header %s", (role) => {
+    it("keeps the agenda frame and uses the canonical link with the permitted sharing controls", async () => {
+        shares = [share("accepted")];
+        const { container } = render(
+            <PersonSharingProvider value>
+                <TooltipProvider>
+                    <ItemHeader
+                        itemId="plan"
+                        kind="meeting"
+                        title="Project agenda"
+                        metadata={[]}
+                        isOwn={role === "author"}
+                        view={
+                            role === "receiver"
+                                ? "received"
+                                : role === "organization"
+                                  ? "org"
+                                  : undefined
+                        }
+                        ownerName="Jitka Dvořáková"
+                    />
+                </TooltipProvider>
+            </PersonSharingProvider>,
+        );
+        expect(container.querySelector("header")?.className).toContain(
+            "border-meeting",
+        );
+        expect(container.querySelector("header")?.className).not.toContain(
+            "border-person-share",
+        );
+        if (role === "author") {
+            await screen.findByText("Shared with 1 person");
+            fireEvent.click(screen.getByRole("button", { name: "Share" }));
+            expect(
+                await screen.findByRole("dialog", { name: "Share agenda" }),
+            ).toBeTruthy();
+            fireEvent.click(screen.getByRole("button", { name: "Done" }));
+        } else
+            expect(screen.queryByRole("button", { name: "Share" })).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
+        if (role === "author")
+            fireEvent.click(
+                within(
+                    await screen.findByRole("dialog", { name: "Link access" }),
+                ).getByRole("button", { name: "Copy link" }),
+            );
+        await waitFor(() =>
+            expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+                `${window.location.origin}/dashboard?meeting=plan`,
+            ),
+        );
+    });
+});
+
+it("discloses hidden agenda tasks and offers ordinary recording invitations", async () => {
+    requests.mockImplementation(async (_url: string, init?: RequestInit) =>
+        Response.json(
+            init?.method === "POST"
+                ? { recordingShare: { invited: ["receiver-0"], skipped: [] } }
+                : {
+                      shares: [share("pending")],
+                      agendaTasks: {
+                          count: 2,
+                          title: "Previous review",
+                          recordingItemId: "source",
+                          canInvite: true,
+                      },
+                  },
+        ),
+    );
+    render(
+        <PersonShareDialog
+            itemId="plan"
+            title="Project agenda"
+            kind="meeting"
+            open
+            onOpenChange={vi.fn()}
+        />,
+    );
+    expect(
+        await screen.findByText(/Invited people will not see 2 tasks/),
+    ).toBeTruthy();
+    fireEvent.click(
+        screen.getByRole("button", {
+            name: "Invite them to the recording too",
+        }),
+    );
+    await waitFor(() =>
+        expect(requests).toHaveBeenCalledWith(
+            "/api/meetings/plan/recording-shares",
+            expect.objectContaining({
+                method: "POST",
+                body: JSON.stringify({
+                    recordingItemId: "source",
+                    taskSource: true,
+                }),
+            }),
+        ),
+    );
+});
+
+it("shows a recorded agenda invitation and accepts the recording into the agenda filing", async () => {
+    render(
+        <PersonSharingProvider value>
+            <PersonInvitations
+                notifications={false}
+                folders={[ownFolder]}
+                initialInvitations={[
+                    {
+                        ...invitation("plan"),
+                        kind: "meeting",
+                        recorded: true,
+                        plannedStart: new Date(),
+                    },
+                    {
+                        ...invitation("recording"),
+                        suggestedFolder: {
+                            id: ownFolder.id,
+                            name: ownFolder.name,
+                        },
+                    },
+                ]}
+            />
+        </PersonSharingProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Invitations (2)" }));
+    expect(screen.getByText("Agenda")).toBeTruthy();
+    expect(screen.getByText("Recorded")).toBeTruthy();
+    fireEvent.click(
+        screen.getByRole("button", { name: `Accept into ${ownFolder.name}` }),
+    );
+    await waitFor(() =>
+        expect(requests).toHaveBeenCalledWith(
+            "/api/shares/recording",
+            expect.objectContaining({
+                body: JSON.stringify({
+                    action: "accept",
+                    version: 0,
+                    folderId: ownFolder.id,
+                }),
+            }),
+        ),
+    );
+});
+
+it("lets an agenda receiver end their direct share while explaining the remaining folder path", async () => {
+    render(
+        <ConfirmDialogProvider>
+            <ReceivedItemBanner
+                recording={{
+                    ...item,
+                    kind: "meeting",
+                    receivedFolderIds: [sharedFolder.id],
+                }}
+                folders={[ownFolder, sharedFolder]}
+            />
+        </ConfirmDialogProvider>,
+    );
+    fireEvent.click(
+        screen.getByRole("button", { name: "Remove and end sharing" }),
+    );
+    const dialog = screen.getByRole("alertdialog");
+    expect(
+        within(dialog).getByText("You will still see it in Local research."),
+    ).toBeTruthy();
+    fireEvent.click(
+        within(dialog).getByRole("button", { name: "Remove and end sharing" }),
+    );
+    await waitFor(() =>
+        expect(requests).toHaveBeenCalledWith(
+            "/api/shares/share",
+            expect.objectContaining({
+                body: JSON.stringify({ action: "remove", version: 2 }),
+            }),
+        ),
+    );
 });

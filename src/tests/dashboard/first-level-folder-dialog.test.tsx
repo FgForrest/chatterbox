@@ -7,7 +7,7 @@ import {
     screen,
     waitFor,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FirstLevelFolderDialog } from "@/components/dashboard/first-level-folder-dialog";
 import type { RecordingFolder } from "@/types/folder";
 
@@ -36,6 +36,17 @@ const folders: RecordingFolder[] = [
     },
 ];
 
+beforeEach(() => {
+    vi.stubGlobal(
+        "ResizeObserver",
+        class {
+            observe() {}
+            disconnect() {}
+            unobserve() {}
+        },
+    );
+    Element.prototype.scrollIntoView = vi.fn();
+});
 afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();

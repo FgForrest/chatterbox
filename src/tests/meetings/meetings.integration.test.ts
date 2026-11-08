@@ -1068,29 +1068,26 @@ suite("meeting planning server (PostgreSQL)", () => {
             (await mergeTaskIntoTask(viewer, "first", "second")).text,
         ).toContain("Changed");
     });
-    it("refuses direct meeting shares and survives a stray invitation", async () => {
+    it("accepts direct agenda invitations without widening content-item visibility", async () => {
         const meeting = await create();
-        if (meeting.meeting.unchanged)
-            throw new Error("Missing meeting detail");
+        if (meeting.meeting.unchanged || !meeting.meeting.meetingItemId)
+            throw new Error("Missing meeting item");
         const itemId = meeting.meeting.meetingItemId;
-        if (!itemId) throw new Error("Missing meeting item");
+        const [share] = await inviteToItem("owner", itemId, ["other"]);
+        expect((await listMyInvitations("other"))[0].kind).toBe("meeting");
         await expect(
-            inviteToItem("owner", itemId, ["other"]),
+            requireMeetingAccess("other", meeting.id),
         ).rejects.toMatchObject({ statusCode: 404 });
-        await db.insert(itemShares).values({
-            id: "stray",
-            userId: "owner",
-            itemId,
-            receiverUserId: "other",
+        await changePersonShare("other", share.id, {
+            action: "accept",
+            version: 0,
+            folderId: "other-folder",
         });
-        expect(await listMyInvitations("other")).toEqual([]);
-        await expect(
-            changePersonShare("other", "stray", {
-                action: "accept",
-                version: 0,
-                folderId: "other-folder",
-            }),
-        ).rejects.toMatchObject({ statusCode: 404 });
+        expect(
+            (await requireMeetingAccess("other", meeting.id, "edit"))
+                .permissions.manage,
+        ).toBe(false);
+        expect(await isItemReceived("other", itemId)).toBe(false);
         const restored = await restoreArchivedItemShares(
             "owner",
             [
@@ -1102,13 +1099,9 @@ suite("meeting planning server (PostgreSQL)", () => {
             ],
             new Map([["old", itemId]]),
         );
-        expect(restored.restored).toBe(0);
-        await db
-            .update(itemShares)
-            .set({ state: "accepted" })
-            .where(eq(itemShares.id, "stray"));
+        expect(restored.restored).toBe(1);
         await expect(
-            requireMeetingAccess("other", meeting.id),
+            requireMeetingAccess("stranger", meeting.id),
         ).rejects.toMatchObject({ statusCode: 404 });
     });
     it("keeps Organization colleagues on the read-only agenda until gated publication", async () => {

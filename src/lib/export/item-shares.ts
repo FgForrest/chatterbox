@@ -1,5 +1,6 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
+import { archivedMeetingShareCondition } from "@/db/queries/archived-meeting-shares";
 import { type ItemShareState, itemShares, users } from "@/db/schema";
 import type { ArchiveScope } from "@/lib/export/archive-scope";
 
@@ -17,7 +18,7 @@ export async function collectArchivedItemShares(
     scope: ArchiveScope,
     itemIds: ReadonlySet<string>,
 ): Promise<ArchivedItemShare[]> {
-    if (scope.kind !== "personal" || itemIds.size === 0) return [];
+    if (scope.kind !== "personal") return [];
     const rows = await db
         .select({
             itemId: itemShares.itemId,
@@ -32,7 +33,10 @@ export async function collectArchivedItemShares(
         .where(
             and(
                 eq(itemShares.userId, scope.userId),
-                inArray(itemShares.itemId, [...itemIds]),
+                or(
+                    inArray(itemShares.itemId, [...itemIds]),
+                    archivedMeetingShareCondition(scope.userId),
+                ),
                 isNull(itemShares.folderShareId),
             ),
         );

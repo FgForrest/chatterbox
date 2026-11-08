@@ -4,6 +4,7 @@ import { ArrowDownWideNarrow, ListChecks, Loader2 } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useExtracted } from "next-intl";
 import { useEffect, useRef, useState } from "react";
+import { FolderCombobox } from "@/components/recordings/folder-combobox";
 import { OwnTaskForm } from "@/components/tasks/own-task-form";
 import { RoutedProposalsInbox } from "@/components/tasks/routed-proposals-inbox";
 import {
@@ -21,33 +22,10 @@ import {
 } from "@/components/ui/select";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useTaskListData } from "@/hooks/use-task-list-data";
+import { matchFolders } from "@/lib/folders/navigation";
 import { cn } from "@/lib/utils";
-import type { RecordingFolder } from "@/types/folder";
 
 const ALL = "all";
-
-/** A folder with its depth, for an indented picker. */
-function flattenFolders(
-    folders: readonly RecordingFolder[],
-): { folder: RecordingFolder; depth: number }[] {
-    const children = new Map<string | null, RecordingFolder[]>();
-    for (const folder of folders) {
-        const siblings = children.get(folder.parentId) ?? [];
-        siblings.push(folder);
-        children.set(folder.parentId, siblings);
-    }
-    const out: { folder: RecordingFolder; depth: number }[] = [];
-    const walk = (parentId: string | null, depth: number) => {
-        for (const folder of (children.get(parentId) ?? []).sort(
-            (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name),
-        )) {
-            out.push({ folder, depth });
-            walk(folder.id, depth + 1);
-        }
-    };
-    walk(null, 0);
-    return out;
-}
 
 /**
  * The viewer's tasks across recordings: theirs to do, or the ones they keep
@@ -217,35 +195,14 @@ export function TaskList({
                         setParam("state", value === "open" ? null : value)
                     }
                 />
-                <Select
-                    value={folder}
-                    onValueChange={(value) => setParam("folder", value)}
-                >
-                    <SelectTrigger
-                        className="h-8 w-48 text-xs"
-                        aria-label={i18n("Folder")}
-                    >
-                        <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value={ALL}>
-                            {i18n("All folders")}
-                        </SelectItem>
-                        {flattenFolders(folders).map(
-                            ({ folder: entry, depth }) => (
-                                <SelectItem key={entry.id} value={entry.id}>
-                                    <span
-                                        style={{
-                                            paddingLeft: `${depth * 12}px`,
-                                        }}
-                                    >
-                                        {folderLabel(entry)}
-                                    </span>
-                                </SelectItem>
-                            ),
-                        )}
-                    </SelectContent>
-                </Select>
+                <FolderCombobox
+                    entries={matchFolders(folders, "", folderLabel)}
+                    value={folder === ALL ? "" : folder}
+                    onValueChange={(value) => setParam("folder", value || ALL)}
+                    emptyChoiceLabel={i18n("All folders")}
+                    aria-label={i18n("Folder")}
+                    className="h-9 min-h-0 max-w-48 text-xs [&>span]:text-foreground"
+                />
                 {tab !== "mine" && (
                     <TaskAssigneeSelect
                         assignee={assignee}

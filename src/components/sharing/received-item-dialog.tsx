@@ -2,6 +2,7 @@
 
 import {
     AudioLines,
+    CalendarClock,
     Check,
     FileText,
     FolderInput,
@@ -16,7 +17,7 @@ import {
     type CreatedFolder,
     NewFolderForm,
 } from "@/components/pipeline/new-folder-form";
-import { FolderSearchList } from "@/components/recordings/folder-search-list";
+import { FolderCombobox } from "@/components/recordings/folder-combobox";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -32,10 +33,12 @@ import type { RecordingFolder } from "@/types/folder";
 
 export interface SharedItemPreview {
     title: string;
-    kind: "audio" | "mail";
+    kind: "audio" | "mail" | "meeting";
     ownerName: string;
     invitedAt?: Date | string;
     visibleInFolders: { id: string; name: string }[];
+    /** An agenda a recording has absorbed, read-only for its receivers. */
+    recorded?: boolean;
 }
 
 /** One acceptance and filing body for recordings and email, with optional existing folder paths. */
@@ -69,7 +72,7 @@ export function ReceivedItemDialog({
     const [folderId, setFolderId] = useState(initialFolderId ?? "");
     const [created, setCreated] = useState<RecordingFolder[]>([]);
     const [creating, setCreating] = useState(false);
-    const [query, setQuery] = useState("");
+    const [newName, setNewName] = useState("");
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const entries = useMemo(
@@ -105,12 +108,30 @@ export function ReceivedItemDialog({
     let title: string;
     if (action === "file")
         title =
-            item.kind === "mail" ? i18n("File email") : i18n("File recording");
+            item.kind === "meeting"
+                ? i18n("File agenda")
+                : item.kind === "mail"
+                  ? i18n("File email")
+                  : i18n("File recording");
     else
         title =
-            item.kind === "mail"
-                ? i18n("Accept email")
-                : i18n("Accept recording");
+            item.kind === "meeting"
+                ? i18n("Accept agenda")
+                : item.kind === "mail"
+                  ? i18n("Accept email")
+                  : i18n("Accept recording");
+    let access: string;
+    if (item.kind === "meeting")
+        access = item.recorded
+            ? i18n(
+                  "The agenda is recorded. Its points and notes are read-only. Recordings and their tasks keep their own sharing.",
+              )
+            : i18n(
+                  "You can co-edit the agenda. Recordings and their tasks keep their own sharing.",
+              );
+    else if (item.kind === "mail")
+        access = i18n("You can read the email and summary.");
+    else access = i18n("You can read the transcript and summary.");
     const save = async () => {
         if (saving || (chooseFolder && !folderId)) return;
         setSaving(true);
@@ -129,7 +150,12 @@ export function ReceivedItemDialog({
             setSaving(false);
         }
     };
-    const Icon = item.kind === "mail" ? Mail : AudioLines;
+    const Icon =
+        item.kind === "meeting"
+            ? CalendarClock
+            : item.kind === "mail"
+              ? Mail
+              : AudioLines;
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent
@@ -229,13 +255,7 @@ export function ReceivedItemDialog({
                         <ul className="space-y-2 text-sm">
                             <li className="flex items-center gap-2">
                                 <FileText className="size-4 shrink-0 text-muted-foreground" />
-                                {item.kind === "mail"
-                                    ? i18n(
-                                          "You can read the email and summary.",
-                                      )
-                                    : i18n(
-                                          "You can read the transcript and summary.",
-                                      )}
+                                {access}
                             </li>
                             <li className="flex items-center gap-2">
                                 <ListChecks className="size-4 shrink-0 text-muted-foreground" />
@@ -266,15 +286,15 @@ export function ReceivedItemDialog({
                 {chooseFolder &&
                     (creating ? (
                         <NewFolderForm
-                            parents={entries.map((entry) => ({
-                                id: entry.folder.id,
-                                path: joinFolderPath(
-                                    entry.path,
-                                    label(entry.folder),
-                                ),
+                            initialName={newName}
+                            parents={entries.map(({ folder, path }) => ({
+                                id: folder.id,
+                                path: joinFolderPath(path, label(folder)),
+                                folder,
                             }))}
                             idPrefix={id}
                             onCancel={() => setCreating(false)}
+                            onSavingChange={setSaving}
                             onCreated={(folder) => {
                                 onFolderCreated?.(folder);
                                 setCreated((current) => [...current, folder]);
@@ -284,17 +304,19 @@ export function ReceivedItemDialog({
                         />
                     ) : (
                         <div className="space-y-2">
-                            <FolderSearchList
+                            <FolderCombobox
                                 entries={entries.filter(
                                     ({ folder }) => folder.kind !== "private",
                                 )}
-                                query={query}
-                                onQueryChange={setQuery}
-                                onSelect={setFolderId}
+                                value={folderId}
+                                onValueChange={setFolderId}
                                 disabled={saving}
                                 onCreate={
                                     entries.length
-                                        ? () => setCreating(true)
+                                        ? (query) => {
+                                              setNewName(query);
+                                              setCreating(true);
+                                          }
                                         : undefined
                                 }
                             />

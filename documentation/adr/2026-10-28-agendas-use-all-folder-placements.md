@@ -1,14 +1,14 @@
 ---
 title: Agenda filing uses recording transactions and every placement contributes audience and preparation context
 date: 2026-10-28
-updated: 2026-10-28 17:25
-status: proposed
+updated: 2026-11-08 09:15
+status: superseded
 kind: feature
 issues: []
 prs: [293, 302]
 areas: [src/lib/folders/folders.ts, src/lib/meetings, src/db/queries/agenda-suggestions.ts, src/app/api/recordings, src/components/meetings]
 supersedes: [2026-10-27-meeting-agendas, 2026-10-27-shared-folders-are-two-way]
-superseded-by: []
+superseded-by: [2026-11-08-meeting-agendas-shared-with-people]
 relates: []
 ---
 
@@ -17,6 +17,8 @@ relates: []
 Standalone agendas can be filed into several folders, moved and unfiled through the recording filing routes.
 Every valid placement contributes to visibility and preparation. The maintainer accepted this ruling on
 2026-10-28; implementation is awaiting integration.
+
+**Superseded in part:** [Agendas shared with people](2026-11-08-meeting-agendas-shared-with-people.md) changes these rules: Explicit recording attachment skips agenda folders the attaching recording owner cannot file into, instead of requiring every placement to accept the recording. The remaining rules still hold.
 
 ## Why
 

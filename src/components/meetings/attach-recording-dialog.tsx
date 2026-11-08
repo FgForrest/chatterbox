@@ -2,7 +2,6 @@
 
 import { useExtracted, useFormatter } from "next-intl";
 import { useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -15,15 +14,17 @@ import {
 import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
-import { meetingRequest, meetingUrl, recordingAudienceConflict } from "./api";
 import {
     AttachmentAudience,
     AttachmentFilingNotice,
+    AttachmentShareChoice,
+    useAgendaAttachment,
 } from "./attachment-disclosure";
 import type { MeetingDetail } from "./types";
 
 export function AttachRecordingDialog({
     detail,
+    userId,
     recordings,
     folders,
     open,
@@ -31,6 +32,7 @@ export function AttachRecordingDialog({
     onAttached,
 }: {
     detail: MeetingDetail;
+    userId?: string;
     recordings: Recording[];
     folders: RecordingFolder[];
     open: boolean;
@@ -40,6 +42,11 @@ export function AttachRecordingDialog({
     const i18n = useExtracted();
     const format = useFormatter();
     const [selected, setSelected] = useState("");
+    const { choice, attach: attachSelected } = useAgendaAttachment(
+        detail.id,
+        selected,
+        userId,
+    );
     const [busy, setBusy] = useState(false);
     const [query, setQuery] = useState("");
     const [limit, setLimit] = useState(20);
@@ -58,19 +65,10 @@ export function AttachRecordingDialog({
     async function attach() {
         setBusy(true);
         try {
-            await meetingRequest(meetingUrl(detail.id, "/attach"), "POST", {
-                recordingItemId: selected,
-            });
-            onAttached(selected);
-            onOpenChange(false);
-        } catch (error) {
-            toast.error(
-                recordingAudienceConflict(error)
-                    ? i18n(
-                          "This recording is shared with people who cannot see the agenda. Limit its sharing before attaching it.",
-                      )
-                    : i18n("Could not attach the recording"),
-            );
+            if (await attachSelected(i18n("Could not attach the recording"))) {
+                onAttached(selected);
+                onOpenChange(false);
+            }
         } finally {
             setBusy(false);
         }
@@ -150,6 +148,7 @@ export function AttachRecordingDialog({
                 )}
                 <AttachmentAudience audience={detail.attachmentAudience} />
                 <AttachmentFilingNotice />
+                <AttachmentShareChoice choice={choice} />
                 <Button
                     variant="ghost"
                     onClick={() => {

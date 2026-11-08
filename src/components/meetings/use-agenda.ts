@@ -3,6 +3,7 @@
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { subscribeEvents } from "@/lib/events/client";
 import { meetingRequest, meetingUrl, takePrewarmedAgenda } from "./api";
 import type { MeetingDetail } from "./types";
 
@@ -69,11 +70,23 @@ export function useAgenda(
                 current.current = next;
                 setDetail(next);
                 setError(null);
+            } catch (error) {
+                if (
+                    error instanceof Error &&
+                    "status" in error &&
+                    error.status === 404
+                ) {
+                    base.current = null;
+                    current.current = null;
+                    setDetail(null);
+                    setError(loadError);
+                }
+                throw error;
             } finally {
                 loading.current = false;
             }
         },
-        [id],
+        [id, loadError],
     );
     useEffect(() => {
         mounted.current = true;
@@ -87,11 +100,18 @@ export function useAgenda(
             if (active && pollEnabled && document.visibilityState === "visible")
                 void reload(controller.signal, true).catch(() => {});
         };
+        const unsubscribe = active
+            ? subscribeEvents((event) => {
+                  if (event.type === "share")
+                      void reload(controller.signal).catch(() => {});
+              })
+            : undefined;
         const timer = active && pollEnabled ? setInterval(poll, 15000) : null;
         if (timer !== null) document.addEventListener("visibilitychange", poll);
         return () => {
             mounted.current = false;
             controller.abort();
+            unsubscribe?.();
             if (timer !== null) clearInterval(timer);
             document.removeEventListener("visibilitychange", poll);
         };

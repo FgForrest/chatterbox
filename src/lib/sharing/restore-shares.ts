@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { activeShareRecipientCondition } from "@/db/queries/item-shares";
+import { liveShareItemCondition } from "@/db/queries/meeting-shares";
 import { chatterItems, itemShares, users } from "@/db/schema";
 import { notifyPersonShareChanged } from "@/lib/events/personal";
 import type { ArchivedItemShare } from "@/lib/export/item-shares";
@@ -30,7 +31,7 @@ export async function restoreArchivedItemShares(
             | "receiver_missing"
             | "already_shared";
     }[] = [];
-    const notified = new Set<string>();
+    const notified = new Map<string, "meeting" | undefined>();
     let restored = 0;
     for (const share of shares) {
         const skip = (reason: (typeof skipped)[number]["reason"]) =>
@@ -50,14 +51,18 @@ export async function restoreArchivedItemShares(
         }
         const outcome = await db.transaction(async (tx) => {
             const [item] = await tx
-                .select({ id: chatterItems.id })
+                .select({ id: chatterItems.id, kind: chatterItems.kind })
                 .from(chatterItems)
                 .where(
                     and(
                         eq(chatterItems.id, itemId),
                         eq(chatterItems.userId, userId),
-                        isNull(chatterItems.deletedAt),
-                        inArray(chatterItems.kind, ["audio", "mail"]),
+                        liveShareItemCondition(),
+                        inArray(chatterItems.kind, [
+                            "audio",
+                            "mail",
+                            "meeting",
+                        ]),
                     ),
                 )
                 .for("update");
@@ -95,17 +100,22 @@ export async function restoreArchivedItemShares(
                 invitedByUserId: userId,
                 state: "pending",
             });
-            return { receiverId: receiver.id };
+            return { receiverId: receiver.id, kind: item.kind };
         });
         if (typeof outcome === "string") skip(outcome);
         else {
             restored++;
-            notified.add(outcome.receiverId);
+            notified.set(
+                outcome.receiverId,
+                outcome.kind === "meeting"
+                    ? "meeting"
+                    : notified.get(outcome.receiverId),
+            );
         }
     }
-    await Promise.all([...notified].map(notifyPersonShareChanged));
-    for (const receiverId of notified)
-        void sendPersonShareInvitation(receiverId).catch(() => {
+    await Promise.all([...notified.keys()].map(notifyPersonShareChanged));
+    for (const [receiverId, kind] of notified)
+        void sendPersonShareInvitation(receiverId, kind).catch(() => {
             console.error("[person-shares] restore invitation email failed");
         });
     return { restored, skipped };

@@ -29,6 +29,8 @@ interface ItemHeaderProps {
     isOwn?: boolean;
     ownerName?: string | null;
     readOnly?: boolean;
+    sharingManageOnly?: boolean;
+    received?: boolean;
     onRenamed?: (title: string) => void;
     action?: ReactNode;
     onKnowledge?: () => void;
@@ -49,6 +51,8 @@ export function ItemHeader({
     isOwn = true,
     ownerName,
     readOnly = false,
+    sharingManageOnly = false,
+    received: receivedProp = false,
     onRenamed,
     action,
     onKnowledge,
@@ -59,23 +63,27 @@ export function ItemHeader({
     const i18n = useExtracted();
     const organization = view === "org";
     const personSharing = usePersonSharing();
-    const received = view === "received";
+    const received = view === "received" || receivedProp;
     const [shareCount, setShareCount] = useState(0);
     const [shareOpen, setShareOpen] = useState(false);
+    const copiedMessage = () => {
+        if (kind === "meeting" && !isOwn) return i18n("Link copied.");
+        if (organization || shared)
+            return i18n(
+                "Link copied. Other members of your Organization can open it.",
+            );
+        if (personSharing || received) return i18n("Link copied.");
+        return i18n("Link copied. Only you can open it.");
+    };
     const copyLink = async () => {
         try {
             await navigator.clipboard.writeText(
-                window.location.origin + itemDetailHref(itemId, { view }),
+                window.location.origin +
+                    (kind === "meeting"
+                        ? `/dashboard?meeting=${encodeURIComponent(itemId)}`
+                        : itemDetailHref(itemId, { view })),
             );
-            toast.success(
-                organization || shared
-                    ? i18n(
-                          "Link copied. Other members of your Organization can open it.",
-                      )
-                    : personSharing || received
-                      ? i18n("Link copied.")
-                      : i18n("Link copied. Only you can open it."),
-            );
+            toast.success(copiedMessage());
         } catch {
             toast.error(i18n("Could not copy the link. Try again."));
         }
@@ -88,8 +96,10 @@ export function ItemHeader({
                 kind === "meeting" &&
                     "rounded-r-lg border-l-2 border-meeting bg-meeting/5 py-2 pl-3",
                 organization &&
+                    kind !== "meeting" &&
                     "rounded-r-lg border-l-2 border-organization bg-organization/5 py-2 pl-3",
                 received &&
+                    kind !== "meeting" &&
                     "rounded-r-lg border-l-2 border-person-share bg-person-share/5 py-2 pl-3",
             )}
         >
@@ -124,25 +134,22 @@ export function ItemHeader({
                             <span>{part}</span>
                         </span>
                     ))}
-                    {kind !== "meeting" &&
-                        personSharing &&
-                        isOwn &&
-                        shareCount > 0 && (
-                            <button
-                                type="button"
-                                onClick={() => setShareOpen(true)}
-                                className="inline-flex items-center gap-1 text-person-share"
-                            >
-                                <MetadataSeparator />
-                                <FolderOutput className="size-4" />
-                                {i18n(
-                                    "Shared with {count, plural, one {# person} other {# people}}",
-                                    {
-                                        count: shareCount,
-                                    },
-                                )}
-                            </button>
-                        )}
+                    {personSharing && isOwn && shareCount > 0 && (
+                        <button
+                            type="button"
+                            onClick={() => setShareOpen(true)}
+                            className="inline-flex items-center gap-1 text-person-share"
+                        >
+                            <MetadataSeparator />
+                            <FolderOutput className="size-4" />
+                            {i18n(
+                                "Shared with {count, plural, one {# person} other {# people}}",
+                                {
+                                    count: shareCount,
+                                },
+                            )}
+                        </button>
+                    )}
                     {kind !== "meeting" && !received && (
                         <AiCostSummary
                             key={`${itemId}:${view ?? "private"}`}
@@ -220,12 +227,13 @@ export function ItemHeader({
                         </Button>
                     </ActionTooltip>
                 )}
-                {kind !== "meeting" && personSharing && isOwn ? (
+                {personSharing && isOwn ? (
                     <OwnerSharingActions
                         key={itemId}
                         itemId={itemId}
                         title={title}
                         kind={kind}
+                        absorbed={sharingManageOnly}
                         copyLink={copyLink}
                         shared={shared || organization}
                         open={shareOpen}
@@ -243,7 +251,7 @@ export function ItemHeader({
                             </Button>
                         </ActionTooltip>
                     </OwnerSharingActions>
-                ) : kind !== "meeting" ? (
+                ) : (
                     <ActionTooltip label={i18n("Copy link")}>
                         <Button
                             type="button"
@@ -255,7 +263,7 @@ export function ItemHeader({
                             <Link className="size-4" />
                         </Button>
                     </ActionTooltip>
-                ) : null}
+                )}
                 {action}
             </div>
         </header>

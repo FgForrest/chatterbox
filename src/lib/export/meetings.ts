@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import {
@@ -83,7 +83,7 @@ export async function collectArchivedMeetings(
     scope: ArchiveScope,
 ): Promise<ArchivedMeeting[]> {
     const rows = await db
-        .select({ agenda: meetingAgendas })
+        .select({ agenda: meetingAgendas, anchorOwnerId: chatterItems.userId })
         .from(meetingAgendas)
         .innerJoin(
             chatterItems,
@@ -92,9 +92,24 @@ export async function collectArchivedMeetings(
                 sql`coalesce(${meetingAgendas.recordingItemId}, ${meetingAgendas.meetingItemId})`,
             ),
         )
-        .where(archivedItemCondition(scope));
+        .where(
+            scope.kind === "personal"
+                ? or(
+                      archivedItemCondition(scope),
+                      and(
+                          eq(meetingAgendas.userId, scope.userId),
+                          isNotNull(meetingAgendas.recordingItemId),
+                          ne(chatterItems.userId, scope.userId),
+                      ),
+                  )
+                : archivedItemCondition(scope),
+        );
     const result: ArchivedMeeting[] = [];
-    for (const { agenda } of rows) {
+    for (const { agenda, anchorOwnerId } of rows) {
+        const includesRecording =
+            !agenda.recordingItemId ||
+            scope.kind !== "personal" ||
+            anchorOwnerId === scope.userId;
         const [[item], points, tasks, folders, sources] = await Promise.all([
             agenda.meetingItemId
                 ? db
@@ -193,6 +208,10 @@ export async function collectArchivedMeetings(
         } = agenda;
         result.push({
             ...archivedAgenda,
+            recordingItemId: includesRecording ? agenda.recordingItemId : null,
+            outcomeSummaryId: includesRecording
+                ? agenda.outcomeSummaryId
+                : null,
             taskSourceItemId: sources.some(
                 (source) => source.id === agenda.taskSourceItemId,
             )
@@ -209,13 +228,17 @@ export async function collectArchivedMeetings(
             plannedEnd: agenda.plannedEnd?.toISOString() ?? null,
             liveStartedAt: agenda.liveStartedAt?.toISOString() ?? null,
             liveEndedAt: agenda.liveEndedAt?.toISOString() ?? null,
-            absorbedAt: agenda.absorbedAt?.toISOString() ?? null,
+            absorbedAt: includesRecording
+                ? (agenda.absorbedAt?.toISOString() ?? null)
+                : null,
             createdAt: agenda.createdAt.toISOString(),
             updatedAt: agenda.updatedAt.toISOString(),
-            outcomeUnplanned:
-                decryptJsonField<string[]>(agenda.outcomeUnplanned) ?? [],
+            outcomeUnplanned: includesRecording
+                ? (decryptJsonField<string[]>(agenda.outcomeUnplanned) ?? [])
+                : [],
             points: points.map((point) => ({
                 ...point,
+                summaryOutcome: includesRecording ? point.summaryOutcome : null,
                 text: decryptText(point.text),
                 note: point.note ? decryptText(point.note) : null,
                 discussedAt: point.discussedAt?.toISOString() ?? null,

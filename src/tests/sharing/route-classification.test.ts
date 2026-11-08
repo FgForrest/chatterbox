@@ -49,6 +49,10 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     },
     "meetings/[id]/folders/[folderId]/route.ts": { DELETE: "meeting" },
     "meetings/[id]/attach/route.ts": { POST: "meeting" },
+    "meetings/[id]/recording-shares/route.ts": {
+        GET: "meeting",
+        POST: "meeting",
+    },
     "meetings/[id]/calendar-export/route.ts": { POST: "meeting" },
     "meetings/[id]/markdown/route.ts": { GET: "meeting" },
     "meetings/[id]/older-tasks/route.ts": { GET: "meeting" },

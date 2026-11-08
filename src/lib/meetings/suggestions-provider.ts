@@ -1,12 +1,15 @@
+import { and, inArray } from "drizzle-orm";
 import { db } from "@/db";
+import { meetingFolderVisibility } from "@/db/queries/meeting-folder-visibility";
 import { meetingFolders } from "@/db/queries/meetings";
+import { recordingFolders } from "@/db/schema";
 import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { requireMeetingAccess } from "@/lib/meetings/access";
 import { resolveStepProviderSelection } from "@/lib/profiles/providers";
 import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
 
-/** Resolve placement summary settings; unfiled agendas use their owner's private profile resolution. */
+/** Resolve visible placement settings and providers under the caller's own account. */
 export async function agendaSuggestionsProvider(userId: string, id: string) {
     const access = await requireMeetingAccess(userId, id, "edit");
     const folders = access.agenda.meetingItemId
@@ -16,13 +19,34 @@ export async function agendaSuggestionsProvider(userId: string, id: string) {
               access.agenda.userId,
           )
         : [];
-    const profileUserId = folders.length ? userId : access.agenda.userId;
+    const profileUserId = userId;
+    const visibleFolders =
+        access.agenda.userId === userId || !folders.length
+            ? folders
+            : await db
+                  .select({
+                      id: recordingFolders.id,
+                      userId: recordingFolders.userId,
+                  })
+                  .from(recordingFolders)
+                  .where(
+                      and(
+                          inArray(
+                              recordingFolders.id,
+                              folders.map((folder) => folder.id),
+                          ),
+                          meetingFolderVisibility(
+                              userId,
+                              access.viewer.orgUserId,
+                          ),
+                      ),
+                  );
     const resolution = await resolveProfileForPlacements({
         ownerUserId: profileUserId,
         itemId: access.agenda.meetingItemId ?? id,
         channel: "audio",
-        folderIds: folders.map((folder) => folder.id),
-        view: folders.some(
+        folderIds: visibleFolders.map((folder) => folder.id),
+        view: visibleFolders.some(
             (folder) => folder.userId === access.viewer.orgUserId,
         )
             ? "org"

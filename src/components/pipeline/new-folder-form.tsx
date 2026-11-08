@@ -3,22 +3,18 @@
 import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { FolderCombobox } from "@/components/recordings/folder-combobox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
+import { useFolderLabel } from "@/hooks/use-folder-label";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import type { RecordingFolder } from "@/types/folder";
 
 export interface NewFolderParent {
     id: string;
     path: string;
+    folder?: RecordingFolder;
 }
 
 export type CreatedFolder = RecordingFolder;
@@ -28,14 +24,19 @@ export function NewFolderForm({
     idPrefix,
     onCancel,
     onCreated,
+    initialName = "",
+    onSavingChange,
 }: {
     parents: readonly NewFolderParent[];
     idPrefix: string;
     onCancel: () => void;
-    onCreated: (folder: CreatedFolder) => void;
+    onCreated: (folder: CreatedFolder) => void | Promise<void>;
+    initialName?: string;
+    onSavingChange?: (saving: boolean) => void;
 }) {
     const i18n = useExtracted();
-    const [name, setName] = useState("");
+    const folderLabel = useFolderLabel();
+    const [name, setName] = useState(initialName);
     const [parentId, setParentId] = useState(parents[0]?.id ?? "");
     const [creating, setCreating] = useState(false);
 
@@ -49,8 +50,9 @@ export function NewFolderForm({
 
     const createFolder = async () => {
         const trimmedName = name.trim();
-        if (!trimmedName || !parentId) return;
+        if (creating || !trimmedName || !parentId) return;
         setCreating(true);
+        onSavingChange?.(true);
         try {
             const response = await fetch("/api/folders", {
                 method: "POST",
@@ -69,13 +71,14 @@ export function NewFolderForm({
             const { folder } = (await response.json()) as {
                 folder: CreatedFolder;
             };
-            onCreated(folder);
+            await onCreated(folder);
             setName("");
             toast.success(i18n("Folder created."));
         } catch {
             toast.error(i18n("The folder could not be created."));
         } finally {
             setCreating(false);
+            onSavingChange?.(false);
         }
     };
 
@@ -87,27 +90,44 @@ export function NewFolderForm({
                 </Label>
                 <Input
                     id={`${idPrefix}-new-folder-name`}
+                    autoFocus
+                    disabled={creating}
                     value={name}
                     onChange={(event) => setName(event.target.value)}
                 />
             </div>
             <div className="space-y-1.5">
                 <Label>{i18n("Parent folder")}</Label>
-                <Select value={parentId} onValueChange={setParentId}>
-                    <SelectTrigger
-                        className="w-full"
-                        aria-label={i18n("Parent folder")}
-                    >
-                        <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                        {parents.map((parent) => (
-                            <SelectItem key={parent.id} value={parent.id}>
-                                {parent.path}
-                            </SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
+                <FolderCombobox
+                    entries={parents.map((parent) => ({
+                        folder: {
+                            id: parent.id,
+                            name: parent.path,
+                            kind: "custom",
+                            scope: "personal",
+                            parentId: null,
+                            ...parent.folder,
+                        },
+                        path: parent.folder
+                            ? parent.path
+                                  .slice(
+                                      0,
+                                      Math.max(
+                                          0,
+                                          parent.path.length -
+                                              folderLabel(parent.folder).length,
+                                      ),
+                                  )
+                                  .replace(/ [›/] $/, "")
+                            : "",
+                        depth: 0,
+                        nameMatch: true,
+                    }))}
+                    value={parentId}
+                    onValueChange={setParentId}
+                    disabled={creating}
+                    aria-label={i18n("Parent folder")}
+                />
             </div>
             <div className="flex justify-end gap-2">
                 <Button

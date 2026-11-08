@@ -7,7 +7,7 @@ import {
     screen,
     waitFor,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next-intl", () => ({
     useExtracted: () => (text: string) => text,
@@ -15,7 +15,21 @@ vi.mock("next-intl", () => ({
 
 import { UploadDialog } from "@/components/dashboard/upload-dialog";
 
-afterEach(cleanup);
+beforeEach(() => {
+    vi.stubGlobal(
+        "ResizeObserver",
+        class {
+            observe() {}
+            disconnect() {}
+            unobserve() {}
+        },
+    );
+    Element.prototype.scrollIntoView = vi.fn();
+});
+afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+});
 
 describe("UploadDialog", () => {
     const folders = [
@@ -49,11 +63,11 @@ describe("UploadDialog", () => {
         );
 
         const picker = screen.getByRole("combobox", { name: "Folder" });
-        expect(picker.textContent).toContain("Organization / Sales");
+        expect(picker.textContent).toContain("Organization › Sales");
 
         fireEvent.click(picker);
         fireEvent.click(
-            screen.getByRole("option", { name: "Private / Project" }),
+            screen.getByRole("option", { name: "Project Private" }),
         );
         fireEvent.click(screen.getByRole("button", { name: "Upload" }));
 
@@ -120,7 +134,7 @@ describe("UploadDialog", () => {
         await waitFor(() =>
             expect(
                 screen.getByRole("combobox", { name: "Folder" }).textContent,
-            ).toBe("Private / New folder"),
+            ).toBe("Private › New folder"),
         );
         expect(onFolderCreated).toHaveBeenCalledWith(
             expect.objectContaining({

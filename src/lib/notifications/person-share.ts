@@ -8,7 +8,10 @@ import { translatedSourceMessage } from "@/lib/i18n/messages";
 import { sendEmail } from "@/lib/notifications/email";
 
 /** Best-effort invitation email, only for recipients who enabled email notifications. */
-export async function sendPersonShareInvitation(userId: string): Promise<void> {
+export async function sendPersonShareInvitation(
+    userId: string,
+    kind?: "meeting",
+): Promise<void> {
     const [recipient] = await db
         .select({
             email: users.email,
@@ -28,7 +31,9 @@ export async function sendPersonShareInvitation(userId: string): Promise<void> {
     const locale = normalizeLocale(recipient.locale) ?? "en";
     const subject = translatedSourceMessage(
         locale,
-        "A colleague shared an item with you.",
+        kind === "meeting"
+            ? "A colleague shared an agenda with you."
+            : "A colleague shared an item with you.",
     );
     const label = translatedSourceMessage(locale, "Review invitations");
     const url = new URL("/dashboard?invitations=1", env.APP_URL)
@@ -57,5 +62,6 @@ export async function sendPersonShareInvitation(userId: string): Promise<void> {
 export async function extractPersonShareEmailMessages(): Promise<void> {
     const i18n = await getExtracted();
     i18n("A colleague shared an item with you.");
+    i18n("A colleague shared an agenda with you.");
     i18n("Review invitations");
 }
