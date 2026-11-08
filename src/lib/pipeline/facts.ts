@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
@@ -39,6 +39,7 @@ import {
 } from "@/lib/profiles/resolve";
 import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
 import type { ProviderPin } from "@/lib/profiles/settings";
+import { RECORDING_CUT_KIND } from "@/lib/recordings/cut";
 import { loadShareGate } from "@/lib/sharing/load-share-gate";
 import { isRecordingShared } from "@/lib/sharing/shared";
 import { recordingJobSubject } from "@/lib/sharing/view";
@@ -306,11 +307,22 @@ export async function gatherFacts(
             .where(
                 and(
                     eq(asyncJobs.userId, userId),
-                    inArray(asyncJobs.kind, [
-                        SUMMARY_JOB_KIND,
-                        TOPICS_JOB_KIND,
-                    ]),
-                    eq(asyncJobs.subjectId, recordingJobSubject(itemId, view)),
+                    or(
+                        and(
+                            inArray(asyncJobs.kind, [
+                                SUMMARY_JOB_KIND,
+                                TOPICS_JOB_KIND,
+                            ]),
+                            eq(
+                                asyncJobs.subjectId,
+                                recordingJobSubject(itemId, view),
+                            ),
+                        ),
+                        and(
+                            eq(asyncJobs.kind, RECORDING_CUT_KIND),
+                            eq(asyncJobs.subjectId, itemId),
+                        ),
+                    ),
                     inArray(asyncJobs.status, ["pending", "processing"]),
                 ),
             ),
@@ -844,7 +856,9 @@ export async function gatherFacts(
             jobActive: activeSummaryJobs.some(
                 (job) => job.kind === SUMMARY_JOB_KIND,
             ),
-            phaseJobActive: activeSummaryJobs.length > 0,
+            phaseJobActive: activeSummaryJobs.some(
+                (job) => job.kind !== RECORDING_CUT_KIND,
+            ),
             failed: Object.fromEntries(
                 [...failedSummaryJobs].reverse().flatMap((job) => {
                     const step =
@@ -872,6 +886,9 @@ export async function gatherFacts(
             followUps: taskDecisions.followUps,
         },
         share: {
+            cutJobActive: activeSummaryJobs.some(
+                (job) => job.kind === RECORDING_CUT_KIND,
+            ),
             problems: shareProblems,
             confirmationRequired:
                 manualOnly &&

@@ -779,6 +779,13 @@ async function lockPipelineJobInTx(
             phase: "categorize",
             generation: 0,
         });
+    if (snapshot.kind === "recording.cut" && snapshot.subjectId)
+        targets.push({
+            itemId: snapshot.subjectId,
+            userId: snapshot.userId,
+            phase: "categorize",
+            generation: 0,
+        });
     if (!(await lockPipelineTargetsInTx(tx, targets, false, skipLocked)))
         return null;
     const [job] = await tx
@@ -988,6 +995,13 @@ export async function settleTerminalJobInTx(
             .limit(1);
         if (processing && processing.requested > processing.processed)
             await wakePipelineInTx(tx, job.payload.itemId, job.userId);
+    }
+    if (job.kind === "recording.cut" && job.subjectId) {
+        await wakePipelineInTx(tx, job.subjectId, job.userId);
+        if (input.status === "failed")
+            console.info(
+                `[cut] failed recording=${job.subjectId} job=${job.id} code=${input.code ?? "INTERNAL_ERROR"}`,
+            );
     }
     return true;
 }

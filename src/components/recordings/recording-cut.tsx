@@ -14,10 +14,6 @@ import {
 import { toast } from "sonner";
 import { usePlayback } from "@/components/playback/playback-context";
 import {
-    useWithdrawPreview,
-    WithdrawRetentionWarning,
-} from "@/components/recordings/withdraw-retention-warning";
-import {
     AlertDialog,
     AlertDialogAction,
     AlertDialogCancel,
@@ -45,6 +41,7 @@ interface CutState {
     owner: boolean;
     open: boolean;
     cutting: boolean;
+    error: string | null;
     disabledReason: string | null;
     range: CutRange;
     activeTurns: TranscriptTurn[] | null;
@@ -84,6 +81,7 @@ export function RecordingCutProvider({
     const i18n = useExtracted();
     const playback = usePlayback();
     const [open, setOpen] = useState(false);
+    const [error, setError] = useState<string | null>(null);
     const [cutting, setCutting] = useState(false);
     const [browserTranscribing, setBrowserTranscribing] = useState(false);
     const [confirming, setConfirming] = useState(false);
@@ -94,12 +92,19 @@ export function RecordingCutProvider({
         startMs: 0,
         endMs: recording.duration,
     });
-    const [jobId, setJobId] = useState<string | null>(null);
     const [activeTurns, setActiveTurns] = useState<TranscriptTurn[] | null>(
         transcripts[0]?.turns ?? null,
     );
     const identity = `${recording.id}:${recording.view ?? "private"}:${recording.cutAt ?? ""}`;
     const [currentIdentity, setCurrentIdentity] = useState(identity);
+    const identityRef = useRef(identity);
+    identityRef.current = identity;
+    useEffect(() => {
+        identityRef.current = identity;
+        return () => {
+            identityRef.current = "";
+        };
+    }, [identity]);
     const owner =
         recording.isOwn !== false &&
         recording.view !== "org" &&
@@ -118,10 +123,34 @@ export function RecordingCutProvider({
             : null;
     const changedRef = useRef(onChanged);
     changedRef.current = onChanged;
-    const submitting = useRef(false);
+    const discoveryVersion = useRef(0);
+    const watchedJobs = useRef(new Set<string>());
     const cutError = useCallback(
         (message: string) => {
             switch (message) {
+                case "Invalid cut range":
+                    return i18n(
+                        "Choose a valid range that keeps part of the recording.",
+                    );
+                case "Unauthorized":
+                case "Authentication required":
+                    return i18n("Sign in again before cutting the recording.");
+                case "The cut job is no longer running":
+                    return i18n("Cutting was interrupted. Try again.");
+                case "Your access to this application has been withdrawn":
+                    return i18n(
+                        "Your access to this application has been withdrawn.",
+                    );
+                case "Your access could not be verified right now. Try again shortly.":
+                    return i18n(
+                        "Your access could not be verified right now. Try again shortly.",
+                    );
+                case "Account suspended":
+                    return i18n(
+                        "Your account is suspended. Contact an administrator.",
+                    );
+                case "Processing was interrupted":
+                    return i18n("Cutting was interrupted. Try again.");
                 case "Only the recording owner may cut it":
                     return i18n("Only the recording's owner can cut it.");
                 case "Recording not found":
@@ -148,77 +177,130 @@ export function RecordingCutProvider({
                         "The recording or transcript changed. Reload it and choose the cut again.",
                     );
                 default:
-                    return i18n(
-                        "The recording could not be cut. Reload it and choose the cut again.",
-                    );
+                    return i18n("The recording could not be cut. Try again.");
             }
         },
         [i18n],
     );
-    const preview = useWithdrawPreview(
-        shared && confirming ? recording.id : null,
+    const showFailure = useCallback(
+        (message: string, failedIdentity: string) => {
+            if (identityRef.current !== failedIdentity) {
+                toast.error(message);
+                return;
+            }
+            setError(message);
+            setCutting(false);
+            setOpen(true);
+        },
+        [],
     );
     const refresh = useCallback(() => {
         invalidateItemProcessing(recording.id);
         changedRef.current();
     }, [recording.id]);
+    const watchCut = useCallback(
+        (id: string, watchedIdentity: string) => {
+            if (watchedJobs.current.has(id)) return;
+            watchedJobs.current.add(id);
+            let stopped = false;
+            let errors = 0;
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const controller = new AbortController();
+            const finish = (message?: string) => {
+                if (stopped) return;
+                stopped = true;
+                watchedJobs.current.delete(id);
+                clearTimeout(timer);
+                clearTimeout(deadline);
+                controller.abort();
+                if (message) showFailure(message, watchedIdentity);
+                else if (identityRef.current === watchedIdentity) {
+                    setCutting(false);
+                    refresh();
+                }
+            };
+            const deadline = setTimeout(
+                () => finish(cutError("")),
+                65 * 60 * 1000,
+            );
+            const poll = async () => {
+                try {
+                    const response = await fetch(`/api/jobs/${id}`, {
+                        signal: controller.signal,
+                    });
+                    if (!response.ok)
+                        throw new Error(await getApiErrorMessage(response, ""));
+                    const job = (await response.json()) as {
+                        status: string;
+                        error?: string;
+                    };
+                    if (stopped) return;
+                    if (job.status === "failed") {
+                        finish(cutError(job.error ?? ""));
+                        return;
+                    }
+                    if (job.status === "completed") {
+                        finish();
+                        return;
+                    }
+                    if (job.status !== "pending" && job.status !== "processing")
+                        throw new Error("status");
+                    errors = 0;
+                } catch (error) {
+                    if (stopped) return;
+                    if (++errors >= 3) {
+                        finish(
+                            cutError(
+                                error instanceof Error ? error.message : "",
+                            ),
+                        );
+                        return;
+                    }
+                }
+                if (!stopped) timer = setTimeout(() => void poll(), 2000);
+            };
+            void poll();
+        },
+        [cutError, refresh, showFailure],
+    );
+    const watchCutRef = useRef(watchCut);
+    watchCutRef.current = watchCut;
     useEffect(() => {
         if (!owner) return;
         let cancelled = false;
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        let observedRunning = jobId !== null;
-        const poll = async () => {
+        const version = discoveryVersion.current;
+        void (async () => {
             try {
                 const response = await fetch(
-                    jobId
-                        ? `/api/jobs/${jobId}`
-                        : `/api/recordings/${recording.id}/cut`,
+                    `/api/recordings/${recording.id}/cut`,
                 );
-                if (!response.ok) throw new Error("status");
-                const result = (await response.json()) as {
-                    job?: { status: string; error?: string } | null;
-                    status?: string;
-                    error?: string;
+                if (!response.ok) return;
+                const { job } = (await response.json()) as {
+                    job?: {
+                        id?: string;
+                        status: string;
+                        range?: CutRange | null;
+                    } | null;
                 };
-                const body = {
-                    job: jobId
-                        ? { status: result.status, error: result.error }
-                        : result.job,
-                };
-                if (cancelled) return;
-                if (submitting.current) {
-                    timer = setTimeout(() => void poll(), 1000);
-                    return;
-                }
-                const running =
-                    body.job?.status === "pending" ||
-                    body.job?.status === "processing";
-                setCutting(running);
-                if (running) {
-                    observedRunning = true;
+                if (cancelled || version !== discoveryVersion.current) return;
+                if (
+                    job?.id &&
+                    (job.status === "pending" || job.status === "processing")
+                ) {
+                    setCutting(true);
                     setOpen(false);
-                } else if (observedRunning) {
-                    observedRunning = false;
-                    if (body.job?.status === "failed")
-                        toast.error(cutError(body.job.error ?? ""));
-                    setJobId(null);
-                    refresh();
+                    if (job.range) setRange(job.range);
+                    watchCutRef.current(job.id, identity);
                 }
-            } catch {
-                if (cancelled) return;
-            }
-            if (!cancelled && observedRunning)
-                timer = setTimeout(() => void poll(), 2000);
-        };
-        void poll();
+            } catch {}
+        })();
         return () => {
             cancelled = true;
-            clearTimeout(timer);
         };
-    }, [recording.id, owner, refresh, cutError, jobId]);
+    }, [identity, recording.id, owner]);
     useEffect(() => {
-        if (disabledReason && !cutting) setOpen(false);
-    }, [disabledReason, cutting]);
+        if (disabledReason && !cutting && !error) setOpen(false);
+    }, [disabledReason, cutting, error]);
     const setEdge = useCallback(
         (edge: "start" | "end", ms: number) => {
             const snapped = Math.max(
@@ -234,10 +316,13 @@ export function RecordingCutProvider({
     );
     const cancel = () => {
         setOpen(false);
+        setError(null);
         setRange({ startMs: 0, endMs: recording.duration });
     };
     const execute = async () => {
-        submitting.current = true;
+        const submittedIdentity = identity;
+        discoveryVersion.current++;
+        setError(null);
         setConfirming(false);
         setOpen(false);
         setCutting(true);
@@ -253,39 +338,27 @@ export function RecordingCutProvider({
                         ...(shownRevisions.current
                             ? { revisions: shownRevisions.current }
                             : {}),
-                        ...(shared ? { withdraw: true } : {}),
                     }),
                 },
             );
             if (!response.ok)
-                throw new Error(
-                    cutError(
-                        await getApiErrorMessage(
-                            response,
-                            i18n("The recording could not be cut."),
-                        ),
-                    ),
-                );
+                throw new Error(await getApiErrorMessage(response, ""));
             const result = (await response.json()) as { jobId: string };
-            setJobId(result.jobId);
-            submitting.current = false;
+            watchCut(result.jobId, submittedIdentity);
         } catch (error) {
-            submitting.current = false;
-            toast.error(
-                error instanceof Error
-                    ? error.message
-                    : i18n("The recording could not be cut."),
+            showFailure(
+                cutError(error instanceof Error ? error.message : ""),
+                submittedIdentity,
             );
-            setCutting(false);
         }
     };
     if (currentIdentity !== identity) {
         setCurrentIdentity(identity);
+        setError(null);
         setOpen(false);
         setCutting(false);
         setBrowserTranscribing(false);
         setConfirming(false);
-        setJobId(null);
         setRange({ startMs: 0, endMs: recording.duration });
         setActiveTurns(transcripts[0]?.turns ?? null);
         shownRevisions.current = undefined;
@@ -295,6 +368,7 @@ export function RecordingCutProvider({
         owner,
         open,
         cutting,
+        error,
         disabledReason,
         range,
         activeTurns,
@@ -302,6 +376,7 @@ export function RecordingCutProvider({
             if (owner && !disabledReason) {
                 if (open) cancel();
                 else {
+                    setError(null);
                     setRange({ startMs: 0, endMs: recording.duration });
                     shownRevisions.current = transcripts.every(
                         (transcript) => transcript.version,
@@ -387,22 +462,16 @@ export function RecordingCutProvider({
                         </li>
                     </ul>
                     {shared && (
-                        <>
-                            <p className="text-sm font-medium">
-                                {i18n(
-                                    "This recording is shared with the Organization. It will be taken out of the Organization first, and colleagues will no longer see it.",
-                                )}
-                            </p>
-                            <WithdrawRetentionWarning preview={preview} />
-                        </>
+                        <p className="text-sm font-medium">
+                            {i18n(
+                                "This recording is shared with the Organization. Colleagues will see the cut version, and its summary in the Organization is generated again.",
+                            )}
+                        </p>
                     )}
                     <AlertDialogFooter>
                         <AlertDialogCancel>{i18n("Cancel")}</AlertDialogCancel>
                         <AlertDialogAction
-                            disabled={
-                                (shared && preview.status === "loading") ||
-                                !validCutRange(range, recording.duration)
-                            }
+                            disabled={!validCutRange(range, recording.duration)}
                             onClick={() => void execute()}
                         >
                             {i18n("Delete and cut")}
@@ -576,6 +645,11 @@ export function RecordingCutBar() {
                     </Button>
                 </span>
             </div>
+            {cut.error && (
+                <p role="alert" className="text-sm text-destructive">
+                    {cut.error}
+                </p>
+            )}
             <p className="text-sm font-medium">
                 {changed
                     ? i18n("{kept} of {total} stays", { kept, total })

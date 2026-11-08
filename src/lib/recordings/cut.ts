@@ -11,16 +11,14 @@ import {
     cutTranscript,
     validCutRange,
 } from "@/lib/recordings/cut-range";
-import { isRecordingShared } from "@/lib/sharing/shared";
 import { recordingJobSubject } from "@/lib/sharing/view";
-import { recordingShared, sharingOrgUserId } from "@/lib/sharing/writer";
+import { sharingOrgUserId } from "@/lib/sharing/writer";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 
 export const RECORDING_CUT_KIND = "recording.cut";
 export const cutRequestSchema = z.object({
     startMs: z.number().int().nonnegative(),
     endMs: z.number().int().positive(),
-    withdraw: z.boolean().optional(),
     revisions: z
         .array(z.object({ id: z.string(), revision: z.number().int() }))
         .optional(),
@@ -170,12 +168,6 @@ export async function requestRecordingCut(
                 409,
             );
         }
-        if (
-            orgUserId &&
-            (await isRecordingShared(recordingId, orgUserId, tx)) &&
-            !range.withdraw
-        )
-            throw recordingShared();
         const payload: CutPayload = {
             ...range,
             recordingId,
@@ -241,6 +233,7 @@ export async function latestRecordingCut(userId: string, recordingId: string) {
             id: asyncJobs.id,
             status: asyncJobs.status,
             error: asyncJobs.lastError,
+            payload: asyncJobs.payload,
         })
         .from(asyncJobs)
         .where(
@@ -252,5 +245,14 @@ export async function latestRecordingCut(userId: string, recordingId: string) {
         )
         .orderBy(desc(asyncJobs.createdAt))
         .limit(1);
-    return job ?? null;
+    if (!job) return null;
+    const parsed = cutPayloadSchema.safeParse(job.payload);
+    return {
+        id: job.id,
+        status: job.status,
+        error: job.error,
+        range: parsed.success
+            ? { startMs: parsed.data.startMs, endMs: parsed.data.endMs }
+            : null,
+    };
 }

@@ -472,6 +472,7 @@ function sameProblems(
 
 function planShare(facts: PipelineFacts, actions: PipelineAction[]): void {
     if (facts.categorization.intendedFolderIds.length === 0) return;
+    if (facts.share?.cutJobActive) return;
     if (facts.phases.share?.jobId || facts.phases.share?.state === "failed")
         return;
     if ((facts.phases.share?.generation ?? -1) >= facts.generation) return;
