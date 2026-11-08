@@ -415,6 +415,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         for (const job of jobs) {
             const result = await pipelineActionJobHandler.run({
                 jobId: job.id,
+                claimToken: job.claimToken,
                 userId: job.userId,
                 attempt: job.attempts,
                 maxAttempts: job.maxAttempts,

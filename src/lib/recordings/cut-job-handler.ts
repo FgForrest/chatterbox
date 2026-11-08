@@ -7,6 +7,7 @@ import { pipeline } from "node:stream/promises";
 import { and, eq, inArray, isNull, notExists, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { cancelAgendaSuggestionsForRecordingInTx } from "@/db/queries/agenda-suggestions";
+import { lockPipelineTargetsInTx } from "@/db/queries/pipeline-jobs";
 import {
     agendaPoints,
     agendaSuggestions,
@@ -35,18 +36,16 @@ import {
 } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { enqueueExportPlansForUser } from "@/lib/folder-exports/jobs";
-import {
-    lockOrgTree,
-    orgTreeChanged,
-    withdrawRecordingInTx,
-} from "@/lib/folders/folders";
+import { lockOrgTree } from "@/lib/folders/folders";
 import { nudge } from "@/lib/jobs/nudge";
 import { InvalidJobPayloadError, type JobHandler } from "@/lib/jobs/types";
 import { quoteFromTurns, quoteSimilarity } from "@/lib/knowledge/fact-rules";
+import { lockOrgPeople } from "@/lib/knowledge/org-people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
 import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
 import { transcriptRewrittenInTx } from "@/lib/knowledge/transcript-rewrite";
+import { notifyOrgChange } from "@/lib/org/events";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import {
     type CutPayload,
@@ -65,7 +64,7 @@ import { buildRecordingStorageFilename } from "@/lib/recordings/filename";
 import { enqueueStorageReconciliationJob } from "@/lib/recordings/storage-reconciliation-job";
 import { isRecordingShared } from "@/lib/sharing/shared";
 import { recordingJobSubject } from "@/lib/sharing/view";
-import { recordingShared, sharingOrgUserId } from "@/lib/sharing/writer";
+import { sharingOrgUserId } from "@/lib/sharing/writer";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import type { StorageProvider } from "@/lib/storage/types";
 import { lockItemTaskGraphInTx } from "@/lib/tasks/mentions";
@@ -247,6 +246,10 @@ export async function commitRecordingCut(
             409,
         );
     }
+    // Processing locks precede job locks, including queue completion.
+    await lockPipelineTargetsInTx(tx, [
+        { itemId: payload.recordingId, userId },
+    ]);
     const [job] = await tx
         .select({ status: asyncJobs.status, claimToken: asyncJobs.claimToken })
         .from(asyncJobs)
@@ -272,17 +275,13 @@ export async function commitRecordingCut(
         .where(
             and(
                 eq(knowledgeFactEvidence.itemId, recording.id),
-                eq(knowledgeFactEvidence.userId, userId),
+                inArray(
+                    knowledgeFactEvidence.userId,
+                    orgUserId ? [userId, orgUserId] : [userId],
+                ),
             ),
         );
     await cancelAgendaSuggestionsForRecordingInTx(tx, userId, recording.id);
-    if (orgUserId && (await isRecordingShared(recording.id, orgUserId, tx))) {
-        if (!payload.withdraw) throw recordingShared();
-        await bumpScopeInTx(
-            tx,
-            await withdrawRecordingInTx(tx, orgUserId, recording.id, userId),
-        );
-    }
     const now = new Date();
     const md5 = audio?.md5 ?? recording.fileMd5;
     await tx
@@ -353,7 +352,10 @@ export async function commitRecordingCut(
                     inArray(knowledgeFacts.id, [
                         ...new Set(factEvidenceBefore.map((row) => row.factId)),
                     ]),
-                    eq(knowledgeFacts.userId, userId),
+                    inArray(
+                        knowledgeFacts.userId,
+                        orgUserId ? [userId, orgUserId] : [userId],
+                    ),
                     notExists(
                         tx
                             .select({ id: knowledgeFactEvidence.id })
@@ -614,6 +616,7 @@ export async function commitRecordingCut(
                 inArray(asyncJobs.subjectId, [
                     recording.id,
                     recordingJobSubject(recording.id, "org"),
+                    `executeShares:${recording.id}`,
                 ]),
                 inArray(asyncJobs.kind, [
                     "summary",
@@ -622,6 +625,7 @@ export async function commitRecordingCut(
                     "learn.run",
                     "learn.release",
                     "learn.correct",
+                    "pipeline.action",
                 ]),
                 inArray(asyncJobs.status, ["pending", "processing"]),
             ),
@@ -637,9 +641,7 @@ export async function commitRecordingCut(
         )
         .for("update");
     const generatedTitle = processingRows.some(
-        (row) =>
-            row.view === "private" &&
-            row.phases.summary?.steps?.title?.state === "done",
+        (row) => row.phases.summary?.steps?.title?.state === "done",
     );
     await tx
         .update(chatterItems)
@@ -664,6 +666,7 @@ export async function commitRecordingCut(
         delete phases.learn;
         delete phases.summary;
         delete phases.taskReview;
+        delete phases.share;
         await tx
             .update(itemProcessing)
             .set({ phases, updatedAt: now })
@@ -694,6 +697,33 @@ export async function commitRecordingCut(
         })
         .where(and(eq(asyncJobs.id, jobId), eq(asyncJobs.userId, userId)));
     return cleanup;
+}
+
+async function afterCutCommit(
+    userId: string,
+    jobId: string,
+    payload: CutPayload,
+) {
+    const orgUserId = await sharingOrgUserId();
+    const shared = orgUserId
+        ? await isRecordingShared(payload.recordingId, orgUserId)
+        : false;
+    console.info(
+        `[cut] done recording=${payload.recordingId} job=${jobId} keptMs=${payload.endMs - payload.startMs} shared=${shared}`,
+    );
+    await enqueueExportPlansForUser(userId);
+    if (orgUserId && shared) {
+        await enqueueExportPlansForUser(orgUserId);
+        await notifyOrgChange({
+            type: "recording",
+            recordingId: payload.recordingId,
+        });
+    }
+    await enqueueStorageReconciliationJob({
+        userId,
+        recordingId: payload.recordingId,
+    });
+    nudge();
 }
 
 export const recordingCutJobHandler: JobHandler<CutPayload> = {
@@ -743,6 +773,7 @@ export const recordingCutJobHandler: JobHandler<CutPayload> = {
                 const cleanup = decryptJsonField<Cleanup>(checkpoint.cleanup);
                 if (!cleanup)
                     throw new Error("Cut cleanup checkpoint is missing");
+                await afterCutCommit(userId, jobId, payload);
                 await cleanStorage(
                     storage,
                     cleanup,
@@ -752,13 +783,6 @@ export const recordingCutJobHandler: JobHandler<CutPayload> = {
                     persisted.claimToken,
                     attempt,
                 );
-                if (checkpoint.withdraw) await orgTreeChanged();
-                await enqueueExportPlansForUser(userId);
-                await enqueueStorageReconciliationJob({
-                    userId,
-                    recordingId: payload.recordingId,
-                });
-                nudge();
                 return { cut: true };
             }
             if (checkpoint.preparedStoragePath) {
@@ -874,7 +898,11 @@ export const recordingCutJobHandler: JobHandler<CutPayload> = {
                 signal.throwIfAborted();
                 const orgUserId = await sharingOrgUserId();
                 const cleanup = await db.transaction(async (tx) => {
-                    if (orgUserId && payload.withdraw) await lockOrgTree(tx);
+                    // Match intended sharing: Organization tree, people, then item/task graph.
+                    if (orgUserId) {
+                        await lockOrgTree(tx);
+                        await lockOrgPeople(tx);
+                    }
                     await lockItemTaskGraphInTx(tx, {
                         itemId: payload.recordingId,
                         ownerUserId: userId,
@@ -892,6 +920,7 @@ export const recordingCutJobHandler: JobHandler<CutPayload> = {
                 });
                 committed = true;
                 reportProgress({ phase: "cleanup" });
+                await afterCutCommit(userId, jobId, payload);
                 await cleanStorage(
                     storage,
                     cleanup,
@@ -901,13 +930,6 @@ export const recordingCutJobHandler: JobHandler<CutPayload> = {
                     persisted.claimToken,
                     attempt,
                 );
-                if (payload.withdraw) await orgTreeChanged();
-                await enqueueExportPlansForUser(userId);
-                await enqueueStorageReconciliationJob({
-                    userId,
-                    recordingId: payload.recordingId,
-                });
-                nudge();
                 return { cut: true };
             } finally {
                 try {
@@ -935,7 +957,6 @@ export const recordingCutJobHandler: JobHandler<CutPayload> = {
                     ErrorCode.CONFLICT,
                     ErrorCode.INVALID_INPUT,
                     ErrorCode.RECORDING_NOT_FOUND,
-                    ErrorCode.RECORDING_SHARED,
                 ].includes(error.code)
             )
                 throw error;

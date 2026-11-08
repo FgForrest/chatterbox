@@ -1,11 +1,11 @@
 ---
 title: New transcripts store each sentence's start time, aligned with the sentence split, only when every sentence has its own timed unit
 date: 2026-11-08
-updated: 2026-11-08 13:25
+updated: 2026-11-08 14:12
 status: accepted
 kind: feature
 issues: []
-prs: []
+prs: [347]
 areas: [src/lib/transcription/turns.ts, src/lib/transcription/sentences.ts, src/lib/topics/timeline.ts, src/lib/transcription/elevenlabs-transcribe.ts, src/lib/transcription/speechmatics-transcribe.ts, src/lib/transcription/format.ts, src/lib/recordings/cut-range.ts]
 supersedes: []
 superseded-by: []

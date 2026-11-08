@@ -1805,6 +1805,16 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
         }, 30_000);
 
         it("stops after 500 mails and continues without gaps at equal timestamps", async () => {
+            const folderId = "search-bound-folder";
+            await db()
+                .insert(recordingFolders)
+                .values({
+                    id: folderId,
+                    userId: READER,
+                    name: encryptText("Scan boundary"),
+                    nameHash: lookupHash("Scan boundary"),
+                    kind: "custom",
+                });
             const at = new Date("2026-10-18");
             const batch = Array.from({ length: 501 }, (_, index) => ({
                 id: `search-bound-${String(index).padStart(3, "0")}`,
@@ -1845,9 +1855,19 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
                         segments: encryptJsonField([body(row.text)]),
                     })),
                 );
+            await db()
+                .insert(recordingFolderAssignments)
+                .values(
+                    batch.map((row) => ({
+                        itemId: row.id,
+                        userId: READER,
+                        folderId,
+                    })),
+                );
             const result = await search(reader(), {
                 query: "Boundaryneedle",
                 from: "2026-10-18",
+                folder: folderId,
             });
             expect(result).toMatchObject({
                 scanned: 500,
@@ -1858,6 +1878,7 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
             const next = await search(reader(), {
                 query: "Boundaryneedle",
                 from: "2026-10-18",
+                folder: folderId,
                 before: result.continue_before,
             });
             expect(ids(next)).toEqual(["search-bound-000"]);

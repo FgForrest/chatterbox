@@ -1,6 +1,8 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
+import { lockPipelineTargetsInTx } from "@/db/queries/pipeline-jobs";
 import {
+    asyncJobs,
     chatterItems,
     itemProcessing,
     mailPendingShares,
@@ -21,6 +23,7 @@ import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
 import { effectiveManualOnly } from "@/lib/pipeline/effective-profile";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
+import { RECORDING_CUT_KIND } from "@/lib/recordings/cut";
 import type { ShareGateProblem } from "@/lib/sharing/share-gate";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -96,12 +99,14 @@ export interface IntendedShareOutcome {
     shared: boolean;
     remaining: boolean;
     confirmationRequired: boolean;
+    waitingForCut?: boolean;
 }
 
 /** Execute intended shares and report whether an intent was fulfilled or remains. */
 export async function executeIntendedSharesWithOutcome(
     ownerUserId: string,
     itemId: string,
+    claim?: { jobId: string; claimToken: string },
 ): Promise<IntendedShareOutcome> {
     const orgUserId = await getOrgUserId();
     if (!orgUserId || !isOrgScopeEnabled()) {
@@ -177,6 +182,35 @@ export async function executeIntendedSharesWithOutcome(
                 await lockOrgTree(tx);
                 await lockOrgPeople(tx);
                 await lockItemForFolderMutation(tx, itemId, ownerUserId);
+                if (claim) {
+                    await lockPipelineTargetsInTx(tx, [
+                        { itemId, userId: ownerUserId },
+                    ]);
+                    const [job] = await tx
+                        .select({ id: asyncJobs.id })
+                        .from(asyncJobs)
+                        .where(
+                            and(
+                                eq(asyncJobs.id, claim.jobId),
+                                eq(asyncJobs.userId, ownerUserId),
+                                eq(asyncJobs.kind, "pipeline.action"),
+                                eq(
+                                    asyncJobs.subjectId,
+                                    `executeShares:${itemId}`,
+                                ),
+                                eq(asyncJobs.status, "processing"),
+                                eq(asyncJobs.claimToken, claim.claimToken),
+                            ),
+                        )
+                        .for("update")
+                        .limit(1);
+                    if (!job)
+                        throw new AppError(
+                            ErrorCode.CONFLICT,
+                            "The share job is no longer running",
+                            409,
+                        );
+                }
                 const [current] = await tx
                     .select({
                         folderId: mailPendingShares.folderId,
@@ -199,6 +233,28 @@ export async function executeIntendedSharesWithOutcome(
                         confirmationRequired: false,
                     };
                 }
+                const [cut] = await tx
+                    .select({ id: asyncJobs.id })
+                    .from(asyncJobs)
+                    .where(
+                        and(
+                            eq(asyncJobs.userId, ownerUserId),
+                            eq(asyncJobs.subjectId, itemId),
+                            eq(asyncJobs.kind, RECORDING_CUT_KIND),
+                            inArray(asyncJobs.status, [
+                                "pending",
+                                "processing",
+                            ]),
+                        ),
+                    )
+                    .limit(1);
+                if (cut)
+                    return {
+                        problems: [],
+                        shared: false,
+                        confirmationRequired: false,
+                        waitingForCut: true,
+                    };
                 const [processing] = await tx
                     .select({
                         manualOnly: itemProcessing.manualOnly,
@@ -278,6 +334,20 @@ export async function executeIntendedSharesWithOutcome(
                 };
             }),
         );
+        if ("waitingForCut" in result && result.waitingForCut) {
+            console.info(`[share] waiting item=${itemId} reason=cut`);
+            return {
+                problems: [],
+                shared,
+                remaining: true,
+                confirmationRequired: false,
+                waitingForCut: true,
+            };
+        }
+        if (result.shared)
+            console.info(
+                `[share] filed item=${itemId} folder=${intent.folderId}`,
+            );
         if (result.problems.length > 0) {
             return {
                 problems: result.problems,
