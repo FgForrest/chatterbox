@@ -523,7 +523,7 @@ export function RecordingCutButton() {
 export function CutEdgeChip({ edge }: { edge: "start" | "end" }) {
     const cut = useRecordingCut();
     const i18n = useExtracted();
-    if (!cut) return null;
+    if (!cut?.owner) return null;
     const time = formatClock(
         edge === "start" ? cut.range.startMs : cut.range.endMs,
     );

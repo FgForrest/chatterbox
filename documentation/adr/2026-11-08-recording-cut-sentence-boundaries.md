@@ -1,7 +1,7 @@
 ---
 title: Cut recordings at sentence starts, with typed times and paragraph-gap controls above the transcript
 date: 2026-11-08
-updated: 2026-11-08 16:52
+updated: 2026-11-08 18:35
 status: accepted
 kind: feature
 issues: [327]
@@ -54,7 +54,7 @@ Only the transcript-header scissors open the panel. Paragraph-gap controls occup
 
 - `src/lib/recordings/cut-range.ts`: `cutTurn` returns the retained raw character interval along with its rewritten turn. Legacy turns materialize retained sentence times whenever text splits or clamping changes the original start or end, so another cut cannot redistribute those times. A legacy turn with unchanged endpoints after rebasing keeps its original shape.
 - `src/lib/knowledge/correction-recheck.ts`: subtract the raw slice's removed prefix from correction anchors; drop anchors outside or crossing the retained interval. The index map follows stable chronological sorting. Repeated words in removed text never relocate to retained occurrences.
-- `loadCutInTx` and `commitRecordingCut` already use `cutTranscript` for every owner-scoped stored source: Plaud, provider/browser and mixed. Organization and received views read those same content rows. Fact evidence is validated against its original time-derived character spans and retained raw slices before shifting times, without a second proportional extraction from shortened turns. Accepted-task quote validation reads the rewritten source turns.
+- `loadCutInTx` and `commitRecordingCut` already use `cutTranscript` for every owner-scoped stored source: Plaud, provider/browser and mixed. Organization and received views read those same content rows. Fact evidence is deleted only when its words fall in removed text, as checked by its original interval and time-derived character spans against retained raw slices. Surviving evidence shifts its times and keeps the normal recheck status, including `wording_changed` and `speaker_changed`, comparing its stored quote with the previous turns without a second proportional extraction from shortened turns. Accepted-task quote validation reads the rewritten source turns.
 - `paragraphsOf` remains the definition of transcript action locations. The waveform hatch stays a preview, not an edge-setting control. Typed edges within a paragraph label its boundary and dim the removed sentences without adding mid-paragraph actions.
 - No schema, environment variable, provider-role or deployment change.
 

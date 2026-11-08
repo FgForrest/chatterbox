@@ -173,7 +173,12 @@ import {
     encryptJsonField,
     encryptText,
 } from "@/lib/encryption/fields";
-import { quoteFromTurns } from "@/lib/knowledge/fact-rules";
+import { recheckEvidenceInTx } from "@/lib/knowledge/fact-evidence";
+import {
+    QUOTE_SIMILARITY_THRESHOLD,
+    quoteFromTurns,
+    quoteSimilarity,
+} from "@/lib/knowledge/fact-rules";
 import { listFacts } from "@/lib/knowledge/facts";
 import { requireMeetingAccess } from "@/lib/meetings/access";
 import { getMeeting } from "@/lib/meetings/service";
@@ -905,6 +910,136 @@ describe.skipIf(!adminUrl)("recording cut routes and transaction", () => {
         }
         for (const fact of await db.select().from(knowledgeFacts))
             expect(fact.origin).toBe(removed ? "manual" : "recording");
+    });
+    it.each([
+        {
+            status: "wording_changed",
+            quote: "Earlier unrelated wording.",
+            expected: "wording_changed",
+        },
+        {
+            status: "supported",
+            quote: "Jitka keeps that.",
+            expected: "supported",
+        },
+        {
+            status: "supported",
+            quote: "Earlier unrelated wording.",
+            expected: "wording_changed",
+        },
+        {
+            status: "supported",
+            quote: "Jitka keeps that.",
+            expected: "speaker_changed",
+            speakerLabel: "missing",
+        },
+        {
+            status: "speaker_changed",
+            quote: "Jitka keeps that.",
+            expected: "speaker_changed",
+        },
+    ] as const)("keeps retained $status evidence with quote '$quote' as $expected and deletes removed evidence", async ({
+        status,
+        quote,
+        expected,
+        ...speaker
+    }) => {
+        const db = database.db;
+        const currentQuote = quoteFromTurns(turns, 3000, 6000);
+        expect(currentQuote).toBe("Jitka keeps this.");
+        const similarity = quoteSimilarity(quote, currentQuote ?? "");
+        expect(similarity).toBeLessThan(1);
+        if (quote === "Jitka keeps that.")
+            expect(similarity).toBeGreaterThan(QUOTE_SIMILARITY_THRESHOLD);
+        else expect(similarity).toBeLessThan(QUOTE_SIMILARITY_THRESHOLD);
+        for (const scope of ["owner", "org"]) {
+            await db.insert(people).values({
+                id: `person-${scope}`,
+                userId: scope,
+                displayName: encryptText("Jitka Dvořáková"),
+            });
+            await db.insert(knowledgeFacts).values({
+                id: `fact-${scope}`,
+                userId: scope,
+                subjectPersonId: `person-${scope}`,
+                subjectKey: `p:person-${scope}`,
+                relationKey: "role",
+                objectLiteral: encryptText("Coordinator"),
+                objectKey: "l:coordinator",
+                origin: "recording",
+                createdByUserId: "owner",
+            });
+            for (const source of ["plaud", "riffado"]) {
+                await db.insert(knowledgeFactEvidence).values([
+                    {
+                        id: `${scope}-${source}-kept`,
+                        userId: scope,
+                        factId: `fact-${scope}`,
+                        itemId: "recording",
+                        transcriptionId: source,
+                        transcriptRevision: 0,
+                        startMs: 3000,
+                        endMs: 6000,
+                        quote: encryptText(quote),
+                        status,
+                        speakerLabel:
+                            "speakerLabel" in speaker
+                                ? speaker.speakerLabel
+                                : null,
+                        dependsOnSpeaker: "speakerLabel" in speaker,
+                        confirmedAt: new Date(),
+                    },
+                    {
+                        id: `${scope}-${source}-removed`,
+                        userId: scope,
+                        factId: `fact-${scope}`,
+                        itemId: "recording",
+                        transcriptionId: source,
+                        transcriptRevision: 0,
+                        startMs: 0,
+                        endMs: 2000,
+                        quote: encryptText("Opening private words."),
+                        status: "supported",
+                        confirmedAt: new Date(),
+                    },
+                ]);
+            }
+        }
+        await db.transaction((tx) =>
+            recheckEvidenceInTx(tx, {
+                transcriptionId: "plaud",
+                previous: { turns, labels: ["S1", "S2"] },
+                next: {
+                    turns,
+                    labels: ["S1", "S2"],
+                    retainedLabels: ["S1", "S2"],
+                },
+            }),
+        );
+        const normal = await db
+            .select()
+            .from(knowledgeFactEvidence)
+            .where(eq(knowledgeFactEvidence.id, "owner-plaud-kept"));
+        expect(normal[0].status).toBe(expected);
+        await commit(await queued());
+        const evidence = await db.select().from(knowledgeFactEvidence);
+        expect(evidence.filter((row) => row.id.endsWith("-removed"))).toEqual(
+            [],
+        );
+        expect(evidence).toHaveLength(4);
+        for (const row of evidence) {
+            expect(row).toMatchObject({
+                startMs: 0,
+                endMs: 3000,
+                status: normal[0].status,
+                transcriptRevision: 1,
+            });
+            expect(decryptText(row.quote)).toBe(quote);
+        }
+        for (const fact of await db.select().from(knowledgeFacts))
+            expect(fact.origin).toBe(
+                expected === "supported" ? "recording" : "manual",
+            );
     });
     it("remaps overlapping-turn corrections after sorting and preserves task and speaker evidence", async () => {
         const db = database.db;

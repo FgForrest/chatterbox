@@ -190,10 +190,6 @@ export async function recheckEvidenceInTx(
         : [];
     for (const row of rows) {
         if (cutRange) {
-            const quote =
-                row.startMs !== null && row.endMs !== null
-                    ? quoteFromTurns(previous.turns, row.startMs, row.endMs)
-                    : null;
             const spans =
                 row.startMs !== null && row.endMs !== null
                     ? quoteSpansFromTurns(
@@ -207,8 +203,6 @@ export async function recheckEvidenceInTx(
                 row.endMs !== null &&
                 row.startMs >= cutRange.startMs &&
                 row.endMs <= cutRange.endMs &&
-                quote !== null &&
-                quoteSimilarity(quote, decryptText(row.quote)) === 1 &&
                 spans.length > 0 &&
                 spans.every((span) => {
                     const slice = retained[span.turnIndex];
@@ -239,17 +233,17 @@ export async function recheckEvidenceInTx(
             row.startMs !== null &&
             row.endMs !== null
         ) {
-            const cut = cutRange
-                ? null
-                : quoteFromTurns(next.turns, row.startMs, row.endMs);
+            const cut = quoteFromTurns(
+                cutRange ? previous.turns : next.turns,
+                row.startMs,
+                row.endMs,
+            );
             const quote = decryptText(row.quote);
             if (
-                !cutRange &&
-                (!cut ||
-                    (untimed
-                        ? cut !== quote
-                        : quoteSimilarity(quote, cut) <
-                          QUOTE_SIMILARITY_THRESHOLD))
+                !cut ||
+                (untimed
+                    ? cut !== quote
+                    : quoteSimilarity(quote, cut) < QUOTE_SIMILARITY_THRESHOLD)
             ) {
                 status = "wording_changed";
             } else if (row.dependsOnSpeaker && !carried) {

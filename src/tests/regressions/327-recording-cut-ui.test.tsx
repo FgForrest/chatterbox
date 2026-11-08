@@ -17,6 +17,8 @@ import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
 import { PlaybackProvider } from "@/components/playback/playback-context";
 import { EraseRecordingMenu } from "@/components/recordings/erase-recording-menu";
 import {
+    CutEdgeChip,
+    CutParagraphBoundary,
     CutPreviewOverlay,
     RecordingCutButton,
     RecordingCutPanel,
@@ -175,6 +177,26 @@ describe("shared recording cut mode", () => {
         expect(
             screen.queryByRole("button", { name: "Cut the start and end" }),
         ).toBeNull();
+    });
+    it.each([
+        { isOwn: false },
+        { view: "org" as const, isOwn: true },
+        { view: "received" as const },
+    ])("hides edge chips for a reader %j", (overrides) => {
+        render(
+            <RecordingCutProvider
+                recording={{ ...recording, ...overrides }}
+                transcripts={[{ turns }]}
+                transcribing={false}
+                shared={false}
+                onChanged={changed}
+            >
+                <CutEdgeChip edge="start" />
+                <CutEdgeChip edge="end" />
+            </RecordingCutProvider>,
+        );
+        expect(screen.queryByText("Start 00:00")).toBeNull();
+        expect(screen.queryByText("End 00:10")).toBeNull();
     });
     it("only the transcript scissors toggle the panel", () => {
         view();
@@ -635,6 +657,47 @@ describe("shared recording cut mode", () => {
         expect(document.querySelectorAll("[data-cut-boundary]")).toHaveLength(
             3,
         );
+    });
+    it.each([
+        "Start here",
+        "End here",
+    ])("disables %s gap actions that would cross or equal the other edge", (name) => {
+        render(
+            <RecordingCutProvider
+                recording={recording}
+                transcripts={[{ turns }]}
+                transcribing={false}
+                shared={false}
+                onChanged={changed}
+            >
+                <RecordingCutButton />
+                <RecordingCutPanel />
+                {[0, 3000, 6000, 10000].map((ms) => (
+                    <CutParagraphBoundary key={ms} ms={ms} />
+                ))}
+            </RecordingCutProvider>,
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Cut the start and end" }),
+        );
+        typeTime("From", "00:03");
+        typeTime("To", "00:06");
+        for (const ms of [0, 3000, 6000, 10000]) {
+            const button = within(boundary(ms)).getByRole("button", {
+                name,
+            }) as HTMLButtonElement;
+            const disabled = name === "Start here" ? ms >= 6000 : ms <= 3000;
+            expect(button.disabled).toBe(disabled);
+            if (disabled) fireEvent.click(button);
+        }
+        expect(
+            (screen.getByRole("textbox", { name: "From" }) as HTMLInputElement)
+                .value,
+        ).toBe("00:03");
+        expect(
+            (screen.getByRole("textbox", { name: "To" }) as HTMLInputElement)
+                .value,
+        ).toBe("00:06");
     });
     it("snaps typed fields on blur and Enter and restores invalid or crossed edges inline", () => {
         view();
