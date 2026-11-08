@@ -1,12 +1,11 @@
-import {
-    differenceInDays,
-    format,
-    formatDistanceToNow,
-    isThisYear,
-    isToday,
-    isYesterday,
-} from "date-fns";
-import { cs, enUS } from "date-fns/locale";
+import { differenceInDays } from "date-fns/differenceInDays";
+import { format } from "date-fns/format";
+import { formatDistanceToNow } from "date-fns/formatDistanceToNow";
+import { isThisYear } from "date-fns/isThisYear";
+import { isToday } from "date-fns/isToday";
+import { isYesterday } from "date-fns/isYesterday";
+import { cs } from "date-fns/locale/cs";
+import { enUS } from "date-fns/locale/en-US";
 import type { DateTimeFormat } from "@/types/common";
 
 export type { DateTimeFormat };
