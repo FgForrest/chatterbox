@@ -110,3 +110,36 @@ footer {
 #recording-state:empty {
     display: none;
 }
+
+.recorder-controls { background: var(--surface); padding: 14px; border: 1px solid var(--border); border-radius: 12px; margin: 0 0 18px; }
+.recorder-controls header { position: static; background: transparent; }
+.recorder-controls #meeting-prompt-offer { display: none; }
+.recorder-controls section { margin: 12px 0 0; }
+.recorder-controls #view-recording { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; }
+.recorder-controls #view-recording .status, .recorder-controls #recording-folder-row { grid-column: 1; }
+.recorder-controls #view-recording .meter, .recorder-controls #upload-status { display: none; }
+.recorder-controls #stop { grid-column: 2; grid-row: 1 / 3; align-self: center; width: auto; }
+.presence, .attachment.linked { padding: 12px; border: 1px solid color-mix(in srgb, var(--meeting) 45%, var(--border)); border-radius: 8px; background: color-mix(in srgb, var(--meeting) 8%, var(--surface)); }
+.attachment { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; font-size: 12px; color: var(--muted-foreground); }
+.attachment.linked { color: var(--meeting); }
+.attachment button { color: inherit; white-space: nowrap; }
+.attribution { display: block; min-height: 14px; margin-top: 4px; }
+.point input.point-title { border: 0; background: transparent; padding: 0; margin: 0; }
+.point.discussed .point-title { color: var(--muted-foreground); text-decoration: line-through; }
+.point label > input.point-title { flex: 1; }
+.task > input[type=text] { width: 100%; box-sizing: border-box; font: inherit; color: inherit; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); padding: 7px; }
+#modes { background: var(--muted); border-radius: 8px; padding: 3px; }
+#modes button { background: transparent; border-color: transparent; }
+#modes button[aria-pressed=true] { background: var(--surface); color: var(--foreground); border-color: var(--border); }
+.agenda-navigation { display: flex; justify-content: space-between; margin-top: 14px; }
+@media (min-width: 560px) { .agenda-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; } }
+
+.recorder-controls header h1 img { display: none; }
+.recorder-controls header h1 { font-size: 14px; }
+.recorder-controls #recording-folder-row .hint:empty, .recorder-controls #recording-folder-row .error:empty { display: none; }
+
+.attribution:empty { display: none; }
+.point, .task { padding: 8px 0; }
+#agenda:not(.live-agenda) .point label::before { content: ""; width: 5px; height: 5px; flex: none; margin-top: 6px; border-radius: 50%; background: var(--meeting); }
+#agenda:not(.live-agenda) .point { border-bottom: none; padding: 6px 0; }
+#recording-state:not(:empty) { display: none; }

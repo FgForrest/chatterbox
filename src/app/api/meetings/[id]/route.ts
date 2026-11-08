@@ -13,7 +13,7 @@ export const GET = meetingRoute(async ({ userId, params, url }) =>
             ? z
                   .string()
                   .regex(
-                      /^\d+(?::(?:visible|hidden|standalone)(?::(?:queued|running|failed|idle))?)?$/,
+                      /^\d+(?::(?:visible|hidden|standalone)(?::(?:queued|running|failed|idle))?)?(?::p[0-9a-f]{16})?$/,
                   )
                   .parse(url.searchParams.get("since"))
             : undefined,

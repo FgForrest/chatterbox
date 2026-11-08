@@ -1,13 +1,4 @@
-// Package the extension into a distributable zip.
-//
-// Run from the repository root so `archiver` resolves:
-//   node extensions/recorder/pack.mjs
-//
-// Produces extensions/recorder/dist/chatterbox-recorder-<version>.zip, suitable
-// for a Chrome Web Store upload or manual distribution. For local
-// development you do not need this: load the extensions/recorder folder as an
-// unpacked extension instead.
-
+import { buildRecorder } from "./build.mjs";
 import { ZipArchive } from "archiver";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
@@ -15,6 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
+await buildRecorder();
 const manifest = JSON.parse(
     await readFile(join(here, "manifest.json"), "utf8"),
 );
@@ -51,12 +43,13 @@ for (const entry of [
     "options",
     "agenda",
     "icons",
+    "generated",
 ]) {
     const full = join(here, entry);
     if (entry.includes(".")) {
         archive.file(full, { name: entry });
     } else {
-        archive.directory(full, entry);
+        archive.glob("**/*", { cwd: full, ignore: ["meta.json"] }, { prefix: entry });
     }
 }
 await archive.finalize();

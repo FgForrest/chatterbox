@@ -21,6 +21,7 @@ export function useAgenda(
     const [colleagueChange, setColleagueChange] = useState(false);
     const loadError = i18n("Could not load the agenda");
     const loading = useRef(false);
+    const reconcilePending = useRef(false);
     const [conflict, setConflict] = useState(false);
     const current = useRef(detail);
     const revision = useRef(0);
@@ -38,9 +39,12 @@ export function useAgenda(
     const queue = useRef(Promise.resolve());
     current.current = detail;
     const reload = useCallback(
-        async (signal?: AbortSignal, poll = false) => {
+        async (signal?: AbortSignal, poll = false): Promise<void> => {
             const before = revision.current;
-            if (outstanding.current || loading.current) return;
+            if (outstanding.current || loading.current) {
+                if (poll && loading.current) reconcilePending.current = true;
+                return;
+            }
             loading.current = true;
             try {
                 const cursor =
@@ -84,6 +88,11 @@ export function useAgenda(
                 throw error;
             } finally {
                 loading.current = false;
+                if (reconcilePending.current) {
+                    reconcilePending.current = false;
+                    if (!signal?.aborted)
+                        void reload(signal, true).catch(() => {});
+                }
             }
         },
         [id, loadError],
@@ -96,8 +105,16 @@ export function useAgenda(
             void reload(controller.signal).catch(() => {
                 if (!controller.signal.aborted) setError(loadError);
             });
+        const streamEnabled = active && typeof EventSource !== "undefined";
+        let events: EventSource | null = null;
+        let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+        let reconnectDelay = 1000;
         const poll = () => {
-            if (active && pollEnabled && document.visibilityState === "visible")
+            if (
+                active &&
+                (pollEnabled || streamEnabled) &&
+                document.visibilityState === "visible"
+            )
                 void reload(controller.signal, true).catch(() => {});
         };
         const unsubscribe = active
@@ -106,16 +123,49 @@ export function useAgenda(
                       void reload(controller.signal).catch(() => {});
               })
             : undefined;
-        const timer = active && pollEnabled ? setInterval(poll, 15000) : null;
+        const connect = () => {
+            if (controller.signal.aborted) return;
+            const source = new EventSource(meetingUrl(id, "/events"));
+            events = source;
+            const reconcile = () => {
+                void reload(controller.signal, true).catch(() => {});
+            };
+            source.onmessage = reconcile;
+            source.addEventListener("connected", () => {
+                reconnectDelay = 1000;
+                reconcile();
+            });
+            source.onerror = () => {
+                if (events !== source) return;
+                source.close();
+                events = null;
+                if (controller.signal.aborted) return;
+                reconnectTimer = setTimeout(connect, reconnectDelay);
+                reconnectDelay = Math.min(reconnectDelay * 2, 60000);
+            };
+        };
+        if (streamEnabled) connect();
+        const timer =
+            active && (pollEnabled || streamEnabled)
+                ? setInterval(poll, pollEnabled ? 15000 : 60000)
+                : null;
+        const textSaved = (event: Event) => {
+            if (event instanceof CustomEvent && event.detail === id)
+                void reload(controller.signal).catch(() => {});
+        };
+        if (active) window.addEventListener("agenda-text-saved", textSaved);
         if (timer !== null) document.addEventListener("visibilitychange", poll);
         return () => {
             mounted.current = false;
             controller.abort();
             unsubscribe?.();
+            events?.close();
+            clearTimeout(reconnectTimer);
+            window.removeEventListener("agenda-text-saved", textSaved);
             if (timer !== null) clearInterval(timer);
             document.removeEventListener("visibilitychange", poll);
         };
-    }, [active, reload, pollEnabled, loadError]);
+    }, [active, reload, pollEnabled, loadError, id]);
     const mutate = useCallback(
         (
             path: string,

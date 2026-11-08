@@ -664,6 +664,7 @@ describe.skipIf(!url)("person shares (PostgreSQL)", () => {
             | "own_recording"
             | "organizer"
             | "visible_task"
+            | "agenda_text_field"
         > = {
             "route.ts:POST": "own_folder",
             "restore/route.ts:POST": "own_archive",
@@ -682,6 +683,7 @@ describe.skipIf(!url)("person shares (PostgreSQL)", () => {
             "[id]/tasks/route.ts:POST": "visible_task",
             "[id]/tasks/[taskId]/route.ts:PATCH": "visible_task",
             "[id]/tasks/[taskId]/route.ts:DELETE": "visible_task",
+            "[id]/text/route.ts:POST": "agenda_text_field",
         };
         const scan = (directory: string): string[] =>
             readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>

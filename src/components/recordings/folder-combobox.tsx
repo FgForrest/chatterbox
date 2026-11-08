@@ -13,7 +13,28 @@ import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useLibraryPreferences } from "@/hooks/use-library-preferences";
 import { joinFolderPath } from "@/lib/folders/navigation";
 
+export interface FolderPickerEnvironment {
+    labels: {
+        folder: string;
+        chooseFolder: string;
+        recent: string;
+        private: string;
+        organization: string;
+        shareOrganization: string;
+        assigned: string;
+        findFolder: string;
+        searchFolders: string;
+        empty: string;
+        newFolder: string;
+        createFolder: (name: string) => string;
+    };
+    label: (folder: FolderSearchEntry["folder"]) => string;
+    recentFolders: { id: string }[];
+    rememberFolder: (id: string) => void;
+}
+
 interface FolderComboboxProps {
+    environment?: FolderPickerEnvironment;
     open?: boolean;
     onOpenChange?: (open: boolean) => void;
     anchorRef?: RefObject<HTMLButtonElement | null>;
@@ -40,7 +61,47 @@ interface FolderComboboxProps {
 }
 
 /** Shared folder chooser with search, recent folders and optional creation. */
-export function FolderCombobox({
+export function FolderCombobox(props: FolderComboboxProps) {
+    return props.environment ? (
+        <FolderComboboxBody {...props} environment={props.environment} />
+    ) : (
+        <AppFolderCombobox {...props} />
+    );
+}
+
+/** Supply application translations and account-local recent folders to the shared chooser. */
+export function useFolderPickerEnvironment(): FolderPickerEnvironment {
+    const i18n = useExtracted();
+    const label = useFolderLabel();
+    const { recentFolders, rememberFolder } = useLibraryPreferences();
+    return {
+        label,
+        recentFolders,
+        rememberFolder,
+        labels: {
+            folder: i18n("Folder"),
+            chooseFolder: i18n("Choose a folder"),
+            recent: i18n("Recently used"),
+            private: i18n("Private"),
+            organization: i18n("Organization"),
+            shareOrganization: i18n("Share with the Organization"),
+            assigned: i18n("Already in this folder"),
+            findFolder: i18n("Find a folder…"),
+            searchFolders: i18n("Search folders"),
+            empty: i18n("No folders match your search."),
+            newFolder: i18n("New folder…"),
+            createFolder: (name) => i18n("Create folder “{name}”", { name }),
+        },
+    };
+}
+
+function AppFolderCombobox(props: FolderComboboxProps) {
+    const environment = useFolderPickerEnvironment();
+    return <FolderComboboxBody {...props} environment={environment} />;
+}
+
+function FolderComboboxBody({
+    environment,
     open,
     onOpenChange,
     anchorRef,
@@ -60,12 +121,10 @@ export function FolderCombobox({
     placeholder,
     emptyChoiceLabel,
     className = "",
-}: FolderComboboxProps) {
-    const i18n = useExtracted();
+}: FolderComboboxProps & { environment: FolderPickerEnvironment }) {
+    const { labels, label, rememberFolder } = environment;
     const [saving, setSaving] = useState(false);
     const [creationQuery, setCreationQuery] = useState<string | null>(null);
-    const label = useFolderLabel();
-    const { rememberFolder } = useLibraryPreferences();
     const selected = entries.find((entry) => entry.folder.id === value);
     const selectedPath = selected
         ? joinFolderPath(selected.path, label(selected.folder))
@@ -80,7 +139,7 @@ export function FolderCombobox({
             anchorRef={anchorRef}
             actionTrigger={actionTrigger}
             popupTitle={popupTitle}
-            aria-label={ariaLabel ?? i18n("Folder")}
+            aria-label={ariaLabel ?? labels.folder}
             title={selectedPath}
             disabled={disabled}
             variant={variant}
@@ -101,14 +160,14 @@ export function FolderCombobox({
                         />
                     )}
                     <span
-                        className={`min-w-0 flex-1 whitespace-normal [overflow-wrap:anywhere] ${selected ? "" : "text-muted-foreground"}`}
+                        className={`min-w-0 flex-1 text-left whitespace-normal [overflow-wrap:anywhere] ${selected ? "" : "text-muted-foreground"}`}
                     >
                         {(variant === "pill" && selected
                             ? label(selected.folder)
                             : selectedPath) ??
                             placeholder ??
                             (value === "" ? emptyChoiceLabel : undefined) ??
-                            i18n("Choose a folder")}
+                            labels.chooseFolder}
                     </span>
                 </>
             }
@@ -122,15 +181,14 @@ export function FolderCombobox({
                     )
                 ) : (
                     <FolderSearchList
+                        environment={environment}
                         assignedIds={assignedIds}
                         disabled={saving}
                         sharing={sharing}
                         createOnlyWhenEmpty={createOnlyWhenEmpty}
                         createLabel={
                             createOnlyWhenEmpty
-                                ? i18n("Create folder “{name}”", {
-                                      name: query.trim(),
-                                  })
+                                ? labels.createFolder(query.trim())
                                 : undefined
                         }
                         entries={entries}

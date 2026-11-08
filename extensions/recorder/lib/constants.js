@@ -49,6 +49,8 @@ export const STORAGE_KEYS = {
     serverDefaults: "serverDefaults",
     nudgeEnabled: "nudgeEnabled",
     agendaReminders: "agendaReminders",
+    meetingNotifications: "meetingNotifications",
+    meetingLeadMinutes: "meetingLeadMinutes",
     agendaBanner: "agendaBanner",
     /** User override for the auto-stop quiet period, or null for server/default. */
     autoStopQuietSeconds: "autoStopQuietSeconds",

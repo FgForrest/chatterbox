@@ -1,4 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+import "../../../extensions/recorder/popup/folder-combobox.js";
+
+vi.mock("../../../extensions/recorder/generated/folders.js", () => ({
+    createFolderField: (...args) =>
+        globalThis.recorderFolders.createFolderField(...args),
+    createRecordingFolder: (...args) =>
+        globalThis.recorderFolders.createRecordingFolder(...args),
+}));
 
 const h = vi.hoisted(() => {
     const nodes = new Map();
@@ -28,6 +36,7 @@ const h = vi.hoisted(() => {
         return nodes.get(id);
     };
     globalThis.document = {
+        body: { querySelector: (selector) => node(selector.slice(1)) },
         documentElement: {},
         querySelectorAll: () => [],
         getElementById: node,
@@ -47,6 +56,7 @@ const h = vi.hoisted(() => {
     globalThis.chrome = {
         i18n: { getMessage: (key) => key, getUILanguage: () => "en" },
         storage: {
+            onChanged: { addListener: vi.fn() },
             local: {
                 get: vi.fn(async () => ({ ...local })),
                 set: vi.fn(async (patch) => Object.assign(local, patch)),

@@ -228,3 +228,15 @@ export async function sha256Hex(blob) {
         .map((byte) => byte.toString(16).padStart(2, "0"))
         .join("");
 }
+
+/** List fileable folders using the released endpoint, without a search-result cap. */
+export async function listRecorderFolders(auth) {
+    return mapRecorderFolders(await (await request(auth, "/api/v1/recorder/folders")).json());
+}
+
+/** Announce recording presence independently from the completion choice. */
+export async function setSessionAgenda(auth, sessionId, agendaId) {
+    return (await request(auth, `/api/v1/recording-sessions/${encodeURIComponent(sessionId)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agendaId }),
+    })).json();
+}

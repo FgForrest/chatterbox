@@ -505,14 +505,18 @@ async function renderAgendaSettings() {
     const settings = await getSettings();
     const supported = supportsAgendas(settings);
     el("agenda-section").hidden = !supported;
-    el("agenda-reminders").checked = settings.agendaReminders;
+    const next = settings.serverDefaults?.nextMeeting === true;
+    el("meeting-notifications-section").hidden = !supported && !next;
+    el("meeting-notifications").checked = settings.meetingNotifications;
+    el("meeting-lead").value = String(settings.meetingLeadMinutes);
     el("agenda-banner").checked = settings.agendaBanner;
 }
-for (const [id, key] of [["agenda-reminders", "agendaReminders"], ["agenda-banner", "agendaBanner"]]) {
-    el(id)?.addEventListener("change", async (event) => {
-        if (requireDataUseConsent()) await saveSettings({ [key]: event.target.checked });
-    });
-}
+el("agenda-banner").addEventListener("change", async (event) => {
+    if (requireDataUseConsent()) await saveSettings({ agendaBanner: event.target.checked });
+});
+
+el("meeting-notifications").addEventListener("change", async (event) => { if (requireDataUseConsent()) await saveSettings({ meetingNotifications: event.target.checked }); });
+el("meeting-lead").addEventListener("change", async (event) => { if (requireDataUseConsent()) await saveSettings({ meetingLeadMinutes: Number(event.target.value) }); });
 
 async function renderServerDefaults() {
     const settings = await getSettings();

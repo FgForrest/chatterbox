@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { publishAgendaEventInTx } from "@/db/queries/agenda-events";
 import { notifyFolderReceiversInTx } from "@/db/queries/item-shares";
 import {
     meetingAudienceWithin,
@@ -361,6 +362,7 @@ async function absorbInTx(
                 isNull(meetingAgendas.recordingItemId),
             ),
         );
+    await publishAgendaEventInTx(tx, agenda.id, String(agenda.version + 1));
     if (explicit)
         for (const folder of folders)
             await notifyFolderReceiversInTx(

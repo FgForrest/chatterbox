@@ -1,4 +1,5 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { publishAgendaEventInTx } from "@/db/queries/agenda-events";
 import type { MeetingTx } from "@/db/queries/meetings";
 import { agendaPoints, meetingAgendas } from "@/db/schema";
 import { encryptJsonField } from "@/lib/encryption/fields";
@@ -76,4 +77,5 @@ export async function writeSummaryAgenda(
                 eq(meetingAgendas.userId, agenda.userId),
             ),
         );
+    await publishAgendaEventInTx(tx, agenda.id, String(agenda.version + 1));
 }

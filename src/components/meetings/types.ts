@@ -32,7 +32,28 @@ export type MeetingDetail = Omit<
     | "receivedShare"
     | "receivedFolders"
     | "agendaTitle"
+    | "textProtocol"
+    | "recordingBy"
+    | "points"
+    | "tasks"
 > & {
+    textProtocol?: number;
+    recordingBy?: Detail["recordingBy"];
+    points: (Omit<Detail["points"][number], "updatedByUserId"> & {
+        updatedByUserId?: string | null;
+    })[];
+    tasks: (Omit<
+        Detail["tasks"][number],
+        | "agendaVersion"
+        | "agendaUpdatedAt"
+        | "agendaUpdatedByUserId"
+        | "statusChangedByUserId"
+    > & {
+        agendaVersion?: number;
+        agendaUpdatedAt?: string;
+        agendaUpdatedByUserId?: string | null;
+        statusChangedByUserId?: string | null;
+    })[];
     cursor?: string;
     agendaTitle?: string;
     shared?: Detail["shared"];
@@ -45,7 +66,11 @@ export type MeetingDetail = Omit<
 export type MeetingPoint = MeetingDetail["points"][number];
 export type MeetingTask = MeetingDetail["tasks"][number];
 type MeetingRow = Json<Awaited<ReturnType<typeof listMeetings>>[number]>;
-export type MeetingRowData = Omit<MeetingRow, "received" | "recorded"> & {
+export type MeetingRowData = Omit<
+    MeetingRow,
+    "received" | "recorded" | "own"
+> & {
+    own?: boolean;
     received?: boolean;
     recorded?: boolean;
 };

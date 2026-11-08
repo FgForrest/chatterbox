@@ -9,7 +9,7 @@ export const GET = meetingRoute(async ({ userId, params, url }) => {
             ? z
                   .string()
                   .regex(
-                      /^\d+(?::(?:visible|hidden|standalone)(?::(?:queued|running|failed|idle))?)?$/,
+                      /^\d+(?::(?:visible|hidden|standalone)(?::(?:queued|running|failed|idle))?)?(?::p[0-9a-f]{16})?$/,
                   )
                   .parse(url.searchParams.get("since"))
             : undefined,
@@ -28,6 +28,12 @@ export const GET = meetingRoute(async ({ userId, params, url }) => {
     } = detail;
     return {
         ...agenda,
-        points: points.map(({ summaryOutcome: _outcome, ...point }) => point),
+        own: detail.userId === userId,
+        points: points.map(({ summaryOutcome: _outcome, ...point }) => ({
+            ...point,
+            canEditText:
+                detail.permissions.edit &&
+                (detail.permissions.manage || point.authorUserId === userId),
+        })),
     };
 }, true);

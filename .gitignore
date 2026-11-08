@@ -63,3 +63,5 @@ bun.lock
 # meeting recorder extension build output
 /extensions/recorder/dist/
 /extensions/signing-keys/*.pem
+
+/extensions/recorder/generated/

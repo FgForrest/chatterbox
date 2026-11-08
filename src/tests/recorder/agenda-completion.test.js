@@ -32,16 +32,25 @@ function load(page, dependencies) {
         "utf8",
     );
     const source = readFileSync(
-        `extensions/recorder/${page}/${page}.js`,
+        page === "popup"
+            ? "extensions/recorder/lib/recording-controls.js"
+            : `extensions/recorder/${page}/${page}.js`,
         "utf8",
-    ).replace(/^import[\s\S]*?;\n/gm, "");
-    new Function(...Object.keys(dependencies), source)(
-        ...Object.values(dependencies),
-    );
+    )
+        .replace(/^import[\s\S]*?;\n/gm, "")
+        .replace(/^export /gm, "");
+    new Function(
+        ...Object.keys(dependencies),
+        source +
+            (page === "popup"
+                ? "\nreturn mountRecordingControls(document.body);"
+                : ""),
+    )(...Object.values(dependencies));
 }
 
 async function popup() {
     load("popup", {
+        createNextMeetingCard: () => ({ destroy: vi.fn() }),
         createAgendaCard,
         agendaFolder,
         supportsAgendas,
@@ -88,6 +97,7 @@ beforeEach(() => {
     });
     vi.stubGlobal("chrome", {
         i18n: { getMessage: (key) => key, getUILanguage: () => "en" },
+        storage: { onChanged: { addListener: vi.fn() } },
         runtime: {
             sendMessage: send,
             onMessage: {

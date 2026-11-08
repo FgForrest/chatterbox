@@ -2,7 +2,6 @@
 
 import { Command } from "cmdk";
 import { Check, Folder, Plus, Users } from "lucide-react";
-import { useExtracted } from "next-intl";
 import {
     type ComponentProps,
     type Ref,
@@ -13,16 +12,18 @@ import {
     useState,
 } from "react";
 import { SharedFolderIcon } from "@/components/sharing/shared-folder-icon";
-
-import { useFolderLabel } from "@/hooks/use-folder-label";
-import { useLibraryPreferences } from "@/hooks/use-library-preferences";
 import type { LabelledFolder } from "@/lib/folders/labels";
 import { type FolderMatch, matchFolderEntries } from "@/lib/folders/navigation";
 import { getPasswordManagerAttributes } from "@/lib/password-manager";
+import {
+    type FolderPickerEnvironment,
+    useFolderPickerEnvironment,
+} from "./folder-combobox";
 
 export type FolderSearchEntry = FolderMatch<LabelledFolder & { id: string }>;
 
 interface FolderSearchListProps {
+    environment?: FolderPickerEnvironment;
     entries: FolderSearchEntry[];
     query: string;
     onQueryChange: (query: string) => void;
@@ -49,7 +50,21 @@ function folderIdOf(value: string): string {
 }
 
 /** Shared keyboard-searchable folder results for dialogs and inline forms. */
-export function FolderSearchList({
+export function FolderSearchList(props: FolderSearchListProps) {
+    return props.environment ? (
+        <FolderSearchListBody {...props} environment={props.environment} />
+    ) : (
+        <AppFolderSearchList {...props} />
+    );
+}
+
+function AppFolderSearchList(props: FolderSearchListProps) {
+    const environment = useFolderPickerEnvironment();
+    return <FolderSearchListBody {...props} environment={environment} />;
+}
+
+function FolderSearchListBody({
+    environment,
     entries,
     query,
     onQueryChange,
@@ -65,10 +80,8 @@ export function FolderSearchList({
     onTab,
     listRef,
     emptyChoiceLabel,
-}: FolderSearchListProps) {
-    const i18n = useExtracted();
-    const label = useFolderLabel();
-    const { recentFolders } = useLibraryPreferences();
+}: FolderSearchListProps & { environment: FolderPickerEnvironment }) {
+    const { labels, label, recentFolders } = environment;
     const [active, setActive] = useState("");
     const [activeId, setActiveId] = useState<string>();
     const command = useRef<HTMLDivElement>(null);
@@ -147,12 +160,12 @@ export function FolderSearchList({
         },
         [onSelect, onCreate, query],
     );
-    const recentHeading = i18n("Recently used");
-    const personalHeading = i18n("Private");
+    const recentHeading = labels.recent;
+    const personalHeading = labels.private;
     const organizationHeading = sharing
-        ? i18n("Share with the Organization")
-        : i18n("Organization");
-    const assignedLabel = i18n("Already in this folder");
+        ? labels.shareOrganization
+        : labels.organization;
+    const assignedLabel = labels.assigned;
     const rows = useMemo(() => {
         const groupHeading = (prefix: string) => {
             if (prefix === "recent") return recentHeading;
@@ -242,7 +255,7 @@ export function FolderSearchList({
             shouldFilter={false}
             value={activeValue}
             onValueChange={setActive}
-            label={i18n("Choose a folder")}
+            label={labels.chooseFolder}
             className="flex min-h-0 flex-col"
             onKeyDown={(event) => {
                 if (event.key === "Tab") onTab?.();
@@ -269,8 +282,8 @@ export function FolderSearchList({
                 value={query}
                 onValueChange={onQueryChange}
                 maxLength={100}
-                placeholder={i18n("Find a folder…")}
-                aria-label={i18n("Search folders")}
+                placeholder={labels.findFolder}
+                aria-label={labels.searchFolders}
                 className="mb-2 w-full shrink-0 rounded border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
                 <input type="search" aria-activedescendant={activeId} />
@@ -299,7 +312,7 @@ export function FolderSearchList({
                     {rows}
                     {matches.length === 0 && !offerCreate && (
                         <Command.Empty className="px-3 py-2 text-sm text-muted-foreground">
-                            {i18n("No folders match your search.")}
+                            {labels.empty}
                         </Command.Empty>
                     )}
                     {offerCreate && (
@@ -311,7 +324,7 @@ export function FolderSearchList({
                             className="flex items-center gap-2 rounded px-3 py-2 text-sm data-[selected=true]:bg-accent data-[disabled=true]:opacity-50"
                         >
                             <Plus className="size-4 shrink-0" aria-hidden />
-                            {createLabel ?? i18n("New folder…")}
+                            {createLabel ?? labels.newFolder}
                         </Command.Item>
                     )}
                 </FolderResults>

@@ -60,7 +60,13 @@ describe("recorder agenda API", () => {
             ).json(),
         ).toEqual({
             noticeText: "Recording notice",
-            features: { agendas: true },
+            features: {
+                agendas: true,
+                nextMeeting: true,
+                agendaLive: true,
+                agendaText: 1,
+                sessionAgenda: true,
+            },
         });
     });
     it.each([
@@ -220,7 +226,8 @@ it.each([
         permissions: { edit: false },
         recordingItemId: "recording",
         attachedRecording: { visible },
-        points: [{ id: "point", text: "Plan" }],
+        own: false,
+        points: [{ id: "point", text: "Plan", canEditText: false }],
         taskGroups: [{ name: "Acme", tasks: [{ id: "task" }] }],
     });
 });
@@ -282,5 +289,28 @@ it.each([
         id: "point",
         text: "Plan",
         version: 1,
+    });
+});
+
+it.each([
+    ["owner", "owner", true, false, true, true],
+    ["other", "owner", true, false, false, true],
+    ["other", "other", true, false, false, false],
+    ["other", "other", true, true, false, true],
+    ["owner", "owner", false, true, true, false],
+])("reports agenda ownership and text rights without granting structural access", async (userId, authorUserId, edit, manage, own, canEditText) => {
+    mocks.get.mockResolvedValue({
+        id: "agenda",
+        userId,
+        permissions: { edit, manage },
+        points: [{ id: "point", authorUserId }],
+    });
+    const response = await detail(
+        new Request("https://example.com/api/v1/recorder/agendas/agenda"),
+        context,
+    );
+    expect(await response.json()).toMatchObject({
+        own,
+        points: [{ id: "point", canEditText }],
     });
 });

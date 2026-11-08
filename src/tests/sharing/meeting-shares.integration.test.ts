@@ -45,6 +45,7 @@ import {
 } from "@/lib/meetings/attachment";
 import { matchRecorderAgendas } from "@/lib/meetings/calendar";
 import type * as CalendarSnapshot from "@/lib/meetings/calendar-snapshot";
+import { AGENDA_EVENT_CHANNEL } from "@/lib/meetings/event-protocol";
 import type * as PersonSharing from "@/lib/meetings/person-sharing";
 import {
     agendaRecordingShareOffer,
@@ -453,6 +454,33 @@ describe.skipIf(!url)("agenda person shares (PostgreSQL)", () => {
                 version: 0,
                 text: "Author revision",
             });
+        }
+    });
+
+    it("deletes an agenda and publishes an ids-only invalidation with the next cursor", async () => {
+        const plan = await create();
+        await addPoint("owner", plan.id, { text: "Private agenda point" });
+        const agenda = await detail("owner", plan.id);
+        const messages: string[] = [];
+        const listener = await database.sql.listen(
+            AGENDA_EVENT_CHANNEL,
+            (payload) => messages.push(payload),
+        );
+        try {
+            await expect(
+                deleteMeeting("owner", plan.id),
+            ).resolves.toBeUndefined();
+            await vi.waitFor(() => expect(messages).toHaveLength(1));
+            expect(JSON.parse(messages[0])).toEqual({
+                agendaId: plan.id,
+                cursor: String(agenda.version + 1),
+            });
+            await expect(getMeeting("owner", plan.id)).rejects.toMatchObject({
+                statusCode: 404,
+            });
+            expect(await listMeetings("owner")).toEqual([]);
+        } finally {
+            await listener.unlisten();
         }
     });
 
