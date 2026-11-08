@@ -285,8 +285,9 @@ describe.skipIf(!adminUrl)("recording cut routes and transaction", () => {
             })),
         );
     });
-    const post = (body: unknown = range) =>
-        POST(
+    const post = async (body: unknown = range) => {
+        const log = vi.spyOn(console, "info");
+        const response = await POST(
             new Request("http://localhost/api/recordings/recording/cut", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -294,6 +295,15 @@ describe.skipIf(!adminUrl)("recording cut routes and transaction", () => {
             }),
             { params: Promise.resolve({ id: "recording" }) },
         );
+        if (response.status >= 400 && response.status < 500) {
+            const body = await response.clone().json();
+            expect(log).toHaveBeenCalledWith(
+                `[cut] refused recording=recording code=${body.code} status=${response.status}`,
+            );
+        }
+        log.mockRestore();
+        return response;
+    };
     async function share() {
         await database.db.insert(recordingFolders).values({
             id: "org-folder",
@@ -307,10 +317,9 @@ describe.skipIf(!adminUrl)("recording cut routes and transaction", () => {
             userId: "owner",
         });
     }
-    async function queued(withdraw = false) {
+    async function queued() {
         const result = await requestRecordingCut("owner", "recording", {
             ...range,
-            withdraw,
         });
         await database.db
             .update(asyncJobs)
@@ -426,10 +435,9 @@ describe.skipIf(!adminUrl)("recording cut routes and transaction", () => {
         mocks.caller.id = caller;
         expect((await post()).status).toBe(404);
     });
-    it("requires withdrawal consent for an Organization recording", async () => {
+    it("queues a shared recording without withdrawal consent", async () => {
         await share();
-        expect((await post()).status).toBe(409);
-        expect((await post({ ...range, withdraw: true })).status).toBe(202);
+        expect((await post()).status).toBe(202);
     });
     it.each([
         "pending",
@@ -818,7 +826,7 @@ describe.skipIf(!adminUrl)("recording cut routes and transaction", () => {
             ).toBe(true);
         },
     );
-    it("withdraws Organization facts normally while preserving private confirmed facts", async () => {
+    it("cuts in place and preserves private and Organization facts as manual", async () => {
         await share();
         await database.db.insert(people).values({
             id: "org-person",
@@ -876,7 +884,7 @@ describe.skipIf(!adminUrl)("recording cut routes and transaction", () => {
             status: "supported",
             confirmedAt: new Date(),
         });
-        const job = await queued(true);
+        const job = await queued();
         await database.db.transaction((tx) =>
             commitRecordingCut(
                 tx,
@@ -896,7 +904,7 @@ describe.skipIf(!adminUrl)("recording cut routes and transaction", () => {
         );
         expect(
             await database.db.select().from(recordingFolderAssignments),
-        ).toEqual([]);
+        ).toMatchObject([{ itemId: "recording", folderId: "org-folder" }]);
         expect(
             await database.db
                 .select({
@@ -905,8 +913,17 @@ describe.skipIf(!adminUrl)("recording cut routes and transaction", () => {
                     origin: knowledgeFacts.origin,
                 })
                 .from(knowledgeFacts),
-        ).toEqual([{ id: "private-fact", userId: "owner", origin: "manual" }]);
-        expect(await listFacts("org", { personId: "org-person" })).toEqual([]);
+        ).toEqual(
+            expect.arrayContaining([
+                { id: "private-fact", userId: "owner", origin: "manual" },
+                { id: "org-fact", userId: "org", origin: "manual" },
+            ]),
+        );
+        expect(
+            (await listFacts("org", { personId: "org-person" })).map(
+                (fact) => fact.id,
+            ),
+        ).toEqual(["org-fact"]);
         expect(
             (await listFacts("owner", { personId: "private-person" })).map(
                 (fact) => fact.id,

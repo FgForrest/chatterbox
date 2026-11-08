@@ -28,6 +28,7 @@ export interface JobProgress {
 
 export interface JobContext<P> {
     jobId: string;
+    claimToken?: string;
     userId: string;
     /** 1-based. A handler can behave differently on a retry if it wants to. */
     attempt: number;

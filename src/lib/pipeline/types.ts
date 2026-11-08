@@ -180,6 +180,7 @@ export interface PipelineFacts {
         followUps: number;
     };
     share?: {
+        cutJobActive?: boolean;
         problems: ShareGateProblem[];
         confirmationRequired?: boolean;
     };

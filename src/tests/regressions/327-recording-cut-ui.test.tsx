@@ -286,7 +286,7 @@ describe("shared recording cut mode", () => {
             ),
         ).toBeTruthy();
     });
-    it("reuses the Organization withdrawal and retention warning", async () => {
+    it("explains the shared cut without withdrawal or retention warnings", async () => {
         view({}, false, true, true);
         fireEvent.click(
             within(screen.getByTestId("player")).getByRole("button"),
@@ -298,13 +298,16 @@ describe("shared recording cut mode", () => {
         fireEvent.click(bar.getByRole("button", { name: "Cut…" }));
         expect(
             screen.getByText(
-                "This recording is shared with the Organization. It will be taken out of the Organization first, and colleagues will no longer see it.",
+                "This recording is shared with the Organization. Colleagues will see the cut version, and its summary in the Organization is generated again.",
             ),
         ).toBeTruthy();
         await act(async () => {});
-        expect(fetchMock).toHaveBeenCalledWith(
-            "/api/recordings/recording/withdraw-preview",
-        );
+        expect(
+            fetchMock.mock.calls.some(([url]) =>
+                url.includes("withdraw-preview"),
+            ),
+        ).toBe(false);
+        expect(screen.queryByText(/retention/i)).toBeNull();
     });
     it.each([
         "completed",
@@ -375,23 +378,23 @@ describe("shared recording cut mode", () => {
         });
         expect(polls).toBe(2);
         expect(screen.queryByRole("status")).toBeNull();
-        expect(
-            screen.queryByRole("region", { name: "Cut recording" }),
-        ).toBeNull();
-        expect(changed).toHaveBeenCalledOnce();
         if (status === "failed") {
-            expect(toast.error).toHaveBeenCalledExactlyOnceWith(
+            expect(screen.getByRole("alert").textContent).toBe(
                 "The recording or transcript changed. Reload it and choose the cut again.",
             );
-            fireEvent.click(
-                within(screen.getByTestId("player")).getByRole("button", {
-                    name: "Cut the start and end",
-                }),
-            );
-            expect(
+            const reopened = within(
                 screen.getByRole("region", { name: "Cut recording" }),
-            ).toBeTruthy();
-        } else expect(toast.error).not.toHaveBeenCalled();
+            );
+            expect(reopened.getByText("Start 00:03")).toBeTruthy();
+            expect(reopened.getByText("End 00:06")).toBeTruthy();
+            expect(changed).not.toHaveBeenCalled();
+        } else {
+            expect(
+                screen.queryByRole("region", { name: "Cut recording" }),
+            ).toBeNull();
+            expect(changed).toHaveBeenCalledOnce();
+        }
+        expect(toast.error).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -431,7 +434,13 @@ describe("shared recording cut mode", () => {
                 screen.getByRole("button", { name: "Delete and cut" }),
             );
         });
-        expect(toast.error).toHaveBeenCalledExactlyOnceWith(message);
+        expect(screen.getByRole("alert").textContent).toBe(message);
+        expect(
+            within(
+                screen.getByRole("region", { name: "Cut recording" }),
+            ).getByText("Start 00:03"),
+        ).toBeTruthy();
+        expect(toast.error).not.toHaveBeenCalled();
         expect(screen.queryByRole("status")).toBeNull();
         expect(changed).not.toHaveBeenCalled();
     });
