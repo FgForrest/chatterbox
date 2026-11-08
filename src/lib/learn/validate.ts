@@ -57,6 +57,10 @@ import {
     quoteFromTurns,
     relationFits,
 } from "@/lib/knowledge/fact-rules";
+import {
+    labelsFromTurns,
+    speakerKey,
+} from "@/lib/knowledge/speaker-label-rules";
 import { deniedTopicOf } from "@/lib/knowledge/vocabulary-core";
 import type { LanguageReviewCandidate } from "@/lib/learn/language";
 import {
@@ -103,6 +107,7 @@ export interface VisibleRelation {
 
 /** What a run may know, frozen when its answer is validated. */
 export interface LearnRunFrame {
+    kind?: "audio" | "mail";
     /** The transcript revision the run read. */
     revision: number;
     /** The transcript's revision now. */
@@ -216,6 +221,7 @@ export type ReviewCandidate =
               onlyFirstName?: true;
               /** The person who made the recording, named on their role. */
               recorder?: true;
+              unmentioned?: true;
           };
       }
     | {
@@ -565,6 +571,35 @@ export function validateLearnOutput(
     }
 
     appendSpeakerGuesses(output, frame, items, { dismissed, drop });
+
+    if (frame.kind !== "mail") {
+        const proposed = new Set(
+            items.flatMap((item) =>
+                item.kind === "speaker" ? [speakerKey(item.payload.label)] : [],
+            ),
+        );
+        for (const label of labelsFromTurns(frame.turns)) {
+            if (frame.answeredLabels.has(label) || proposed.has(label))
+                continue;
+            items.push({
+                kind: "speaker",
+                fingerprint: JSON.stringify([
+                    "unmentioned-speaker",
+                    transcriptKey,
+                    label,
+                ]),
+                preTicked: false,
+                payload: {
+                    label,
+                    personId: null,
+                    evidenceMs: [],
+                    reason: "",
+                    unmentioned: true,
+                },
+            });
+            proposed.add(label);
+        }
+    }
 
     // Corrections: exact anchors, in scope, grouped per target and words.
     const taken: AnchorPosition[] = [...(frame.corrected ?? [])];

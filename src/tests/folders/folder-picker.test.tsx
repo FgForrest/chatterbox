@@ -62,8 +62,9 @@ beforeEach(() => {
     vi.stubGlobal("ResizeObserver", Observer);
     Element.prototype.scrollIntoView = vi.fn();
 });
-afterEach(() => {
+afterEach(async () => {
     cleanup();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     vi.unstubAllGlobals();
 });
 

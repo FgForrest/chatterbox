@@ -1,7 +1,7 @@
 ---
 title: Speakers are identified from names and calendar rosters, never from voiceprints
 date: 2026-09-14
-updated: 2026-10-22 22:30
+updated: 2026-11-08 15:50
 status: superseded
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [25]
 areas: [src/lib/knowledge/attribution.ts, src/lib/knowledge/people.ts, src/lib/transcription/speechmatics-transcribe.ts, src/lib/transcription/elevenlabs-transcribe.ts, src/lib/integrations/google]
 supersedes: []
 superseded-by: [2026-09-30-learn]
-relates: [2026-10-12-calendar-meet-speaker-candidates, 2026-09-28-google-drive-export, 2026-10-22-calendar-speaker-guesses-in-automatic-runs]
+relates: [2026-10-12-calendar-meet-speaker-candidates, 2026-09-28-google-drive-export, 2026-10-22-calendar-speaker-guesses-in-automatic-runs, 2026-11-08-optional-speaker-review-and-speech-samples]
 ---
 
 # Speakers are identified from names and calendar rosters, never from voiceprints
@@ -147,6 +147,8 @@ Drive export's choice, see its record).
   gap.
 
 ## Related work
+
+- [Optional speaker review and speech samples](2026-11-08-optional-speaker-review-and-speech-samples.md): browser-selected listening shortcuts replay existing audio without storing voice samples or inferring identity.
 
 - [2026-09-30-learn](2026-09-30-learn/README.md): restates the boundary (no voice samples,
   embeddings, provider identifiers, style or accent) and builds speaker suggestions on it; it
