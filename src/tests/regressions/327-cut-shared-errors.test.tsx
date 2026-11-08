@@ -11,8 +11,8 @@ import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PlaybackProvider } from "@/components/playback/playback-context";
 import {
-    RecordingCutBar,
     RecordingCutButton,
+    RecordingCutPanel,
     RecordingCutProvider,
 } from "@/components/recordings/recording-cut";
 import type { Recording } from "@/types/recording";
@@ -55,7 +55,7 @@ function View({ id = "recording" }: { id?: string }) {
                 onChanged={changed}
             >
                 <RecordingCutButton />
-                <RecordingCutBar />
+                <RecordingCutPanel />
             </RecordingCutProvider>
         </PlaybackProvider>
     );
@@ -65,8 +65,14 @@ function choose() {
         screen.getByRole("button", { name: "Cut the start and end" }),
     );
     const bar = within(screen.getByRole("region", { name: "Cut recording" }));
-    fireEvent.click(bar.getByRole("button", { name: "Start here" }));
-    fireEvent.click(bar.getByRole("button", { name: "End here" }));
+    for (const [name, value] of [
+        ["From", "00:02"],
+        ["To", "00:08"],
+    ]) {
+        const input = bar.getByRole("textbox", { name });
+        fireEvent.change(input, { target: { value } });
+        fireEvent.blur(input);
+    }
     fireEvent.click(bar.getByRole("button", { name: "Cut…" }));
 }
 function submit() {
@@ -75,8 +81,12 @@ function submit() {
 function expectRange(message: string) {
     const bar = within(screen.getByRole("region", { name: "Cut recording" }));
     expect(bar.getByRole("alert").textContent).toBe(message);
-    expect(bar.getByText("Start 00:02")).toBeTruthy();
-    expect(bar.getByText("End 00:08")).toBeTruthy();
+    expect(
+        (bar.getByRole("textbox", { name: "From" }) as HTMLInputElement).value,
+    ).toBe("00:02");
+    expect(
+        (bar.getByRole("textbox", { name: "To" }) as HTMLInputElement).value,
+    ).toBe("00:08");
     expect(toast.error).not.toHaveBeenCalled();
 }
 beforeEach(() => {
@@ -182,7 +192,9 @@ describe("#327 refused and failed cuts remain visible", () => {
         );
         render(<View />);
         await act(async () => {});
-        expect(screen.getByRole("status").textContent).toBe("Cutting…");
+        expect(screen.getByRole("status").textContent).toBe(
+            "Cutting 00:02–00:08",
+        );
         status = "failed";
         await act(async () => {
             await vi.advanceTimersByTimeAsync(2000);

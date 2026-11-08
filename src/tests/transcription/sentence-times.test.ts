@@ -186,9 +186,11 @@ describe("sentence start timing", () => {
         expect(paragraphs.map((p) => p.startMs)).toEqual([1000, 71000, 81000]);
         expect(paragraphs[topicParagraphs[0]].charStart).toBe(15);
     });
-    it("shifts and clamps sentence times during a cut", () => {
+    it("keeps only retained sentence times during a cut", () => {
         const cut = cutTranscript([turn], { startMs: 11000, endMs: 91000 });
-        expect(cut.turns[0].sentenceStartsMs).toEqual([0, 60000, 70000]);
+        expect(cut.turns[0].sentenceStartsMs).toEqual([60000, 70000]);
+        expect(cut.turns[0].text).toBe("Second. Third.");
+        expect(cut.turns[0].startMs).toBe(60000);
         expect(turn.sentenceStartsMs).toEqual([1000, 71000, 81000]);
     });
     it("keeps times for a correction with the same sentence count", () => {

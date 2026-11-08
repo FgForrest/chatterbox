@@ -8,6 +8,7 @@ import {
     useCallback,
     useContext,
     useEffect,
+    useId,
     useRef,
     useState,
 } from "react";
@@ -24,11 +25,13 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ActionTooltip } from "@/components/ui/tooltip";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import {
     type CutRange,
+    parseCutTime,
     snapCutEdge,
     validCutRange,
 } from "@/lib/recordings/cut-range";
@@ -520,7 +523,7 @@ export function RecordingCutButton() {
 export function CutEdgeChip({ edge }: { edge: "start" | "end" }) {
     const cut = useRecordingCut();
     const i18n = useExtracted();
-    if (!cut) return null;
+    if (!cut?.owner) return null;
     const time = formatClock(
         edge === "start" ? cut.range.startMs : cut.range.endMs,
     );
@@ -529,14 +532,14 @@ export function CutEdgeChip({ edge }: { edge: "start" | "end" }) {
             ? cut.range.startMs > 0
             : cut.range.endMs < cut.recording.duration;
     return (
-        <span className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-background px-2 py-1 text-xs text-primary">
+        <span className="inline-flex h-4 items-center gap-1 rounded-full border border-primary/40 bg-background px-2 text-xs leading-none text-primary">
             {edge === "start"
                 ? i18n("Start {time}", { time })
                 : i18n("End {time}", { time })}
             {set && (
                 <button
                     type="button"
-                    className="rounded-full p-0.5 hover:bg-primary/10"
+                    className="inline-flex h-full items-center rounded-full hover:bg-primary/10"
                     onClick={() => cut.reset(edge)}
                     aria-label={
                         edge === "start"
@@ -551,169 +554,291 @@ export function CutEdgeChip({ edge }: { edge: "start" | "end" }) {
     );
 }
 
-export function RecordingCutBar() {
+function CutTimeField({
+    edge,
+    invalid,
+    hintId,
+    onInvalidChange,
+}: {
+    edge: "start" | "end";
+    invalid: boolean;
+    hintId: string;
+    onInvalidChange: (invalid: boolean) => void;
+}) {
     const cut = useRecordingCut();
     const i18n = useExtracted();
-    const playback = usePlayback();
-    const [position, setPosition] = useState(0);
-    useEffect(
-        () => playback?.subscribe((state) => setPosition(Math.round(state.ms))),
-        [playback],
+    const id = useId();
+    const [draft, setDraft] = useState<string | null>(null);
+    const value = edge === "start" ? cut?.range.startMs : cut?.range.endMs;
+    const [committedValue, setCommittedValue] = useState(value);
+    if (committedValue !== value) {
+        setCommittedValue(value);
+        setDraft(null);
+    }
+    if (!cut || value === undefined) return null;
+    const commit = () => {
+        if (draft === null) return;
+        const parsed = parseCutTime(draft);
+        const snapped =
+            parsed === null
+                ? null
+                : snapCutEdge(
+                      cut.activeTurns ?? [],
+                      parsed,
+                      edge,
+                      cut.recording.duration,
+                  );
+        const valid =
+            snapped !== null &&
+            (edge === "start"
+                ? snapped < cut.range.endMs
+                : snapped > cut.range.startMs);
+        onInvalidChange(!valid);
+        setDraft(null);
+        if (valid && snapped !== null) cut.setEdge(edge, snapped);
+    };
+    return (
+        <label
+            htmlFor={id}
+            className="flex items-center gap-2 text-sm text-muted-foreground"
+        >
+            {edge === "start"
+                ? i18n("From")
+                : i18n({ id: "recording-cut-to", message: "To" })}
+            <Input
+                id={id}
+                className="h-8 w-24 text-center font-mono text-sm text-foreground tabular-nums"
+                value={draft ?? formatClock(value)}
+                aria-invalid={invalid}
+                aria-describedby={invalid ? hintId : undefined}
+                onChange={(event) => {
+                    setDraft(event.target.value);
+                    onInvalidChange(false);
+                }}
+                onBlur={commit}
+                onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                        event.preventDefault();
+                        commit();
+                    }
+                }}
+            />
+        </label>
     );
-    if (cut?.cutting)
-        return (
-            <output className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" />
-                {i18n("Cutting…")}
-            </output>
-        );
-    if (!cut?.open) return null;
+}
+
+export function RecordingCutPanel() {
+    const cut = useRecordingCut();
+    const i18n = useExtracted();
+    const hintId = useId();
+    const [invalid, setInvalid] = useState({ start: false, end: false });
+    const identity = `${cut?.open}:${cut?.recording.id}`;
+    const [previousIdentity, setPreviousIdentity] = useState(identity);
+    if (identity !== previousIdentity) {
+        setPreviousIdentity(identity);
+        setInvalid({ start: false, end: false });
+    }
+    if (!cut?.owner || (!cut.open && !cut.cutting)) return null;
     const { range, recording } = cut;
-    const changed = range.startMs > 0 || range.endMs < recording.duration;
     const total = formatClock(recording.duration);
     const kept = formatClock(Math.max(0, range.endMs - range.startMs));
+    const start = formatClock(range.startMs);
+    const end = formatClock(recording.duration - range.endMs);
+    let removed = "";
+    if (range.startMs > 0 && range.endMs < recording.duration) {
+        removed = i18n(
+            "{start} will be removed from the start, {end} from the end.",
+            { start, end },
+        );
+    } else if (range.startMs > 0) {
+        removed = i18n("{start} will be removed from the start.", { start });
+    } else if (range.endMs < recording.duration) {
+        removed = i18n("{end} will be removed from the end.", { end });
+    }
     return (
         <section
-            className="sticky top-0 z-30 space-y-2 rounded-lg border border-primary/40 bg-background p-3 shadow-sm"
+            className="space-y-3 rounded-lg border border-primary/40 bg-card p-4"
             aria-label={i18n("Cut recording")}
         >
-            <div className="flex flex-wrap items-center gap-2">
-                <span className="mr-2 inline-flex items-center gap-2 text-sm font-medium">
-                    <Scissors className="size-4 text-primary" />
-                    {i18n("Cut recording")}
-                </span>
-                <CutEdgeChip edge="start" />
-                <CutEdgeChip edge="end" />
-                {!recording.audioReaped && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+                {cut.cutting ? (
+                    <output className="inline-flex items-center gap-2 text-sm font-medium">
+                        <Loader2 className="size-4 animate-spin text-primary" />
+                        {i18n("Cutting {start}–{end}", {
+                            start,
+                            end: formatClock(range.endMs),
+                        })}
+                    </output>
+                ) : (
                     <>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() =>
-                                cut.setEdge(
-                                    "start",
-                                    snapCutEdge(
-                                        cut.activeTurns ?? [],
-                                        position,
-                                        "start",
-                                    ),
-                                )
-                            }
-                        >
-                            {i18n({
-                                id: "recording-cut-start-here",
-                                message: "Start here",
-                            })}
-                        </Button>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() =>
-                                cut.setEdge(
-                                    "end",
-                                    snapCutEdge(
-                                        cut.activeTurns ?? [],
-                                        position,
-                                        "end",
-                                    ),
-                                )
-                            }
-                        >
-                            {i18n("End here")}
-                        </Button>
-                        <span
-                            className="font-mono text-xs tabular-nums"
-                            title={i18n("From the playback position")}
-                        >
-                            {formatClock(position)}
+                        <span className="inline-flex items-center gap-2 text-sm font-medium">
+                            <Scissors className="size-4 text-primary" />
+                            {i18n("Cut recording")}
                         </span>
+                        <div className="flex items-start gap-2">
+                            <CutTimeField
+                                edge="start"
+                                invalid={invalid.start}
+                                hintId={hintId}
+                                onInvalidChange={(value) =>
+                                    setInvalid((previous) => ({
+                                        ...previous,
+                                        start: value,
+                                    }))
+                                }
+                            />
+                            <span
+                                aria-hidden="true"
+                                className="pt-1 text-muted-foreground"
+                            >
+                                –
+                            </span>
+                            <CutTimeField
+                                edge="end"
+                                invalid={invalid.end}
+                                hintId={hintId}
+                                onInvalidChange={(value) =>
+                                    setInvalid((previous) => ({
+                                        ...previous,
+                                        end: value,
+                                    }))
+                                }
+                            />
+                        </div>
                     </>
                 )}
-                <span className="ml-auto inline-flex gap-2">
-                    <Button variant="outline" size="sm" onClick={cut.cancel}>
-                        {i18n("Cancel")}
-                    </Button>
-                    <Button
-                        size="sm"
-                        disabled={
-                            !changed ||
-                            !validCutRange(range, recording.duration)
-                        }
-                        onClick={cut.confirm}
-                    >
-                        {i18n("Cut…")}
-                    </Button>
+                <span className="text-sm">
+                    {i18n("{kept} of {total} stays", { kept, total })}
                 </span>
+                {!cut.cutting && (
+                    <span className="ml-auto inline-flex gap-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={cut.cancel}
+                        >
+                            {i18n("Cancel")}
+                        </Button>
+                        <Button
+                            size="sm"
+                            disabled={!validCutRange(range, recording.duration)}
+                            onClick={cut.confirm}
+                        >
+                            {i18n("Cut…")}
+                        </Button>
+                    </span>
+                )}
             </div>
+            {!cut.cutting && (invalid.start || invalid.end) && (
+                <p id={hintId} className="text-xs text-destructive">
+                    {i18n(
+                        "Enter mm:ss or h:mm:ss and keep the start before the end. The previous time was restored.",
+                    )}
+                </p>
+            )}
             {cut.error && (
-                <p role="alert" className="text-sm text-destructive">
+                <p
+                    role="alert"
+                    className="rounded-md bg-destructive/10 p-3 text-sm text-destructive"
+                >
                     {cut.error}
                 </p>
             )}
-            <p className="text-sm font-medium">
-                {changed
-                    ? i18n("{kept} of {total} stays", { kept, total })
-                    : i18n("The whole recording for now, {total}", { total })}
-            </p>
-            <p className="text-xs text-muted-foreground">
-                {!changed
-                    ? i18n(
-                          "Hover the turn where the recording should start and click Start here. On the last turn to keep, click End here.",
-                      )
-                    : recording.audioReaped
-                      ? i18n(
-                            "The cut turns are deleted from the transcript and cannot be restored. The summary, title, topics and tasks are then generated again.",
+            <p className="text-xs leading-relaxed text-muted-foreground">
+                {cut.cutting ? (
+                    recording.audioReaped ? (
+                        i18n(
+                            "The transcript is being cut on the server. You can leave. Learn, summary, title and topics will then run again.",
                         )
-                      : i18n(
-                            "The cut part is deleted from the audio and the transcript and cannot be restored. The summary, title, topics and tasks are then generated again.",
+                    ) : (
+                        i18n(
+                            "Audio is cut on the server, about a minute for a half-hour recording. You can leave. Learn, summary, title and topics will then run again.",
+                        )
+                    )
+                ) : (
+                    <>
+                        {removed && <>{removed} </>}
+                        {i18n(
+                            "You can also choose the start and end in the transcript: hover between paragraphs. A typed time snaps to the nearest sentence start.",
                         )}
+                    </>
+                )}
             </p>
         </section>
     );
 }
 
-export function CutTurnAction({
-    turn,
-    edge,
+export function CutParagraphBoundary({
+    ms,
+    startEdge = false,
+    endEdge = false,
 }: {
-    turn: TranscriptTurn;
-    edge: "start" | "end";
+    ms: number;
+    startEdge?: boolean;
+    endEdge?: boolean;
 }) {
     const cut = useRecordingCut();
     const i18n = useExtracted();
-    if (!cut?.open) return null;
+    const timeId = useId();
+    if (!cut?.owner || !cut.open) return null;
     return (
-        <button
-            type="button"
-            className="relative z-10 inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-xs opacity-0 transition-opacity group-hover/para:opacity-100 group-focus-within/para:opacity-100 focus:opacity-100"
-            onClick={() =>
-                cut.setEdge(edge, edge === "start" ? turn.startMs : turn.endMs)
-            }
+        <div
+            data-cut-boundary={ms}
+            className="group/cut absolute inset-x-0 -top-4 z-20 h-4"
         >
-            <Scissors className="size-3 text-primary" />
-            {edge === "start"
-                ? i18n({
-                      id: "recording-cut-start-here",
-                      message: "Start here",
-                  })
-                : i18n("End here")}
-        </button>
-    );
-}
-
-export function CutLine({ edge }: { edge: "start" | "end" }) {
-    return (
-        <div className="flex items-center gap-2 py-1">
-            <span className="flex-1 border-t border-dashed border-primary" />
-            <CutEdgeChip edge={edge} />
-            <span className="flex-1 border-t border-dashed border-primary" />
+            {(startEdge || endEdge) && (
+                <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-center gap-2">
+                    <span className="pointer-events-none flex-1 border-t border-primary" />
+                    <span className="pointer-events-auto inline-flex gap-1">
+                        {startEdge && <CutEdgeChip edge="start" />}
+                        {endEdge && <CutEdgeChip edge="end" />}
+                    </span>
+                    <span className="pointer-events-none flex-1 border-t border-primary" />
+                </div>
+            )}
+            {!(startEdge || endEdge) && (
+                <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-center gap-2 opacity-0 transition-opacity group-hover/cut:opacity-100 group-focus-within/cut:opacity-100 motion-reduce:transition-none">
+                    <span className="pointer-events-none flex-1 border-t border-dashed border-primary" />
+                    <span className="pointer-events-none inline-flex h-4 shrink-0 items-center gap-1 rounded-full border border-primary/40 bg-background px-2 text-xs leading-none shadow-sm group-hover/cut:pointer-events-auto group-focus-within/cut:pointer-events-auto">
+                        <Scissors className="size-3 text-primary" />
+                        <span
+                            id={timeId}
+                            className="font-mono tabular-nums text-muted-foreground"
+                        >
+                            {formatClock(ms)}
+                        </span>
+                        <button
+                            type="button"
+                            aria-describedby={timeId}
+                            className="h-full rounded-full px-2 leading-none hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            disabled={ms >= cut.range.endMs}
+                            onClick={() => cut.setEdge("start", ms)}
+                        >
+                            {i18n({
+                                id: "recording-cut-start-here",
+                                message: "Start here",
+                            })}
+                        </button>
+                        <button
+                            type="button"
+                            aria-describedby={timeId}
+                            className="h-full rounded-full px-2 leading-none hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            disabled={ms <= cut.range.startMs}
+                            onClick={() => cut.setEdge("end", ms)}
+                        >
+                            {i18n("End here")}
+                        </button>
+                    </span>
+                    <span className="pointer-events-none flex-1 border-t border-dashed border-primary" />
+                </div>
+            )}
         </div>
     );
 }
 
 export function CutPreviewOverlay() {
     const cut = useRecordingCut();
-    if (!cut?.open) return null;
+    if (!cut?.owner || (!cut.open && !cut.cutting)) return null;
     const hatch = {
         backgroundImage:
             "repeating-linear-gradient(135deg, transparent, transparent 3px, var(--muted-foreground) 3px, var(--muted-foreground) 4px)",

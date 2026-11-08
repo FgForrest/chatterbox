@@ -173,6 +173,12 @@ import {
     encryptJsonField,
     encryptText,
 } from "@/lib/encryption/fields";
+import { recheckEvidenceInTx } from "@/lib/knowledge/fact-evidence";
+import {
+    QUOTE_SIMILARITY_THRESHOLD,
+    quoteFromTurns,
+    quoteSimilarity,
+} from "@/lib/knowledge/fact-rules";
 import { listFacts } from "@/lib/knowledge/facts";
 import { requireMeetingAccess } from "@/lib/meetings/access";
 import { getMeeting } from "@/lib/meetings/service";
@@ -186,6 +192,7 @@ import {
 import { restoreAudioFromPlaud } from "@/lib/recordings/erase";
 import { syncRecordingsForUser } from "@/lib/sync/sync-recordings";
 import { persistContentVectors } from "@/lib/tasks/proposals";
+import { sentenceStarts } from "@/lib/topics/timeline";
 import {
     upsertEnhancement,
     upsertTranscription,
@@ -317,9 +324,9 @@ describe.skipIf(!adminUrl)("recording cut routes and transaction", () => {
             userId: "owner",
         });
     }
-    async function queued() {
+    async function queued(cutRange = range) {
         const result = await requestRecordingCut("owner", "recording", {
-            ...range,
+            ...cutRange,
         });
         await database.db
             .update(asyncJobs)
@@ -713,6 +720,429 @@ describe.skipIf(!adminUrl)("recording cut routes and transaction", () => {
         expect(
             decryptText((await db.select().from(chatterItems))[0].title),
         ).toBe("");
+    });
+    it.each([
+        false,
+        true,
+    ])("splits all sources and rebases accepted correction anchors (stored=%s)", async (stored) => {
+        const db = database.db;
+        const raw: TranscriptTurn = {
+            speaker: "S1",
+            startMs: 0,
+            endMs: 10000,
+            text: "Name removed. Name kept. Name ending.",
+            ...(stored ? { sentenceStartsMs: [0, 3000, 8000] } : {}),
+        };
+        const starts = sentenceStarts(raw);
+        const splitRange = { startMs: starts[1].ms, endMs: starts[2].ms };
+        await db.update(transcriptions).set({
+            text: encryptText(renderTurnsAsText([raw])),
+            turns: encryptJsonField([raw]),
+        });
+        await db.insert(transcriptions).values({
+            id: "mixed",
+            userId: "owner",
+            recordingId: "recording",
+            source: "mixed",
+            provider: "test",
+            model: "test",
+            text: encryptText(renderTurnsAsText([raw])),
+            turns: encryptJsonField([raw]),
+        });
+        await db
+            .update(transcriptions)
+            .set({ transcriptionType: "browser" })
+            .where(eq(transcriptions.id, "riffado"));
+        for (const source of ["plaud", "riffado", "mixed"]) {
+            for (const scope of ["owner", "org"]) {
+                await db.insert(transcriptCorrections).values(
+                    starts.map(({ at }, index) => ({
+                        id: `${source}-${scope}-${index}`,
+                        userId: scope,
+                        transcriptionId: source,
+                        transcriptRevision: 0,
+                        turnIndex: 0,
+                        charStart: at,
+                        charEnd: at + 4,
+                        heard: encryptText("Name"),
+                        heardHmac: `${scope}-${index}`,
+                        kind: "fix" as const,
+                        replacement: encryptText("Label"),
+                    })),
+                );
+            }
+        }
+        await db.insert(transcriptCorrections).values({
+            id: "crossing",
+            userId: "owner",
+            transcriptionId: "riffado",
+            transcriptRevision: 0,
+            turnIndex: 0,
+            charStart: starts[1].at - 2,
+            charEnd: starts[1].at + 4,
+            heard: encryptText(
+                raw.text.slice(starts[1].at - 2, starts[1].at + 4),
+            ),
+            heardHmac: "crossing",
+            kind: "fix",
+            replacement: encryptText("Label"),
+        });
+        const job = await queued(splitRange);
+        await db.transaction((tx) =>
+            commitRecordingCut(
+                tx,
+                "owner",
+                job.id,
+                job.payload,
+                {
+                    ...preparedAudio,
+                    duration: splitRange.endMs - splitRange.startMs,
+                },
+                "org",
+            ),
+        );
+        const rows = await db.select().from(transcriptions);
+        expect(rows).toHaveLength(3);
+        for (const row of rows) {
+            expect(decryptText(row.text)).toBe("S1: Name kept.");
+            expect(decryptJsonField<TranscriptTurn[]>(row.turns)).toEqual([
+                {
+                    speaker: "S1",
+                    startMs: 0,
+                    endMs: splitRange.endMs - splitRange.startMs,
+                    text: "Name kept.",
+                    sentenceStartsMs: [0],
+                },
+            ]);
+            expect(row.revision).toBe(1);
+            expect(row.topics).toBeNull();
+        }
+        const anchors = await db.select().from(transcriptCorrections);
+        expect(anchors).toHaveLength(6);
+        for (const anchor of anchors) {
+            expect(anchor.id).toMatch(/-1$/);
+            expect(anchor).toMatchObject({
+                turnIndex: 0,
+                charStart: 0,
+                charEnd: 4,
+                transcriptRevision: 1,
+            });
+        }
+        expect((await db.select().from(recordings))[0].duration).toBe(
+            splitRange.endMs - splitRange.startMs,
+        );
+    });
+    it.each([
+        false,
+        true,
+    ])("validates cut evidence against its original raw slice without relocating repeats (removed=%s)", async (removed) => {
+        const db = database.db;
+        const raw: TranscriptTurn = {
+            speaker: "S1",
+            startMs: 0,
+            endMs: 10000,
+            text: removed
+                ? "Kept sentence. Kept sentence. Ending."
+                : "Opening. Kept sentence with enough words. Ending.",
+            sentenceStartsMs: removed ? [0, 6000, 8000] : [0, 2000, 8000],
+        };
+        const quote = removed ? "sentence." : "Kept sentence";
+        const endMs = removed ? 2500 : 2700;
+        expect(quoteFromTurns([raw], 2000, endMs)).toBe(quote);
+        await db.update(transcriptions).set({
+            text: encryptText(renderTurnsAsText([raw])),
+            turns: encryptJsonField([raw]),
+        });
+        for (const scope of ["owner", "org"]) {
+            await db.insert(people).values({
+                id: `person-${scope}`,
+                userId: scope,
+                displayName: encryptText("Jitka Dvořáková"),
+            });
+            await db.insert(knowledgeFacts).values({
+                id: `fact-${scope}`,
+                userId: scope,
+                subjectPersonId: `person-${scope}`,
+                subjectKey: `p:person-${scope}`,
+                relationKey: "role",
+                objectLiteral: encryptText("Coordinator"),
+                objectKey: "l:coordinator",
+                origin: "recording",
+                createdByUserId: "owner",
+            });
+            for (const source of ["plaud", "riffado"] as const) {
+                await db.insert(knowledgeFactEvidence).values({
+                    id: `${scope}-${source}`,
+                    userId: scope,
+                    factId: `fact-${scope}`,
+                    itemId: "recording",
+                    transcriptionId: source,
+                    transcriptRevision: 0,
+                    startMs: 2000,
+                    endMs,
+                    quote: encryptText(quote),
+                    status: "supported",
+                    confirmedAt: new Date(),
+                });
+            }
+        }
+        const job = await queued({ startMs: 2000, endMs: 10000 });
+        await db.transaction((tx) =>
+            commitRecordingCut(
+                tx,
+                "owner",
+                job.id,
+                job.payload,
+                { ...preparedAudio, duration: 8000 },
+                "org",
+            ),
+        );
+        const evidence = await db.select().from(knowledgeFactEvidence);
+        expect(evidence).toHaveLength(removed ? 0 : 4);
+        for (const row of evidence) {
+            expect(row).toMatchObject({
+                startMs: 0,
+                endMs: 700,
+                status: "supported",
+                transcriptRevision: 1,
+            });
+            expect(decryptText(row.quote)).toBe(quote);
+        }
+        for (const fact of await db.select().from(knowledgeFacts))
+            expect(fact.origin).toBe(removed ? "manual" : "recording");
+    });
+    it.each([
+        {
+            status: "wording_changed",
+            quote: "Earlier unrelated wording.",
+            expected: "wording_changed",
+        },
+        {
+            status: "supported",
+            quote: "Jitka keeps that.",
+            expected: "supported",
+        },
+        {
+            status: "supported",
+            quote: "Earlier unrelated wording.",
+            expected: "wording_changed",
+        },
+        {
+            status: "supported",
+            quote: "Jitka keeps that.",
+            expected: "speaker_changed",
+            speakerLabel: "missing",
+        },
+        {
+            status: "speaker_changed",
+            quote: "Jitka keeps that.",
+            expected: "speaker_changed",
+        },
+    ] as const)("keeps retained $status evidence with quote '$quote' as $expected and deletes removed evidence", async ({
+        status,
+        quote,
+        expected,
+        ...speaker
+    }) => {
+        const db = database.db;
+        const currentQuote = quoteFromTurns(turns, 3000, 6000);
+        expect(currentQuote).toBe("Jitka keeps this.");
+        const similarity = quoteSimilarity(quote, currentQuote ?? "");
+        expect(similarity).toBeLessThan(1);
+        if (quote === "Jitka keeps that.")
+            expect(similarity).toBeGreaterThan(QUOTE_SIMILARITY_THRESHOLD);
+        else expect(similarity).toBeLessThan(QUOTE_SIMILARITY_THRESHOLD);
+        for (const scope of ["owner", "org"]) {
+            await db.insert(people).values({
+                id: `person-${scope}`,
+                userId: scope,
+                displayName: encryptText("Jitka Dvořáková"),
+            });
+            await db.insert(knowledgeFacts).values({
+                id: `fact-${scope}`,
+                userId: scope,
+                subjectPersonId: `person-${scope}`,
+                subjectKey: `p:person-${scope}`,
+                relationKey: "role",
+                objectLiteral: encryptText("Coordinator"),
+                objectKey: "l:coordinator",
+                origin: "recording",
+                createdByUserId: "owner",
+            });
+            for (const source of ["plaud", "riffado"]) {
+                await db.insert(knowledgeFactEvidence).values([
+                    {
+                        id: `${scope}-${source}-kept`,
+                        userId: scope,
+                        factId: `fact-${scope}`,
+                        itemId: "recording",
+                        transcriptionId: source,
+                        transcriptRevision: 0,
+                        startMs: 3000,
+                        endMs: 6000,
+                        quote: encryptText(quote),
+                        status,
+                        speakerLabel:
+                            "speakerLabel" in speaker
+                                ? speaker.speakerLabel
+                                : null,
+                        dependsOnSpeaker: "speakerLabel" in speaker,
+                        confirmedAt: new Date(),
+                    },
+                    {
+                        id: `${scope}-${source}-removed`,
+                        userId: scope,
+                        factId: `fact-${scope}`,
+                        itemId: "recording",
+                        transcriptionId: source,
+                        transcriptRevision: 0,
+                        startMs: 0,
+                        endMs: 2000,
+                        quote: encryptText("Opening private words."),
+                        status: "supported",
+                        confirmedAt: new Date(),
+                    },
+                ]);
+            }
+        }
+        await db.transaction((tx) =>
+            recheckEvidenceInTx(tx, {
+                transcriptionId: "plaud",
+                previous: { turns, labels: ["S1", "S2"] },
+                next: {
+                    turns,
+                    labels: ["S1", "S2"],
+                    retainedLabels: ["S1", "S2"],
+                },
+            }),
+        );
+        const normal = await db
+            .select()
+            .from(knowledgeFactEvidence)
+            .where(eq(knowledgeFactEvidence.id, "owner-plaud-kept"));
+        expect(normal[0].status).toBe(expected);
+        await commit(await queued());
+        const evidence = await db.select().from(knowledgeFactEvidence);
+        expect(evidence.filter((row) => row.id.endsWith("-removed"))).toEqual(
+            [],
+        );
+        expect(evidence).toHaveLength(4);
+        for (const row of evidence) {
+            expect(row).toMatchObject({
+                startMs: 0,
+                endMs: 3000,
+                status: normal[0].status,
+                transcriptRevision: 1,
+            });
+            expect(decryptText(row.quote)).toBe(quote);
+        }
+        for (const fact of await db.select().from(knowledgeFacts))
+            expect(fact.origin).toBe(
+                expected === "supported" ? "recording" : "manual",
+            );
+    });
+    it("remaps overlapping-turn corrections after sorting and preserves task and speaker evidence", async () => {
+        const db = database.db;
+        const overlapping: TranscriptTurn[] = [
+            {
+                speaker: "S1",
+                startMs: 0,
+                endMs: 10000,
+                text: "Opening. Kept words.",
+                sentenceStartsMs: [0, 6000],
+            },
+            { speaker: "S2", startMs: 4000, endMs: 5000, text: "Yes." },
+        ];
+        await db.update(transcriptions).set({
+            text: encryptText(renderTurnsAsText(overlapping)),
+            turns: encryptJsonField(overlapping),
+        });
+        await db.insert(people).values({
+            id: "person",
+            userId: "owner",
+            displayName: encryptText("Jitka Dvořáková"),
+        });
+        for (const source of ["plaud", "riffado"] as const) {
+            await db.insert(transcriptSpeakers).values({
+                userId: "owner",
+                transcriptionId: source,
+                label: "S1",
+                personId: "person",
+                source: "user",
+                status: "confirmed",
+                confirmedByUserId: "owner",
+                evidenceStartMs: 6000,
+            });
+            for (const scope of ["owner", "org"]) {
+                await db.insert(transcriptCorrections).values([
+                    {
+                        id: `${source}-${scope}-long`,
+                        userId: scope,
+                        transcriptionId: source,
+                        transcriptRevision: 0,
+                        turnIndex: 0,
+                        charStart: 9,
+                        charEnd: 13,
+                        heard: encryptText("Kept"),
+                        heardHmac: "kept",
+                        kind: "fix",
+                        replacement: encryptText("Retained"),
+                    },
+                    {
+                        id: `${source}-${scope}-short`,
+                        userId: scope,
+                        transcriptionId: source,
+                        transcriptRevision: 0,
+                        turnIndex: 1,
+                        charStart: 0,
+                        charEnd: 3,
+                        heard: encryptText("Yes"),
+                        heardHmac: "yes",
+                        kind: "fix",
+                        replacement: encryptText("Agreed"),
+                    },
+                ]);
+            }
+            await db.insert(recordingTasks).values({
+                id: `task-${source}`,
+                userId: "owner",
+                itemId: "recording",
+                text: encryptText("Accepted task"),
+                status: "open",
+                source,
+                quote: encryptText("Kept words."),
+                evidenceStartMs: 6000,
+                acceptedAt: new Date(),
+            });
+        }
+        await commit(await queued({ startMs: 4000, endMs: 10000 }));
+        for (const row of await db.select().from(transcriptions)) {
+            expect(
+                decryptJsonField<TranscriptTurn[]>(row.turns)?.map(
+                    (t) => t.speaker,
+                ),
+            ).toEqual(["S2", "S1"]);
+        }
+        const corrections = await db.select().from(transcriptCorrections);
+        expect(corrections).toHaveLength(8);
+        for (const row of corrections)
+            expect(row).toMatchObject({
+                turnIndex: row.id.endsWith("long") ? 1 : 0,
+                charStart: 0,
+                charEnd: row.id.endsWith("long") ? 4 : 3,
+                transcriptRevision: 1,
+            });
+        for (const row of await db.select().from(recordingTasks)) {
+            expect(row.evidenceStartMs).toBe(2000);
+            expect(decryptText(row.quote)).toBe("Kept words.");
+        }
+        for (const row of await db.select().from(transcriptSpeakers))
+            expect(row).toMatchObject({
+                label: "S1",
+                status: "confirmed",
+                personId: "person",
+                evidenceStartMs: null,
+            });
     });
     it("does not commit after a transcript revision changes", async () => {
         const job = await queued();

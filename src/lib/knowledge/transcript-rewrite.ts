@@ -43,7 +43,7 @@ export async function transcriptRewrittenInTx(
         previous: SpeakerVersion;
         next: SpeakerVersion;
         /** A cut preserves the voices and words on the retained audio. */
-        cut?: CutRange;
+        cut?: CutRange & { turnIndices: ReadonlyMap<number, number> };
         /**
          * The md5 of the audio the new text was made from, read when its
          * transcription began; the recording's current one by default.
@@ -63,12 +63,14 @@ export async function transcriptRewrittenInTx(
         previousTurns: args.previous.turns,
         nextTurns: args.next.turns,
         cutRange: args.cut,
+        cutTurnIndices: args.cut?.turnIndices,
     });
     const evidenced = await recheckEvidenceInTx(tx, {
         transcriptionId: args.transcriptionId,
         previous: args.previous,
         next: args.next,
         audioChanged,
+        cutRange: args.cut,
     });
     await tx
         .update(learnRuns)
@@ -83,7 +85,11 @@ export async function transcriptRewrittenInTx(
     const held = await riffadoRecordingOfInTx(tx, args.transcriptionId);
     if (held) await clearAutoLearnHoldInTx(tx, held);
     // Once, after both: the knowledge of every scope the rewrite touched.
-    await bumpScopeInTx(tx, [...corrected, ...evidenced]);
+    await bumpScopeInTx(tx, [
+        ...(args.cut ? [args.userId] : []),
+        ...corrected,
+        ...evidenced,
+    ]);
 }
 
 /**
