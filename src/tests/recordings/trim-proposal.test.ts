@@ -100,6 +100,19 @@ describe("whole-transcript trim boundaries", () => {
             ),
         ).toThrow("unsafe_overlap");
     });
+    it("accepts an edge overlapped only by a secondary transcript", () => {
+        const secondary = [{ ...turns[0], endMs: 4000 }, ...turns.slice(1)];
+        const edges = { start, end: null };
+        expect(
+            validateTrimOutput(
+                edges,
+                anchors,
+                turns,
+                [turns, secondary],
+                10000,
+            ),
+        ).toEqual(edges);
+    });
     it("drops a zero length edge", () =>
         expect(
             validateTrimOutput(

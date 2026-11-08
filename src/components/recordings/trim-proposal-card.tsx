@@ -323,7 +323,6 @@ function TrimEdgeRow({
                 id={`trim-${proposal.id}-${edge}`}
                 checked={selected}
                 onChange={(event) => onChange(event.target.checked)}
-                aria-label={label}
             />
             <span className="text-sm">
                 <span className="font-medium">

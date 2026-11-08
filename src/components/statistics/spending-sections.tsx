@@ -51,7 +51,7 @@ function useCostSteps() {
         {
             label: i18n("Trim proposal"),
             metric: "trimCost" as const,
-            color: "var(--chart-5)",
+            color: SERIES[4],
         },
     ];
     return steps;

@@ -673,7 +673,10 @@ export function ItemWorkflow({
                 const card = document.getElementById(
                     `recording-trim-${itemId}`,
                 );
-                card?.scrollIntoView({ block: "center", behavior: "smooth" });
+                card?.scrollIntoView({
+                    block: "center",
+                    behavior: workflowScrollBehavior(),
+                });
                 card?.focus();
                 break;
             }

@@ -800,7 +800,7 @@ export function TranscriptView({
                                                     data-sentence={
                                                         chunk.sentence
                                                     }
-                                                    className={`${bySentence ? "cursor-pointer" : ""} rounded-[3px] box-decoration-clone transition-colors ${!cut?.open && cut?.proposalPreview && chunk.startMs !== null && (chunk.startMs < cut.proposalPreview.startMs || chunk.startMs >= cut.proposalPreview.endMs) ? "bg-amber-500/15 decoration-amber-500" : wash} ${cut?.open && !removed && chunk.startMs !== null && (chunk.startMs < cut.range.startMs || chunk.startMs >= cut.range.endMs) ? "opacity-40 line-through" : ""}`}
+                                                    className={`${bySentence ? "cursor-pointer" : ""} rounded-[3px] box-decoration-clone transition-colors ${!cut?.open && cut?.proposalPreview && chunk.startMs !== null && (chunk.startMs < cut.proposalPreview.startMs || chunk.startMs >= cut.proposalPreview.endMs) ? "bg-amber-500/15 underline decoration-dotted decoration-amber-500 underline-offset-4" : wash} ${cut?.open && !removed && chunk.startMs !== null && (chunk.startMs < cut.range.startMs || chunk.startMs >= cut.range.endMs) ? "opacity-40 line-through" : ""}`}
                                                 >
                                                     {proposed && (
                                                         <span className="sr-only">

@@ -807,7 +807,8 @@ export async function prepareClaimedPipelineJob(
                     !cut &&
                     trim?.state === "waiting" &&
                     trim.waitingFor?.kind === "trimReview" &&
-                    trim.waitingFor.until
+                    trim.waitingFor.until &&
+                    Date.parse(trim.waitingFor.until) > now.getTime()
                         ? new Date(trim.waitingFor.until)
                         : new Date(now.getTime() + TRIM_DEFERRAL_MS);
                 await tx

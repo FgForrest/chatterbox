@@ -13,7 +13,10 @@ import {
     useState,
 } from "react";
 import { toast } from "sonner";
-import { openWidget } from "@/components/pipeline/workflow-widget";
+import {
+    openWidget,
+    workflowScrollBehavior,
+} from "@/components/pipeline/workflow-widget";
 import { usePlayback } from "@/components/playback/playback-context";
 import {
     AlertDialog,
@@ -425,7 +428,7 @@ export function RecordingCutProvider({
                         );
                     boundary?.scrollIntoView({
                         block: "center",
-                        behavior: "smooth",
+                        behavior: workflowScrollBehavior(),
                     });
                     boundary?.querySelector<HTMLElement>("button")?.focus();
                 });

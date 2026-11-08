@@ -904,6 +904,52 @@ ${reply}`,
         expect(mocks.summary).toHaveBeenCalledOnce();
     });
     it.each([
+        0, 1000,
+    ])("defers a held summary for 30 seconds when claimed %s ms after the unresolved deadline", async (elapsed) => {
+        const queued = await enqueueJob({
+            userId: "owner",
+            kind: "summary",
+            subjectId: "recording",
+            payload: { recordingId: "recording", trigger: "auto" },
+        });
+        await run();
+        const { proposal, processing } = await current();
+        if (!proposal) throw new Error("Missing trim proposal");
+        const now = Date.parse(proposal.deadline) + elapsed;
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(now);
+        try {
+            const [job] = await claimDueJobs("summary", 1);
+            expect(job.id).toBe(queued.job.id);
+            expect(
+                await prepareClaimedPipelineJob(job.id, job.claimToken),
+            ).toBe(false);
+            const [deferred] = await db()
+                .select()
+                .from(asyncJobs)
+                .where(
+                    and(
+                        eq(asyncJobs.id, job.id),
+                        eq(asyncJobs.userId, "owner"),
+                    ),
+                );
+            expect(deferred).toMatchObject({
+                status: "pending",
+                attempts: 0,
+                claimToken: null,
+                heartbeatAt: null,
+                startedAt: null,
+            });
+            expect(deferred.nextAttemptAt.getTime()).toBe(now + 30_000);
+            expect(await claimDueJobs("summary", 1)).toEqual([]);
+            const held = await current();
+            expect(held.processing.phases.trim).toEqual(processing.phases.trim);
+            expect(held.proposal?.id).toBe(proposal.id);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+    it.each([
         "topics",
         "pipeline.action",
         "learn.run",

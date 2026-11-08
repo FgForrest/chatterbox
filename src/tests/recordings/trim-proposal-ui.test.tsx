@@ -10,6 +10,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptView } from "@/components/dashboard/transcript-view";
 import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
+import { ItemWorkflow } from "@/components/pipeline/item-workflow";
 import {
     RecordingCutPanel,
     RecordingCutProvider,
@@ -160,11 +161,31 @@ describe("owner trim card", () => {
         expect(document.querySelectorAll("[data-trim-proposed]").length).toBe(
             2,
         );
-        fireEvent.click(screen.getByRole("checkbox", { name: "Beginning" }));
+        expect(
+            screen.getByRole("checkbox", {
+                name: /^Beginning 00:00–00:03\s*0 min 3 s\s*Unrelated opening$/,
+            }),
+        ).toBeTruthy();
+        expect(
+            screen.getByRole("checkbox", {
+                name: /^End 00:08–00:10\s*0 min 2 s\s*Unrelated closing$/,
+            }),
+        ).toBeTruthy();
+        for (const mark of document.querySelectorAll("[data-trim-proposed]")) {
+            expect(mark.classList.contains("underline")).toBe(true);
+            expect(mark.classList.contains("decoration-dotted")).toBe(true);
+            expect(mark.classList.contains("decoration-amber-500")).toBe(true);
+            expect(mark.classList.contains("underline-offset-4")).toBe(true);
+            expect(mark.closest(".line-through")).toBeNull();
+            expect(mark.querySelector(".sr-only")?.textContent).toContain(
+                "Proposed for removal",
+            );
+        }
+        fireEvent.click(screen.getByRole("checkbox", { name: /^Beginning/ }));
         expect(document.querySelectorAll("[data-trim-proposed]").length).toBe(
             1,
         );
-        fireEvent.click(screen.getByRole("checkbox", { name: "End" }));
+        fireEvent.click(screen.getByRole("checkbox", { name: /^End/ }));
         expect(document.querySelectorAll("[data-trim-proposed]").length).toBe(
             0,
         );
@@ -189,7 +210,7 @@ describe("owner trim card", () => {
     });
     it("edits the checked range and leaves the decision card pending", () => {
         view();
-        fireEvent.click(screen.getByRole("checkbox", { name: "End" }));
+        fireEvent.click(screen.getByRole("checkbox", { name: /^End/ }));
         fireEvent.click(
             screen.getByRole("button", { name: "Adjust in transcript" }),
         );
@@ -348,7 +369,14 @@ describe("owner trim card", () => {
             screen.getByRole("button", { name: "Try trim proposal again" }),
         ).toBeTruthy();
     });
-    it("expands the default collapsed workflow transcript, selects its source and focuses the mounted boundary", async () => {
+    it.each([
+        false,
+        true,
+    ])("expands the default collapsed workflow transcript, selects its source and focuses the mounted boundary (reduced motion: %s)", async (reducedMotion) => {
+        vi.stubGlobal(
+            "matchMedia",
+            vi.fn(() => ({ matches: reducedMotion })),
+        );
         const data = processing();
         render(
             <RecordingCutProvider
@@ -415,9 +443,45 @@ describe("owner trim card", () => {
             );
             expect(boundary).not.toBeNull();
             expect(boundary?.contains(document.activeElement)).toBe(true);
-            expect(boundary?.scrollIntoView).toHaveBeenCalled();
+            expect(boundary?.scrollIntoView).toHaveBeenLastCalledWith({
+                block: "center",
+                behavior: reducedMotion ? "auto" : "smooth",
+            });
         });
         expect(screen.getByText("Budget decision.")).toBeTruthy();
+    });
+    it.each([
+        false,
+        true,
+    ])("scrolls the workflow strip to the trim card (reduced motion: %s)", (reducedMotion) => {
+        vi.stubGlobal(
+            "matchMedia",
+            vi.fn(() => ({ matches: reducedMotion })),
+        );
+        const data = processing();
+        render(
+            <>
+                <ItemWorkflow
+                    itemId={data.itemId}
+                    kind="audio"
+                    initialData={data}
+                    folders={[]}
+                    folderAssignments={[]}
+                    onSelectFolder={vi.fn()}
+                    onAddToFolder={vi.fn()}
+                    onRemoveFromFolder={vi.fn()}
+                />
+                {recordingView({}, data)}
+            </>,
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Review trim" }));
+        expect(document.activeElement).toBe(
+            screen.getByRole("region", { name: "Trim off-topic talk?" }),
+        );
+        expect(Element.prototype.scrollIntoView).toHaveBeenLastCalledWith({
+            block: "center",
+            behavior: reducedMotion ? "auto" : "smooth",
+        });
     });
     it("tells a shared reader that the trim decision belongs to someone else", () => {
         const data = projectProcessing(
