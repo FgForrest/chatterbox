@@ -207,10 +207,9 @@ section_workflow() {
 section_transcript() {
     select_recording "Weekly product sync"
     click_button "View transcript" 1200
-    tag guesses "Speaker guesses" "[aria-label='Speaker guesses']"
     tag transcript "Transcription" ".bg-card"
-    scroll_to guesses
-    crop transcript-speakers guesses transcript
+    scroll_to "css:fieldset[aria-label='Transcript speakers']"
+    crop transcript-speakers "css:fieldset[aria-label='Transcript speakers']" transcript
     ab click "[data-chapter-bar] button[aria-haspopup=menu]" >/dev/null
     ab wait 900 >/dev/null
     js "(() => { document.querySelector('[data-chapter-bar] button[aria-haspopup=menu]').setAttribute('data-shot', 'topics'); return 'ok'; })()" >/dev/null

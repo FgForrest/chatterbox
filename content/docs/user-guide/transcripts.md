@@ -52,7 +52,6 @@ The chips above the transcript are the speakers.
 
 - Click the name on a chip such as **Speaker 2** and choose who it is from your [Almanac](almanac.md), create a new person, or mark the speaker **Unknown**.
 - A dashed chip ending in **?**, such as **Priya Raman?**, is a suggestion. Click **✓** to confirm it or **×** to reject it; a rejected name is never suggested for that speaker again. **▶** plays the moment the suggestion is based on, or the speaker’s next turn if there is no evidence clip.
-- **Speaker guesses** above the transcript are Learn's suggestions. See [Learn](learn.md).
 - Every chip has a coloured **▶**, including an unanswered one. Click it to hear that speaker’s next turn. Right-click remains a shortcut. Click a confirmed name to choose another person or **Open in Almanac**, or **×** to unlink it. An unknown speaker’s name opens the same picker.
 
 Names you give appear everywhere the transcript does: in the summary, in exports, in copied Markdown and in the API.

@@ -2,9 +2,8 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { learnMarksFrom } from "@/components/learn/learn-marks";
+import { LearnReview } from "@/components/learn/learn-review";
 import { ReviewSpeaker } from "@/components/learn/review-speaker";
-import { SpeakerGuesses } from "@/components/learn/speaker-guesses";
 import { speakerAccent } from "@/components/people/speaker-accents";
 import {
     SpeakerTags,
@@ -12,14 +11,6 @@ import {
 } from "@/components/people/speaker-tags";
 import type { SpeakerProposalContext } from "@/lib/learn/output";
 
-vi.mock("next-intl", () => ({
-    useLocale: () => "en",
-    useExtracted:
-        () => (message: string, values?: Record<string, string | number>) =>
-            message.replace(/\{(\w+)\}/g, (_, key: string) =>
-                String(values?.[key] ?? key),
-            ),
-}));
 afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
@@ -28,6 +19,46 @@ const guess = {
     confidence: 0.6,
     clues: ["meet"],
 } satisfies SpeakerProposalContext["guess"];
+
+function renderReview(payload: Record<string, unknown>, preTicked = false) {
+    vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+            Response.json({
+                run: { id: "run-1", status: "ready" },
+                available: true,
+                names: { p1: "Nera Veln" },
+                types: {},
+                relations: {},
+                items: [
+                    {
+                        id: "speaker-item",
+                        kind: "speaker",
+                        preTicked,
+                        decision: null,
+                        choice: null,
+                        version: 0,
+                        dependsOnLabel: null,
+                        payload: {
+                            label: "speaker_0",
+                            personId: "p1",
+                            evidenceMs: [],
+                            ...payload,
+                        },
+                    },
+                ],
+            }),
+        ),
+    );
+    render(
+        <LearnReview
+            recordingId="recording"
+            source="riffado"
+            turns={[]}
+            showTrigger={false}
+        />,
+    );
+}
 
 describe("speaker proposal provenance", () => {
     it.each([
@@ -61,93 +92,46 @@ describe("speaker proposal provenance", () => {
         fireEvent.click(checkbox);
         expect(onTick).toHaveBeenCalledWith(true);
     });
-    it("keeps guesses unticked and puts their source and reason on the transcript chip", () => {
-        const marks = learnMarksFrom(
-            {
-                run: { status: "ready" },
-                names: { p1: "Nera Veln" },
-                items: [
-                    {
-                        id: "speaker-item",
-                        kind: "speaker",
-                        preTicked: false,
-                        decision: null,
-                        payload: {
-                            label: "speaker_0",
-                            personId: "p1",
-                            source: "meet",
-                            guess,
-                            reason: "Role matches the discussion.",
-                            evidenceMs: [],
-                        },
-                    },
-                ],
-            },
-            vi.fn(),
-        );
-        if (!marks) throw new Error("Marks missing");
-        expect(marks.speakers.speaker_0?.ticked).toBe(false);
-        render(
-            <SpeakerGuesses
-                recordingId="recording"
-                source="riffado"
-                marks={marks}
-                answeredLabels={new Set()}
-                onAccepted={vi.fn()}
-            />,
-        );
-        expect(screen.getByText("Nera Veln?")).toBeTruthy();
+    it("keeps guesses unticked and puts their source and reason in the review", async () => {
+        renderReview({
+            source: "meet",
+            guess,
+            reason: "Role matches the discussion.",
+        });
+        expect(await screen.findByText("Nera Veln?")).toBeTruthy();
+        expect(screen.getByText("Joined in Google Meet · Guess")).toBeTruthy();
         expect(
-            screen.getByTitle(
-                "Joined in Google Meet · Guess · Role matches the discussion.",
-            ),
+            screen.getByText("Role matches the discussion.", { exact: false }),
         ).toBeTruthy();
+        expect(
+            screen.getByRole("checkbox", {
+                name: "Accept Speaker 0 as Nera Veln",
+            }),
+        ).toHaveProperty("checked", false);
     });
     it.each([
         ["calendar", "Invited in Calendar"],
         ["meet", "Joined in Google Meet"],
-    ] as const)("keeps an evidence-backed %s proposal's reason on the transcript chip", (source, origin) => {
-        const marks = learnMarksFrom(
+    ] as const)("keeps an evidence-backed %s proposal's reason in the review", async (source, origin) => {
+        renderReview(
             {
-                run: { status: "ready" },
-                names: { p1: "Nera Veln" },
-                items: [
-                    {
-                        id: "speaker-item",
-                        kind: "speaker",
-                        preTicked: true,
-                        decision: null,
-                        payload: {
-                            label: "speaker_0",
-                            personId: "p1",
-                            source,
-                            reason: "Introduces herself at the start.",
-                            evidenceMs: [2_000],
-                        },
-                    },
-                ],
+                source,
+                reason: "Introduces herself at the start.",
+                evidenceMs: [2_000],
             },
-            vi.fn(),
+            true,
         );
-        if (!marks) throw new Error("Marks missing");
-        expect(marks.speakers.speaker_0).toMatchObject({
-            source,
-            reason: "Introduces herself at the start.",
-            ticked: true,
-        });
-        expect(marks.speakers.speaker_0?.guess).toBeUndefined();
-        render(
-            <SpeakerGuesses
-                recordingId="recording"
-                source="riffado"
-                marks={marks}
-                answeredLabels={new Set()}
-                onAccepted={vi.fn()}
-            />,
-        );
-        expect(screen.getByText("Nera Veln")).toBeTruthy();
+        expect(await screen.findByText("Nera Veln")).toBeTruthy();
         expect(
-            screen.getByTitle(`${origin} · Introduces herself at the start.`),
+            screen.getByRole("checkbox", {
+                name: "Accept Speaker 0 as Nera Veln",
+            }),
+        ).toHaveProperty("checked", true);
+        expect(screen.getByText(origin)).toBeTruthy();
+        expect(
+            screen.getByText("Introduces herself at the start.", {
+                exact: false,
+            }),
         ).toBeTruthy();
     });
     it("shows the stored suggestion's source and reason on the transcript speaker chip", async () => {
@@ -225,88 +209,36 @@ describe("speaker proposal provenance", () => {
     });
 });
 
-it("Accept all confirms evidence-backed proposals and leaves guesses for individual confirmation", async () => {
-    const decide = vi.fn();
-    const accepted = vi.fn();
-    const fetchImpl = vi.fn(async () => Response.json({ speakers: [] }));
-    vi.stubGlobal("fetch", fetchImpl);
-    const marks = learnMarksFrom(
-        {
-            run: { status: "ready" },
-            names: { p0: "Nera Veln", p1: "Míra Luvin", p2: "Tera Vosk" },
-            items: [0, 1, 2].map((index) => ({
-                id: `item-${index}`,
-                kind: "speaker",
-                preTicked: false,
-                decision: null,
-                payload: {
-                    label: `speaker_${index}`,
-                    personId: `p${index}`,
-                    evidenceMs: [],
-                    ...(index === 2 ? { guess, source: "meet" } : {}),
-                },
-            })),
-        },
-        decide,
-    );
-    if (!marks) throw new Error("Missing marks");
+it("shows first-name and recorder notes in the review", () => {
     render(
-        <SpeakerGuesses
-            recordingId="recording"
-            source="riffado"
-            marks={marks}
-            shownVersion={{ transcriptionId: "transcript", revision: 0 }}
-            answeredLabels={new Set()}
-            onAccepted={accepted}
+        <ReviewSpeaker
+            label="speaker_0"
+            person={{ name: "Nera Veln" }}
+            accent={speakerAccent(0)}
+            ticked={false}
+            blocked={false}
+            disabled={false}
+            recorder
+            onlyFirstName
+            reason="Leads the discussion."
+            evidence={null}
+            waits={null}
+            onTick={vi.fn()}
+            onPick={vi.fn()}
+            onUnknown={vi.fn()}
         />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Accept all" }));
-    await vi.waitFor(() => expect(accepted).toHaveBeenCalledOnce());
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(decide).toHaveBeenCalledWith("item-0", "accepted");
-    expect(decide).toHaveBeenCalledWith("item-1", "accepted");
-    expect(decide).not.toHaveBeenCalledWith("item-2", "accepted");
-    expect(screen.getByText("Tera Vosk?")).toBeTruthy();
-});
-
-it("appends first-name and recorder notes to the strip source", () => {
-    const marks = learnMarksFrom(
-        {
-            run: { status: "ready" },
-            names: { p1: "Nera Veln" },
-            items: [
-                {
-                    id: "item",
-                    kind: "speaker",
-                    preTicked: false,
-                    decision: null,
-                    payload: {
-                        label: "speaker_0",
-                        personId: "p1",
-                        evidenceMs: [],
-                        onlyFirstName: true,
-                        recorder: true,
-                    },
-                },
-            ],
-        },
-        vi.fn(),
-    );
-    if (!marks) throw new Error("Missing marks");
-    render(
-        <SpeakerGuesses
-            recordingId="recording"
-            source="riffado"
-            marks={marks}
-            answeredLabels={new Set()}
-            onAccepted={vi.fn()}
-        />,
-    );
+    expect(screen.getByText("Nera Veln?")).toBeTruthy();
+    expect(screen.getByText("Named in the transcript")).toBeTruthy();
     expect(
-        screen.getByTitle(
-            "Named in the transcript Only the first name was heard: someone else of that name may be speaking. You made this recording, and this speaker leads it.",
+        screen.getByText(
+            "Only the first name was heard: someone else of that name may be speaking.",
         ),
     ).toBeTruthy();
+    expect(
+        screen.getByTitle("You made this recording, and this speaker leads it.")
+            .textContent,
+    ).toBe("you");
 });
 
 it.each([

@@ -55,7 +55,7 @@ Pro rychlé dokončení použijte **Jen mluvčí a shrnutí** v pruhu nad sekcem
 
 Po první změně mimo sekci Mluvčí pruh zmizí a nevrátí se ani po obnovení stránky. Potvrzení nebo odmítnutí mluvčího jej neskryje. Zápatí vložené kontroly zůstává při posouvání viditelné. Po rychlém dokončení kontrola zmizí; volba **Vrátit** v oznámení ji přibližně osm sekund obnoví. Opuštění stránky akci potvrdí ihned. Volba platí jen pro tuto položku.
 
-Přehled nemusíte otevírat: návrhy se zobrazují i přímo v přepisu. Návrh opravy je zvýrazněn, navržený mluvčí je zobrazen jako jméno s **?**, každý s fajfkou k přijetí. **Návrhy mluvčích** nad přepisem zobrazují navržená jména s možností **Přijmout vše**.
+Přehled nemusíte otevírat: návrhy se zobrazují i přímo v přepisu. Návrh opravy je zvýrazněn, navržený mluvčí je zobrazen jako jméno s **?**, každý s fajfkou k přijetí.
 
 <span id="after-the-review" />
 

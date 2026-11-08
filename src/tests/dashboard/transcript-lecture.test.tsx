@@ -116,19 +116,12 @@ describe("TranscriptView for a lecture", () => {
                     speakers: {
                         speaker_1: {
                             itemId: "i-1",
-                            label: "speaker_1",
                             name: "Jan",
                             ticked: false,
-                            declined: false,
-                            answer: { displayName: "Jan" },
-                            evidenceMs: [],
-                            onlyFirstName: false,
-                            recorder: false,
                         },
                     },
                     corrections: [],
                     decide: vi.fn(),
-                    track: (work) => work,
                 }}
             />,
         );

@@ -52,8 +52,6 @@ interface SpeakerTagsProps {
     shownVersion?: TranscriptVersionRef;
     /** The transcript on screen was replaced: reload the page's transcripts. */
     onStale?: () => void;
-    /** The labels answered "nobody known", each time they are read. */
-    onUnknownLabelsChange?: (labels: ReadonlySet<string>) => void;
     /**
      * Show the names without changing them: the Organization manages the
      * speakers of a shared recording.
@@ -179,7 +177,6 @@ export function SpeakerTags({
     nextSpeakerTurn,
     shownVersion,
     onStale,
-    onUnknownLabelsChange,
     readOnly = false,
 }: SpeakerTagsProps) {
     const i18n = useExtracted();
@@ -209,8 +206,6 @@ export function SpeakerTags({
     // changes on a re-render.
     const onStaleRef = useRef(onStale);
     onStaleRef.current = onStale;
-    const onUnknownLabelsChangeRef = useRef(onUnknownLabelsChange);
-    onUnknownLabelsChangeRef.current = onUnknownLabelsChange;
 
     // The panel mounts a new instance for another transcript; an answer
     // arriving after that belongs to the one it replaced.
@@ -245,9 +240,7 @@ export function SpeakerTags({
                 return;
             }
             onAttributionsChange(confirmedAttributions(body.speakers));
-            const unknown = unknownSpeakerLabels(body.speakers);
-            setUnknownLabels(unknown);
-            onUnknownLabelsChangeRef.current?.(unknown);
+            setUnknownLabels(unknownSpeakerLabels(body.speakers));
             setSuggestions(suggestedSpeakers(body.speakers));
             if (read) setVersion(read);
         },
