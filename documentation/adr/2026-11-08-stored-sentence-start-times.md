@@ -1,7 +1,7 @@
 ---
 title: New transcripts store each sentence's start time, aligned with the sentence split, only when every sentence has its own timed unit
 date: 2026-11-08
-updated: 2026-11-08 14:12
+updated: 2026-11-08 16:52
 status: accepted
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [347]
 areas: [src/lib/transcription/turns.ts, src/lib/transcription/sentences.ts, src/lib/topics/timeline.ts, src/lib/transcription/elevenlabs-transcribe.ts, src/lib/transcription/speechmatics-transcribe.ts, src/lib/transcription/format.ts, src/lib/recordings/cut-range.ts]
 supersedes: []
 superseded-by: []
-relates: [2026-10-05-timed-turns-topics-and-paragraphs, 2026-10-07-sentence-playback-two-way-sync]
+relates: [2026-10-05-timed-turns-topics-and-paragraphs, 2026-10-07-sentence-playback-two-way-sync, 2026-11-08-recording-cut-sentence-boundaries]
 ---
 
 # New transcripts store each sentence's start time, aligned with the sentence split, only when every sentence has its own timed unit
@@ -124,7 +124,7 @@ A feature that needs word positions, or that wants turnless transcripts timed, n
 ## Consequences & open follow-ups
 
 - Existing transcripts keep interpolated times until they are transcribed again.
-- The next cut UI can split a turn at a sentence and snap typed cut times to sentence starts using these times.
+- [Sentence-boundary recording cuts](2026-11-08-recording-cut-sentence-boundaries.md) implement the deferred turn split and typed-time snapping using these times.
 - A Learn correction that changes a turn's sentence count drops that turn's times; it falls back to
   interpolation.
 
@@ -135,6 +135,8 @@ A feature that needs word positions, or that wants turnless transcripts timed, n
   unbuilt.
 - [2026-10-07-sentence-playback-two-way-sync](2026-10-07-sentence-playback-two-way-sync.md): sentence playback
   starts at stored times where they exist; its deferred "exact sentence times" item is this record.
+
+- [Sentence-boundary recording cuts](2026-11-08-recording-cut-sentence-boundaries.md): implements the deferred cut UI and keeps the retained subset of sentence starts.
 
 ## Timeline
 

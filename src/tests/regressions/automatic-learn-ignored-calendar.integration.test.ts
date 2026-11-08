@@ -929,12 +929,18 @@ databaseTests("automatic Learn uses the owner's Calendar (PostgreSQL)", () => {
             signal: new AbortController().signal,
             reportProgress: vi.fn(),
         });
-        expect(
-            await database.db
-                .select()
-                .from(learnReviewItems)
-                .where(eq(learnReviewItems.runId, run.id)),
-        ).toEqual([]);
+        const remaining = await database.db
+            .select()
+            .from(learnReviewItems)
+            .where(eq(learnReviewItems.runId, run.id));
+        expect(remaining).toEqual([]);
+        const [finished] = await database.db
+            .select()
+            .from(learnRuns)
+            .where(
+                and(eq(learnRuns.id, run.id), eq(learnRuns.userId, "owner")),
+            );
+        expect(finished.status).toBe("finished");
         expect(
             await database.db
                 .select()

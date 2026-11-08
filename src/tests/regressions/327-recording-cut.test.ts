@@ -9,9 +9,12 @@ import type { PipelineFacts } from "@/lib/pipeline/types";
 import { cutAudio } from "@/lib/recordings/cut-audio";
 import {
     cutTranscript,
+    cutTurn,
+    parseCutTime,
     snapCutEdge,
     validCutRange,
 } from "@/lib/recordings/cut-range";
+import { containingTurnIndex, sentenceStarts } from "@/lib/topics/timeline";
 import { runFfmpeg } from "@/lib/transcription/ffmpeg";
 
 function hasFfmpeg(): boolean {
@@ -26,27 +29,202 @@ const turns = [
 ];
 
 describe("recording cut range", () => {
-    it("keeps turns by their middle, clamps, shifts and uses the shared renderer", () => {
-        expect(cutTranscript(turns, { startMs: 4000, endMs: 8000 })).toEqual({
-            turns: [
-                { speaker: "S2", startMs: 0, endMs: 2000, text: "Keep this." },
-            ],
+    it("includes sentence starts at the start and excludes those at the end", () => {
+        expect(cutTranscript(turns, { startMs: 3000, endMs: 7000 })).toEqual({
+            turns: [{ ...turns[1], startMs: 0, endMs: 3000 }],
             text: "S2: Keep this.",
+            turnIndices: new Map([[1, 0]]),
+        });
+        expect(
+            cutTranscript(turns, { startMs: 4000, endMs: 8000 }).turns,
+        ).toEqual([
+            {
+                ...turns[2],
+                startMs: 3000,
+                endMs: 4000,
+                sentenceStartsMs: [3000],
+            },
+        ]);
+    });
+    it.each([
+        false,
+        true,
+    ])("splits both edges inside one turn (stored=%s)", (stored) => {
+        const text = "Opening.  Keep this. Ending.";
+        const turn = {
+            speaker: "S1",
+            startMs: 0,
+            endMs: 27000,
+            text,
+            ...(stored ? { sentenceStartsMs: [0, 12000, 22000] } : {}),
+        };
+        const startMs = stored ? 12000 : 9643;
+        const endMs = stored ? 22000 : 20250;
+        const result = cutTurn(turn, { startMs, endMs });
+        expect(result).toEqual({
+            charStart: 10,
+            charEnd: 20,
+            turn: {
+                speaker: "S1",
+                startMs: 0,
+                endMs: endMs - startMs,
+                text: "Keep this.",
+                sentenceStartsMs: [0],
+            },
+        });
+        expect(turn.text).toBe(text);
+    });
+    it("keeps raw internal whitespace so correction offsets remain valid", () => {
+        const turn = {
+            speaker: "S1",
+            startMs: 0,
+            endMs: 10000,
+            text: "Remove.  Keep  these words.\nNext. Tail.",
+            sentenceStartsMs: [0, 2000, 5000, 8000],
+        };
+        expect(cutTurn(turn, { startMs: 2000, endMs: 8000 })).toMatchObject({
+            charStart: 9,
+            charEnd: 33,
+            turn: {
+                text: "Keep  these words.\nNext.",
+                sentenceStartsMs: [0, 3000],
+            },
         });
     });
-    it("includes a middle at the start and excludes one at the end", () => {
-        expect(
-            cutTranscript(turns, { startMs: 1000, endMs: 4500 }).turns.map(
-                (turn) => turn.speaker,
-            ),
-        ).toEqual(["S1"]);
+    it("equals the old whole-turn result for non-overlapping turns when both edges are turn starts", () => {
+        const range = { startMs: 3000, endMs: 7000 };
+        const previous = turns
+            .filter(
+                (turn) =>
+                    (turn.startMs + turn.endMs) / 2 >= range.startMs &&
+                    (turn.startMs + turn.endMs) / 2 < range.endMs,
+            )
+            .map((turn) => ({
+                ...turn,
+                startMs: Math.max(turn.startMs, range.startMs) - range.startMs,
+                endMs: Math.min(turn.endMs, range.endMs) - range.startMs,
+            }));
+        expect(cutTranscript(turns, range).turns).toEqual(previous);
     });
-    it("snaps both playback edges and gaps in opposite directions", () => {
-        expect(snapCutEdge(turns, 4500, "start")).toBe(3000);
-        expect(snapCutEdge(turns, 4500, "end")).toBe(6000);
-        expect(snapCutEdge(turns, 2500, "start")).toBe(3000);
-        expect(snapCutEdge(turns, 2500, "end")).toBe(2000);
-        expect(snapCutEdge([], 2500, "start")).toBe(2500);
+    it("orders overlapping retained turns chronologically with stable ties", () => {
+        const overlapping = [
+            {
+                speaker: "S1",
+                startMs: 0,
+                endMs: 10000,
+                text: "Opening. Kept words.",
+                sentenceStartsMs: [0, 6000],
+            },
+            { speaker: "S2", startMs: 4000, endMs: 5000, text: "Yes." },
+            { speaker: "S3", startMs: 6000, endMs: 7000, text: "Agreed." },
+            { speaker: "S1", startMs: 12000, endMs: 14000, text: "End." },
+        ];
+        const kept = cutTranscript(overlapping, {
+            startMs: 4000,
+            endMs: 12000,
+        });
+        expect(
+            kept.turns.map(({ speaker, startMs }) => ({ speaker, startMs })),
+        ).toEqual([
+            { speaker: "S2", startMs: 0 },
+            { speaker: "S1", startMs: 2000 },
+            { speaker: "S3", startMs: 2000 },
+        ]);
+        expect(kept.turns[containingTurnIndex(kept.turns, 500)].speaker).toBe(
+            "S2",
+        );
+    });
+    it("preserves legacy sentence clocks through an end clamp and a second cut", () => {
+        const raw = {
+            speaker: "S1",
+            startMs: 0,
+            endMs: 10000,
+            text: "One. Two.",
+        };
+        const first = cutTranscript([raw], { startMs: 0, endMs: 8000 });
+        expect(sentenceStarts(first.turns[0])).toEqual(sentenceStarts(raw));
+        const second = cutTranscript(first.turns, {
+            startMs: 5000,
+            endMs: 8000,
+        });
+        const direct = cutTranscript([raw], { startMs: 5000, endMs: 8000 });
+        expect(second).toEqual(direct);
+        expect(second.turns[0]).toMatchObject({
+            text: "Two.",
+            startMs: 556,
+            sentenceStartsMs: [556],
+        });
+    });
+    it("keeps an untouched legacy turn's shape after rebasing", () => {
+        const raw = {
+            speaker: "S1",
+            startMs: 2000,
+            endMs: 8000,
+            text: "One. Two.",
+        };
+        expect(cutTurn(raw, { startMs: 1000, endMs: 9000 })?.turn).toEqual({
+            ...raw,
+            startMs: 1000,
+            endMs: 7000,
+        });
+    });
+    it("keeps the clamped turn start when sentence zero survives", () => {
+        const raw = {
+            speaker: "S1",
+            startMs: 1000,
+            endMs: 8000,
+            text: "One. Two.",
+            sentenceStartsMs: [1200, 5000],
+        };
+        expect(cutTurn(raw, { startMs: 1100, endMs: 8000 })?.turn.startMs).toBe(
+            0,
+        );
+        expect(cutTurn(raw, { startMs: 2000, endMs: 8000 })?.turn.startMs).toBe(
+            3000,
+        );
+    });
+    it("snaps to sentence starts with different start and end endpoints", () => {
+        const turn = {
+            speaker: "S1",
+            startMs: 3000,
+            endMs: 9000,
+            text: "One. Two.",
+            sentenceStartsMs: [3000, 7000],
+        };
+        expect(snapCutEdge([turn], 1000, "start", 10000)).toBe(0);
+        expect(snapCutEdge([turn], 1000, "end", 10000)).toBe(3000);
+        expect(snapCutEdge([turn], 9500, "start", 10000)).toBe(7000);
+        expect(snapCutEdge([turn], 9500, "end", 10000)).toBe(10000);
+        expect(snapCutEdge([turn], 5000, "start", 10000)).toBe(3000);
+        expect(
+            snapCutEdge(
+                [{ ...turn, sentenceStartsMs: undefined }],
+                6000,
+                "start",
+                10000,
+            ),
+        ).toBe(6333);
+    });
+    it.each([
+        ["05:18", 318000],
+        ["1:02:03", 3723000],
+        ["125:00", 7500000],
+        [" 0:09 ", 9000],
+    ])("parses %s", (value, expected) => {
+        expect(parseCutTime(String(value))).toBe(expected);
+    });
+    it.each([
+        "5",
+        "1:60",
+        "1:99:00",
+        "1:2:03",
+        "-1:05",
+        "1:2",
+        "",
+        "[01:05]",
+        "999999999999999:00",
+    ])("rejects %s", (value) => {
+        expect(parseCutTime(value)).toBeNull();
     });
     it.each([
         [0, 10000],

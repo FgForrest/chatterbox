@@ -16,7 +16,7 @@ import {
     remapCorrectionAnchors,
 } from "@/lib/knowledge/correction-anchors";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
-import { type CutRange, turnStays } from "@/lib/recordings/cut-range";
+import { type CutRange, cutTurn } from "@/lib/recordings/cut-range";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -38,11 +38,13 @@ export async function recheckCorrectionsInTx(
         previousTurns,
         nextTurns,
         cutRange,
+        cutTurnIndices,
     }: {
         transcriptionId: string;
         previousTurns: readonly TranscriptTurn[] | null;
         nextTurns: readonly TranscriptTurn[] | null;
         cutRange?: CutRange;
+        cutTurnIndices?: ReadonlyMap<number, number>;
     },
 ): Promise<Set<string>> {
     const ofTranscript = eq(
@@ -76,26 +78,28 @@ export async function recheckCorrectionsInTx(
     const scopes = new Set([...preTicked, ...rows].map((row) => row.userId));
     if (rows.length === 0) return scopes;
 
+    const cutTurns = cutRange
+        ? (previousTurns ?? []).map((turn) => cutTurn(turn, cutRange))
+        : [];
     const positions = cutRange
         ? rows.map((row) => {
-              const previous = previousTurns?.[row.turnIndex];
-              if (!previous || !turnStays(previous, cutRange)) return null;
-              const turnIndex = (previousTurns ?? [])
-                  .slice(0, row.turnIndex)
-                  .filter((turn) => turnStays(turn, cutRange)).length;
-              const heard = decryptText(row.heard);
+              const retained = cutTurns[row.turnIndex];
               if (
-                  nextTurns?.[turnIndex]?.text.slice(
-                      row.charStart,
-                      row.charEnd,
-                  ) !== heard
+                  !retained ||
+                  row.charStart < retained.charStart ||
+                  row.charEnd > retained.charEnd
               )
                   return null;
-              return {
-                  turnIndex,
-                  charStart: row.charStart,
-                  charEnd: row.charEnd,
-              };
+              const turnIndex = cutTurnIndices?.get(row.turnIndex);
+              if (turnIndex === undefined) return null;
+              const charStart = row.charStart - retained.charStart;
+              const charEnd = row.charEnd - retained.charStart;
+              if (
+                  nextTurns?.[turnIndex]?.text.slice(charStart, charEnd) !==
+                  decryptText(row.heard)
+              )
+                  return null;
+              return { turnIndex, charStart, charEnd };
           })
         : remapCorrectionAnchors(
               rows.map((row) => ({ ...row, heard: decryptText(row.heard) })),

@@ -20,10 +20,7 @@ import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import { openWidget } from "@/components/pipeline/workflow-widget";
 import { PlaybackProvider } from "@/components/playback/playback-context";
 import { EraseRecordingMenu } from "@/components/recordings/erase-recording-menu";
-import {
-    RecordingCutBar,
-    RecordingCutProvider,
-} from "@/components/recordings/recording-cut";
+import { RecordingCutProvider } from "@/components/recordings/recording-cut";
 import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
 import { ReceivedItemBanner } from "@/components/sharing/person-sharing";
 import { Button } from "@/components/ui/button";
@@ -254,7 +251,6 @@ export function WorkstationDetailPane({
                         <ArrowLeft className="size-4" />{" "}
                         {backLabel ?? i18n("Recent")}
                     </Button>
-                    <RecordingCutBar />
                     {currentRecording ? (
                         <>
                             <RecordingPlayerHeader

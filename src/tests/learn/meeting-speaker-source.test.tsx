@@ -69,6 +69,13 @@ describe("speaker proposal provenance", () => {
         const onTick = vi.fn();
         render(
             <ReviewSpeaker
+                stats={{ durationMs: 0, replies: 0 }}
+                samples={{
+                    samples: [],
+                    fallback: false,
+                    longestTurnMs: 0,
+                    longestStretchMs: 0,
+                }}
                 label="speaker_0"
                 person={{ name: "Nera Veln" }}
                 accent={speakerAccent(0)}
@@ -79,7 +86,7 @@ describe("speaker proposal provenance", () => {
                 onlyFirstName={false}
                 reason="A short reason."
                 source={source}
-                evidence={null}
+                evidence={[]}
                 waits={null}
                 onTick={onTick}
                 onPick={vi.fn()}
@@ -181,6 +188,13 @@ describe("speaker proposal provenance", () => {
     it("shows a guess and its reason in the review", () => {
         render(
             <ReviewSpeaker
+                stats={{ durationMs: 0, replies: 0 }}
+                samples={{
+                    samples: [],
+                    fallback: false,
+                    longestTurnMs: 0,
+                    longestStretchMs: 0,
+                }}
                 label="speaker_0"
                 person={{ name: "Nera Veln" }}
                 accent={speakerAccent(0)}
@@ -192,7 +206,7 @@ describe("speaker proposal provenance", () => {
                 reason="Role matches the discussion."
                 source="meet"
                 guess={guess}
-                evidence={null}
+                evidence={[]}
                 waits={null}
                 onTick={vi.fn()}
                 onPick={vi.fn()}
@@ -212,6 +226,13 @@ describe("speaker proposal provenance", () => {
 it("shows first-name and recorder notes in the review", () => {
     render(
         <ReviewSpeaker
+            stats={{ durationMs: 0, replies: 0 }}
+            samples={{
+                samples: [],
+                fallback: false,
+                longestTurnMs: 0,
+                longestStretchMs: 0,
+            }}
             label="speaker_0"
             person={{ name: "Nera Veln" }}
             accent={speakerAccent(0)}
@@ -221,7 +242,7 @@ it("shows first-name and recorder notes in the review", () => {
             recorder
             onlyFirstName
             reason="Leads the discussion."
-            evidence={null}
+            evidence={[]}
             waits={null}
             onTick={vi.fn()}
             onPick={vi.fn()}

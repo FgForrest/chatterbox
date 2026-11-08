@@ -1,14 +1,14 @@
 ---
 title: Cutting a recording deletes the cut part; there is no hide mode
 date: 2026-11-03
-updated: 2026-11-08 09:45
+updated: 2026-11-08 15:40
 status: superseded
 kind: feature
 issues: [327]
 prs: []
 areas: [src/lib/recordings, src/components/recordings/recording-cut.tsx, src/lib/sync/sync-recordings.ts, src/db/schema.ts]
 supersedes: [2026-09-30-learn]
-superseded-by: [2026-11-08-shared-recordings-cut-in-place]
+superseded-by: [2026-11-08-shared-recordings-cut-in-place, 2026-11-08-recording-cut-sentence-boundaries]
 relates: []
 ---
 
@@ -17,6 +17,8 @@ relates: []
 Owners can cut the beginning and end of a recording. The cut deletes those parts from stored audio and every transcript. The remaining timeline starts at zero, and the processing pipeline requests fresh derived results. There is no saved hidden range and no cut annotation in the recording view.
 
 **Superseded in part** by [shared recordings cut in place](2026-11-08-shared-recordings-cut-in-place.md): cuts preserve Organization placements, Organization facts receive the same keep-as-manual exception as private facts, generated title markers in either stored view count, and intended sharing waits for an active cut. The destructive operation and all other rules still hold.
+
+**Superseded in part** by [sentence-boundary recording cuts](2026-11-08-recording-cut-sentence-boundaries.md): sentence starts replace turn midpoints for retention, turns can be split, typed times snap to sentence starts, transcript controls sit at paragraph boundaries, and scissors appear only in the transcript header. The remaining destructive-cut rules still hold.
 
 ## Why
 

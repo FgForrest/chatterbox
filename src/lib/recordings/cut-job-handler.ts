@@ -39,7 +39,6 @@ import { enqueueExportPlansForUser } from "@/lib/folder-exports/jobs";
 import { lockOrgTree } from "@/lib/folders/folders";
 import { nudge } from "@/lib/jobs/nudge";
 import { InvalidJobPayloadError, type JobHandler } from "@/lib/jobs/types";
-import { quoteFromTurns, quoteSimilarity } from "@/lib/knowledge/fact-rules";
 import { lockOrgPeople } from "@/lib/knowledge/org-people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
@@ -55,7 +54,7 @@ import {
     RECORDING_CUT_KIND,
 } from "@/lib/recordings/cut";
 import { cutAudioFile } from "@/lib/recordings/cut-audio";
-import { type CutRange, cutTranscript } from "@/lib/recordings/cut-range";
+import { cutTranscript } from "@/lib/recordings/cut-range";
 import {
     isStorageNotFoundError,
     storageKeysForErase,
@@ -143,64 +142,6 @@ async function cleanStorage(
             }
         }
     });
-}
-
-async function shiftEvidence(
-    tx: CutTx,
-    userId: string,
-    transcriptionId: string,
-    range: CutRange,
-    nextTurns: readonly TranscriptTurn[],
-) {
-    const rows = await tx
-        .select()
-        .from(knowledgeFactEvidence)
-        .where(eq(knowledgeFactEvidence.transcriptionId, transcriptionId));
-    for (const row of rows) {
-        const retainedQuote =
-            row.startMs !== null && row.endMs !== null
-                ? quoteFromTurns(
-                      nextTurns,
-                      row.startMs - range.startMs,
-                      row.endMs - range.startMs,
-                  )
-                : null;
-        if (
-            !retainedQuote ||
-            quoteSimilarity(retainedQuote, decryptText(row.quote)) < 1 ||
-            row.startMs === null ||
-            row.endMs === null ||
-            row.startMs < range.startMs ||
-            row.endMs > range.endMs
-        ) {
-            await tx
-                .delete(knowledgeFactEvidence)
-                .where(
-                    and(
-                        eq(knowledgeFactEvidence.id, row.id),
-                        eq(knowledgeFactEvidence.userId, row.userId),
-                    ),
-                );
-        } else {
-            await tx
-                .update(knowledgeFactEvidence)
-                .set({
-                    startMs:
-                        Math.max(row.startMs, range.startMs) - range.startMs,
-                    endMs: Math.min(row.endMs, range.endMs) - range.startMs,
-                })
-                .where(
-                    and(
-                        eq(knowledgeFactEvidence.id, row.id),
-                        eq(knowledgeFactEvidence.userId, row.userId),
-                    ),
-                );
-        }
-    }
-    await bumpScopeInTx(
-        tx,
-        new Set([userId, ...rows.map((row) => row.userId)]),
-    );
 }
 
 /** Apply the prepared audio and transcript cut atomically; the caller holds the task graph. */
@@ -326,13 +267,6 @@ export async function commitRecordingCut(
                     eq(transcriptions.userId, userId),
                 ),
             );
-        await shiftEvidence(
-            tx,
-            userId,
-            transcript.id,
-            payload,
-            rewritten.turns,
-        );
         const next = speakerVersionOf(rewritten);
         await transcriptRewrittenInTx(tx, {
             userId,
@@ -340,7 +274,7 @@ export async function commitRecordingCut(
             previous,
             next: { ...next, retainedLabels: next.labels },
             audioMd5: md5,
-            cut: payload,
+            cut: { ...payload, turnIndices: rewritten.turnIndices },
         });
     }
     if (factEvidenceBefore.length) {

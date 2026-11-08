@@ -28,11 +28,12 @@ import {
     users,
 } from "@/db/schema";
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
-import { decryptText } from "@/lib/encryption/fields";
+import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { folderDisplayName, folderDisplayPath } from "@/lib/folders/labels";
 import { type AppLocale, normalizeLocale } from "@/lib/i18n/config";
 import { translatedSourceMessage } from "@/lib/i18n/messages";
 import { learnRunCurrentScope } from "@/lib/learn/learn-open";
+import { needsLearnReview } from "@/lib/learn/review-policy";
 import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
 import { pipelineDriver } from "@/lib/pipeline/driver";
 import { effectiveManualOnly } from "@/lib/pipeline/effective-profile";
@@ -380,7 +381,8 @@ export async function loadPrivateItemProcessing(
         recentTranscriptionJobs,
         recentTopicsJobs,
         recentSummaryJobs,
-        [learnFindings],
+        nonSpeakerFindings,
+        speakerFindings,
         transcripts,
         mailContent,
         summaries,
@@ -487,7 +489,9 @@ export async function loadPrivateItemProcessing(
             .orderBy(desc(asyncJobs.createdAt))
             .limit(1),
         db
-            .select({ count: count() })
+            .select({
+                n: count(),
+            })
             .from(learnReviewItems)
             .innerJoin(
                 learnRuns,
@@ -504,6 +508,30 @@ export async function loadPrivateItemProcessing(
                     eq(learnRuns.status, "ready"),
                     eq(learnReviewItems.userId, learnRuns.scopeUserId),
                     ne(learnReviewItems.kind, "known_fact"),
+                    ne(learnReviewItems.kind, "speaker"),
+                ),
+            ),
+        db
+            .select({
+                kind: learnReviewItems.kind,
+                payload: learnReviewItems.payload,
+            })
+            .from(learnReviewItems)
+            .innerJoin(
+                learnRuns,
+                and(
+                    eq(learnRuns.id, learnReviewItems.runId),
+                    eq(learnRuns.userId, ownerUserId),
+                ),
+            )
+            .where(
+                and(
+                    eq(learnRuns.itemId, itemId),
+                    eq(learnRuns.userId, ownerUserId),
+                    learnRunCurrentScope(orgUserId),
+                    eq(learnRuns.status, "ready"),
+                    eq(learnReviewItems.userId, learnRuns.scopeUserId),
+                    eq(learnReviewItems.kind, "speaker"),
                 ),
             ),
         item.kind === "audio"
@@ -746,7 +774,14 @@ export async function loadPrivateItemProcessing(
         processAgainReason: processAgain
             ? processingOutdatedReason(item.phases ?? {})
             : null,
-        learnFindingsWaiting: learnFindings?.count ?? 0,
+        learnFindingsWaiting:
+            (nonSpeakerFindings[0]?.n ?? 0) +
+            speakerFindings.filter((item) =>
+                needsLearnReview({
+                    ...item,
+                    payload: decryptJsonField(item.payload),
+                }),
+            ).length,
         latestLearnRun: learnRunRows[0]
             ? {
                   status: learnRunRows[0].status,

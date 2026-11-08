@@ -106,6 +106,11 @@ import {
     replaceRefs,
 } from "@/lib/learn/new-refs";
 import type { LearnObject, LearnSubject } from "@/lib/learn/output";
+import {
+    isUnansweredSpeaker,
+    isUnmentionedSpeaker,
+    needsLearnReview,
+} from "@/lib/learn/review-policy";
 import type { ReviewCandidate } from "@/lib/learn/validate";
 import type { NewRecordPayload } from "@/lib/learn/validate-new-records";
 import { isInternalMailAddress } from "@/lib/mail/internal-address";
@@ -347,7 +352,15 @@ export async function loadReview(
             payload: decryptJsonField<ReviewCandidate["payload"]>(
                 row.payload,
             ) as ReviewCandidate["payload"],
-        }));
+        }))
+        .filter(
+            (item) =>
+                !(
+                    run.status === "finished" &&
+                    item.outcome === "not_now" &&
+                    (isUnmentionedSpeaker(item) || isUnansweredSpeaker(item))
+                ),
+        );
     if (items.length === 0) {
         return {
             run: summary,
@@ -2077,7 +2090,17 @@ function finishInTx(
             });
         }
 
-        const rejected = items.filter((item) => !item.accepted);
+        const deferredSpeakers = new Set(
+            items
+                .filter(
+                    (item) =>
+                        isUnansweredSpeaker(item) || isUnmentionedSpeaker(item),
+                )
+                .map((item) => item.id),
+        );
+        const rejected = items.filter(
+            (item) => !item.accepted && !deferredSpeakers.has(item.id),
+        );
         if (transcript) {
             for (const item of rejected) {
                 if (
@@ -2119,7 +2142,8 @@ function finishInTx(
         }
         if (quick) {
             for (const item of items)
-                if (!item.accepted) skip(item.id, "not_now", "Left for later");
+                if (!item.accepted && !deferredSpeakers.has(item.id))
+                    skip(item.id, "not_now", "Left for later");
         }
         if (!quick && rejected.length > 0) {
             await tx
@@ -2146,7 +2170,7 @@ function finishInTx(
         const byOutcome = new Map<ItemOutcome, string[]>();
         for (const item of items) {
             const outcome: ItemOutcome = !item.accepted
-                ? quick
+                ? quick || deferredSpeakers.has(item.id)
                     ? "not_now"
                     : "rejected"
                 : (skippedCode.get(item.id) ?? "applied");
@@ -2282,7 +2306,7 @@ export async function learnQuickFinishPolicy(
     };
 }
 
-/** Apply repeated known facts without opening a review; authorization is rechecked under the finish locks. */
+/** Apply known facts and defer optional speaker rows without review, rechecking authorization under the finish locks. */
 export async function finishKnownFactsOnly(
     runId: string,
     actorUserId: string,
@@ -2303,6 +2327,7 @@ export async function finishKnownFactsOnly(
             id: learnReviewItems.id,
             kind: learnReviewItems.kind,
             version: learnReviewItems.version,
+            payload: sql<unknown>`case when ${learnReviewItems.kind} = 'speaker' then ${learnReviewItems.payload} else null end`,
         })
         .from(learnReviewItems)
         .where(
@@ -2311,7 +2336,18 @@ export async function finishKnownFactsOnly(
                 eq(learnReviewItems.userId, run.scopeUserId),
             ),
         );
-    if (!rows.length || rows.some((row) => row.kind !== "known_fact"))
+    if (
+        !rows.length ||
+        rows.some((row) =>
+            needsLearnReview({
+                ...row,
+                payload:
+                    row.kind === "speaker"
+                        ? decryptJsonField(row.payload)
+                        : null,
+            }),
+        )
+    )
         return false;
     try {
         const access = await requireRecordingView(

@@ -1,14 +1,14 @@
 ---
 title: Learn proposes knowledge from transcripts for a person to confirm; knowledge stays encrypted and is searched in memory
 date: 2026-09-30
-updated: 2026-11-03 09:25
+updated: 2026-11-08 15:50
 status: superseded
 kind: feature
 issues: []
 prs: [69]
 areas: [src/lib/learn, src/lib/knowledge, src/lib/sharing/share-gate.ts, src/app/api/mcp/learn, src/lib/learn/auto-learn.ts]
 supersedes: [2026-09-14-speaker-identity-without-biometrics]
-superseded-by: [2026-10-01-almanac-and-new-records, 2026-10-02-almanac-guided-transcript-correction, 2026-11-02-quick-finish-of-reviews, 2026-11-03-destructive-recording-cut]
+superseded-by: [2026-10-01-almanac-and-new-records, 2026-10-02-almanac-guided-transcript-correction, 2026-11-02-quick-finish-of-reviews, 2026-11-03-destructive-recording-cut, 2026-11-08-optional-speaker-review-and-speech-samples]
 relates: [2026-09-28-agent-bridge-cli-providers, 2026-09-30-self-hosted-embeddings, 2026-09-30-shared-recording-edited-by-organization, 2026-10-01-name-matching-across-word-forms, 2026-10-12-calendar-meet-speaker-candidates, 2026-10-20-learn-review-one-column, 2026-09-23-shared-organization-scope, 2026-09-13-durable-job-queue, 2026-10-22-recording-language-checked-by-learn]
 ---
 
@@ -32,6 +32,8 @@ subset of names now goes as key terms ([Almanac-guided transcript correction](..
 Everything else here still holds.
 
 **Superseded in part** by [quick finish of reviews](../2026-11-02-quick-finish-of-reviews.md): Known facts mentioned again now apply automatically without a visible pre-tick, and quick finish applies confirmed speakers and previous corrections without rejecting the rest. Other confirmation, encryption and speaker-guess rules still hold.
+
+**Superseded in part** by [optional speaker review and speech samples](../2026-11-08-optional-speaker-review-and-speech-samples.md): untouched no-name rows are deferred and never remembered as dismissals. Application-added rows never require review. Other confirmation and hold rules remain in force.
 
 ## Why
 
@@ -243,6 +245,8 @@ share would bring it back; the refusal lifts when the Organization has a type of
   reloads (inferred from the code; noted in the implementation plan).
 
 ## Related work
+
+- [Optional speaker review and speech samples](../2026-11-08-optional-speaker-review-and-speech-samples.md): every unanswered audio label, optional naming and bounded listening shortcuts.
 
 - [2026-09-14-speaker-identity-without-biometrics](../2026-09-14-speaker-identity-without-biometrics.md):
   the non-biometric boundary Learn inherits; this record supersedes its plaintext knowledge-base

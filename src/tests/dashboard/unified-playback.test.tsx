@@ -315,6 +315,13 @@ describe("shared play shortcuts", () => {
         const controls = (
             <>
                 <ReviewSpeaker
+                    stats={{ durationMs: 0, replies: 0 }}
+                    samples={{
+                        samples: [],
+                        fallback: false,
+                        longestTurnMs: 0,
+                        longestStretchMs: 0,
+                    }}
                     label="speaker_0"
                     person={{ name: "Neri Vosk" }}
                     accent={speakerAccent(0)}
@@ -324,7 +331,9 @@ describe("shared play shortcuts", () => {
                     recorder={false}
                     onlyFirstName={false}
                     reason=""
-                    evidence={<PlayAtButton ms={5000} />}
+                    evidence={[
+                        { ms: 5000, untilMs: 7000, quote: "A name was heard." },
+                    ]}
                     waits={null}
                     onTick={vi.fn()}
                     onPick={vi.fn()}

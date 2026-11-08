@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import {
+    act,
     cleanup,
     fireEvent,
     render,
@@ -10,6 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
 import { PlaybackProvider } from "@/components/playback/playback-context";
+import type { TranscriptPlayback } from "@/hooks/use-transcript-follow";
 import { createTestPlayback } from "@/tests/helpers/playback";
 import type { Recording } from "@/types/recording";
 
@@ -49,7 +51,7 @@ const turns = [
     { speaker: "speaker_0", startMs: 5000, endMs: 6000, text: "Again." },
 ];
 
-function renderPendingSpeakerReview() {
+function renderPendingSpeakerReview(playback?: TranscriptPlayback) {
     vi.stubGlobal(
         "fetch",
         vi.fn(async (url: string) =>
@@ -73,7 +75,7 @@ function renderPendingSpeakerReview() {
                                   payload: {
                                       label: "speaker_1",
                                       personId: "person-1",
-                                      evidenceMs: [],
+                                      evidenceMs: [1000],
                                       reason: "",
                                   },
                               },
@@ -92,7 +94,10 @@ function renderPendingSpeakerReview() {
     const onPlayFromTurn = vi.fn();
     render(
         <PlaybackProvider
-            playback={createTestPlayback({ play: onPlayFromTurn }).playback}
+            playback={
+                playback ??
+                createTestPlayback({ play: onPlayFromTurn }).playback
+            }
         >
             <TranscriptionPanel
                 recording={recording}
@@ -320,6 +325,46 @@ describe("speaker playback navigation", () => {
             expect.any(String),
             4000,
         );
+    });
+
+    it.each([
+        false,
+        true,
+    ])("review playback keeps transcript expansion and window position (expanded: %s)", async (expanded) => {
+        const { playback, emit } = createTestPlayback();
+        renderPendingSpeakerReview(playback);
+        fireEvent.click(await screen.findByRole("button", { name: "Review" }));
+        await screen.findByRole("button", { name: "Play a turn of Speaker 1" });
+        if (!expanded)
+            fireEvent.click(
+                screen.getByRole("button", { name: "Collapse transcript" }),
+            );
+        const windowScroll = vi
+            .spyOn(window, "scrollTo")
+            .mockImplementation(() => {});
+        const intoView = vi.fn();
+        Element.prototype.scrollIntoView = intoView;
+        const before = window.scrollY;
+        for (const name of [
+            "Play a turn of Speaker 1",
+            "Play from 00:02",
+            "Play from 00:01",
+        ]) {
+            fireEvent.click(screen.getByRole("button", { name }));
+            const owner = vi.mocked(playback.play).mock.calls.at(-1)?.[1];
+            act(() => emit({ ms: 3500, owner, playing: true }));
+            expect(
+                screen.getByRole("button", {
+                    name: expanded
+                        ? "Collapse transcript"
+                        : "Expand transcript",
+                }),
+            ).toBeTruthy();
+            expect(window.scrollY).toBe(before);
+            expect(windowScroll).not.toHaveBeenCalled();
+            expect(intoView).not.toHaveBeenCalled();
+        }
+        windowScroll.mockRestore();
     });
 });
 
