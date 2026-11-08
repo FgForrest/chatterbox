@@ -39,7 +39,7 @@ export { meetingFolders } from "@/db/queries/meeting-folders";
 export type MeetingTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export type MeetingExecutor = Pick<
     typeof db,
-    "select" | "update" | "insert" | "delete"
+    "select" | "update" | "insert" | "delete" | "execute"
 >;
 
 /** Item visibility for both standalone meetings and agendas absorbed by recordings. */
@@ -254,6 +254,7 @@ export async function listMeetingRows(
             ),
         )
         .orderBy(
+            sql`case when ${meetingAgendas.userId} = ${userId} then 0 else 1 end`,
             sql`case when ${meetingAgendas.plannedStart} >= now() or not ${meetingAgendas.timeSet} then 0 else 1 end`,
             sql`case when ${meetingAgendas.plannedStart} >= now() then ${meetingAgendas.plannedStart} end asc`,
             sql`case when ${meetingAgendas.plannedStart} < now() then ${meetingAgendas.plannedStart} end desc`,

@@ -1,4 +1,5 @@
 import type { db } from "@/db";
+import { publishTaskAgendaEventsInTx } from "@/db/queries/agenda-task-events";
 import { taskStatusTransitions } from "@/db/schema";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -17,4 +18,5 @@ export async function logTaskStatusInTx(
     await tx
         .insert(taskStatusTransitions)
         .values({ taskId, actorUserId, fromStatus, toStatus, createdAt });
+    if (fromStatus !== null) await publishTaskAgendaEventsInTx(tx, taskId);
 }

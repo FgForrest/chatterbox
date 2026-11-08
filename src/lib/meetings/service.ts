@@ -3,6 +3,7 @@ import {
     asc,
     desc,
     eq,
+    getTableColumns,
     inArray,
     isNull,
     ne,
@@ -13,6 +14,10 @@ import {
 import { nanoid } from "nanoid";
 import type { z } from "zod";
 import { db } from "@/db";
+import {
+    bumpAgendaInTx,
+    publishAgendaEventInTx,
+} from "@/db/queries/agenda-events";
 import { hasVisibleAgendaSources } from "@/db/queries/agenda-source-visibility";
 import { notifyFolderReceiversInTx } from "@/db/queries/item-shares";
 import {
@@ -83,7 +88,12 @@ import {
     validatePointTree,
 } from "@/lib/meetings/model";
 import { OLDER_TASK_POSITION_BASE } from "@/lib/meetings/positions";
+import { agendaRecordingBy } from "@/lib/meetings/recording-by";
 import { agendaSuggestionsAvailability } from "@/lib/meetings/suggestions-provider";
+import {
+    deletePointTextDocsInTx,
+    replaceAgendaTextInTx,
+} from "@/lib/meetings/text-documents";
 import { listVisibleItemFolders } from "@/lib/sharing/person-shares";
 import { taskViewerById } from "@/lib/tasks/access";
 import { getVisibleTasks } from "@/lib/tasks/tasks";
@@ -120,13 +130,7 @@ function readPoint({
 
 /** Bump the polling version in the same transaction as an agenda edit. */
 export async function bumpAgenda(tx: MeetingTx, agenda: Agenda) {
-    await tx
-        .update(meetingAgendas)
-        .set({
-            version: sql`${meetingAgendas.version} + 1`,
-            updatedAt: new Date(),
-        })
-        .where(whereAgenda(agenda));
+    await bumpAgendaInTx(tx, agenda);
 }
 
 async function editMeeting<T>(
@@ -626,6 +630,7 @@ export async function listMeetings(
         calendarEventId: agenda.calendarEventId,
         calendarSeriesId: agenda.calendarSeriesId,
         author: { id: agenda.userId, name: authorName },
+        own: agenda.userId === userId,
         recorded: !!agenda.recordingItemId,
         received: receipts.some(
             (share) => share.itemId === agenda.meetingItemId,
@@ -668,6 +673,7 @@ export async function getMeeting(
     const access = await requireMeetingAccess(userId, id);
     let { agenda } = access;
     const { item } = access;
+    const presence = await agendaRecordingBy(userId, agenda.id);
     const [suggestionJob] = await db
         .select({ status: asyncJobs.status, errorCode: asyncJobs.errorCode })
         .from(asyncJobs)
@@ -696,11 +702,12 @@ export async function getMeeting(
             ? { errorCode: suggestionJob.errorCode }
             : {}),
     };
-    const cursor = `${agenda.version}:${agenda.recordingItemId ? (access.recordingVisible ? "visible" : "hidden") : "standalone"}:${job.state ?? "idle"}`;
+    const cursor = `${agenda.version}:${agenda.recordingItemId ? (access.recordingVisible ? "visible" : "hidden") : "standalone"}:${job.state ?? "idle"}${presence.cursor}`;
     if (agenda.recordingItemId && since === cursor)
         return { unchanged: true as const, version: agenda.version, cursor };
     if (
-        (Number(since) === agenda.version || since === cursor) &&
+        ((!presence.cursor && Number(since) === agenda.version) ||
+            since === cursor) &&
         !agenda.recordingItemId &&
         (!agenda.calendarEventId ||
             (agenda.calendarRefreshedAt &&
@@ -736,6 +743,7 @@ export async function getMeeting(
             .where(whereAgenda(agenda))
             .returning();
         agenda = refreshed;
+        await publishAgendaEventInTx(db, agenda.id, String(agenda.version));
     }
     const [
         points,
@@ -756,8 +764,15 @@ export async function getMeeting(
             .where(pointWhere(agenda))
             .orderBy(asc(agendaPoints.position), asc(agendaPoints.id)),
         db
-            .select()
+            .select({
+                ...getTableColumns(agendaTasks),
+                statusChangedByUserId: recordingTasks.statusChangedByUserId,
+            })
             .from(agendaTasks)
+            .innerJoin(
+                recordingTasks,
+                eq(recordingTasks.id, agendaTasks.taskId),
+            )
             .where(
                 and(
                     eq(agendaTasks.agendaId, agenda.id),
@@ -872,6 +887,10 @@ export async function getMeeting(
                       removedAt: link.removedAt,
                       agendaNote: link.note ? decryptText(link.note) : null,
                       agendaOrigin: link.origin,
+                      agendaVersion: link.version,
+                      agendaUpdatedAt: link.updatedAt,
+                      agendaUpdatedByUserId: link.updatedByUserId,
+                      statusChangedByUserId: link.statusChangedByUserId,
                       position: link.position,
                   },
               ]
@@ -881,7 +900,19 @@ export async function getMeeting(
         ...new Set([
             agenda.userId,
             ...points.flatMap((point) =>
-                point.authorUserId ? [point.authorUserId] : [],
+                [
+                    point.authorUserId,
+                    point.updatedByUserId,
+                    point.discussedByUserId,
+                ].filter((id): id is string => id !== null),
+            ),
+            ...links
+                .filter((link) => visibleTasks.has(link.taskId))
+                .flatMap((link) =>
+                    link.updatedByUserId ? [link.updatedByUserId] : [],
+                ),
+            ...tasks.flatMap((task) =>
+                task.statusChangedByUserId ? [task.statusChangedByUserId] : [],
             ),
         ]),
     ];
@@ -975,7 +1006,8 @@ export async function getMeeting(
                     visibleItems.has(agenda.snapshotSourceItemId)
                   ? agenda.snapshotSourceItemId
                   : null,
-        cursor: `${agenda.version}:${agenda.recordingItemId ? (access.recordingVisible ? "visible" : "hidden") : "standalone"}:${job.state ?? "idle"}`,
+        cursor: `${agenda.version}:${agenda.recordingItemId ? (access.recordingVisible ? "visible" : "hidden") : "standalone"}:${job.state ?? "idle"}${presence.cursor}`,
+        recordingBy: presence.recordingBy,
         attachedRecording: agenda.recordingItemId
             ? { visible: access.recordingVisible }
             : null,
@@ -1017,6 +1049,7 @@ export async function getMeeting(
                   }
                 : null,
         points: tree,
+        textProtocol: 1,
         pointTree: buildPointTree(tree),
         tasks,
         taskGroups: groupAgendaTasks(
@@ -1304,6 +1337,7 @@ export async function addPoint(
                     userId: agenda.userId,
                     text: encryptText(input.text),
                     authorUserId: userId,
+                    updatedByUserId: userId,
                     origin: input.origin ?? "manual",
                 })
                 .returning();
@@ -1396,6 +1430,11 @@ export async function changePoint(
                                 eq(agendaPoints.parentId, point.id),
                             ),
                         );
+                await deletePointTextDocsInTx(
+                    tx,
+                    agenda,
+                    input.mergeUp ? [point.id] : [...descendants],
+                );
                 await tx
                     .delete(agendaPoints)
                     .where(
@@ -1427,6 +1466,24 @@ export async function changePoint(
                             sql`${agendaPoints.position} >= ${input.position}`,
                         ),
                     );
+            if (input.text !== undefined)
+                await replaceAgendaTextInTx(
+                    tx,
+                    agenda,
+                    `point:${point.id}:text`,
+                    decryptText(point.text),
+                    input.text,
+                    userId,
+                );
+            if (input.note !== undefined)
+                await replaceAgendaTextInTx(
+                    tx,
+                    agenda,
+                    `point:${point.id}:note`,
+                    decryptText(point.note) ?? "",
+                    input.note ?? "",
+                    userId,
+                );
             const [updated] = await tx
                 .update(agendaPoints)
                 .set({
@@ -1454,6 +1511,7 @@ export async function changePoint(
                           }
                         : {}),
                     version: point.version + 1,
+                    updatedByUserId: userId,
                     updatedAt: new Date(),
                 })
                 .where(
@@ -1587,6 +1645,32 @@ export async function changeAgendaTask(
                 "Agenda task not found",
                 404,
             );
+        if (change.note !== undefined) {
+            const [link] = await tx
+                .select({ note: agendaTasks.note })
+                .from(agendaTasks)
+                .where(
+                    and(
+                        eq(agendaTasks.agendaId, agenda.id),
+                        eq(agendaTasks.userId, agenda.userId),
+                        eq(agendaTasks.taskId, taskId),
+                    ),
+                );
+            if (!link)
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "Agenda task not found",
+                    404,
+                );
+            await replaceAgendaTextInTx(
+                tx,
+                agenda,
+                `task:${taskId}:note`,
+                decryptText(link.note) ?? "",
+                change.note ?? "",
+                userId,
+            );
+        }
         const [row] = await tx
             .update(agendaTasks)
             .set({
@@ -1596,6 +1680,9 @@ export async function changeAgendaTask(
                 ...(change.removed !== undefined
                     ? { removedAt: change.removed ? new Date() : null }
                     : {}),
+                version: sql`${agendaTasks.version} + 1`,
+                updatedAt: new Date(),
+                updatedByUserId: userId,
             })
             .where(
                 and(
@@ -1665,6 +1752,7 @@ export async function decideSuggestion(
                 text: suggestion.text,
                 sources: suggestion.sources,
                 authorUserId: userId,
+                updatedByUserId: userId,
                 origin: suggestion.kind,
                 originPointId: suggestion.originPointId,
             });

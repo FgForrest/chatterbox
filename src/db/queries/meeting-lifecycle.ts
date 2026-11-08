@@ -1,4 +1,5 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { publishAgendaEventInTx } from "@/db/queries/agenda-events";
 import { meetingFolders } from "@/db/queries/meeting-folders";
 import type { MeetingExecutor } from "@/db/queries/meetings";
 import {
@@ -94,6 +95,11 @@ export async function restoreStandaloneAgendaInTx(
                 eq(meetingAgendas.userId, agenda.userId),
             ),
         );
+    await publishAgendaEventInTx(
+        executor,
+        agenda.id,
+        String(agenda.version + 1),
+    );
     await executor
         .update(agendaPoints)
         .set({
@@ -154,6 +160,11 @@ export async function deleteRecordingAgendaInTx(
                 eq(meetingAgendas.userId, input.userId),
             ),
         );
+    await publishAgendaEventInTx(
+        executor,
+        row.agenda.id,
+        String(row.agenda.version + 1),
+    );
     if (row.agenda.meetingItemId)
         await executor
             .delete(chatterItems)

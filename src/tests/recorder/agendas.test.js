@@ -210,7 +210,7 @@ describe("matching and folders", () => {
                 ],
                 now,
             ),
-        ).toEqual([meeting]);
+        ).toEqual([meeting, { ...meeting, id: "held", state: "held" }]);
     });
     it("preselects the agenda folder and preserves an unfiled agenda", () => {
         expect(agendaFolder(meeting)).toEqual({
@@ -222,7 +222,7 @@ describe("matching and folders", () => {
 });
 
 describe("reminder lifecycle", () => {
-    it("fetches the next 24 hours and schedules one minute before a timed start", async () => {
+    it("fetches the next 24 hours and schedules at the timed start by default", async () => {
         fetch.mockResolvedValueOnce(
             Response.json({
                 data: [
@@ -243,7 +243,7 @@ describe("reminder lifecycle", () => {
         ).toBe(86400000);
         expect(chrome.alarms.create).toHaveBeenCalledExactlyOnceWith(
             "agenda:agenda-one",
-            { when: Date.parse(meeting.start) - 60000 },
+            { when: Date.parse(meeting.start) },
         );
         expect(chrome.alarms.clear).toHaveBeenCalledWith("agenda:old");
         expect(chrome.alarms.clear).not.toHaveBeenCalledWith("upload-retry");
@@ -263,6 +263,7 @@ describe("reminder lifecycle", () => {
     });
     it("shows localized title, time, counts and a Show agenda action", async () => {
         await refreshAgendas();
+        vi.setSystemTime(Date.parse(meeting.start));
         await remindAgenda(meeting.id);
         expect(chrome.notifications.create).toHaveBeenCalledWith(
             "agenda:agenda-one",
@@ -466,12 +467,12 @@ describe("reminder refresh regressions", () => {
         await refreshAgendas();
         chrome.alarms.get = vi.fn(async () => ({
             name: "agenda:agenda-one",
-            scheduledTime: Date.parse(meeting.start) - 60000,
+            scheduledTime: Date.parse(meeting.start),
         }));
         chrome.alarms.getAll.mockResolvedValue([
             {
                 name: "agenda:agenda-one",
-                scheduledTime: Date.parse(meeting.start) - 60000,
+                scheduledTime: Date.parse(meeting.start),
             },
         ]);
         chrome.notifications.getAll.mockResolvedValue({
@@ -498,4 +499,19 @@ describe("reminder refresh regressions", () => {
         await vi.advanceTimersByTimeAsync(5000);
         await assertion;
     });
+});
+
+it("gates each text request independently and stops using it after a capability downgrade", async () => {
+    await expect(
+        agendaRequest("/one/text?field=point:p1:note"),
+    ).rejects.toThrow("agendaUnsupported");
+    expect(fetch).not.toHaveBeenCalled();
+    local.serverDefaults.agendaText = 1;
+    await agendaRequest("/one/text?field=point:p1:note");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    local.serverDefaults.agendaText = 0;
+    await expect(
+        agendaRequest("/one/text", { method: "POST" }),
+    ).rejects.toThrow("agendaUnsupported");
+    expect(fetch).toHaveBeenCalledTimes(1);
 });

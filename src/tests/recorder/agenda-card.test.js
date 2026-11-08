@@ -79,7 +79,7 @@ describe("popup agenda card", () => {
         container.querySelector("button").click();
         expect(send.mock.calls[1][0].choose).toBe(true);
     });
-    it("hides the recording card without a selection or a matching agenda", async () => {
+    it("keeps the agenda picker reachable while recording without any current match", async () => {
         send.mockResolvedValueOnce({
             ok: true,
             agendas: [],
@@ -94,7 +94,7 @@ describe("popup agenda card", () => {
             sessionId: "one",
             agendaId: null,
         });
-        expect(container.hidden).toBe(true);
+        expect(container.hidden).toBe(false);
         expect(render.choice()).toEqual({});
     });
     it.each([
@@ -124,13 +124,13 @@ describe("popup agenda card", () => {
             1,
         );
         expect(container.querySelector("button").textContent).toBe(
-            "agendaChoose",
+            count === 1 ? "agendaShow" : "agendaChoose",
         );
         container.querySelector("button").click();
         expect(send).toHaveBeenLastCalledWith(
             expect.objectContaining({
                 type: "open-agenda",
-                choose: true,
+                choose: count !== 1,
                 tabId: 8,
                 matchTabId: 7,
             }),
@@ -166,7 +166,7 @@ describe("popup agenda card", () => {
             sessionId: "one",
             agendaId: null,
         });
-        expect(container.hidden).toBe(true);
+        expect(container.hidden).toBe(false);
     });
     it("does not reselect an explicitly cleared agenda on popup reopen", async () => {
         send.mockResolvedValueOnce({
@@ -275,7 +275,7 @@ describe("popup agenda card", () => {
         await render(settings, { state: "recording", sessionId: "one" });
         await vi.advanceTimersByTimeAsync(59999);
         expect(send).toHaveBeenCalledTimes(1);
-        expect(container.hidden).toBe(true);
+        expect(container.hidden).toBe(false);
         await vi.advanceTimersByTimeAsync(1);
         expect(send).toHaveBeenCalledTimes(2);
         expect(container.hidden).toBe(false);
@@ -310,16 +310,20 @@ describe("popup agenda card", () => {
             onFolder: vi.fn(),
         });
         await render(settings, { state: "recording", sessionId: "one" });
-        expect(container.querySelector("strong").textContent).toBe(expected);
+        expect(container.querySelector("strong").textContent).toBe(
+            count === 1 ? agenda.title : expected,
+        );
         expect(container.querySelector("button").textContent).toBe(
-            catalog.agendaChoose.message,
+            count === 1
+                ? catalog.agendaShow.message
+                : catalog.agendaChoose.message,
         );
     });
     it("keeps permissions unchanged and packages a panel without a global default", () => {
         const manifest = JSON.parse(
             readFileSync("extensions/recorder/manifest.json", "utf8"),
         );
-        expect(manifest.version).toBe("0.8.3");
+        expect(manifest.version).toBe("0.9.0");
         expect(manifest.permissions).toEqual([
             "offscreen",
             "storage",

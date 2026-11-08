@@ -165,6 +165,8 @@ const h = vi.hoisted(() => {
             onAlarm: event("alarm"),
         },
         sidePanel: {
+            onOpened: event("panelOpened"),
+            onClosed: event("panelClosed"),
             setOptions: vi.fn(async () => {}),
             open: vi.fn(async () => {}),
         },
@@ -214,6 +216,8 @@ vi.mock("../../../extensions/recorder/lib/api.js", () => ({
     searchRecorderFolders: h.search,
     sha256Hex: vi.fn(),
     uploadChunk: vi.fn(),
+    listRecorderFolders: vi.fn(async () => []),
+    setSessionAgenda: vi.fn(async () => ({})),
 }));
 import "../../../extensions/recorder/service-worker.js";
 const meeting = {
@@ -243,6 +247,8 @@ beforeEach(async () => {
     h.request.mockReset().mockImplementation(defaultRequest);
     for (const store of [h.local, h.session])
         for (const key of Object.keys(store)) delete store[key];
+    h.listeners.panelClosed({ tabId: 7 });
+    delete chrome.sidePanel.close;
     h.tabs.clear();
     h.scripts.clear();
     h.metas.clear();
@@ -279,7 +285,7 @@ async function arm() {
 }
 async function start() {
     await arm();
-    h.listeners.clicked(h.tabs.get(7));
+    await h.listeners.command("toggle-recording");
     await vi.waitFor(() =>
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
             expect.objectContaining({ target: "offscreen", type: "start" }),
@@ -1091,4 +1097,122 @@ describe("banner selection regressions", () => {
         expect(h.session.recordingState.folderId).toBe(folderId);
         expect(h.metas.get("session-1")).not.toHaveProperty("agendaTitle");
     });
+});
+
+describe("0.9 agenda toolbar and session linking", () => {
+    it.each([
+        "prompt",
+        "auto",
+    ])("toggles the agenda panel synchronously instead of capturing in %s mode", async (mode) => {
+        h.local.serverDefaults.agendas = true;
+        h.local.platformModes = { "google-meet": mode };
+        await arm();
+        expect(chrome.action.setPopup).toHaveBeenLastCalledWith({
+            tabId: 7,
+            popup: "",
+        });
+        h.listeners.clicked(h.tabs.get(7));
+        expect(chrome.sidePanel.open).toHaveBeenCalledWith({ tabId: 7 });
+        expect(h.createSession).not.toHaveBeenCalled();
+        await settle();
+        expect(h.session[agendaPanelKey(7)].agendaIds).toEqual(["agenda-one"]);
+    });
+    it("keeps panel routing after capture starts and a selected held agenda stops matching", async () => {
+        h.local.serverDefaults.agendas = true;
+        await start();
+        h.session["agenda-match:7"].agendas = [];
+        chrome.action.setPopup.mockClear();
+        await h.listeners.updated(7, { status: "complete" }, h.tabs.get(7));
+        expect(chrome.action.setPopup).toHaveBeenLastCalledWith({
+            tabId: 7,
+            popup: "",
+        });
+        h.listeners.clicked(h.tabs.get(7));
+        expect(chrome.sidePanel.open).toHaveBeenCalledWith({ tabId: 7 });
+    });
+    it.each([
+        true,
+        false,
+    ])("announces the start agenda only with sessionAgenda=%s", async (supported) => {
+        h.local.serverDefaults.agendas = true;
+        h.local.serverDefaults.sessionAgenda = supported;
+        await start();
+        const body = h.createSession.mock.calls[0][1];
+        if (supported) expect(body.agendaId).toBe("agenda-one");
+        else expect(body).not.toHaveProperty("agendaId");
+    });
+    it("accepts the shared panel's direct recording and folder controls", async () => {
+        const panel = {
+            id: "test",
+            url: "chrome-extension://test/agenda/agenda.html?tab=7",
+        };
+        expect(
+            await message(
+                {
+                    type: "start-recording",
+                    payload: { tabId: 7, noticeAcknowledgedAt: "now" },
+                },
+                panel,
+            ),
+        ).toMatchObject({ ok: true });
+        expect(
+            await message(
+                {
+                    type: "set-recording-folder",
+                    sessionId: "session-1",
+                    folderId: "chosen",
+                    folderLabel: "Acme",
+                },
+                panel,
+            ),
+        ).toMatchObject({ ok: true });
+    });
+});
+
+it.each([
+    true,
+    false,
+])("closes an open agenda panel without stopping capture with native close=%s", async (native) => {
+    h.local.serverDefaults.agendas = true;
+    await arm();
+    if (native) chrome.sidePanel.close = vi.fn(async () => {});
+    h.listeners.clicked(h.tabs.get(7));
+    expect(chrome.sidePanel.open).toHaveBeenCalledTimes(1);
+    await settle();
+    h.listeners.panelOpened({ tabId: 7 });
+    h.listeners.clicked(h.tabs.get(7));
+    await settle();
+    if (native)
+        expect(chrome.sidePanel.close).toHaveBeenCalledWith({ tabId: 7 });
+    else {
+        expect(chrome.sidePanel.setOptions).toHaveBeenCalledWith({
+            tabId: 7,
+            enabled: false,
+        });
+        expect(chrome.sidePanel.setOptions).toHaveBeenLastCalledWith({
+            tabId: 7,
+            path: "agenda/agenda.html?tab=7",
+            enabled: true,
+        });
+    }
+    expect(h.createSession).not.toHaveBeenCalled();
+});
+
+it("does not add a recording nudge to an already-open room covered by Calendar notifications", async () => {
+    h.local.serverDefaults.nextMeeting = true;
+    h.granted = false;
+    h.session.recorderNextMeeting = {
+        serverUrl: h.local.serverUrl,
+        connectionId: null,
+        fetchedAt: Date.now(),
+        data: {
+            eventId: "calendar-one",
+            start: new Date(Date.now() + 300000).toISOString(),
+            end: new Date(Date.now() + 3600000).toISOString(),
+            joinUrl:
+                "https://meet.google.com/abc-defg-hij?authuser=recorder%40example.com",
+        },
+    };
+    await arm();
+    expect(chrome.notifications.create).not.toHaveBeenCalled();
 });

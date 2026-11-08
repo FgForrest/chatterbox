@@ -220,6 +220,10 @@ export async function refreshServerConfig() {
     await chrome.storage.local.set({
         [STORAGE_KEYS.serverDefaults]: {
             agendas: config.features?.agendas === true,
+            nextMeeting: config.features?.nextMeeting === true,
+            agendaLive: config.features?.agendaLive === true,
+            agendaText: config.features?.agendaText === 1 ? 1 : 0,
+            sessionAgenda: config.features?.sessionAgenda === true,
             encryptedRecordingProtocol: config.encrypted_recording_protocol,
             recordingFolderOverride: config.recording_folder_override === true,
             autoRecordPlatforms: Array.isArray(defaults.auto_record_platforms)

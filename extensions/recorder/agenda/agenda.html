@@ -4,6 +4,7 @@
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Agenda</title>
+        <link rel="stylesheet" href="../generated/folders.css" />
         <link rel="stylesheet" href="../popup/popup.css" />
         <link rel="stylesheet" href="agenda.css" />
     </head>
@@ -12,17 +13,20 @@
             <h1><img src="../icons/icon-48.png" alt="" width="24" height="24" /><span data-i18n="appName"></span></h1>
             <button id="open-app" class="link" type="button" data-i18n="agendaOpenApp" hidden></button>
         </header>
+        <section id="colleague-recording" class="presence" hidden><p id="recording-by"></p><button id="record-also" class="link" type="button" data-i18n="recordAlso"></button></section>
+        <section id="recorder-controls" class="recorder-controls"></section>
         <p id="recording-state" class="hint" role="status"></p>
         <p id="status" class="error" role="status"></p>
-        <button id="retry" type="button" data-i18n="agendaReload" hidden></button>
+        <button id="agenda-retry" type="button" data-i18n="agendaReload" hidden></button>
         <main id="agenda" hidden>
             <h2 id="title"></h2>
             <p id="time" class="hint"></p>
+            <div id="attachment" class="attachment" hidden><span id="attachment-text"></span><button id="unlink" type="button" class="link" data-i18n="agendaUnlink"></button><button id="switch-here" type="button" class="link" data-i18n="agendaSwitchHere"></button></div>
             <div class="row" id="modes">
                 <button id="prep" type="button" data-i18n="agendaPrep" aria-pressed="true"></button>
                 <button id="live" type="button" data-i18n="agendaLive" aria-pressed="false"></button>
             </div>
-            <section aria-labelledby="points-heading">
+            <div class="agenda-columns"><section aria-labelledby="points-heading">
                 <h3 id="points-heading" data-i18n="agendaPoints"></h3>
                 <p id="point-count" class="hint"></p>
                 <div id="points"></div>
@@ -34,7 +38,7 @@
             <section aria-labelledby="tasks-heading">
                 <h3 id="tasks-heading" data-i18n="agendaTasks"></h3>
                 <div id="tasks"></div>
-            </section>
+            </section></div>
         </main>
         <section id="choices" hidden aria-labelledby="choice-heading">
             <h2 id="choice-heading" data-i18n="agendaChoose"></h2>
@@ -42,10 +46,7 @@
             <button id="none" type="button" data-i18n="agendaNone"></button>
             <p class="hint" data-i18n="agendaNoneHint"></p>
         </section>
-        <footer id="attachment" hidden>
-            <span id="attachment-text" class="hint"></span>
-            <button id="other" class="link" type="button" data-i18n="agendaOther"></button>
-        </footer>
+        <div class="agenda-navigation"><button id="other" class="link" type="button" data-i18n="agendaChoose"></button><button id="close-panel" class="link" type="button" data-i18n="meetingPromptDismiss"></button></div>
         <script type="module" src="agenda.js"></script>
     </body>
 </html>

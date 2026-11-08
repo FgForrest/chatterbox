@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { publishAgendaEventInTx } from "@/db/queries/agenda-events";
 import {
     recordingCaptureKeys,
     recordingSessionChunks,
@@ -36,7 +37,18 @@ export async function createRecordingSession(input: {
     });
     const key = randomBytes(32).toString("base64");
     const expiresAt = new Date(Date.now() + CAPTURE_KEY_RETENTION_MS);
+    const viewer = input.metadata.liveAgendaId
+        ? await meetingViewer(input.userId)
+        : undefined;
     const session = await db.transaction(async (tx) => {
+        const liveAgenda = input.metadata.liveAgendaId
+            ? await requireMeetingAccess(
+                  input.userId,
+                  input.metadata.liveAgendaId,
+                  "edit",
+                  { viewer, executor: tx, lock: true },
+              )
+            : null;
         const [capture] = await tx
             .insert(recordingCaptureKeys)
             .values({
@@ -63,7 +75,12 @@ export async function createRecordingSession(input: {
                 clientRecordingId: input.clientRecordingId,
                 captureKeyId: capture.id,
                 mimeType: input.mimeType,
-                metadata: { ...input.metadata },
+                metadata: {
+                    ...input.metadata,
+                    ...(liveAgenda
+                        ? { liveAgendaId: liveAgenda.agenda.id }
+                        : {}),
+                },
                 startedAt: input.startedAt,
                 noticeAcknowledgedAt: input.noticeAcknowledgedAt,
                 folderId: input.folderId,
@@ -79,9 +96,82 @@ export async function createRecordingSession(input: {
                     eq(recordingCaptureKeys.userId, input.userId),
                 ),
             );
+        if (liveAgenda)
+            await publishAgendaEventInTx(
+                tx,
+                liveAgenda.agenda.id,
+                String(liveAgenda.agenda.version),
+            );
         return row;
     });
     return { session, key, expiresAt };
+}
+
+/** Change the live agenda only for an open session and its original recorder key. */
+export async function setRecordingSessionAgenda(input: {
+    userId: string;
+    apiKeyId: string;
+    sessionId: string;
+    agendaId: string | null;
+}): Promise<RecordingSessionRow> {
+    const viewer = input.agendaId
+        ? await meetingViewer(input.userId)
+        : undefined;
+    return db.transaction(async (tx) => {
+        const access = input.agendaId
+            ? await requireMeetingAccess(input.userId, input.agendaId, "edit", {
+                  viewer,
+                  executor: tx,
+                  lock: true,
+              })
+            : null;
+        const [session] = await tx
+            .select()
+            .from(recordingSessions)
+            .where(
+                and(
+                    eq(recordingSessions.id, input.sessionId),
+                    eq(recordingSessions.userId, input.userId),
+                    eq(recordingSessions.apiKeyId, input.apiKeyId),
+                ),
+            )
+            .for("update");
+        if (!session)
+            throw new AppError(
+                ErrorCode.NOT_FOUND,
+                "Recording session not found",
+                404,
+            );
+        if (session.status !== "open")
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "Recording session is no longer open",
+                409,
+            );
+        const [updated] = await tx
+            .update(recordingSessions)
+            .set({
+                metadata: {
+                    ...session.metadata,
+                    liveAgendaId: access?.agenda.id ?? null,
+                },
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(recordingSessions.id, session.id),
+                    eq(recordingSessions.userId, input.userId),
+                ),
+            )
+            .returning();
+        for (const agendaId of new Set([
+            session.metadata.liveAgendaId,
+            access?.agenda.id,
+        ]))
+            if (typeof agendaId === "string")
+                await publishAgendaEventInTx(tx, agendaId, "0");
+        return updated;
+    });
 }
 
 /** Resolve only the active capture's key for its original recorder credential. */
@@ -563,6 +653,8 @@ export async function markRecordingSessionCompleting(input: {
                 ),
             )
             .returning();
+        if (typeof row?.metadata?.liveAgendaId === "string")
+            await publishAgendaEventInTx(tx, row.metadata.liveAgendaId, "0");
         return row ?? null;
     });
 }
@@ -605,8 +697,17 @@ export async function markRecordingSessionCompleted(
                     eq(recordingSessions.status, "completing"),
                 ),
             )
-            .returning({ captureKeyId: recordingSessions.captureKeyId });
+            .returning({
+                captureKeyId: recordingSessions.captureKeyId,
+                metadata: recordingSessions.metadata,
+            });
         if (!session) return false;
+        if (typeof session.metadata?.liveAgendaId === "string")
+            await publishAgendaEventInTx(
+                tx,
+                session.metadata.liveAgendaId,
+                "0",
+            );
         await tx
             .update(recordingCaptureKeys)
             .set({
@@ -672,7 +773,13 @@ export async function markRecordingSessionAborted(
                 inArray(recordingSessions.status, ["open", "failed"]),
             ),
         )
-        .returning({ id: recordingSessions.id });
+        .returning({
+            id: recordingSessions.id,
+            metadata: recordingSessions.metadata,
+        });
+    for (const row of rows)
+        if (typeof row.metadata?.liveAgendaId === "string")
+            await publishAgendaEventInTx(db, row.metadata.liveAgendaId, "0");
     return rows.length > 0;
 }
 

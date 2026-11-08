@@ -55,6 +55,8 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     },
     "meetings/[id]/calendar-export/route.ts": { POST: "meeting" },
     "meetings/[id]/markdown/route.ts": { GET: "meeting" },
+    "meetings/[id]/events/route.ts": { GET: "meeting" },
+    "meetings/[id]/text/route.ts": { GET: "meeting", POST: "meeting" },
     "meetings/[id]/older-tasks/route.ts": { GET: "meeting" },
     "meetings/[id]/points/route.ts": { POST: "meeting" },
     "meetings/[id]/points/[pointId]/route.ts": {
@@ -250,7 +252,9 @@ describe("recording route classification", () => {
             const rules = new Set(Object.values(methods));
             const source = readFileSync(join(API_ROOT, file), "utf8");
             if (rules.has("meeting"))
-                expect(source, file).toMatch(/meetingRoute|requireApiSession/);
+                expect(source, file).toMatch(
+                    /meetingRoute|requireApiSession|agendaTextRoutes/,
+                );
             if (rules.has("shares"))
                 expect(source, file).toContain("requirePersonShareSession");
             if (rules.has("session")) {

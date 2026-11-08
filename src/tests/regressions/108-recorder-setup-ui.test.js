@@ -26,6 +26,7 @@ const h = vi.hoisted(() => {
                 children: [],
                 scrollIntoView: vi.fn(),
                 querySelector: (selector) => node(`${id}:${selector}`),
+                closest: (selector) => node(`${id}:closest:${selector}`),
                 querySelectorAll: () => [],
                 addEventListener: (type, listener) => {
                     handlers[`${id}:${type}`] = listener;
@@ -353,6 +354,32 @@ describe("agenda options capability", () => {
             expect(h.node("agenda-reminders").checked).toBe(false);
             expect(h.node("agenda-banner").checked).toBe(true);
         }
+    });
+});
+
+describe("Calendar notification options", () => {
+    it.each([
+        false,
+        true,
+    ])("gates Calendar controls by nextMeeting=%s", async (nextMeeting) => {
+        h.local.serverDefaults = { agendas: true, nextMeeting };
+        h.local.meetingNotifications = false;
+        h.local.meetingLeadMinutes = 5;
+        chrome.storage.onChanged.addListener.mock.calls[0][0](
+            { serverDefaults: { newValue: h.local.serverDefaults } },
+            "local",
+        );
+        await vi.waitFor(() => {
+            expect(h.node("meeting-notifications-section").hidden).toBe(
+                !nextMeeting,
+            );
+            expect(h.node("agenda-reminders:closest:label").hidden).toBe(
+                nextMeeting,
+            );
+            expect(h.node("agenda-reminders-hint").hidden).toBe(nextMeeting);
+            expect(h.node("meeting-notifications").checked).toBe(false);
+            expect(h.node("meeting-lead").value).toBe("5");
+        });
     });
 });
 

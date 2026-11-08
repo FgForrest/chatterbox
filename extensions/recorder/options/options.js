@@ -505,6 +505,12 @@ async function renderAgendaSettings() {
     const settings = await getSettings();
     const supported = supportsAgendas(settings);
     el("agenda-section").hidden = !supported;
+    const next = settings.serverDefaults?.nextMeeting === true;
+    el("meeting-notifications-section").hidden = !next;
+    el("meeting-notifications").checked = settings.meetingNotifications;
+    el("meeting-lead").value = String(settings.meetingLeadMinutes);
+    el("agenda-reminders").closest("label").hidden = next;
+    el("agenda-reminders-hint").hidden = next;
     el("agenda-reminders").checked = settings.agendaReminders;
     el("agenda-banner").checked = settings.agendaBanner;
 }
@@ -513,6 +519,9 @@ for (const [id, key] of [["agenda-reminders", "agendaReminders"], ["agenda-banne
         if (requireDataUseConsent()) await saveSettings({ [key]: event.target.checked });
     });
 }
+
+el("meeting-notifications").addEventListener("change", async (event) => { if (requireDataUseConsent()) await saveSettings({ meetingNotifications: event.target.checked }); });
+el("meeting-lead").addEventListener("change", async (event) => { if (requireDataUseConsent()) await saveSettings({ meetingLeadMinutes: Number(event.target.value) }); });
 
 async function renderServerDefaults() {
     const settings = await getSettings();

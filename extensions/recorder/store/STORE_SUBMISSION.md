@@ -53,7 +53,7 @@ how to finish there. Manual address-and-key pairing stays available.
 | `storage` | Keeps the paired server URL, encrypted recorder token (creates recordings and looks up folder names for filing, and reads and edits visible agendas on supporting servers, but cannot read recordings), random installation identifier, preferences, and recording state on the user's device. Encrypted audio segments use Chrome's separate private file system so interrupted uploads can resume. |
 | `scripting` | Installs a narrow pairing relay on the Chatterbox site the user authorizes. After the user turns on In-meeting prompt and grants meeting-site access, registers and injects a top-frame isolated recording banner on supported meeting sites. The banner reads no page content and makes no network requests. |
 | `sidePanel` | Shows the user-selected meeting agenda alongside browser tabs, with discussion ticks, notes and task review while recording. Opened only by a user click; if Chrome refuses, the same packaged page opens in a small extension window. |
-| `alarms` | Schedules agenda reminders one minute before timed meetings and refreshes server recording preferences, retries interrupted uploads, polls completion, and stops a one-click recording after the configured quiet period. |
+| `alarms` | Schedules optional Calendar reminders with the user’s chosen lead time (legacy agenda reminders on older servers) and refreshes server recording preferences, retries interrupted uploads, polls completion, and stops a one-click recording after the configured quiet period. |
 | Optional `https://*/*` host access | Allows pairing and uploads to the Chatterbox HTTPS server origin chosen by the user. Separately, when the user turns on In-meeting prompt, requests Google Meet, Zoom web, Microsoft Teams, Webex and Whereby together to show recording instructions and controls inside supported meetings. The isolated banner reads no page content, makes no network requests and sends no page content anywhere. Turning the switch off removes that meeting-site access. Version 0.8.0 adds only the required sidePanel permission. |
 | Optional `http://localhost/*` host access | Allows pairing a Chatterbox instance on the user's own computer for local development. Remote HTTP is not supported. |
 | `externally_connectable` for `localhost` | Allows a local Chatterbox page to message the extension for setup without a pairing relay. Other origins use the relay after the user grants access. |
@@ -69,6 +69,14 @@ The privacy policy, store listing, permission explanations, and in-extension con
 - The recorder token is encrypted under a non-exportable Web Crypto key in extension IndexedDB, and the OPFS recovery chunks are encrypted under a server-issued per-capture key. These measures do not protect against malicious code running in the extension or every browser-profile compromise. Describe that boundary accurately in the dashboard.
 - The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
+
+## What changed in 0.9.0
+
+- The icon toggles an agenda panel on matching tabs, including while recording. Popup and panel share recording controls. Non-agenda tabs and the keyboard shortcut retain their existing behavior. Chrome refusals keep the fallback window and sharing dialog.
+- On servers advertising the relevant capability: live agenda invalidations, collaborative text, recording attribution, and scoped Calendar Meet joins using the connected account email. No new permissions, host access, web-accessible resources or remote code.
+- Calendar data received: own event title, start/end, validated join link and connected Google account email, cached in extension session storage. One optional notification per meeting replaces the agenda reminder, with configurable lead time and suppression when its room is open. Join never records.
+- Popup and panel bundle the real application folder chooser and static light/dark CSS. Recent folder IDs remain local. The in-page picker is unchanged.
+- Update the dashboard's Calendar data declarations and privacy-policy links. Verify the real toolbar gesture, native capture permission, side-panel toggle and notification buttons before Store submission. Packaging does not submit a release.
 
 ## What changed in 0.8.3
 

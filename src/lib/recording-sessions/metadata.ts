@@ -14,6 +14,7 @@ export interface RecordingSessionMetadata {
     /** Label per audio channel, in channel order, e.g. `["microphone", "system"]`. */
     channelLayout: string[];
     agendaId?: string | null;
+    liveAgendaId?: string | null;
     /** Where the meeting ran, when the client could tell: `google-meet`, `zoom`, `teams`. */
     platformHint?: string;
     clientVersion?: string;
@@ -72,6 +73,24 @@ function parseFolderId(value: unknown): string | null {
         throw invalid("folderId must be a non-empty string", "folderId");
     }
     return parseOptionalString(value, "folderId", 255) ?? null;
+}
+
+/** Validate an explicit live agenda choice without changing completion metadata. */
+export function parseSessionAgendaBody(body: unknown): {
+    agendaId: string | null;
+} {
+    if (!body || typeof body !== "object" || !("agendaId" in body))
+        throw invalid("agendaId is required", "agendaId");
+    const value = body.agendaId;
+    if (
+        value !== null &&
+        (typeof value !== "string" || !value.trim() || value.length > 255)
+    )
+        throw invalid(
+            "agendaId must be null or a non-empty string of at most 255 characters",
+            "agendaId",
+        );
+    return { agendaId: value as string | null };
 }
 
 function parseOptionalString(
@@ -171,6 +190,8 @@ export function parseCreateRecordingSessionBody(
     }
 
     const metadata: RecordingSessionMetadata = { channelLayout };
+    if (raw.agendaId !== undefined)
+        metadata.liveAgendaId = parseSessionAgendaBody(raw).agendaId;
     const platformHint = parseOptionalString(
         raw.platformHint,
         "platformHint",
@@ -359,6 +380,8 @@ export function readRecordingSessionMetadata(
     const metadata: RecordingSessionMetadata = { channelLayout };
     if (raw.agendaId === null || typeof raw.agendaId === "string")
         metadata.agendaId = raw.agendaId;
+    if (raw.liveAgendaId === null || typeof raw.liveAgendaId === "string")
+        metadata.liveAgendaId = raw.liveAgendaId;
     if (typeof raw.platformHint === "string") {
         metadata.platformHint = raw.platformHint;
     }

@@ -64,6 +64,8 @@ export async function getSettings() {
         serverDefaults: raw[STORAGE_KEYS.serverDefaults] ?? null,
         nudgeEnabled: raw[STORAGE_KEYS.nudgeEnabled] ?? true,
         agendaReminders: raw[STORAGE_KEYS.agendaReminders] !== false,
+        meetingNotifications: raw[STORAGE_KEYS.meetingNotifications] ?? raw[STORAGE_KEYS.agendaReminders] !== false,
+        meetingLeadMinutes: [0, 1, 2, 5, 10].includes(raw[STORAGE_KEYS.meetingLeadMinutes]) ? raw[STORAGE_KEYS.meetingLeadMinutes] : 0,
         agendaBanner: raw[STORAGE_KEYS.agendaBanner] !== false,
         autoStopQuietSeconds: raw[STORAGE_KEYS.autoStopQuietSeconds] ?? null,
         autoModeAcknowledgedAt: raw[STORAGE_KEYS.autoModeAcknowledgedAt] ?? null,

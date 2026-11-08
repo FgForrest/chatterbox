@@ -1,8 +1,9 @@
-import { request } from "./api.js";
+import { pairingRequest } from "./pairing-request-auth.js";
 import { t } from "./i18n.js";
 import { pickerWindowBounds } from "./picker-window.js";
 import { getSettings } from "./settings.js";
-import { readToken } from "./token-vault.js";
+import { formatMeetingTime } from "./meeting-time.js";
+import { claimMeetingNotification } from "./meeting-notifications.js";
 
 export const AGENDA_ALARM_PREFIX = "agenda:";
 export const AGENDA_CACHE_KEY = "recorderAgendas";
@@ -24,27 +25,24 @@ export function supportsAgendas(settings) {
     );
 }
 
+function supportsAgendaPath(settings, path) {
+    return supportsAgendas(settings) && (!/\/text(?:\?|$)/.test(path) || settings.serverDefaults?.agendaText === 1);
+}
+
 /** Call an agenda route only after capability detection. */
 export async function agendaRequest(path = "", init = {}) {
     const settings = await getSettings();
-    if (!supportsAgendas(settings)) throw new Error(t("agendaUnsupported"));
-    const apiKey = await readToken();
-    const latest = await getSettings();
-    if (
-        !supportsAgendas(latest) ||
-        latest.serverUrl !== settings.serverUrl ||
-        latest.connectionId !== settings.connectionId
-    )
-        throw new Error(t("agendaUnsupported"));
-    const response = await request(
-        { serverUrl: settings.serverUrl, apiKey },
+    if (!supportsAgendaPath(settings, path)) throw new Error(t("agendaUnsupported"));
+    const response = await pairingRequest(
         `/api/v1/recorder/agendas${path}`,
         init,
+        (value) => supportsAgendaPath(value, path),
+        settings,
     );
     const body = await response.json();
     const current = await getSettings();
     if (
-        !supportsAgendas(current) ||
+        !supportsAgendaPath(current, path) ||
         current.serverUrl !== settings.serverUrl ||
         current.connectionId !== settings.connectionId
     )
@@ -60,8 +58,7 @@ export function currentAgendas(rows, now = Date.now()) {
         return (
             Number.isFinite(start) &&
             start <= now + 15 * 60000 &&
-            end > now &&
-            row.state !== "held"
+            end > now
         );
     });
 }
@@ -91,7 +88,7 @@ export async function clearAgendas() {
         AGENDA_CACHE_KEY,
         AGENDA_PANEL_KEY,
         AGENDA_SELECTION_KEY,
-        ...Object.keys(stored).filter((key) => key.startsWith("agenda-match:") || key.startsWith(`${AGENDA_PANEL_KEY}:`)),
+        ...Object.keys(stored).filter((key) => key.startsWith("agenda-route:") || key.startsWith("agenda-match:") || key.startsWith(`${AGENDA_PANEL_KEY}:`)),
     ];
     await chrome.storage.session.remove(keys);
     await clearAgendaReminders();
@@ -155,7 +152,7 @@ async function refreshAgendasNow({ force = false } = {}) {
     )
         return;
     const agendas = (Array.isArray(body.data) ? body.data : []).filter(
-        (row) => row.timeSet && row.state !== "held",
+        (row) => row.timeSet,
     );
     await chrome.storage.session.set({
         [AGENDA_CACHE_KEY]: {
@@ -165,27 +162,57 @@ async function refreshAgendasNow({ force = false } = {}) {
             fetchedAt: now,
         },
     });
-    if (!latest.agendaReminders) { await clearAgendaReminders(); return; }
-    const desired = new Map(agendas.map((agenda) => [`${AGENDA_ALARM_PREFIX}${agenda.id}`, Date.parse(agenda.start) - 60000]));
+    await scheduleAgendaReminders();
+}
+
+async function calendarReplacement(settings, agenda) {
+    const cached = (await chrome.storage.session.get("recorderNextMeeting")).recorderNextMeeting;
+    return settings.serverDefaults?.nextMeeting === true && cached?.serverUrl === settings.serverUrl && cached.connectionId === settings.connectionId && !cached.reason && cached.data?.agendaId === agenda.id && Date.parse(cached.data.start) === Date.parse(agenda.start);
+}
+
+/** Reconcile fallback alarms against only the Calendar occurrence that replaces them. */
+export async function scheduleAgendaReminders() {
+    const settings = await getSettings();
+    if (!supportsAgendas(settings) || !settings.meetingNotifications) {
+        await clearAgendaReminders();
+        return;
+    }
+    const cached = (await chrome.storage.session.get(AGENDA_CACHE_KEY))[AGENDA_CACHE_KEY];
+    if (cached?.serverUrl !== settings.serverUrl || cached.connectionId !== settings.connectionId) return;
+    const agendas = [];
+    for (const agenda of cached.agendas) {
+        if (!await calendarReplacement(settings, agenda)) agendas.push(agenda);
+    }
+    const now = Date.now();
+    const desired = new Map(agendas.map((agenda) => [
+        `${AGENDA_ALARM_PREFIX}${agenda.id}`,
+        Date.parse(agenda.start) - settings.meetingLeadMinutes * 60000,
+    ]));
     for (const alarm of (await chrome.alarms?.getAll?.()) ?? []) {
-        if (alarm.name.startsWith(AGENDA_ALARM_PREFIX) && (!desired.has(alarm.name) || desired.get(alarm.name) !== alarm.scheduledTime)) await chrome.alarms.clear(alarm.name);
+        if (
+            alarm.name.startsWith(AGENDA_ALARM_PREFIX) &&
+            (!desired.has(alarm.name) || desired.get(alarm.name) !== alarm.scheduledTime)
+        )
+            await chrome.alarms.clear(alarm.name);
     }
     for (const id of Object.keys((await chrome.notifications?.getAll?.()) ?? {}))
         if (id.startsWith(AGENDA_ALARM_PREFIX) && !desired.has(id)) await chrome.notifications.clear(id);
     for (const agenda of agendas) {
-        const when = Date.parse(agenda.start) - 60000;
+        const when = Date.parse(agenda.start) - settings.meetingLeadMinutes * 60000;
         const existing = await chrome.alarms?.get?.(`${AGENDA_ALARM_PREFIX}${agenda.id}`);
         if (when > now && existing?.scheduledTime !== when)
             await chrome.alarms.create(`${AGENDA_ALARM_PREFIX}${agenda.id}`, {
                 when,
             });
+        else if (when <= now && Date.parse(agenda.start) + 60000 > now)
+            await chrome.alarms.create(`${AGENDA_ALARM_PREFIX}${agenda.id}`, { when: now + 1 });
     }
 }
 
 /** Show a reminder only while the current pairing and settings still allow it. */
 export async function remindAgenda(id) {
     const settings = await getSettings();
-    if (!supportsAgendas(settings) || !settings.agendaReminders) return;
+    if (!supportsAgendas(settings) || !settings.meetingNotifications) return;
     const cached = (await chrome.storage.session.get(AGENDA_CACHE_KEY))[
         AGENDA_CACHE_KEY
     ];
@@ -195,10 +222,9 @@ export async function remindAgenda(id) {
             ? cached.agendas.find((row) => row.id === id)
             : null;
     if (!agenda || Date.parse(agenda.start) + 60000 < Date.now()) return;
-    const time = new Date(agenda.start).toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-    });
+    if (Date.parse(agenda.start) - settings.meetingLeadMinutes * 60000 > Date.now() || await calendarReplacement(settings, agenda)) return;
+    if (!await claimMeetingNotification(settings, agenda)) return;
+    const time = formatMeetingTime(agenda.start, agenda.end);
     await chrome.notifications.create(`${AGENDA_ALARM_PREFIX}${id}`, {
         type: "basic",
         iconUrl: "icons/icon-128.png",
@@ -298,4 +324,18 @@ export function canChooseRecordingAgenda(state) {
             ((state.state === "recording" && !state.stopped) ||
                 (state.state === "error" && state.stopped && !state.jobId)),
     );
+}
+
+/** Apply first-edit selection without replacing an owned recording agenda. */
+export function shouldLinkEditedAgenda(state, agenda) {
+    return state.state === "recording" &&
+        !state.stopped &&
+        agenda?.permissions?.edit === true &&
+        (
+            (!state.agendaId && state.agendaExplicit !== true) ||
+            (Boolean(state.agendaId) &&
+                state.agendaId !== agenda.id &&
+                state.agendaOwn !== true &&
+                agenda.own === true)
+        );
 }

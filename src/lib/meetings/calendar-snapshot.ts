@@ -1,5 +1,6 @@
 import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { publishAgendaEventInTx } from "@/db/queries/agenda-events";
 import { meetingAgendas } from "@/db/schema";
 import { decryptJsonField, encryptJsonField } from "@/lib/encryption/fields";
 import {
@@ -114,6 +115,12 @@ export async function readMeetingCalendarSnapshot(
                     eq(meetingAgendas.calendarRefreshedAt, now),
                     isNull(meetingAgendas.recordingItemId),
                 ),
+            );
+        if (changed)
+            await publishAgendaEventInTx(
+                db,
+                agenda.id,
+                String(agenda.version + 1),
             );
         return snapshot;
     } catch {

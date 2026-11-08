@@ -1,18 +1,13 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
+import { bumpAgendaInTx } from "@/db/queries/agenda-events";
 import {
     agendaSuggestionInputs,
     lockAgendaSuggestionSourcesInTx,
 } from "@/db/queries/agenda-suggestions";
 import { enqueueJob } from "@/db/queries/async-jobs";
-import {
-    agendaPoints,
-    agendaSuggestions,
-    asyncJobs,
-    meetingAgendas,
-    users,
-} from "@/db/schema";
+import { agendaPoints, agendaSuggestions, asyncJobs, users } from "@/db/schema";
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
 import { chatCompletionWithUsage } from "@/lib/ai/usage-attempt";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
@@ -288,18 +283,7 @@ export const agendaSuggestionsJobHandler: JobHandler<{
                         createdByUserId: userId,
                     })),
                 );
-                await tx
-                    .update(meetingAgendas)
-                    .set({
-                        version: sql`${meetingAgendas.version} + 1`,
-                        updatedAt: new Date(),
-                    })
-                    .where(
-                        and(
-                            eq(meetingAgendas.id, agenda.id),
-                            eq(meetingAgendas.userId, agenda.userId),
-                        ),
-                    );
+                await bumpAgendaInTx(tx, agenda);
             }
             return { count: result.length };
         });

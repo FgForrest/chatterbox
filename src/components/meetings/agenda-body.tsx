@@ -48,6 +48,7 @@ import type { TaskChange, TaskView } from "@/lib/tasks/tasks";
 import { cn } from "@/lib/utils";
 import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
+import { AgendaAttribution } from "./agenda-attribution";
 import { AgendaCalendarExport, AgendaExport } from "./agenda-export";
 import { AgendaFolderTags } from "./agenda-folder-tags";
 import { AttachRecordingDialog } from "./attach-recording-dialog";
@@ -56,6 +57,7 @@ import { OlderTasksDialog } from "./older-tasks-dialog";
 import { OutlineEditor, type PointPatch } from "./outline-editor";
 import type { MeetingDetail, MeetingPoint, MeetingTask } from "./types";
 import { useAgenda } from "./use-agenda";
+import { useAgendaText } from "./use-agenda-text";
 
 export type AgendaVariant = "meeting" | "live" | "recording";
 function elapsed(start: string | null, now: number) {
@@ -438,6 +440,22 @@ export function AgendaBody({
                                     <AgendaTaskRow
                                         key={task.id}
                                         task={task}
+                                        agendaId={detail.id}
+                                        collaborative={
+                                            detail.textProtocol === 1
+                                        }
+                                        attribution={
+                                            detail.authors.find(
+                                                (author) =>
+                                                    author.id ===
+                                                    (task.statusChangedAt &&
+                                                    (!task.agendaUpdatedAt ||
+                                                        task.statusChangedAt >
+                                                            task.agendaUpdatedAt)
+                                                        ? task.statusChangedByUserId
+                                                        : task.agendaUpdatedByUserId),
+                                            )?.name
+                                        }
                                         recording={task.recording}
                                         evidence={task.evidence}
                                         readOnly={
@@ -671,6 +689,7 @@ export function AgendaBody({
                             discussedByUserId: null,
                             note: null,
                             noteAt: null,
+                            updatedByUserId: userId ?? null,
                             summaryOutcome: null,
                             version: 0,
                             createdAt: at,
@@ -990,8 +1009,20 @@ export function AgendaBody({
                     )}
                 </output>
             )}
+            {!!detail.recordingBy?.length && (
+                <p className="text-sm text-muted-foreground">
+                    {i18n("Recording this meeting: {names}", {
+                        names: detail.recordingBy
+                            .map(
+                                (person) =>
+                                    person.name ?? i18n("Unknown author"),
+                            )
+                            .join(", "),
+                    })}
+                </p>
+            )}
             {agenda.colleagueChange && (
-                <output className="flex items-center justify-between rounded-lg border bg-muted/30 p-3 text-sm">
+                <output className="fixed right-4 bottom-4 z-50 flex max-w-md items-center justify-between rounded-lg border bg-background p-3 text-sm shadow-lg">
                     {i18n(
                         "A colleague changed the agenda. Their changes are shown below.",
                     )}
@@ -1247,6 +1278,9 @@ function AgendaTaskRow({
     changed,
     onRemove,
     onNote,
+    agendaId,
+    collaborative,
+    attribution,
     ...rowProps
 }: Omit<ComponentProps<typeof TaskRow>, "task"> & {
     task: MeetingTask;
@@ -1256,6 +1290,9 @@ function AgendaTaskRow({
     changed: boolean;
     onRemove: () => void;
     onNote: (note: string | null) => Promise<boolean>;
+    agendaId: string;
+    collaborative: boolean;
+    attribution?: string | null;
 }) {
     const i18n = useExtracted();
     const [noteOpen, setNoteOpen] = useState(false);
@@ -1291,12 +1328,24 @@ function AgendaTaskRow({
                             {i18n("Changed during the meeting")}
                         </span>
                     )}
+                    <AgendaAttribution
+                        name={attribution}
+                        at={
+                            task.statusChangedAt &&
+                            (!task.agendaUpdatedAt ||
+                                task.statusChangedAt > task.agendaUpdatedAt)
+                                ? task.statusChangedAt
+                                : task.agendaUpdatedAt
+                        }
+                    />
                 </>
             }
             extraNotes={
                 noteOpen && canEdit ? (
                     <AgendaTaskNote
                         task={task}
+                        agendaId={agendaId}
+                        collaborative={collaborative}
                         saving={pending}
                         onCancel={closeNote}
                         onSave={async (note) => {
@@ -1370,15 +1419,27 @@ function AgendaTaskNote({
     saving,
     onCancel,
     onSave,
+    agendaId,
+    collaborative,
 }: {
     task: MeetingTask;
     saving: boolean;
     onCancel: () => void;
     onSave: (note: string | null) => Promise<void>;
+    agendaId: string;
+    collaborative: boolean;
 }) {
     const i18n = useExtracted();
     const [draft, setDraft] = useState(task.agendaNote ?? "");
     const input = useRef<HTMLTextAreaElement>(null);
+    const textSync = useAgendaText(
+        input,
+        agendaId,
+        `task:${task.id}:note`,
+        collaborative,
+        task.agendaVersion ?? 0,
+        setDraft,
+    );
     useEffect(() => input.current?.focus(), []);
     return (
         <div className="space-y-2">
@@ -1394,11 +1455,17 @@ function AgendaTaskNote({
                 onChange={(event) => setDraft(event.target.value)}
             />
             <EditorActions
-                cancelLabel={i18n("Cancel")}
+                cancelLabel={textSync.enabled ? i18n("Close") : i18n("Cancel")}
                 saveLabel={i18n("Save")}
                 saving={saving}
                 onCancel={onCancel}
-                onSave={() => void onSave(draft.trim() || null)}
+                onSave={() => {
+                    if (textSync.enabled)
+                        void textSync.flush().then((saved) => {
+                            if (saved) onCancel();
+                        });
+                    else void onSave(draft.trim() || null);
+                }}
             />
         </div>
     );

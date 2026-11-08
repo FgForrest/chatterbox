@@ -20,6 +20,12 @@ export const GET = apiHandler(async (request: Request) => {
 
     return NextResponse.json({
         ...serializeRecorderServerConfig(getRecorderServerConfig()),
-        features: { agendas: true },
+        features: {
+            agendas: true,
+            nextMeeting: true,
+            agendaLive: true,
+            agendaText: 1,
+            sessionAgenda: true,
+        },
     });
 });

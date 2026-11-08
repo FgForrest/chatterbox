@@ -27,7 +27,7 @@ export interface CalendarEventCandidate {
     organizer?: { self: boolean; name?: string; email?: string };
     description?: string;
     htmlLink?: string;
-    /** Meet code read from the event list; never returned to the browser. */
+    /** Server-side matching code; recorder join URLs are built from validated codes. */
     meetingCode?: string | null;
 }
 
@@ -177,12 +177,25 @@ const EVENT_FIELDS =
 
 type GoogleEvent = NonNullable<CalendarEventResponse["items"]>[number];
 
-function upcomingCandidate(event: GoogleEvent): CalendarEventCandidate | null {
+function upcomingCandidate(
+    event: GoogleEvent,
+    participantEmail?: string,
+): CalendarEventCandidate | null {
     const start = Date.parse(event.start?.dateTime ?? "");
     const end = Date.parse(event.end?.dateTime ?? "");
     if (
         !event.id ||
         event.status === "cancelled" ||
+        !!event.recurrence?.length ||
+        (participantEmail !== undefined &&
+            !event.organizer?.self &&
+            !event.attendees?.some(
+                (attendee) =>
+                    (attendee.self ||
+                        attendee.email?.toLowerCase() ===
+                            participantEmail.toLowerCase()) &&
+                    attendee.responseStatus !== "declined",
+            )) ||
         !Number.isFinite(start) ||
         !Number.isFinite(end) ||
         end <= start ||
@@ -280,7 +293,11 @@ export async function listUpcomingCalendarEvents(
     userId: string,
     from: Date,
     to: Date,
-    options: { fetchImpl?: typeof fetch; seriesId?: string } = {},
+    options: {
+        fetchImpl?: typeof fetch;
+        seriesId?: string;
+        participantEmail?: string;
+    } = {},
 ): Promise<CalendarEventCandidate[]> {
     if (
         !Number.isFinite(from.getTime()) ||
@@ -310,7 +327,10 @@ export async function listUpcomingCalendarEvents(
         const response = await calendarRequest(userId, url, options);
         const data = (await response.json()) as CalendarEventResponse;
         for (const event of data.items ?? []) {
-            const candidate = upcomingCandidate(event);
+            const candidate = upcomingCandidate(
+                event,
+                options.participantEmail,
+            );
             if (candidate) events.push(candidate);
         }
         if (!data.nextPageToken) return events;
