@@ -171,6 +171,7 @@ The unpacked build uses a different ID from the published extension. Set
 Chatterbox against this development build.
 
 The build step creates gitignored `generated/` JavaScript and CSS using esbuild and the repository's Tailwind v4 toolchain. Run it again after changing shared components. `pack.mjs` builds these assets automatically; every dependency ships inside the ZIP. No remote code is loaded. Chrome loads the remaining extension JavaScript directly.
+Vitest also builds these assets once before each test run when any output is missing or older than its JavaScript, CSS or build dependencies. Tests work from a fresh checkout without a manual build, including sharded runs. Build failures stop the test run.
 Extension pages use ES modules. The meeting banner and shared folder combobox
 use classic scripts in Chrome's isolated world. A static ES-module wrapper
 exports the same combobox to the popup and recorder window. This avoids dynamic

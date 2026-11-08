@@ -13,6 +13,9 @@ export default defineConfig({
     },
     test: {
         environment: "node",
-        globalSetup: ["./src/tests/integration/global-setup.ts"],
+        globalSetup: [
+            "./src/tests/recorder/global-setup.ts",
+            "./src/tests/integration/global-setup.ts",
+        ],
     },
 });

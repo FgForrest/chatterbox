@@ -22,7 +22,8 @@ export async function buildRecorder() {
     const cssPath = join(here, "bundle/folders.css");
     const css = await postcss([tailwind()]).process(await readFile(cssPath, "utf8"), { from: cssPath });
     await writeFile(join(here, "generated/folders.css"), css.css);
-    await writeFile(join(here, "generated/meta.json"), JSON.stringify(result.metafile, null, 2));
+    const cssInputs = [cssPath, ...css.messages.filter((message) => message.type === "dependency").map((message) => message.file)];
+    await writeFile(join(here, "generated/meta.json"), JSON.stringify({ ...result.metafile, cssInputs }, null, 2));
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) await buildRecorder();
