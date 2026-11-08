@@ -105,10 +105,14 @@ export function useAgenda(
             void reload(controller.signal).catch(() => {
                 if (!controller.signal.aborted) setError(loadError);
             });
+        const streamEnabled = active && typeof EventSource !== "undefined";
+        let events: EventSource | null = null;
+        let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+        let reconnectDelay = 1000;
         const poll = () => {
             if (
                 active &&
-                (pollEnabled || events) &&
+                (pollEnabled || streamEnabled) &&
                 document.visibilityState === "visible"
             )
                 void reload(controller.signal, true).catch(() => {});
@@ -119,21 +123,32 @@ export function useAgenda(
                       void reload(controller.signal).catch(() => {});
               })
             : undefined;
-        const events =
-            active && typeof EventSource !== "undefined"
-                ? new EventSource(meetingUrl(id, "/events"))
-                : null;
-        const timer =
-            active && (pollEnabled || events)
-                ? setInterval(poll, pollEnabled ? 15000 : 60000)
-                : null;
-        if (events) {
+        const connect = () => {
+            if (controller.signal.aborted) return;
+            const source = new EventSource(meetingUrl(id, "/events"));
+            events = source;
             const reconcile = () => {
                 void reload(controller.signal, true).catch(() => {});
             };
-            events.onmessage = reconcile;
-            events.addEventListener("connected", reconcile);
-        }
+            source.onmessage = reconcile;
+            source.addEventListener("connected", () => {
+                reconnectDelay = 1000;
+                reconcile();
+            });
+            source.onerror = () => {
+                if (events !== source) return;
+                source.close();
+                events = null;
+                if (controller.signal.aborted) return;
+                reconnectTimer = setTimeout(connect, reconnectDelay);
+                reconnectDelay = Math.min(reconnectDelay * 2, 60000);
+            };
+        };
+        if (streamEnabled) connect();
+        const timer =
+            active && (pollEnabled || streamEnabled)
+                ? setInterval(poll, pollEnabled ? 15000 : 60000)
+                : null;
         const textSaved = (event: Event) => {
             if (event instanceof CustomEvent && event.detail === id)
                 void reload(controller.signal).catch(() => {});
@@ -145,6 +160,7 @@ export function useAgenda(
             controller.abort();
             unsubscribe?.();
             events?.close();
+            clearTimeout(reconnectTimer);
             window.removeEventListener("agenda-text-saved", textSaved);
             if (timer !== null) clearInterval(timer);
             document.removeEventListener("visibilitychange", poll);

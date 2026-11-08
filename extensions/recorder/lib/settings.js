@@ -17,6 +17,7 @@ import { t } from "./i18n.js";
  * @typedef {Object} ServerDefaults
  * @property {number} encryptedRecordingProtocol
  * @property {boolean} agendas
+ * @property {boolean} nextMeeting
  * @property {boolean} recordingFolderOverride
  * @property {string[]} autoRecordPlatforms
  * @property {number} autoStopQuietSeconds
@@ -39,6 +40,8 @@ import { t } from "./i18n.js";
  * @property {Record<string, "off"|"prompt"|"auto">} platformModes
  * @property {ServerDefaults|null} serverDefaults
  * @property {boolean} agendaReminders
+ * @property {boolean} meetingNotifications
+ * @property {number} meetingLeadMinutes
  * @property {boolean} agendaBanner
  * @property {boolean} nudgeEnabled
  * @property {number|null} autoStopQuietSeconds
@@ -64,7 +67,7 @@ export async function getSettings() {
         serverDefaults: raw[STORAGE_KEYS.serverDefaults] ?? null,
         nudgeEnabled: raw[STORAGE_KEYS.nudgeEnabled] ?? true,
         agendaReminders: raw[STORAGE_KEYS.agendaReminders] !== false,
-        meetingNotifications: raw[STORAGE_KEYS.meetingNotifications] ?? raw[STORAGE_KEYS.agendaReminders] !== false,
+        meetingNotifications: raw[STORAGE_KEYS.meetingNotifications] ?? (raw[STORAGE_KEYS.agendaReminders] !== false),
         meetingLeadMinutes: [0, 1, 2, 5, 10].includes(raw[STORAGE_KEYS.meetingLeadMinutes]) ? raw[STORAGE_KEYS.meetingLeadMinutes] : 0,
         agendaBanner: raw[STORAGE_KEYS.agendaBanner] !== false,
         autoStopQuietSeconds: raw[STORAGE_KEYS.autoStopQuietSeconds] ?? null,

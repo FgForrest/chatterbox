@@ -1,7 +1,7 @@
 ---
 title: Meeting Recorder 0.7.0 asks inside the meeting page and points at its own icon, because only an extension invocation records a tab without Chrome's dialog
 date: 2026-10-22
-updated: 2026-11-08 17:00
+updated: 2026-11-08 20:50
 status: superseded
 kind: feature
 issues: []
@@ -22,10 +22,10 @@ which records the tab with no dialog; while the banner shows, that click starts 
 recording pill then shows the time, the target folder (changeable) and Stop. Decided on 2026-10-22
 and merged into `dev` the same day as PR #249; the Chrome Web Store upload is still pending.
 
-**Superseded in part:** [Recorder live agendas](2026-11-08-recorder-live-agendas.md) changes ruling a
-for agenda tabs: the toolbar icon toggles their agenda panel, whose controls start recording.
-The keyboard shortcut and other tabs retain their recording behavior. The extension implementation
-follows the server work; all remaining rules of this record hold.
+**Superseded in part:** [Recorder live agendas](2026-11-08-recorder-live-agendas.md) changes the
+one-click recording rule on agenda tabs: the toolbar icon toggles their agenda panel, whose controls
+start recording. PR #356 includes this behavior in extension 0.9.0. The keyboard shortcut and other
+tabs retain their recording behavior; all remaining rules of this record hold.
 
 ## Why
 

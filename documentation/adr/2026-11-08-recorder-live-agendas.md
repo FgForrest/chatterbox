@@ -1,11 +1,11 @@
 ---
 title: Recorder agendas use scoped Meet join links, PostgreSQL live invalidations and encrypted CRDT text with materialized archive fields
 date: 2026-11-08
-updated: 2026-11-08 17:43
-status: partially-implemented
+updated: 2026-11-08 20:50
+status: accepted
 kind: feature
 issues: []
-prs: []
+prs: [356]
 areas: [src/lib/meetings, src/db/queries/agenda-events.ts, src/db/schema.ts, src/lib/recording-sessions, src/app/api/v1/recorder, src/components/meetings, extensions/recorder]
 supersedes: [2026-10-27-meeting-agendas, 2026-10-22-meeting-recorder-banner]
 superseded-by: []
@@ -16,8 +16,8 @@ relates: []
 
 Agendas gain live invalidations and character-level text merging in the web editor and recorder API.
 The recorder can request the caller's next primary-calendar Meet event and announce the agenda of an
-active recording. The server and web implementation is prepared for review; the extension's panel,
-notification and toolbar changes follow separately. Database migration generation is pending approval.
+active recording. PR #356 includes the server, web editor, recorder extension 0.9.0 and additive
+migration `0156_recorder_live_agendas.sql`.
 
 ## Why
 
@@ -60,10 +60,10 @@ or attends and has not declined. The recorder key belongs to that same caller. B
 validated room code, setting `authuser` to the connected Google email, never an account index or an
 unvalidated event URL. Google availability and hosted-mode boundaries remain unchanged.
 
-For agenda tabs, the extension's toolbar icon is to toggle the agenda panel; recording starts from
+For agenda tabs, the extension's toolbar icon toggles the agenda panel; recording starts from
 its controls. The keyboard shortcut retains start/stop behavior, and the separate fallback window
-remains. This is the accepted extension behavior for the follow-up implementation, not a claim that
-the server change has already altered the released extension.
+remains. The extension detects server capabilities and keeps agenda reminders and recording controls
+available on released servers. Notifications default to meeting start; users can select an earlier lead.
 
 ## Key technical details
 
@@ -103,22 +103,20 @@ the server change has already altered the released extension.
 
 ## Verification
 
-Node 22.22.2 passes 63 focused tests across ten files, covering SSE framing and revocation, fan-out,
-Calendar selection and join URLs, recorder matching, recording presence, text routes, input lifecycle,
-focused-field carets, attribution, save-then-indent versions and session agenda linking. Five input-binding
-tests include reconnect merging and IME composition. Formatting and TypeScript checks pass.
+On Node 22.22.2, `src/tests/recorder` and `src/tests/meetings` pass 1,038 tests across 69 files with
+PostgreSQL, including the eighteen `live-agendas.integration.test.ts` cases for seeding, concurrent
+merges, materialization, legacy writes, privacy, revocation, leases, session choices and notifications.
 
-The whole suite reports 10,733 passed, 258 failed and 122 skipped tests. Its failures are in fifteen
-database suites that query the ungenerated attribution schema. The fifteen new PostgreSQL cases cover
-locked first seeding, concurrent merges, materialization, legacy replacements, task privacy, revocation,
-stream leases, session choices, presence and notifications, but their fixtures cannot initialize until
-the additive migration is generated. Database behavior is not verified by the passing unit tests.
+The focused options, panel-label, stream-reconnect, web-live and polling suites pass 41 tests across
+five files. They cover released-server lead settings, distinct English/Czech navigation labels,
+bounded stream backoff with polling and cleanup, focused-field carets and save-then-indent versions.
+Formatting and TypeScript checks pass.
 
 ## Consequences & open follow-ups
 
-Both deployment modes receive additive schema changes without new environment variables or compose
-configuration. Migration generation is required before deployment. A text-merge failure rolls back the
-document and materialized column together. Older images ignore the derivative tables and new columns;
+Both deployment modes receive additive migration `0156_recorder_live_agendas.sql` without new environment
+variables or compose configuration. A text-merge failure rolls back the document and materialized column
+together. Older images ignore the derivative tables and new columns;
 their text writes cannot maintain existing Yjs history, so the next document read reconciles any
 divergence against the materialized field under the agenda lock before collaborative editing resumes.
 
@@ -129,11 +127,11 @@ sharing unavailable while using the same owner-scoped text and stream boundaries
 delays changes until polling, and a broken merge affects the attempted field rather than losing the
 stored plan. Exported materialized text remains recoverable independently of collaboration state.
 
-The extension follow-up implements icon routing, shared controls, capability detection, session linking,
-next-event notifications, recording attribution and the shared text binding. It must remove the `held`
-filter in `currentAgendas`, preserve selection while recording, and keep the agenda reachable when a
-fresh match is empty. The popup currently discards the matched current agenda during recording unless
-the recording already carries a selection. Live Google and Chrome checks remain unverified.
+Extension 0.9.0 includes icon routing, shared controls, capability detection, session linking,
+next-event notifications, recording attribution and the shared text binding. Agenda matching includes
+held meetings, preserves selection during recording and keeps the agenda reachable after an empty match.
+The maintainer's real-click Google and Chrome checks remain: account-scoped Meet joins, toolbar/panel
+recording, notification clicks and the fallback window. The Chrome Web Store release is pending.
 
 ## Related work
 
@@ -141,11 +139,12 @@ the recording already carries a selection. Live Google and Chrome checks remain 
   polling/whole-field-only collaboration. The scoped recorder join link is the exception; other
   clients receive no room code. Plan/evidence separation, author management, sharing, attachment
   consent, Calendar export and backup scope remain in force.
-- [Meeting recorder banner](2026-10-22-meeting-recorder-banner.md) is superseded only for ruling a
-  on agenda tabs: icon clicks toggle the panel there. Other tabs, keyboard recording, opt-in site
-  access, notification fallback and capture consent retain their previous rules.
+- [Meeting recorder banner](2026-10-22-meeting-recorder-banner.md) is superseded only for the
+  one-click recording rule on agenda tabs: icon clicks toggle the panel there. Other tabs, keyboard
+  recording, opt-in site access, notification fallback and capture consent retain their previous rules.
 
 ## Timeline
 
 - **2026-11-08**: maintainer accepted scoped Meet joins, agenda-panel icon behavior, PostgreSQL live
-  events and Yjs text collaboration. Server and web implementation prepared; extension follow-up remains.
+  events and Yjs text collaboration. PR #356 implements the server, web editor, extension 0.9.0 and
+  migration 0156; real-click checks and the Store release remain.
