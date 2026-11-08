@@ -40,6 +40,16 @@ describe("readTranscriptTurns", () => {
         ).toEqual([expected]);
     });
 
+    it.each([
+        [[-1, 800]],
+        [[900, 800]],
+    ])("drops negative or decreasing sentence starts: %j", (sentenceStartsMs) => {
+        const turn = { ...turns[0], text: "Hello. Again." };
+        expect(
+            readTranscriptTurns({ turns: [{ ...turn, sentenceStartsMs }] }),
+        ).toEqual([turn]);
+    });
+
     it("round-trips encrypted sentence starts", () => {
         const timed = [
             { ...turns[0], text: "Hello. Again.", sentenceStartsMs: [0, 800] },

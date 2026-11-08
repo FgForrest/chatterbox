@@ -21,14 +21,23 @@ export function sentencesOf(raw: string): { text: string; at: number }[] {
     return sentences;
 }
 
-/** Accept only finite sentence times aligned with the current sentence split. */
+/**
+ * Accept only finite, non-negative, non-decreasing sentence times aligned
+ * with the current sentence split.
+ */
 export function validSentenceStarts(
     text: string,
     value: unknown,
 ): number[] | undefined {
     return Array.isArray(value) &&
         value.length === sentencesOf(text).length &&
-        value.every((ms) => typeof ms === "number" && Number.isFinite(ms))
+        value.every(
+            (ms, index) =>
+                typeof ms === "number" &&
+                Number.isFinite(ms) &&
+                ms >= 0 &&
+                (index === 0 || ms >= value[index - 1]),
+        )
         ? value
         : undefined;
 }

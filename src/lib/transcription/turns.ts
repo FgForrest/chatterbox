@@ -281,7 +281,6 @@ export function withSentenceTiming(
         const ms =
             unit.startMs + Math.round(fraction * (unit.endMs - unit.startMs));
         previous = Math.max(previous, Math.min(turn.endMs, ms));
-        if (!Number.isFinite(previous)) return turn;
         sentenceStartsMs.push(previous);
     }
     return { ...turn, sentenceStartsMs };

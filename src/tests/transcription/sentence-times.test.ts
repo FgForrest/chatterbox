@@ -36,19 +36,21 @@ describe("sentence start timing", () => {
             sentenceStarts({ ...turn, sentenceStartsMs: undefined }),
         );
     });
-    it("clamps finite stored times and keeps them non-decreasing", () => {
+    it("clamps stored times to the turn", () => {
         expect(
             sentenceStarts({
                 ...turn,
-                sentenceStartsMs: [-1000, 200000, 0],
+                sentenceStartsMs: [0, 200000, 200000],
             }).map((s) => s.ms),
         ).toEqual([1000, 101000, 101000]);
-        expect(
-            sentenceStarts({
-                ...turn,
-                sentenceStartsMs: [1000, 71000, 2000],
-            }).map((s) => s.ms),
-        ).toEqual([1000, 71000, 71000]);
+    });
+    it.each([
+        [[-1000, 200000, 200000]],
+        [[1000, 71000, 2000]],
+    ])("interpolates instead of trusting negative or decreasing stored times: %j", (sentenceStartsMs) => {
+        expect(sentenceStarts({ ...turn, sentenceStartsMs })).toEqual(
+            sentenceStarts({ ...turn, sentenceStartsMs: undefined }),
+        );
     });
     it("interpolates only within a coarse segment", () => {
         const turns = turnsFromLabelledSegments([
