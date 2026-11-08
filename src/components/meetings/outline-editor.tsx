@@ -167,7 +167,8 @@ function PointField({
                 }}
                 onBlur={() => {
                     focused.current = false;
-                    if (!draft.trim()) setDraft(point.text);
+                    if (!textSync.enabled && !draft.trim())
+                        setDraft(point.text);
                     else save();
                 }}
                 onKeyDown={(event) => {

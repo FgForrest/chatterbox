@@ -16,14 +16,16 @@ const disposals: (() => void)[] = [];
 afterEach(() => {
     for (const dispose of disposals.splice(0)) dispose();
     document.body.replaceChildren();
+    vi.clearAllTimers();
+    vi.useRealTimers();
 });
 
-function setup() {
+function setup(field = "point:p:text") {
     const server = createAgendaTextDoc("Planning");
     disposals.push(() => server.destroy());
     let version = 0;
     const state = (): AgendaTextState => ({
-        field: "point:p:text",
+        field,
         update: agendaTextBase64(Y.encodeStateAsUpdate(server)),
         stateVector: agendaTextBase64(Y.encodeStateVector(server)),
         version,
@@ -54,7 +56,7 @@ function setup() {
     const onError = vi.fn();
     const binding = bindAgendaTextInput(
         input,
-        "point:p:text",
+        field,
         { get, send },
         { onError, debounceMs: 10000 },
     );
@@ -63,6 +65,145 @@ function setup() {
 }
 
 describe("framework-free agenda text input binding", () => {
+    it.each([
+        "",
+        " \t ",
+    ])("keeps a required blank %j local through saves and resync, then restores the current document on blur", async (blank) => {
+        const { input, server, binding, send, onError } = setup();
+        input.focus();
+        await vi.waitFor(() => expect(input.readOnly).toBe(false));
+        input.value = "Plan";
+        input.dispatchEvent(new Event("input"));
+        input.value = blank;
+        input.dispatchEvent(new Event("input"));
+        await binding.flush();
+        expect(server.getText(AGENDA_TEXT_NAME).toString()).toBe("Plan");
+        expect(input.value).toBe(blank);
+        server.getText(AGENDA_TEXT_NAME).insert(0, "Remote ");
+        await binding.resync();
+        expect(input.value).toBe(blank);
+        input.blur();
+        expect(input.value).toBe("Remote Plan");
+        expect(send).toHaveBeenCalledOnce();
+        expect(onError).not.toHaveBeenCalled();
+    });
+    it("lets a required field be replaced after clearing without sending a blank document", async () => {
+        const { input, binding, send, server } = setup();
+        input.focus();
+        await vi.waitFor(() => expect(input.readOnly).toBe(false));
+        input.value = "";
+        input.dispatchEvent(new Event("input"));
+        await binding.flush();
+        expect(send).not.toHaveBeenCalled();
+        input.value = "New point";
+        input.dispatchEvent(new Event("input"));
+        expect(await binding.flush()).toBe(true);
+        expect(server.getText(AGENDA_TEXT_NAME).toString()).toBe("New point");
+    });
+    it.each([
+        "point:p:note",
+        "task:t:note",
+    ])("saves an empty optional %s", async (field) => {
+        const { input, binding, send, server } = setup(field);
+        input.focus();
+        await vi.waitFor(() => expect(input.readOnly).toBe(false));
+        input.value = "";
+        input.dispatchEvent(new Event("input"));
+        expect(await binding.flush()).toBe(true);
+        expect(send).toHaveBeenCalledOnce();
+        expect(server.getText(AGENDA_TEXT_NAME).toString()).toBe("");
+    });
+    it.each([
+        400, 401, 403, 404, 422,
+    ])("stops retrying permanent HTTP %s until a new edit, including polling resyncs and blur", async (status) => {
+        const { input, binding, send, onError } = setup();
+        input.focus();
+        await vi.waitFor(() => expect(input.readOnly).toBe(false));
+        vi.useFakeTimers();
+        input.value = "Planning local";
+        input.dispatchEvent(new Event("input"));
+        const save = send.getMockImplementation();
+        send.mockRejectedValue(Object.assign(new Error("Refused"), { status }));
+        expect(await binding.flush()).toBe(false);
+        await vi.advanceTimersByTimeAsync(60000);
+        await binding.resync();
+        input.blur();
+        await binding.flush();
+        expect(send).toHaveBeenCalledOnce();
+        expect(onError).toHaveBeenCalledOnce();
+        send.mockReset();
+        if (save) send.mockImplementation(save);
+        input.value = "Planning corrected";
+        input.dispatchEvent(new Event("input"));
+        expect(await binding.flush()).toBe(true);
+        expect(send).toHaveBeenCalledOnce();
+    });
+    it("resyncs once on HTTP 409 and retries the merged document immediately", async () => {
+        const { input, binding, send, get, server } = setup();
+        input.focus();
+        await vi.waitFor(() => expect(input.readOnly).toBe(false));
+        input.value = "Planning local";
+        input.dispatchEvent(new Event("input"));
+        server.getText(AGENDA_TEXT_NAME).insert(0, "Remote ");
+        send.mockRejectedValueOnce(
+            Object.assign(new Error("Conflict"), { status: 409 }),
+        );
+        expect(await binding.flush()).toBe(true);
+        expect(get).toHaveBeenCalledTimes(2);
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(server.getText(AGENDA_TEXT_NAME).toString()).toBe(
+            "Remote Planning local",
+        );
+    });
+    it("stops retrying HTTP 409 after one resync attempt, even when polled", async () => {
+        const { input, binding, send, get, onError } = setup();
+        input.focus();
+        await vi.waitFor(() => expect(input.readOnly).toBe(false));
+        vi.useFakeTimers();
+        input.value = "Planning local";
+        input.dispatchEvent(new Event("input"));
+        send.mockRejectedValue(
+            Object.assign(new Error("Conflict"), { status: 409 }),
+        );
+        expect(await binding.flush()).toBe(false);
+        expect(get).toHaveBeenCalledTimes(2);
+        await vi.advanceTimersByTimeAsync(60000);
+        await binding.resync();
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(onError).toHaveBeenCalledOnce();
+    });
+    it.each([
+        undefined,
+        429,
+        500,
+        502,
+        503,
+        599,
+    ])("backs off and retries transient status %s, resetting the delay after success", async (status) => {
+        const { input, binding, send } = setup();
+        input.focus();
+        await vi.waitFor(() => expect(input.readOnly).toBe(false));
+        vi.useFakeTimers();
+        input.value = "Planning local";
+        input.dispatchEvent(new Event("input"));
+        const error = Object.assign(new Error("Temporary"), { status });
+        send.mockRejectedValueOnce(error).mockRejectedValueOnce(error);
+        expect(await binding.flush()).toBe(false);
+        await vi.advanceTimersByTimeAsync(1999);
+        expect(send).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(send).toHaveBeenCalledTimes(2);
+        await vi.advanceTimersByTimeAsync(3999);
+        expect(send).toHaveBeenCalledTimes(2);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(send).toHaveBeenCalledTimes(3);
+        input.value = "Planning again";
+        input.dispatchEvent(new Event("input"));
+        send.mockRejectedValueOnce(error);
+        expect(await binding.flush()).toBe(false);
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(send).toHaveBeenCalledTimes(5);
+    });
     it("does not let an obsolete initialization change the read-only state of a replacement binding", async () => {
         const { input, get, state, binding } = setup();
         let finish: ((state: AgendaTextState) => void) | undefined;

@@ -3,6 +3,7 @@ import { agendaPanelKey } from "../../../extensions/recorder/lib/agendas.js";
 import {
     completeSession,
     getSession,
+    setSessionAgenda,
 } from "../../../extensions/recorder/lib/api.js";
 import {
     deleteLocalSession,
@@ -1100,6 +1101,90 @@ describe("banner selection regressions", () => {
 });
 
 describe("0.9 agenda toolbar and session linking", () => {
+    it.each([
+        "panel",
+        "fallback",
+    ])("limits first-edit linking to the recording tab while allowing explicit switch and unlink from another %s", async (surface) => {
+        h.local.serverDefaults.agendas = true;
+        h.local.serverDefaults.sessionAgenda = true;
+        h.local.agendaBanner = false;
+        h.local.autoModeAcknowledgedAt = "now";
+        await start();
+        h.tabs.set(8, {
+            ...meeting,
+            id: 8,
+            url: "https://meet.google.com/xyz-uvwx-rst",
+        });
+        const panel = (id) => ({
+            id: "test",
+            url: `chrome-extension://test/agenda/agenda.html${surface === "panel" ? `?tab=${id}` : ""}`,
+        });
+        h.request.mockImplementation(async () => ({
+            json: async () => ({
+                id: "agenda-two",
+                title: "Another review",
+                own: true,
+                permissions: { edit: true },
+            }),
+        }));
+        expect(h.session.recordingState.agendaId).toBeNull();
+        expect(
+            await message(
+                {
+                    type: "edit-agenda",
+                    tabId: 8,
+                    agendaId: "agenda-two",
+                    sessionId: "session-1",
+                },
+                panel(8),
+            ),
+        ).toMatchObject({ ok: true });
+        expect(h.session.recordingState.agendaId).toBeNull();
+        expect(h.metas.get("session-1").agendaId).toBeNull();
+        expect(setSessionAgenda).not.toHaveBeenCalled();
+        expect(
+            await message(
+                {
+                    type: "edit-agenda",
+                    tabId: 7,
+                    agendaId: "agenda-two",
+                    sessionId: "session-1",
+                },
+                panel(7),
+            ),
+        ).toMatchObject({ ok: true });
+        expect(h.session.recordingState.agendaId).toBe("agenda-two");
+        expect(setSessionAgenda).toHaveBeenLastCalledWith(
+            expect.anything(),
+            "session-1",
+            "agenda-two",
+        );
+        expect(
+            await message(
+                {
+                    type: "select-agenda",
+                    tabId: 8,
+                    agendaId: null,
+                    sessionId: "session-1",
+                },
+                panel(8),
+            ),
+        ).toMatchObject({ ok: true });
+        expect(h.session.recordingState.agendaId).toBeNull();
+        expect(
+            await message(
+                {
+                    type: "select-agenda",
+                    tabId: 8,
+                    agendaId: "agenda-two",
+                    sessionId: "session-1",
+                },
+                panel(8),
+            ),
+        ).toMatchObject({ ok: true });
+        expect(h.session.recordingState.agendaId).toBe("agenda-two");
+        expect(h.metas.get("session-1").agendaId).toBe("agenda-two");
+    });
     it.each([
         "prompt",
         "auto",

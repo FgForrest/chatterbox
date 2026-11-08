@@ -70,6 +70,15 @@ The privacy policy, store listing, permission explanations, and in-extension con
 - The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
 
+## What changed in 0.9.2
+
+- Clearing an agenda point's title no longer sends an empty text; leaving the field restores the saved title.
+  Refused saves stop retrying; network and server errors retry with backoff.
+- The toolbar icon still closes an open agenda panel after Chrome restarts the extension's service worker.
+- Ticking or editing an agenda in a panel on a tab that is not being recorded no longer selects that agenda for the
+  running recording; the explicit switch and unlink actions still work from any panel.
+- No permission, data-use or server-contract change against 0.9.1.
+
 ## What changed in 0.9.1
 
 - Options show the meeting notification switch and lead time whenever agenda reminders or the Calendar

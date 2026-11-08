@@ -47,9 +47,22 @@ export function bindAgendaTextInput(
     let acknowledged = 0;
     let disposed = false;
     let composing = false;
+    let localBlank = false;
+    let refused = false;
+    let retryDelay = 2000;
     let deferred: AgendaTextState | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const originalReadOnly = input.readOnly;
+    const required = /^point:[^:]+:text$/u.test(field);
+
+    function errorStatus(error: unknown) {
+        return error &&
+            typeof error === "object" &&
+            "status" in error &&
+            typeof error.status === "number"
+            ? error.status
+            : undefined;
+    }
 
     function renderRemote(state: AgendaTextState) {
         if (composing) {
@@ -85,6 +98,8 @@ export function bindAgendaTextInput(
                 state.materializedVersion,
             );
         initialized = true;
+        if (localBlank && focused) return;
+        localBlank = false;
         input.value = text.toString();
         options.onValue?.(input.value);
         if (start && end) {
@@ -134,29 +149,50 @@ export function bindAgendaTextInput(
                 return false;
             }
         }
+        if (refused) return false;
         if (!initialized || edits === acknowledged || composing) return true;
         if (sending) {
             const saved = await sending;
             return saved && edits !== acknowledged ? flush() : saved;
         }
         const sentEdits = edits;
-        sending = transport
-            .send({
+        const send = () =>
+            transport.send({
                 field,
                 update: agendaTextBase64(
                     Y.encodeStateAsUpdate(doc, serverVector),
                 ),
                 stateVector: agendaTextBase64(Y.encodeStateVector(doc)),
+            });
+        sending = send()
+            .catch(async (error: unknown) => {
+                if (errorStatus(error) !== 409 || disposed) throw error;
+                const state = await transport.get(field);
+                if (disposed) throw error;
+                renderRemote(state);
+                return send();
             })
             .then((state) => {
                 if (!disposed) renderRemote(state);
                 acknowledged = sentEdits;
+                retryDelay = 2000;
                 options.onSaved?.();
                 return true;
             })
-            .catch(() => {
+            .catch((error: unknown) => {
                 options.onError?.();
-                schedule(2000);
+                const status = errorStatus(error);
+                if (
+                    status === undefined ||
+                    status === 429 ||
+                    (status >= 500 && status < 600)
+                ) {
+                    schedule(retryDelay);
+                    retryDelay = Math.min(retryDelay * 2, 30000);
+                } else {
+                    refused = true;
+                    clearTimeout(timer);
+                }
                 return false;
             })
             .finally(() => {
@@ -169,7 +205,11 @@ export function bindAgendaTextInput(
 
     function localInput() {
         if (!initialized || composing || disposed) return;
-        editAgendaText(text, input.value.replace(/[\r\n]/gu, " "));
+        const value = input.value.replace(/[\r\n]/gu, " ");
+        localBlank = required && !value.trim();
+        if (localBlank) return;
+        refused = false;
+        editAgendaText(text, value);
         edits++;
         schedule();
     }
@@ -179,6 +219,11 @@ export function bindAgendaTextInput(
             .catch(() => {});
     }
     function blur() {
+        if (localBlank) {
+            localBlank = false;
+            input.value = text.toString();
+            options.onValue?.(input.value);
+        }
         void flush();
     }
     function compositionStart() {

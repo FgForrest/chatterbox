@@ -2,6 +2,126 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { expect, it, vi } from "vitest";
 
+function panelWorker(stored, hydration = Promise.resolve({ ...stored })) {
+    const source = readFileSync(
+        "extensions/recorder/service-worker.js",
+        "utf8",
+    );
+    const init = source.slice(
+        source.indexOf("const agendaTabs ="),
+        source.indexOf("async function routeAgendaTab"),
+    );
+    const action = source.slice(
+        source.indexOf("chrome.action.onClicked.addListener"),
+        source.indexOf("chrome.commands.onCommand.addListener"),
+    );
+    const listeners = {};
+    const event = (name) => ({
+        addListener: (fn) => {
+            listeners[name] = fn;
+        },
+    });
+    const open = vi.fn(async () => "panel:7");
+    const close = vi.fn(async () => {});
+    const capture = vi.fn();
+    const ctx = {
+        URL,
+        chrome: {
+            storage: {
+                session: {
+                    get: () => hydration,
+                    set: vi.fn(async (patch) => Object.assign(stored, patch)),
+                },
+            },
+            runtime: {
+                id: "test",
+                getURL: (path) => `chrome-extension://test/${path}`,
+                onConnect: event("connect"),
+            },
+            sidePanel: {
+                setOptions: vi.fn(async () => {}),
+                open,
+                close,
+                onOpened: event("opened"),
+                onClosed: event("closed"),
+            },
+            action: { onClicked: event("click") },
+        },
+        openAgendaPanelNow: open,
+        openAgendaPanel: open,
+        startFromInvocation: capture,
+        agendaPanelKey: (id) => `panel:${id}`,
+    };
+    vm.runInNewContext(init + action, ctx);
+    return { listeners, open, close, capture };
+}
+
+it.each([
+    false,
+    true,
+])("closes the previously open panel on the first click after a worker restart (before hydration=%s)", async (cold) => {
+    const stored = {
+        "agenda-route:7": { agendaIds: ["agenda"], tabId: 7 },
+        "agenda-open:7": true,
+    };
+    let deliver;
+    const hydration = new Promise((resolve) => {
+        deliver = resolve;
+    });
+    const h = panelWorker(stored, hydration);
+    if (!cold) {
+        deliver({ ...stored });
+        await hydration;
+    }
+    h.listeners.click({ id: 7 });
+    if (cold) {
+        expect(h.open).toHaveBeenCalledOnce();
+        deliver({ ...stored });
+    } else expect(h.open).not.toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.close).toHaveBeenCalledWith({ tabId: 7 });
+    expect(stored["agenda-open:7"]).toBe(false);
+    expect(h.capture).not.toHaveBeenCalled();
+});
+
+it("persists panel port and native open/close events, preserving a disconnect that precedes hydration", async () => {
+    const stored = { "agenda-open:7": true };
+    let deliver;
+    const hydration = new Promise((resolve) => {
+        deliver = resolve;
+    });
+    const h = panelWorker(stored, hydration);
+    let disconnect;
+    h.listeners.connect({
+        name: "agenda-panel",
+        sender: {
+            id: "test",
+            url: "chrome-extension://test/agenda/agenda.html?tab=7",
+        },
+        onDisconnect: {
+            addListener: (fn) => {
+                disconnect = fn;
+            },
+        },
+    });
+    expect(stored["agenda-open:7"]).toBe(true);
+    disconnect();
+    expect(stored["agenda-open:7"]).toBe(false);
+    deliver({
+        "agenda-open:7": true,
+        "agenda-route:7": { agendaIds: ["agenda"], tabId: 7 },
+    });
+    await hydration;
+    h.listeners.click({ id: 7 });
+    expect(h.open).toHaveBeenCalledOnce();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(stored["agenda-open:7"]).toBe(true);
+    h.listeners.closed({ tabId: 7 });
+    expect(stored["agenda-open:7"]).toBe(false);
+    h.listeners.opened({ tabId: 7 });
+    expect(stored["agenda-open:7"]).toBe(true);
+});
+
 it.each([
     "idle",
     "recording",

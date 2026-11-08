@@ -23,7 +23,7 @@ import {
     clearAgendas,
     currentAgendas,
     matchAgendas,
-    openAgendaPanel,
+    openAgendaPanel as openAgendaPanelNow,
     refreshAgendas,
     remindAgenda,
     scheduleAgendaReminders,
@@ -104,26 +104,50 @@ import { NEXT_REFRESH, NEXT_START, NEXT_END, NEXT_BADGE, NEXT_NOTICE, meetingRoo
 
 const agendaTabs = new Map();
 const openPanels = new Set();
+const panelChanges = new Set();
 let agendaRoutesReady = false;
 const agendaRoutesLoaded = chrome.storage.session.get(null).then((stored) => {
-    for (const [key, value] of Object.entries(stored)) if (key.startsWith("agenda-route:")) agendaTabs.set(Number(key.slice(13)), value);
+    for (const [key, value] of Object.entries(stored)) {
+        if (key.startsWith("agenda-route:")) agendaTabs.set(Number(key.slice(13)), value);
+        if (key.startsWith("agenda-open:")) {
+            const id = Number(key.slice(12));
+            if (value === true && !panelChanges.has(id)) openPanels.add(id);
+        }
+    }
     const state = stored.recordingState;
     if (state?.tabId != null && state.agendaId && state.state !== "idle") agendaTabs.set(state.tabId, { agendaIds: [state.agendaId], choose: false, tabId: state.tabId });
     agendaRoutesReady = true;
-    return true;
+    panelChanges.clear();
+    return stored;
 }).catch(() => false);
+
+function setAgendaPanelOpen(tabId, opened) {
+    if (!agendaRoutesReady) panelChanges.add(tabId);
+    if (opened) openPanels.add(tabId);
+    else openPanels.delete(tabId);
+    return chrome.storage.session.set({ [`agenda-open:${tabId}`]: opened });
+}
+
+function openAgendaPanel(context = {}, agendaIds = []) {
+    const opened = openAgendaPanelNow(context, agendaIds);
+    return opened.then(async (key) => {
+        if (context.tabId != null && key === agendaPanelKey(context.tabId)) await setAgendaPanelOpen(context.tabId, true);
+        return key;
+    });
+}
+
 chrome.runtime.onConnect?.addListener((port) => {
     if (port.name !== "agenda-panel" || port.sender?.id !== chrome.runtime.id || port.sender.url?.split("?")[0] !== chrome.runtime.getURL("agenda/agenda.html")) return;
     const id = Number(new URL(port.sender.url).searchParams.get("tab"));
     if (!Number.isInteger(id) || !new URL(port.sender.url).searchParams.has("tab")) return;
-    openPanels.add(id);
-    port.onDisconnect.addListener(() => openPanels.delete(id));
+    void setAgendaPanelOpen(id, true).catch(() => {});
+    port.onDisconnect.addListener(() => { void setAgendaPanelOpen(id, false).catch(() => {}); });
 });
-chrome.sidePanel?.onOpened?.addListener(({ tabId }) => { if (tabId != null) openPanels.add(tabId); });
-chrome.sidePanel?.onClosed?.addListener(({ tabId }) => { if (tabId != null) openPanels.delete(tabId); });
+chrome.sidePanel?.onOpened?.addListener(({ tabId }) => { if (tabId != null) void setAgendaPanelOpen(tabId, true).catch(() => {}); });
+chrome.sidePanel?.onClosed?.addListener(({ tabId }) => { if (tabId != null) void setAgendaPanelOpen(tabId, false).catch(() => {}); });
 
 async function closeAgendaPanel(tabId) {
-    openPanels.delete(tabId);
+    await setAgendaPanelOpen(tabId, false);
     if (chrome.sidePanel.close) await chrome.sidePanel.close({ tabId });
     else {
         await chrome.sidePanel.setOptions({ tabId, enabled: false });
@@ -1182,7 +1206,7 @@ async function handleAgendaMessageNow(message, sender) {
     const state = await getState();
     if (message.sessionId) {
         if (state.sessionId !== message.sessionId || !canChooseRecordingAgenda(state)) throw new Error(t("agendaFailed"));
-        if (message.type === "edit-agenda" && !shouldLinkEditedAgenda(state, agenda)) return { ok: true, agenda };
+        if (message.type === "edit-agenda" && (message.tabId !== state.tabId || !shouldLinkEditedAgenda(state, agenda))) return { ok: true, agenda };
         if (settings.serverDefaults?.sessionAgenda === true && state.state === STATE.recording && !state.stopped) {
             await setSessionAgenda({ serverUrl: settings.serverUrl, apiKey: await readToken() }, state.sessionId, agenda?.id ?? null);
         }
@@ -1735,8 +1759,9 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 });
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
+    await agendaRoutesLoaded;
     agendaTabs.delete(tabId); openPanels.delete(tabId);
-    await chrome.storage.session.remove([agendaPanelKey(tabId), `agenda-match:${tabId}`, `agenda-route:${tabId}`]);
+    await chrome.storage.session.remove([agendaPanelKey(tabId), `agenda-match:${tabId}`, `agenda-route:${tabId}`, `agenda-open:${tabId}`]);
     void updateNextMeetingBadge().catch(() => {});
     await sendMeetingBanner(tabId, { view: "hidden" });
     await disarm(tabId);
@@ -1845,7 +1870,11 @@ chrome.action.onClicked.addListener((tab) => {
             if (!loaded) { if (shown) await closeAgendaPanel(tab.id); return; }
             const restored = agendaTabs.get(tab.id);
             if (restored) {
-                if (shown) await chrome.storage.session.set({ [agendaPanelKey(tab.id)]: restored });
+                if (loaded[`agenda-open:${tab.id}`] === true) await closeAgendaPanel(tab.id);
+                else if (shown) {
+                    await setAgendaPanelOpen(tab.id, true);
+                    await chrome.storage.session.set({ [agendaPanelKey(tab.id)]: restored });
+                }
                 else await openAgendaPanel({ tabId: tab.id }, restored.agendaIds);
             } else {
                 await closeAgendaPanel(tab.id).catch(() => {});
