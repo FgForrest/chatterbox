@@ -757,6 +757,19 @@ describe("shared recording cut mode", () => {
         button.focus();
         expect(document.activeElement).toBe(button);
     });
+    it("describes each gap action with its paragraph time", () => {
+        view();
+        fireEvent.click(
+            within(screen.getByTestId("transcript")).getByRole("button"),
+        );
+        for (const name of ["Start here", "End here"]) {
+            const button = within(boundary(3000)).getByRole("button", { name });
+            const description = document.getElementById(
+                button.getAttribute("aria-describedby") ?? "",
+            );
+            expect(description?.textContent).toBe("00:03");
+        }
+    });
     it("accepts hour clocks and snaps to stored sentence times inside a paragraph", () => {
         const longTurn = {
             speaker: "S1",

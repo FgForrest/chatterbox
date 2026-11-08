@@ -779,6 +779,7 @@ export function CutParagraphBoundary({
 }) {
     const cut = useRecordingCut();
     const i18n = useExtracted();
+    const timeId = useId();
     if (!cut?.owner || !cut.open) return null;
     return (
         <div
@@ -800,11 +801,15 @@ export function CutParagraphBoundary({
                     <span className="pointer-events-none flex-1 border-t border-dashed border-primary" />
                     <span className="pointer-events-none inline-flex h-4 shrink-0 items-center gap-1 rounded-full border border-primary/40 bg-background px-2 text-xs leading-none shadow-sm group-hover/cut:pointer-events-auto group-focus-within/cut:pointer-events-auto">
                         <Scissors className="size-3 text-primary" />
-                        <span className="font-mono tabular-nums text-muted-foreground">
+                        <span
+                            id={timeId}
+                            className="font-mono tabular-nums text-muted-foreground"
+                        >
                             {formatClock(ms)}
                         </span>
                         <button
                             type="button"
+                            aria-describedby={timeId}
                             className="h-full rounded-full px-2 leading-none hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             disabled={ms >= cut.range.endMs}
                             onClick={() => cut.setEdge("start", ms)}
@@ -816,6 +821,7 @@ export function CutParagraphBoundary({
                         </button>
                         <button
                             type="button"
+                            aria-describedby={timeId}
                             className="h-full rounded-full px-2 leading-none hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             disabled={ms <= cut.range.startMs}
                             onClick={() => cut.setEdge("end", ms)}
