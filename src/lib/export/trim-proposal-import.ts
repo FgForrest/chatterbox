@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { readTrimSnapshot, type TrimTx } from "@/db/queries/trim-proposal";
+import { readTrimSnapshot } from "@/db/queries/trim-proposal";
+import type { TrimTx } from "@/db/queries/trim-state";
 import { itemProcessing, recordings } from "@/db/schema";
 import { encryptJsonField } from "@/lib/encryption/fields";
 import {
@@ -13,6 +14,7 @@ import type { PhaseRecord } from "@/lib/pipeline/types";
 import {
     type StoredTrimProposal,
     trimAnchors,
+    trimAuditMatches,
     validateTrimOutput,
 } from "@/lib/recordings/trim-proposal";
 import { preferredTranscript } from "@/lib/transcription/preferred-source";
@@ -73,18 +75,12 @@ export async function importTrimProposalInTx(
             preferred &&
             profileRevisionId &&
             Date.parse(source.deadline) > now.getTime() &&
-            source.audio.fileMd5 === snapshot.recording.fileMd5 &&
-            source.audio.duration === snapshot.recording.duration &&
-            source.audio.cutAt ===
-                (snapshot.recording.cutAt?.toISOString() ?? null) &&
+            trimAuditMatches(snapshot.recording, snapshot.transcripts, {
+                audio: source.audio,
+                revisions,
+            }) &&
             preferred.revision === source.transcript.revision &&
-            preferred.source === source.transcript.source &&
-            revisions.length === snapshot.transcripts.length &&
-            snapshot.transcripts.every((t) =>
-                revisions.some(
-                    (r) => r.id === t.id && r.revision === t.revision,
-                ),
-            )
+            preferred.source === source.transcript.source
         ) {
             const raw = readTranscriptTurns(preferred);
             if (raw) {

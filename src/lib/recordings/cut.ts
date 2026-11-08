@@ -12,6 +12,7 @@ import {
 import { decryptJsonField, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { nudge } from "@/lib/jobs/nudge";
+import { RECORDING_CUT_KIND } from "@/lib/recordings/cut-kind";
 import {
     type CutRange,
     cutTranscript,
@@ -22,7 +23,7 @@ import { recordingJobSubject } from "@/lib/sharing/view";
 import { sharingOrgUserId } from "@/lib/sharing/writer";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 
-export const RECORDING_CUT_KIND = "recording.cut";
+export { RECORDING_CUT_KIND } from "@/lib/recordings/cut-kind";
 export const cutRequestSchema = z.object({
     trimProposalId: z.string().min(1).optional(),
     startMs: z.number().int().nonnegative(),

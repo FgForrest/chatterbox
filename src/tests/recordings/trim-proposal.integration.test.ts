@@ -128,11 +128,8 @@ import {
 } from "@/db/queries/async-jobs";
 import { reconcilePipelineSteps } from "@/db/queries/pipeline-reconciler";
 import { reapAudioForRecording } from "@/db/queries/retention";
-import {
-    lockTrimRecording,
-    readOwnerTrimProposal,
-    resolveTrimInTx,
-} from "@/db/queries/trim-proposal";
+import { readOwnerTrimProposal } from "@/db/queries/trim-proposal";
+import { lockTrimRecording, resolveTrimInTx } from "@/db/queries/trim-state";
 import {
     decryptJsonField,
     encryptJsonField,

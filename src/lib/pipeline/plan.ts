@@ -1281,7 +1281,7 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
             const settled =
                 trim &&
                 ["done", "skipped", "failed"].includes(trim.state) &&
-                !["content_changed"].includes(trim.reason ?? "") &&
+                trim.reason !== "content_changed" &&
                 sameInput(trim, trimInput) &&
                 (evaluationGeneration === undefined ||
                     trim.generation >= evaluationGeneration ||

@@ -12,8 +12,30 @@ import { Button } from "@/components/ui/button";
 import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
-import { trimRange } from "@/lib/recordings/trim-proposal";
+import {
+    type StoredTrimProposal,
+    trimRange,
+} from "@/lib/recordings/trim-proposal";
 import { formatClock } from "@/lib/topics/timeline";
+
+const SILENT_SKIP_REASONS = new Set([
+    "profile_off",
+    "manual_only",
+    "gone",
+    "outdated",
+    "no_provider",
+    "unsupported_cut",
+]);
+
+function showsTrimNotice(processing: ItemProcessingPresentation): boolean {
+    const phase = processing.phases.trim;
+    return Boolean(
+        processing.trimProposal ||
+            (phase &&
+                ["failed", "skipped"].includes(phase.state) &&
+                !SILENT_SKIP_REASONS.has(phase.reason ?? "")),
+    );
+}
 
 export function TrimProposalCard({
     processing,
@@ -37,15 +59,7 @@ export function TrimProposalCard({
             cut.cancel();
         previousIdentity.current = identity;
     }, [cut, identity]);
-    if (
-        !cut?.owner ||
-        !processing ||
-        (!processing.trimProposal &&
-            !["failed", "skipped"].includes(
-                processing.phases.trim?.state ?? "",
-            ))
-    )
-        return null;
+    if (!cut?.owner || !processing || !showsTrimNotice(processing)) return null;
     return <TrimProposalBody processing={processing} userId={userId} />;
 }
 
@@ -56,25 +70,53 @@ function TrimProposalBody({
     processing: ItemProcessingPresentation;
     userId?: string;
 }) {
-    const proposal = processing?.trimProposal;
+    const proposal = processing.trimProposal;
     const cut = useRecordingCut();
     const i18n = useExtracted();
     const format = useFormatter();
     const timeZone = useTimeZone() ?? "UTC";
     const product = useProductName();
+    // The message extractor only sees i18n calls inside the component that owns useExtracted.
+    const skipMessage = (reason: string | undefined) => {
+        switch (reason) {
+            case "context_limit":
+                return i18n(
+                    "Trim proposal skipped: the whole transcript exceeds the model context or input limit. Choose a longer-context provider and process again.",
+                );
+            case "invalid_output":
+                return i18n(
+                    "Trim proposal skipped: the AI response did not describe safe sentence boundaries. Processing continues without a cut.",
+                );
+            default:
+                return i18n(
+                    "Trim proposal could not run. Processing continues without a cut. Check the trim provider before processing again.",
+                );
+        }
+    };
+    const proposalDescription = (edges: StoredTrimProposal) => {
+        if (edges.start && edges.end)
+            return i18n(
+                "The beginning and end probably contain conversation unrelated to the meeting. You can trim it before Learn and summary processing starts. The proposed parts are marked in the transcript.",
+            );
+        if (edges.start)
+            return i18n(
+                "The beginning probably contains conversation unrelated to the meeting. You can trim it before Learn and summary processing starts. The proposed part is marked in the transcript.",
+            );
+        return i18n(
+            "The end probably contains conversation unrelated to the meeting. You can trim it before Learn and summary processing starts. The proposed part is marked in the transcript.",
+        );
+    };
     const [selected, setSelected] = useState({ start: true, end: true });
     const [dismissed, setDismissed] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
-    const identity = proposal ? `${processing?.itemId}:${proposal.id}` : "";
+    const identity = proposal ? `${processing.itemId}:${proposal.id}` : "";
     const [shown, setShown] = useState(identity);
     if (shown !== identity) {
         setShown(identity);
         setSelected({ start: true, end: true });
         setDismissed(null);
     }
-    const visible = Boolean(
-        cut?.owner && proposal && proposal.id !== dismissed,
-    );
+    const visible = Boolean(proposal && proposal.id !== dismissed);
     const setPreview = cut?.setProposalPreview;
     useEffect(() => {
         setPreview?.(
@@ -99,54 +141,13 @@ function TrimProposalBody({
             setSaving(false);
         }
     };
-    function skipMessage(reason: string | undefined) {
-        switch (reason) {
-            case "context_limit":
-                return i18n(
-                    "Trim proposal skipped: the whole transcript exceeds the model context or input limit. Choose a longer-context provider and process again.",
-                );
-            case "invalid_output":
-                return i18n(
-                    "Trim proposal skipped: the AI response did not describe safe sentence boundaries. Processing continues without a cut.",
-                );
-            default:
-                return i18n(
-                    "Trim proposal could not run. Processing continues without a cut. Check the trim provider before processing again.",
-                );
-        }
-    }
-    function proposalDescription() {
-        if (proposal?.start && proposal.end)
-            return i18n(
-                "The beginning and end probably contain conversation unrelated to the meeting. You can trim it before Learn and summary processing starts. The proposed parts are marked in the transcript.",
-            );
-        if (proposal?.start)
-            return i18n(
-                "The beginning probably contains conversation unrelated to the meeting. You can trim it before Learn and summary processing starts. The proposed part is marked in the transcript.",
-            );
-        return i18n(
-            "The end probably contains conversation unrelated to the meeting. You can trim it before Learn and summary processing starts. The proposed part is marked in the transcript.",
-        );
-    }
-    if (!cut?.owner) return null;
+    if (!cut) return null;
     if (!proposal) {
-        const phase = processing?.phases.trim;
-        if (
-            !phase ||
-            !["skipped", "failed"].includes(phase.state) ||
-            [
-                "profile_off",
-                "manual_only",
-                "gone",
-                "outdated",
-                "no_provider",
-                "unsupported_cut",
-            ].includes(phase.reason ?? "")
-        )
-            return null;
+        const phase = processing.phases.trim;
+        if (!showsTrimNotice(processing)) return null;
         return (
             <output className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
-                {skipMessage(phase.reason)}
+                {skipMessage(phase?.reason)}
                 <Button
                     className="ml-3"
                     variant="outline"
@@ -173,7 +174,7 @@ function TrimProposalBody({
         setSaving(true);
         try {
             const response = await fetch(
-                `/api/recordings/${processing?.itemId}/trim-proposal`,
+                `/api/recordings/${processing.itemId}/trim-proposal`,
                 {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -181,7 +182,7 @@ function TrimProposalBody({
                 },
             );
             if (!response.ok) throw new Error("decision_failed");
-            invalidateItemProcessing(processing?.itemId ?? "");
+            invalidateItemProcessing(processing.itemId);
         } catch {
             setDismissed(null);
             toast.error(
@@ -195,12 +196,12 @@ function TrimProposalBody({
     };
     return (
         <section
-            id={`recording-trim-${processing?.itemId}`}
+            id={`recording-trim-${processing.itemId}`}
             tabIndex={-1}
             aria-label={i18n("Trim off-topic talk?")}
         >
             <WorkflowWidget
-                id={`recording-trim-body-${processing?.itemId}`}
+                id={`recording-trim-body-${processing.itemId}`}
                 frame="inline"
                 tone="review"
                 title={
@@ -211,59 +212,21 @@ function TrimProposalBody({
                 }
                 bodyClassName="space-y-3 bg-amber-500/5"
             >
-                <p className="text-sm">{proposalDescription()}</p>
-                {(["start", "end"] as const).map((edge) => {
-                    const value = proposal[edge];
-                    if (!value) return null;
-                    const from = edge === "start" ? 0 : value.startMs;
-                    const to =
-                        edge === "start"
-                            ? value.startMs
-                            : proposal.audio.duration;
-                    const label =
-                        edge === "start" ? i18n("Beginning") : i18n("End");
-                    return (
-                        <label
-                            htmlFor={`trim-${proposal.id}-${edge}`}
-                            key={edge}
-                            className="flex cursor-pointer items-start gap-3 rounded-md border border-amber-500/20 p-3"
-                        >
-                            <input
-                                {...getPasswordManagerAttributes()}
-                                type="checkbox"
-                                className="mt-1 size-4 accent-amber-600"
-                                id={`trim-${proposal.id}-${edge}`}
-                                checked={selected[edge]}
-                                onChange={(event) =>
-                                    setSelected((previous) => ({
-                                        ...previous,
-                                        [edge]: event.target.checked,
-                                    }))
-                                }
-                                aria-label={label}
-                            />
-                            <span className="text-sm">
-                                <span className="font-medium">
-                                    {label} {formatClock(from)}–
-                                    {formatClock(to)}
-                                </span>
-                                <span className="ml-2 text-muted-foreground">
-                                    {i18n("{minutes} min {seconds} s", {
-                                        minutes: String(
-                                            Math.floor((to - from) / 60000),
-                                        ),
-                                        seconds: String(
-                                            Math.floor(
-                                                ((to - from) % 60000) / 1000,
-                                            ),
-                                        ),
-                                    })}
-                                </span>
-                                <span className="block">{value.reason}</span>
-                            </span>
-                        </label>
-                    );
-                })}
+                <p className="text-sm">{proposalDescription(proposal)}</p>
+                {(["start", "end"] as const).map((edge) => (
+                    <TrimEdgeRow
+                        key={edge}
+                        proposal={proposal}
+                        edge={edge}
+                        selected={selected[edge]}
+                        onChange={(checked) =>
+                            setSelected((previous) => ({
+                                ...previous,
+                                [edge]: checked,
+                            }))
+                        }
+                    />
+                ))}
                 <p className="text-xs text-muted-foreground">
                     {i18n(
                         "Without a decision, {product} continues without a cut at {time}. You can still cut later; Learn and the summary then run again.",
@@ -310,19 +273,72 @@ function TrimProposalBody({
                     </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                    {i18n(
-                        "Suggested by {provider} · {model}. Paid by {payer}.",
-                        {
-                            provider: proposal.provider.provider,
-                            model: proposal.provider.model,
-                            payer:
-                                proposal.provider.payerUserId === userId
-                                    ? i18n("you")
-                                    : i18n("the Organization"),
-                        },
-                    )}
+                    {proposal.provider.payerUserId === userId
+                        ? i18n(
+                              "Suggested by {provider} · {model}. You pay for it.",
+                              {
+                                  provider: proposal.provider.provider,
+                                  model: proposal.provider.model,
+                              },
+                          )
+                        : i18n(
+                              "Suggested by {provider} · {model}. The Organization pays for it.",
+                              {
+                                  provider: proposal.provider.provider,
+                                  model: proposal.provider.model,
+                              },
+                          )}
                 </p>
             </WorkflowWidget>
         </section>
+    );
+}
+
+function TrimEdgeRow({
+    proposal,
+    edge,
+    selected,
+    onChange,
+}: {
+    proposal: StoredTrimProposal;
+    edge: "start" | "end";
+    selected: boolean;
+    onChange: (checked: boolean) => void;
+}) {
+    const i18n = useExtracted();
+    const value = proposal[edge];
+    if (!value) return null;
+    const from = edge === "start" ? 0 : value.startMs;
+    const to = edge === "start" ? value.startMs : proposal.audio.duration;
+    const label = edge === "start" ? i18n("Beginning") : i18n("End");
+    return (
+        <label
+            htmlFor={`trim-${proposal.id}-${edge}`}
+            className="flex cursor-pointer items-start gap-3 rounded-md border border-amber-500/20 p-3"
+        >
+            <input
+                {...getPasswordManagerAttributes()}
+                type="checkbox"
+                className="mt-1 size-4 accent-amber-600"
+                id={`trim-${proposal.id}-${edge}`}
+                checked={selected}
+                onChange={(event) => onChange(event.target.checked)}
+                aria-label={label}
+            />
+            <span className="text-sm">
+                <span className="font-medium">
+                    {label} {formatClock(from)}–{formatClock(to)}
+                </span>
+                <span className="ml-2 text-muted-foreground">
+                    {i18n("{minutes} min {seconds} s", {
+                        minutes: String(Math.floor((to - from) / 60000)),
+                        seconds: String(
+                            Math.floor(((to - from) % 60000) / 1000),
+                        ),
+                    })}
+                </span>
+                <span className="block">{value.reason}</span>
+            </span>
+        </label>
     );
 }

@@ -93,7 +93,7 @@ import {
     failJobAttempt,
     settleTerminalJobInTx,
 } from "@/db/queries/async-jobs";
-import { resolveTrimInTx } from "@/db/queries/trim-proposal";
+import { resolveTrimInTx } from "@/db/queries/trim-state";
 import {
     decryptText,
     encryptJsonField,

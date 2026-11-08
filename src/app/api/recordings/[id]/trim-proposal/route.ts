@@ -11,7 +11,6 @@ import { decryptJsonField } from "@/lib/encryption/fields";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { nudge } from "@/lib/jobs/nudge";
 import type { StoredTrimProposal } from "@/lib/recordings/trim-proposal";
-
 import { requireRecordingView } from "@/lib/sharing/access";
 
 type Context = { params: Promise<{ id: string }> };

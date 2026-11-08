@@ -11,15 +11,10 @@ import { modelInput } from "@/lib/learn/llm-input";
 import {
     type StoredTrimProposal,
     trimAnchors,
+    trimAuditMatches,
     validateTrimOutput,
 } from "@/lib/recordings/trim-proposal";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
-
-export {
-    lockTrimRecording,
-    resolveTrimInTx,
-    type TrimTx,
-} from "@/db/queries/trim-state";
 
 /** Read all inputs under the recording writer lock, including secondary transcripts. */
 export async function readTrimSnapshot(
@@ -48,19 +43,7 @@ export async function trimSnapshotMatches(
     proposal: StoredTrimProposal,
 ): Promise<boolean> {
     const { recording, transcripts } = snapshot;
-    if (
-        recording.fileMd5 !== proposal.audio.fileMd5 ||
-        recording.duration !== proposal.audio.duration ||
-        (recording.cutAt?.toISOString() ?? null) !== proposal.audio.cutAt ||
-        transcripts.length !== proposal.revisions.length ||
-        transcripts.some(
-            (t) =>
-                !proposal.revisions.some(
-                    (r) => r.id === t.id && r.revision === t.revision,
-                ),
-        )
-    )
-        return false;
+    if (!trimAuditMatches(recording, transcripts, proposal)) return false;
     const preferred = transcripts.find(
         (t) =>
             t.id === proposal.transcript.id &&
@@ -127,25 +110,12 @@ export async function readOwnerTrimProposal(
                         eq(transcriptions.userId, userId),
                     ),
                 );
-            const changed =
-                recording.fileMd5 !== proposal.audio.fileMd5 ||
-                recording.duration !== proposal.audio.duration ||
-                (recording.cutAt?.toISOString() ?? null) !==
-                    proposal.audio.cutAt ||
-                revisions.length !== proposal.revisions.length ||
-                revisions.some(
-                    (revision) =>
-                        !proposal.revisions.some(
-                            (expected) =>
-                                expected.id === revision.id &&
-                                expected.revision === revision.revision,
-                        ),
-                );
-            const reason = changed
-                ? "content_changed"
-                : Date.parse(proposal.deadline) <= Date.now()
-                  ? "timed_out"
-                  : undefined;
+            let reason: string | undefined;
+            if (!trimAuditMatches(recording, revisions, proposal)) {
+                reason = "content_changed";
+            } else if (Date.parse(proposal.deadline) <= Date.now()) {
+                reason = "timed_out";
+            }
             return { proposal, reason };
         };
         const current = await read();

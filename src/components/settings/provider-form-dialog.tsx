@@ -544,13 +544,14 @@ export function ProviderFormDialog({
                             </span>
                         </label>
                         <label
-                            htmlFor="provider-trim-default"
-                            className="flex cursor-pointer items-center gap-2"
+                            className={
+                                transcriptionOnly
+                                    ? "flex items-center gap-2 opacity-60"
+                                    : "flex cursor-pointer items-center gap-2"
+                            }
                         >
-                            <Input
-                                id="provider-trim-default"
+                            <input
                                 type="checkbox"
-                                className="size-4"
                                 checked={isDefaultTrim && !transcriptionOnly}
                                 disabled={
                                     saving ||
@@ -561,11 +562,13 @@ export function ProviderFormDialog({
                                     setIsDefaultTrim(event.target.checked)
                                 }
                             />
-                            {personal
-                                ? i18n("Use for trim proposals")
-                                : i18n(
-                                      "Organization default for trim proposals",
-                                  )}
+                            <span>
+                                {personal
+                                    ? i18n("Use for trim proposals")
+                                    : i18n(
+                                          "Organization default for trim proposals",
+                                      )}
+                            </span>
                         </label>
                         {!personal && (
                             <>

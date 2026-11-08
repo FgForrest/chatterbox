@@ -1,8 +1,9 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { db } from "@/db";
+import { readActiveCutJob } from "@/db/queries/active-cut-job";
 import { wakePipelineInTx } from "@/db/queries/pipeline-jobs";
 import { wakeTrimDownstreamInTx } from "@/db/queries/trim-downstream";
-import { asyncJobs, itemProcessing, recordings } from "@/db/schema";
+import { itemProcessing, recordings } from "@/db/schema";
 import type { ContentRevisionInput } from "@/lib/pipeline/types";
 import { trimHolds } from "@/lib/recordings/trim-proposal";
 
@@ -83,18 +84,7 @@ export async function resolveTrimInTx(
         Date.parse(phase.waitingFor.until) <= now.getTime()
     )
         return false;
-    const [cut] = await tx
-        .select({ id: asyncJobs.id })
-        .from(asyncJobs)
-        .where(
-            and(
-                eq(asyncJobs.userId, input.userId),
-                eq(asyncJobs.subjectId, input.recordingId),
-                eq(asyncJobs.kind, "recording.cut"),
-                inArray(asyncJobs.status, ["pending", "processing"]),
-            ),
-        )
-        .limit(1);
+    const cut = await readActiveCutJob(tx, input.userId, input.recordingId);
     if (cut && !input.force) return false;
     await tx
         .update(recordings)

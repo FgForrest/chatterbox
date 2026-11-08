@@ -9,6 +9,8 @@
 
 import { and, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { readActiveCutJob } from "@/db/queries/active-cut-job";
+import { isActive } from "@/db/queries/async-job-status";
 import {
     bindAvailableCorrectionInTx,
     bindPipelineJobInTx,
@@ -34,6 +36,7 @@ import {
 import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { JobDeferredError } from "@/lib/jobs/deferred";
 import type { StepOutcome } from "@/lib/pipeline/outcome";
+import type { PhaseRecord } from "@/lib/pipeline/types";
 import { trimHolds } from "@/lib/recordings/trim-proposal";
 
 export type AsyncJobStatus = "pending" | "processing" | "completed" | "failed";
@@ -74,19 +77,12 @@ export interface ClaimedAsyncJob {
 }
 
 /**
- * A job still to be finished. Also the predicate of `async_jobs_active_unique`,
- * which `enqueueJob` names as its conflict target, so the two must match.
- */
-function isActive() {
-    return sql`${asyncJobs.status} in ('pending', 'processing')`;
-}
-
-/**
  * A queued job that finishes between a conflicting insert and the read that
  * follows it leaves nothing to return; the next insert then succeeds. More
  * than a couple of such races in a row means something else is wrong.
  */
 const ENQUEUE_ATTEMPTS = 3;
+const TRIM_DEFERRAL_MS = 30_000;
 
 /**
  * `db.execute` returns an array on some drivers and `{ rows }` on others.
@@ -98,6 +94,40 @@ function rowsOf<T>(result: unknown): T[] {
 }
 
 type EnqueueExecutor = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function resolveManualOwnerTrimInTx(
+    tx: EnqueueExecutor,
+    manual: boolean,
+    actorUserId: string,
+    kind: string,
+    target: Pick<PipelineJobTarget, "userId" | "itemId">,
+): Promise<void> {
+    if (
+        manual &&
+        actorUserId === target.userId &&
+        (kind === "learn.run" || kind === "summary")
+    )
+        await resolveTrimInTx(tx, {
+            userId: target.userId,
+            recordingId: target.itemId,
+            reason: "bypassed_manual",
+        });
+}
+
+async function readTrimCutBlocker(
+    tx: EnqueueExecutor,
+    target: Pick<PipelineJobTarget, "userId" | "itemId">,
+    phase: PhaseRecord | undefined,
+) {
+    const cut = await readActiveCutJob(tx, target.userId, target.itemId);
+    return { cut, blocked: trimHolds(phase) || Boolean(cut) };
+}
+
+function compareItemIds(a: { itemId: string }, b: { itemId: string }): number {
+    if (a.itemId < b.itemId) return -1;
+    if (a.itemId > b.itemId) return 1;
+    return 0;
+}
 
 export interface EnqueueJobInput {
     userId: string;
@@ -220,30 +250,20 @@ export async function enqueueJob(
                 ),
             )
             .limit(1);
-        if (
-            manual &&
-            input.userId === target.userId &&
-            (input.kind === "learn.run" || input.kind === "summary")
-        )
-            await resolveTrimInTx(executor, {
-                userId: target.userId,
-                recordingId: target.itemId,
-                reason: "bypassed_manual",
-            });
+        await resolveManualOwnerTrimInTx(
+            executor,
+            manual,
+            input.userId,
+            input.kind,
+            target,
+        );
         if (!manual) {
-            const [cut] = await executor
-                .select({ id: asyncJobs.id })
-                .from(asyncJobs)
-                .where(
-                    and(
-                        eq(asyncJobs.userId, target.userId),
-                        eq(asyncJobs.subjectId, target.itemId),
-                        eq(asyncJobs.kind, "recording.cut"),
-                        isActive(),
-                    ),
-                )
-                .limit(1);
-            if (trimHolds(processing?.phases.trim) || cut)
+            const { blocked } = await readTrimCutBlocker(
+                executor,
+                target,
+                processing?.phases.trim,
+            );
+            if (blocked)
                 throw new JobDeferredError(
                     1000,
                     "Waiting for the trim decision or cut",
@@ -724,9 +744,7 @@ export async function prepareClaimedPipelineJob(
             (entry) => entry.phase === "learn" || entry.phase === "summary",
         );
         // Recording locks must precede processing/job locks, including already-bound claims.
-        for (const entry of [...downstream].sort((a, b) =>
-            a.itemId < b.itemId ? -1 : a.itemId > b.itemId ? 1 : 0,
-        ))
+        for (const entry of [...downstream].sort(compareItemIds))
             await lockTrimRecording(tx, entry.userId, entry.itemId);
         await lockPipelineTargetsInTx(
             tx,
@@ -758,16 +776,13 @@ export async function prepareClaimedPipelineJob(
         const manual =
             job.payload.trigger === "manual" || pipeline?.existingOnly === true;
         for (const entry of downstream) {
-            if (
-                manual &&
-                current.userId === entry.userId &&
-                (job.kind === "learn.run" || job.kind === "summary")
-            )
-                await resolveTrimInTx(tx, {
-                    userId: entry.userId,
-                    recordingId: entry.itemId,
-                    reason: "bypassed_manual",
-                });
+            await resolveManualOwnerTrimInTx(
+                tx,
+                manual,
+                current.userId,
+                job.kind,
+                entry,
+            );
             if (manual) continue;
             const [processing] = await tx
                 .select({ phases: itemProcessing.phases })
@@ -780,19 +795,12 @@ export async function prepareClaimedPipelineJob(
                     ),
                 )
                 .limit(1);
-            const [cut] = await tx
-                .select({ id: asyncJobs.id })
-                .from(asyncJobs)
-                .where(
-                    and(
-                        eq(asyncJobs.userId, entry.userId),
-                        eq(asyncJobs.subjectId, entry.itemId),
-                        eq(asyncJobs.kind, "recording.cut"),
-                        isActive(),
-                    ),
-                )
-                .limit(1);
-            if (trimHolds(processing?.phases.trim) || cut) {
+            const { cut, blocked } = await readTrimCutBlocker(
+                tx,
+                entry,
+                processing?.phases.trim,
+            );
+            if (blocked) {
                 const now = new Date();
                 const trim = processing?.phases.trim;
                 const nextAttemptAt =
@@ -801,7 +809,7 @@ export async function prepareClaimedPipelineJob(
                     trim.waitingFor?.kind === "trimReview" &&
                     trim.waitingFor.until
                         ? new Date(trim.waitingFor.until)
-                        : new Date(now.getTime() + 30_000);
+                        : new Date(now.getTime() + TRIM_DEFERRAL_MS);
                 await tx
                     .update(asyncJobs)
                     .set({

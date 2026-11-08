@@ -1,11 +1,11 @@
 import { and, eq, inArray, notExists, or, sql } from "drizzle-orm";
-import type { db } from "@/db";
+import type { TrimTx } from "@/db/queries/trim-state";
 import { asyncJobs, learnRuns } from "@/db/schema";
 import { nudge } from "@/lib/jobs/nudge";
 
 /** Wake the owner's pending automatic downstream work under the processing lock. */
 export async function wakeTrimDownstreamInTx(
-    tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+    tx: TrimTx,
     userId: string,
     recordingId: string,
 ): Promise<void> {

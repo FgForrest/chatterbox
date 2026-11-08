@@ -310,7 +310,9 @@ describe("owner trim card", () => {
         ).toBeNull();
         expect(screen.queryByText("Process without trimming")).toBeNull();
         expect(
-            screen.getByText("Suggested by Custom · local-model. Paid by you."),
+            screen.getByText(
+                "Suggested by Custom · local-model. You pay for it.",
+            ),
         ).toBeTruthy();
     });
     it.each([

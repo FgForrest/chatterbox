@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { anchorMatches } from "@/lib/knowledge/correction-anchors";
 import { type OverlayCorrection, renderTurnsForLlm } from "@/lib/learn/render";
+import type { PhaseRecord } from "@/lib/pipeline/types";
 import {
     type CutRange,
     cutTranscript,
@@ -15,7 +16,7 @@ export const TRIM_WAIT_MS = 4 * 60 * 60 * 1000;
 export const TRIM_INPUT_BYTES = 512 * 1024;
 const time = z.number().int().nonnegative().safe();
 const reason = z.string().trim().min(1).max(240);
-export const trimOutputSchema = z
+const trimOutputSchema = z
     .object({
         start: z
             .object({
@@ -36,7 +37,7 @@ export const trimOutputSchema = z
     })
     .strict();
 export type TrimEdges = z.infer<typeof trimOutputSchema>;
-export interface TrimAnchor {
+interface TrimAnchor {
     id: string;
     startMs: number;
     text: string;
@@ -60,6 +61,27 @@ export interface StoredTrimProposal extends TrimEdges {
         model: string;
         payerUserId: string;
     };
+}
+
+/** Compare the audio and complete transcript revision audit with a proposal. */
+export function trimAuditMatches(
+    recording: { fileMd5: string; duration: number; cutAt: Date | null },
+    revisions: readonly { id: string; revision: number }[],
+    proposal: Pick<StoredTrimProposal, "audio" | "revisions">,
+): boolean {
+    return (
+        recording.fileMd5 === proposal.audio.fileMd5 &&
+        recording.duration === proposal.audio.duration &&
+        (recording.cutAt?.toISOString() ?? null) === proposal.audio.cutAt &&
+        revisions.length === proposal.revisions.length &&
+        revisions.every((revision) =>
+            proposal.revisions.some(
+                (expected) =>
+                    expected.id === revision.id &&
+                    expected.revision === revision.revision,
+            ),
+        )
+    );
 }
 
 /** Render the whole corrected transcript using raw, indivisible sentence anchors. */
@@ -164,9 +186,7 @@ export function trimRange(
 }
 
 /** Whether the private decision or its short inference still holds automatic work. */
-export function trimHolds(
-    phase: { state: string; waitingFor?: { kind: string } } | undefined,
-): boolean {
+export function trimHolds(phase: PhaseRecord | undefined): boolean {
     return (
         phase?.state === "outdated" ||
         phase?.state === "running" ||
