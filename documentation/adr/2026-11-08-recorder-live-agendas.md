@@ -16,7 +16,7 @@ relates: []
 
 Agendas gain live invalidations and character-level text merging in the web editor and recorder API.
 The recorder can request the caller's next primary-calendar Meet event and announce the agenda of an
-active recording. PR #356 includes the server, web editor, recorder extension 0.9.0 and additive
+active recording. PR #356 includes the server, web editor, recorder extension 0.9.2 and additive
 migration `0157_recorder_live_agendas.sql`.
 
 ## Why
@@ -127,7 +127,7 @@ sharing unavailable while using the same owner-scoped text and stream boundaries
 delays changes until polling, and a broken merge affects the attempted field rather than losing the
 stored plan. Exported materialized text remains recoverable independently of collaboration state.
 
-Extension 0.9.0 includes icon routing, shared controls, capability detection, session linking,
+Extension 0.9.2 includes icon routing, shared controls, capability detection, session linking,
 next-event notifications, recording attribution and the shared text binding. Agenda matching includes
 held meetings, preserves selection during recording and keeps the agenda reachable after an empty match.
 The maintainer's real-click Google and Chrome checks remain: account-scoped Meet joins, toolbar/panel
@@ -146,5 +146,5 @@ recording, notification clicks and the fallback window. The Chrome Web Store rel
 ## Timeline
 
 - **2026-11-08**: maintainer accepted scoped Meet joins, agenda-panel icon behavior, PostgreSQL live
-  events and Yjs text collaboration. PR #356 implements the server, web editor, extension 0.9.0 and
+  events and Yjs text collaboration. PR #356 implements the server, web editor, extension 0.9.2 and
   migration 0157; real-click checks and the Store release remain.
