@@ -40,7 +40,7 @@ field, a filename date disagrees with `date:`, a value is not one of the allowed
 
 | Date | Record | Kind | Status | Refs |
 |------|--------|------|--------|------|
-| 2026-11-08 | [Offer whole-transcript edge trimming before Learn and wait durably for the owner](2026-11-08-ai-trim-proposal-before-learn.md) | feature | proposed |  |
+| 2026-11-08 | [Offer whole-transcript edge trimming before Learn and wait durably for the owner](2026-11-08-ai-trim-proposal-before-learn.md) | feature | accepted | [#327](https://github.com/FgForrest/chatterbox/issues/327), [PR #357](https://github.com/FgForrest/chatterbox/pull/357) |
 | 2026-11-08 | [Agendas share co-editing through accepted person invitations while recordings require separate consent](2026-11-08-meeting-agendas-shared-with-people.md) | feature | proposed | [#329](https://github.com/FgForrest/chatterbox/issues/329), [PR #348](https://github.com/FgForrest/chatterbox/pull/348) |
 | 2026-11-08 | [Show every unanswered speaker without making optional naming hold processing](2026-11-08-optional-speaker-review-and-speech-samples.md) | feature | accepted | [#354](https://github.com/FgForrest/chatterbox/issues/354) |
 | 2026-11-08 | [Cut recordings at sentence starts, with typed times and paragraph-gap controls above the transcript](2026-11-08-recording-cut-sentence-boundaries.md) | feature | accepted | [#327](https://github.com/FgForrest/chatterbox/issues/327), [PR #352](https://github.com/FgForrest/chatterbox/pull/352) |
