@@ -42,6 +42,7 @@ export function FirstLevelFolderDialog({
         .map((folder) => ({
             id: folder.id,
             path: folderLabel(folder),
+            folder,
         }));
 
     return (

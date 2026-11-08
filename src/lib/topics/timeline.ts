@@ -11,6 +11,10 @@
  */
 
 import { formatSpeakerLabel } from "@/lib/transcription/diarization";
+import {
+    sentencesOf,
+    validSentenceStarts,
+} from "@/lib/transcription/sentences";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
 /** One chapter of a transcript. */
@@ -36,46 +40,29 @@ const LONG_TURN_MS = 60_000;
 /** Marks inside a long turn are at least this far apart. */
 const MIN_MARK_SPACING_MS = 15_000;
 
-const SENTENCE_BREAK = /(?<=[.!?…]["'”»)\]]*)\s+/u;
-
-/**
- * A turn's sentences, each with where it starts in the text as it is, and
- * its whitespace tidied for showing.
- */
-function sentencesOf(raw: string): { text: string; at: number }[] {
-    const end = raw.trimEnd().length;
-    let at = raw.length - raw.trimStart().length;
-    const sentences: { text: string; at: number }[] = [];
-    const breaks = new RegExp(SENTENCE_BREAK.source, "gu");
-    for (const found of raw.slice(0, end).matchAll(breaks)) {
-        if (found.index < at) continue;
-        sentences.push({
-            text: raw.slice(at, found.index).replace(/\s+/g, " "),
-            at,
-        });
-        at = found.index + found[0].length;
-    }
-    sentences.push({ text: raw.slice(at, end).replace(/\s+/g, " "), at });
-    return sentences;
-}
-
 /**
  * Where each of a turn's sentences starts, in its text and in the audio.
- * The first starts with the turn; the others are interpolated by character
- * position, so they can be a few seconds off.
+ * Stored sentence times take precedence; older transcripts use character interpolation.
  */
 export function sentenceStarts(
-    turn: Pick<TranscriptTurn, "startMs" | "endMs" | "text">,
+    turn: Pick<
+        TranscriptTurn,
+        "startMs" | "endMs" | "text" | "sentenceStartsMs"
+    >,
 ): { at: number; ms: number }[] {
     const length = turn.text.length;
     const duration = turn.endMs - turn.startMs;
-    return sentencesOf(turn.text).map(({ at }, index) => ({
-        at,
-        ms:
-            index === 0 || length === 0
-                ? turn.startMs
-                : turn.startMs + Math.round((at / length) * duration),
-    }));
+    const stored = validSentenceStarts(turn.text, turn.sentenceStartsMs);
+    let previous = turn.startMs;
+    return sentencesOf(turn.text).map(({ at }, index) => {
+        const ms = stored
+            ? Math.max(previous, Math.min(turn.endMs, stored[index]))
+            : index === 0 || length === 0
+              ? turn.startMs
+              : turn.startMs + Math.round((at / length) * duration);
+        previous = ms;
+        return { at, ms };
+    });
 }
 
 /**
@@ -86,8 +73,7 @@ export function sentenceStarts(
  * can run for minutes. With a mark only at its start, a topic beginning
  * halfway through could only be placed at the start of the turn, and clicking
  * it would play the end of the previous topic first. The inner marks are
- * interpolated by character position -- speech rate is not constant, so they
- * can be a few seconds off, which is close enough to start listening.
+ * taken from stored sentence times when available, otherwise interpolated.
  */
 export function buildTimeMarks(
     turns: readonly TranscriptTurn[],
@@ -110,8 +96,10 @@ export function buildTimeMarks(
         const speaker = formatSpeakerLabel(turn.speaker);
         const duration = turn.endMs - turn.startMs;
 
+        const starts = sentenceStarts(turn);
+        const stored = validSentenceStarts(turn.text, turn.sentenceStartsMs);
         if (duration <= LONG_TURN_MS) {
-            marks.push({ ms: turn.startMs, turnIndex, speaker, text });
+            marks.push({ ms: starts[0].ms, turnIndex, speaker, text });
             return;
         }
 
@@ -122,13 +110,14 @@ export function buildTimeMarks(
             // Placed by where it starts in the turn's text as it is, which
             // is what `toHeard` maps; only what is shown is tidied. The
             // first is the turn's start, whatever space leads its text.
-            const ms =
-                index === 0
-                    ? turn.startMs
-                    : turn.startMs +
-                      Math.round(
-                          toHeard(turnIndex, at / turn.text.length) * duration,
-                      );
+            const ms = stored
+                ? starts[index].ms
+                : index === 0
+                  ? turn.startMs
+                  : turn.startMs +
+                    Math.round(
+                        toHeard(turnIndex, at / turn.text.length) * duration,
+                    );
             if (chunk && ms - chunk.ms < MIN_MARK_SPACING_MS) {
                 chunk.text = `${chunk.text} ${sentence}`;
                 continue;
@@ -265,7 +254,7 @@ export interface TranscriptParagraph {
     turnIndex: number;
     /** UTF-16 offset into the turn's text where the paragraph starts. */
     charStart: number;
-    /** Milliseconds from the start of the audio; interpolated inside a turn. */
+    /** Milliseconds from the start of the audio. */
     startMs: number;
 }
 
@@ -293,7 +282,8 @@ export function paragraphsOf(
     turns.forEach((turn, turnIndex) => {
         const duration = turn.endMs - turn.startMs;
         const first = paragraphs.length;
-        paragraphs.push({ turnIndex, charStart: 0, startMs: turn.startMs });
+        const sentences = sentenceStarts(turn);
+        paragraphs.push({ turnIndex, charStart: 0, startMs: sentences[0].ms });
         const headed = topicStartsMs.flatMap((ms, topicIndex) =>
             containingTurnIndex(turns, ms) === turnIndex
                 ? [{ ms, topicIndex }]
@@ -306,16 +296,20 @@ export function paragraphsOf(
             return;
         }
 
-        const length = turn.text.length;
-        const sentences = sentenceStarts(turn);
         const topicAt = new Map<number, number[]>();
+        const stored = validSentenceStarts(turn.text, turn.sentenceStartsMs);
         for (const { ms, topicIndex } of headed) {
-            const at = ((ms - turn.startMs) / duration) * length;
+            const at = ((ms - turn.startMs) / duration) * turn.text.length;
+            const position = stored ? ms : at;
             let nearest = 0;
             sentences.forEach((sentence, index) => {
                 if (
-                    Math.abs(sentence.at - at) <
-                    Math.abs(sentences[nearest].at - at)
+                    Math.abs((stored ? sentence.ms : sentence.at) - position) <
+                    Math.abs(
+                        (stored
+                            ? sentences[nearest].ms
+                            : sentences[nearest].at) - position,
+                    )
                 ) {
                     nearest = index;
                 }

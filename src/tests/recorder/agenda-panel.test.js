@@ -2,11 +2,14 @@
 
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as Y from "yjs";
+import { bindAgendaTextInput } from "@/lib/meetings/text-sync";
 import {
     agendaPanelKey,
     canChooseRecordingAgenda,
 } from "../../../extensions/recorder/lib/agendas.js";
 import { localizeDocument, t } from "../../../extensions/recorder/lib/i18n.js";
+import { formatMeetingTime } from "../../../extensions/recorder/lib/meeting-time.js";
 
 const html = readFileSync("extensions/recorder/agenda/agenda.html", "utf8");
 const source = readFileSync(
@@ -22,12 +25,22 @@ let settings;
 let request;
 let onChanges;
 let matches;
-const el = (id) => document.getElementById(id);
+let subscription;
+let disconnect;
+let subscribe;
+const el = (id) =>
+    document.getElementById(id === "retry" ? "agenda-retry" : id);
 const settle = () => vi.advanceTimersByTimeAsync(0);
 
 beforeEach(async () => {
     vi.useFakeTimers();
     onChanges = [];
+    subscription = undefined;
+    disconnect = vi.fn();
+    subscribe = vi.fn((_id, handlers) => {
+        subscription = handlers;
+        return disconnect;
+    });
     document.documentElement.innerHTML = html;
     settings = { serverUrl: "https://recorder.example.com", supported: true };
     session = {
@@ -169,6 +182,11 @@ async function start(doc = document, tabId = 7) {
         "localizeDocument",
         "t",
         "getSettings",
+        "mountRecordingControls",
+        "agendaFolder",
+        "bindAgendaTextInput",
+        "subscribeAgenda",
+        "formatMeetingTime",
         `return (async () => { ${source} })();`,
     );
     await run(
@@ -184,6 +202,11 @@ async function start(doc = document, tabId = 7) {
         localizeDocument,
         t,
         async () => settings,
+        async () => ({ folder: vi.fn(), destroy: vi.fn() }),
+        () => ({}),
+        bindAgendaTextInput,
+        subscribe,
+        formatMeetingTime,
     );
 }
 
@@ -495,4 +518,176 @@ describe("agenda side panel", () => {
         await vi.advanceTimersByTimeAsync(120000);
         expect(request).toHaveBeenCalledTimes(1);
     });
+});
+
+describe("live panel collaboration", () => {
+    it("uses live invalidations with the last detail cursor and falls back to polling when down", async () => {
+        settings.serverDefaults = { agendaLive: true };
+        data.cursor = "4:standalone:idle";
+        await start();
+        expect(subscribe).toHaveBeenCalledTimes(1);
+        subscription.onConnection(true);
+        request.mockClear();
+        await vi.advanceTimersByTimeAsync(15000);
+        expect(request).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(45000);
+        expect(request).toHaveBeenCalledTimes(1);
+        await subscription.invalidate();
+        expect(request).toHaveBeenLastCalledWith(
+            "/agenda-one?since=4%3Astandalone%3Aidle",
+        );
+        subscription.onConnection(false);
+        request.mockClear();
+        await vi.advanceTimersByTimeAsync(15000);
+        expect(request).toHaveBeenCalledTimes(1);
+    });
+    it("never starts streams or text requests without their independent flags", async () => {
+        settings.serverDefaults = { agendas: true };
+        data.textProtocol = 1;
+        await start();
+        el("live").click();
+        const note = el("points").querySelector("input[type=text]");
+        note.focus();
+        note.value = "Legacy note";
+        note.dispatchEvent(new Event("change"));
+        await settle();
+        expect(subscribe).not.toHaveBeenCalled();
+        expect(
+            request.mock.calls.some(([path]) => path.includes("/text")),
+        ).toBe(false);
+        expect(request).toHaveBeenCalledWith(
+            "/agenda-one/points/p1",
+            expect.objectContaining({ method: "PATCH" }),
+        );
+    });
+    it("keeps Preparation selected during recording and reveals controls only after Record too", async () => {
+        data.recordingBy = [{ name: "Jitka Dvořáková", self: false }];
+        await start();
+        expect(el("recording-by").textContent).toContain("Jitka Dvořáková");
+        expect(el("recorder-controls").hidden).toBe(true);
+        el("record-also").click();
+        expect(el("recorder-controls").hidden).toBe(false);
+        session.recordingState = {
+            state: "recording",
+            sessionId: "session-one",
+            startedAt: new Date().toISOString(),
+        };
+        await chrome.storage.session.set({
+            recordingState: session.recordingState,
+        });
+        await settle();
+        expect(el("live").getAttribute("aria-pressed")).toBe("true");
+        el("prep").click();
+        await vi.advanceTimersByTimeAsync(15000);
+        expect(el("prep").getAttribute("aria-pressed")).toBe("true");
+    });
+    it("links the edited agenda after a successful tick during recording", async () => {
+        session.recordingState = {
+            state: "recording",
+            sessionId: "session-one",
+            agendaId: null,
+            startedAt: new Date().toISOString(),
+        };
+        await start();
+        el("points").querySelector("input[type=checkbox]").click();
+        await settle();
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+            type: "edit-agenda",
+            agendaId: "agenda-one",
+            sessionId: "session-one",
+            tabId: 7,
+        });
+    });
+    it("reuses the shared CRDT binding, keeps a focused input/caret, and flushes its materialized version before ticking", async () => {
+        settings.serverDefaults = { agendaLive: true, agendaText: 1 };
+        data.textProtocol = 1;
+        data.cursor = "4:standalone:idle";
+        const doc = new Y.Doc();
+        const ytext = doc.getText("text");
+        ytext.insert(0, "Initial");
+        let materialized = 2;
+        const base = request.getMockImplementation();
+        const response = (field) => ({
+            field,
+            update: Buffer.from(Y.encodeStateAsUpdate(doc)).toString("base64"),
+            stateVector: Buffer.from(Y.encodeStateVector(doc)).toString(
+                "base64",
+            ),
+            version: 9,
+            materializedVersion: materialized,
+        });
+        request.mockImplementation(async (path, init) => {
+            if (path.includes("/text?"))
+                return response(
+                    new URL(path, "https://example.com").searchParams.get(
+                        "field",
+                    ),
+                );
+            if (path.endsWith("/text") && init?.method === "POST") {
+                const input = JSON.parse(init.body);
+                Y.applyUpdate(doc, Buffer.from(input.update, "base64"));
+                materialized++;
+                data.points[0].note = ytext.toString();
+                data.points[0].version = materialized;
+                return response(input.field);
+            }
+            return base(path, init);
+        });
+        await start();
+        el("live").click();
+        const note = el("points").querySelector("input[type=text]");
+        note.focus();
+        await settle();
+        expect(note.value).toBe("Initial");
+        note.setSelectionRange(3, 3);
+        ytext.insert(0, "Remote ");
+        await subscription.invalidate();
+        await settle();
+        expect(el("points").querySelector("input[type=text]")).toBe(note);
+        expect(document.activeElement).toBe(note);
+        expect(note.value).toBe("Remote Initial");
+        expect(note.selectionStart).toBe(10);
+        note.value += " local";
+        note.dispatchEvent(new Event("input"));
+        el("points").querySelector("input[type=checkbox]").click();
+        await settle();
+        const mutation = request.mock.calls.find(
+            ([path, init]) =>
+                path === "/agenda-one/points/p1" && init?.method === "PATCH",
+        );
+        expect(JSON.parse(mutation[1].body).version).toBe(3);
+        expect(ytext.toString()).toBe("Remote Initial local");
+        expect(
+            request.mock.calls.findIndex(([path]) => path.endsWith("/text")),
+        ).toBeLessThan(request.mock.calls.indexOf(mutation));
+        doc.destroy();
+    });
+});
+
+it.each([
+    "cs",
+    "en",
+])("uses the extension UI language in the panel header: %s", async (locale) => {
+    chrome.i18n.getUILanguage = () => locale;
+    data.plannedStart = "2026-11-08T18:34:00Z";
+    data.plannedEnd = "2026-11-08T19:17:00Z";
+    await start();
+    expect(el("time").textContent).toBe(
+        locale === "cs" ? "8. 11. 18:34–19:17" : "11/8 18:34–19:17",
+    );
+});
+
+it("reconciles an attached agenda even while its stream remains connected", async () => {
+    settings.serverDefaults = { agendaLive: true };
+    data.recordingItemId = "recording-one";
+    data.cursor = "4:recording:idle";
+    await start();
+    subscription.onConnection(true);
+    request.mockClear();
+    await vi.advanceTimersByTimeAsync(59999);
+    expect(request).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(request).toHaveBeenCalledExactlyOnceWith(
+        "/agenda-one?since=4%3Arecording%3Aidle",
+    );
 });

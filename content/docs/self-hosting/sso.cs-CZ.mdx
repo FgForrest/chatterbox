@@ -88,6 +88,14 @@ Dělejte to jen pro tentýž realm na nové adrese. Chcete-li lidi záměrně p�
 - První spuštění s jednotným přihlášením ukončí **všechny** existující relace, takže nikdo nezůstane přihlášen přes heslo. Vypnutí a opětovné zapnutí SSO to způsobí znovu.
 - Relace trvá `OIDC_SESSION_MAX_AGE` sekund (výchozí 24 hodin) a její délka se nepřidlužuje použitím. Uživatel deaktivovaný u poskytovatele ztratí přístup do Klepna v tomto intervalu.
 - **Odhlásit se** ukončí pouze relaci Klepna. Relace poskytovatele zůstává, takže další **Přihlášení** může automaticky projít bez výzvy.
+- Klepna zapisuje `[session] started`, `ended` a `renew-failed` s ID uživatele
+  a relace, důvodem a dostupnými časy v minutách. Hledejte podle `user=` nebo
+  `session=`; `expiresAt` je pevný konec platnosti, `authAgeMin` / `sinceAuthMin`
+  udávají stáří přihlášení u poskytovatele a záporné `refreshExpiresInMin`
+  znamená prošlý obnovovací token. `renew-failed` relaci ponechá; ukončení
+  správcem, úklidem nebo přechodem na jednotné přihlášení uvádí `count`.
+  Prošlé relace se zaznamenají při načtení nebo úklidu,
+  takže řádek `started` bez `ended` už může být za časem `expiresAt`.
 - Osobní API tokeny nejsou relace a nadále fungují.
 
 <span id="the-almanac" />
@@ -95,6 +103,8 @@ Dělejte to jen pro tentýž realm na nové adrese. Chcete-li lidi záměrně p�
 ## Almanach
 
 Každé přihlášení přes SSO zaznamená osobu (jméno a e-mail) do Almanachu organizace, případně do jejího vlastního almanachu, pokud [Organizace](./organization) není aktivní. Známá osoba je určena podle e-mailu a přebírá aktuální jméno od poskytovatele; přezdívky, poznámky a fakta přidaná v Klepna se zachovávají.
+
+V Almanachu organizace se při prvním přihlášení záznam s adresou dané osoby, jehož jméno k jejímu jménu nesedí, považuje za cizí, protože členové mohou adresu přiřadit nesprávné osobě dřív, než se její držitel vůbec přihlásí. Takový záznam si ponechá jméno a přijde o adresu, přihlášená osoba dostane nový záznam a do logu serveru se zapíše varování. Pokud šlo přece jen o tutéž osobu (přezdívka, kterou Klepna nezná, změna jména), může je kurátor v Almanachu sloučit.
 
 <span id="the-organization-account" />
 

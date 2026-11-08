@@ -1,4 +1,5 @@
 import { enqueueJob } from "@/db/queries/async-jobs";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { nudge } from "@/lib/jobs/nudge";
 import { InvalidJobPayloadError, type JobHandler } from "@/lib/jobs/types";
 import {
@@ -6,7 +7,10 @@ import {
     type StepOutcome,
     waitForReason,
 } from "@/lib/pipeline/outcome";
-import { executeIntendedSharesWithOutcome } from "@/lib/pipeline/share-intent";
+import {
+    executeIntendedSharesWithOutcome,
+    type IntendedShareOutcome,
+} from "@/lib/pipeline/share-intent";
 import type { PipelineAction } from "@/lib/pipeline/types";
 import { applyPlaudActionItemProposals } from "@/lib/tasks/plaud-proposals";
 
@@ -20,6 +24,15 @@ interface ActionPayload {
 }
 
 export const PIPELINE_ACTION_JOB_KIND = "pipeline.action";
+
+function shareWaitReason(result: IntendedShareOutcome): string | undefined {
+    if (result.waitingForCut) return "cut";
+    if (result.waitingForTrim) return "trim";
+    if (result.confirmationRequired) return "confirmation_required";
+    if (result.problems.length > 0) return "gate_blocked";
+    if (result.remaining) return "org_unavailable";
+    return undefined;
+}
 
 /** Queue a content or sharing action together with its step binding. */
 export async function enqueuePipelineAction(
@@ -69,7 +82,12 @@ export const pipelineActionJobHandler: JobHandler<ActionPayload> = {
             );
         return { itemId: raw.itemId, action: raw.action as Action };
     },
-    async run({ userId, payload }): Promise<PipelineJobResult> {
+    async run({
+        userId,
+        jobId,
+        claimToken,
+        payload,
+    }): Promise<PipelineJobResult> {
         if (payload.action.type === "applyPlaudTasks") {
             const applied = await applyPlaudActionItemProposals({
                 itemId: payload.itemId,
@@ -85,17 +103,18 @@ export const pipelineActionJobHandler: JobHandler<ActionPayload> = {
                     : { kind: "skipped", reason: "outdated" },
             };
         }
+        if (!claimToken)
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "The share job is no longer running",
+                409,
+            );
         const result = await executeIntendedSharesWithOutcome(
             userId,
             payload.itemId,
+            { jobId, claimToken },
         );
-        const reason = result.confirmationRequired
-            ? "confirmation_required"
-            : result.problems.length > 0
-              ? "gate_blocked"
-              : result.remaining
-                ? "org_unavailable"
-                : undefined;
+        const reason = shareWaitReason(result);
         const outcome: StepOutcome = reason
             ? {
                   kind: "waiting",

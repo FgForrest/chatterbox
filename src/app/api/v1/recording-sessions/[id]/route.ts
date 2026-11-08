@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { readProcessing } from "@/lib/pipeline/state";
+import { parseSessionAgendaBody } from "@/lib/recording-sessions/metadata";
 import { gateRecordingSessionRequest } from "@/lib/recording-sessions/route-gate";
 import { serializeRecordingSession } from "@/lib/recording-sessions/serialize";
 import {
@@ -9,10 +10,29 @@ import {
     markRecordingSessionAborted,
     purgeRecordingSessionChunks,
     retireRecordingCaptureKey,
+    setRecordingSessionAgenda,
 } from "@/lib/recording-sessions/store";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 
 type IdContext = { params: Promise<{ id: string }> };
+
+/** Update the live agenda choice while capture is open. */
+export const PATCH = apiHandler<IdContext>(async (request, context) => {
+    const gate = await gateRecordingSessionRequest(request);
+    if (gate.response) return gate.response;
+    const { id } = await (context as IdContext).params;
+    const input = parseSessionAgendaBody(
+        await request.json().catch(() => null),
+    );
+    const session = await setRecordingSessionAgenda({
+        userId: gate.authn.user.id,
+        apiKeyId: gate.authn.apiKeyId,
+        sessionId: id,
+        agendaId: input.agendaId,
+    });
+    const chunks = await listRecordingSessionChunks(session.id);
+    return NextResponse.json(serializeRecordingSession(session, chunks));
+});
 
 /**
  * `GET /api/v1/recording-sessions/{id}` — session status and received chunks.

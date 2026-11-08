@@ -19,6 +19,7 @@ import { anchorMatches } from "@/lib/knowledge/correction-anchors";
 import {
     renderTurnsAsText,
     type TranscriptTurn,
+    withTurnText,
 } from "@/lib/transcription/turns";
 
 export interface OverlayCorrection {
@@ -121,8 +122,10 @@ function render(
     return turns.map((turn, index) => {
         const segments = segmentsOf(turn.text, byTurn.get(index) ?? [], shown);
         return {
-            ...turn,
-            text: segments.map((segment) => segment.text).join(""),
+            ...withTurnText(
+                turn,
+                segments.map((segment) => segment.text).join(""),
+            ),
             segments,
         };
     });

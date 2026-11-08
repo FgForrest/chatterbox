@@ -48,6 +48,11 @@ function useCostSteps() {
             metric: "otherCost" as const,
             color: "var(--muted-foreground)",
         },
+        {
+            label: i18n("Trim proposal"),
+            metric: "trimCost" as const,
+            color: SERIES[4],
+        },
     ];
     return steps;
 }

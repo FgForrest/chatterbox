@@ -442,5 +442,9 @@ export async function restoreMeetings(
                     ),
                 );
     }
-    return { restored, skipped };
+    return {
+        restored,
+        skipped,
+        itemIdMap: Object.fromEntries(restoredItemIds),
+    };
 }

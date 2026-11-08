@@ -55,6 +55,104 @@ beforeEach(() => {
 });
 
 describe("upcoming Calendar events", () => {
+    it("keeps invitations with omitted attendees but still excludes an explicit self-decline", async () => {
+        const omitted = {
+            ...event,
+            organizer: { self: false },
+            attendeesOmitted: true,
+            attendees: undefined,
+        };
+        const fetchImpl = vi.fn(async () =>
+            Response.json({
+                items: [
+                    { ...omitted, id: "omitted" },
+                    {
+                        ...omitted,
+                        id: "omitted-declined",
+                        attendees: [{ self: true, responseStatus: "declined" }],
+                    },
+                    {
+                        ...omitted,
+                        id: "declined",
+                        attendeesOmitted: false,
+                        attendees: [{ self: true, responseStatus: "declined" }],
+                    },
+                ],
+            }),
+        );
+        const rows = await listUpcomingCalendarEvents("owner", from, to, {
+            fetchImpl,
+            participantEmail: "jitka@example.com",
+        });
+        expect(rows.map((row) => row.id)).toEqual(["omitted"]);
+        expect(rows[0].attendees).toEqual([]);
+    });
+    it("limits recorder events to timed primary-calendar meetings the caller organizes or attends", async () => {
+        const timed = {
+            ...event,
+            hangoutLink: "https://meet.google.com/abc-defg-hij?authuser=other",
+            organizer: { self: false },
+        };
+        const fetchImpl = vi.fn(async (_input: string | URL | Request) =>
+            Response.json({
+                items: [
+                    {
+                        ...timed,
+                        id: "invited",
+                        attendees: [{ self: true, responseStatus: "accepted" }],
+                    },
+                    {
+                        ...timed,
+                        id: "email-invited",
+                        attendees: [
+                            {
+                                email: "jitka@example.com",
+                                responseStatus: "tentative",
+                            },
+                        ],
+                    },
+                    {
+                        ...timed,
+                        id: "organizer",
+                        organizer: { self: true },
+                        attendees: [],
+                    },
+                    {
+                        ...timed,
+                        id: "declined",
+                        attendees: [{ self: true, responseStatus: "declined" }],
+                    },
+                    { ...timed, id: "not-invited", attendees: [] },
+                    { ...timed, id: "cancelled", status: "cancelled" },
+                    {
+                        ...timed,
+                        id: "series",
+                        organizer: { self: true },
+                        recurrence: ["RRULE:FREQ=WEEKLY"],
+                    },
+                    {
+                        ...timed,
+                        id: "all-day",
+                        start: { date: "2026-11-08" },
+                        end: { date: "2026-11-09" },
+                    },
+                ],
+            }),
+        );
+        const rows = await listUpcomingCalendarEvents("owner", from, to, {
+            fetchImpl,
+            participantEmail: "jitka@example.com",
+        });
+        expect(rows.map((row) => row.id)).toEqual([
+            "invited",
+            "email-invited",
+            "organizer",
+        ]);
+        expect(rows[0].meetingCode).toBe("abc-defg-hij");
+        expect(String(fetchImpl.mock.calls[0][0])).toContain(
+            "/calendars/primary/events?",
+        );
+    });
     it("follows pages, preserves series ids, filters all-day and declined events", async () => {
         const requests: URL[] = [];
         const fetchImpl = vi.fn(async (input: string | URL | Request) => {

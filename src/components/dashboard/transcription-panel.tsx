@@ -19,7 +19,6 @@ import { TranscriptView } from "@/components/dashboard/transcript-view";
 import { HelpLink } from "@/components/help/help-button";
 import type { LearnMarks } from "@/components/learn/learn-marks";
 import { LearnReview } from "@/components/learn/learn-review";
-import { SpeakerGuesses } from "@/components/learn/speaker-guesses";
 import { SpeakerAccentContext } from "@/components/people/speaker-accent-context";
 import {
     confirmedAttributions,
@@ -38,6 +37,7 @@ import { usePlayback } from "@/components/playback/playback-context";
 import { useProductName } from "@/components/product-name-provider";
 import {
     RecordingCutButton,
+    RecordingCutPanel,
     useRecordingCut,
 } from "@/components/recordings/recording-cut";
 import { SourceSwitcher } from "@/components/source-switcher";
@@ -245,6 +245,10 @@ export function TranscriptionPanel({
     const [activeSource, setActiveSource] = useState<string | undefined>(
         undefined,
     );
+    useEffect(() => {
+        if (cut?.open && cut.proposalSource)
+            setActiveSource(cut.proposalSource);
+    }, [cut?.open, cut?.proposalSource]);
     const [openingReviewSource, setOpeningReviewSource] = useState<
         string | null
     >(null);
@@ -395,8 +399,6 @@ export function TranscriptionPanel({
     // Reviews finished here: a review names speakers without a new
     // revision, so the speaker tags mount afresh to read them again.
     const [reviewsFinished, setReviewsFinished] = useState(0);
-    // Speakers named from Learn's guesses, read again the same way.
-    const [guessesAccepted, setGuessesAccepted] = useState(0);
 
     // The transcript's corrections, read edited by default. Only a Plaud or
     // Riffado transcript with stored turns has any; a mix has none.
@@ -529,19 +531,18 @@ export function TranscriptionPanel({
         Record<string, SpeakerAttributions>
     >({});
     const speakerAttributions = attributionsByKey[attributionKey] ?? {};
-    // Labels answered "nobody known", which no guess names either.
     const [unknownByKey, setUnknownByKey] = useState<
         Record<string, ReadonlySet<string>>
     >({});
-    const answeredLabels = useMemo(
-        () =>
-            new Set([
-                ...Object.keys(speakerAttributions),
-                ...(unknownByKey[attributionKey] ?? []),
-            ]),
-        [speakerAttributions, unknownByKey, attributionKey],
+    const handleUnknownLabelsChange = useCallback(
+        (labels: ReadonlySet<string>) => {
+            setUnknownByKey((current) => ({
+                ...current,
+                [attributionKey]: labels,
+            }));
+        },
+        [attributionKey],
     );
-
     const nextSpeakerTurn = (
         voices: string | readonly string[],
         once = false,
@@ -570,8 +571,8 @@ export function TranscriptionPanel({
         const index = matching[nextPosition];
         speakerCursorRef.current = { transcript, speaker, index };
         const { startMs, endMs } = turns[index];
-        setTranscriptExpanded(true);
-        setSpeakerJump({ index });
+        if (!once) setTranscriptExpanded(true);
+        if (!once || transcriptOpen) setSpeakerJump({ index });
         return {
             ms: startMs,
             endMs:
@@ -599,16 +600,6 @@ export function TranscriptionPanel({
         },
         [attributionKey],
     );
-    const handleUnknownLabelsChange = useCallback(
-        (labels: ReadonlySet<string>) => {
-            setUnknownByKey((current) => ({
-                ...current,
-                [attributionKey]: labels,
-            }));
-        },
-        [attributionKey],
-    );
-
     const defaultSummarySource: SummarySource =
         activeTranscript?.source === "plaud" ? "plaud" : "riffado";
     const [summarySelection, setSummarySelection] = useState<{
@@ -706,9 +697,13 @@ export function TranscriptionPanel({
     }, [followReleased, onTranscriptStale]);
 
     useWorkflowWidgetOpen(
-        (!widgets || widgets.transcript.visible) && !transcriptLine
-            ? transcriptWidgetId
-            : undefined,
+        !widgets || widgets.transcript.visible ? transcriptWidgetId : undefined,
+        (source) => {
+            if (source && transcriptList.some((t) => t.source === source))
+                setActiveSource(source);
+            setWorkflowTranscriptExpanded(true);
+            setTranscriptExpanded(true);
+        },
     );
     const [resummarizeAction, setResummarizeAction] = useState<{
         run: () => void;
@@ -824,25 +819,15 @@ export function TranscriptionPanel({
                     )}
                 </p>
             )}
-            {learnMarks &&
-                canLearn &&
-                activeTranscript &&
-                activeTranscript.source !== "mixed" && (
-                    <SpeakerGuesses
-                        key={`learn:${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}`}
-                        recordingId={recording.id}
-                        source={activeTranscript.source}
-                        view={view}
-                        shownVersion={activeTranscript.version}
-                        marks={learnMarks}
-                        answeredLabels={answeredLabels}
-                        onAccepted={() =>
-                            setGuessesAccepted((count) => count + 1)
-                        }
-                    />
-                )}
             {(!widgets || widgets.transcript.visible) && (
-                <div className={agenda ? "order-4" : "contents"}>
+                <div
+                    className={
+                        agenda
+                            ? "order-4 flex flex-col gap-3"
+                            : "flex flex-col gap-3"
+                    }
+                >
+                    <RecordingCutPanel />
                     <WorkflowWidget
                         id={transcriptWidgetId}
                         frame="inline"
@@ -1116,12 +1101,15 @@ export function TranscriptionPanel({
                                 // another transcript to name: mount afresh, so
                                 // nothing of the last one's state, or its late
                                 // answers, reaches this one.
-                                key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}:${reviewsFinished}:${guessesAccepted}`}
+                                key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}:${reviewsFinished}`}
                                 recordingId={recording.id}
                                 source={activeTranscript.source}
                                 speakers={speakerTags}
                                 attributions={speakerAttributions}
                                 onAttributionsChange={handleAttributionsChange}
+                                onUnknownLabelsChange={
+                                    handleUnknownLabelsChange
+                                }
                                 view={view}
                                 nextSpeakerTurn={
                                     activeTranscript.turns?.length
@@ -1130,9 +1118,6 @@ export function TranscriptionPanel({
                                 }
                                 shownVersion={activeTranscript.version}
                                 onStale={onTranscriptStale}
-                                onUnknownLabelsChange={
-                                    handleUnknownLabelsChange
-                                }
                                 readOnly={readOnly}
                             />
                         )}
@@ -1232,6 +1217,9 @@ export function TranscriptionPanel({
                                     : "riffado"
                             }
                             turns={activeTranscript.turns ?? []}
+                            durationMs={recording.duration}
+                            confirmedAttributions={speakerAttributions}
+                            unknownLabels={unknownByKey[attributionKey]}
                             nextSpeakerTurn={
                                 playback
                                     ? (label) => nextSpeakerTurn(label, true)
@@ -1253,7 +1241,11 @@ export function TranscriptionPanel({
 
             {activeTranscript?.text &&
                 (!widgets || widgets.summary.visible) && (
-                    <div className={agenda ? "order-1 space-y-4" : "contents"}>
+                    <div
+                        className={
+                            agenda ? "order-1 flex flex-col gap-4" : "contents"
+                        }
+                    >
                         <SummaryWidget
                             itemId={recording.id}
                             onResummarizeReady={setResummarizeAction}

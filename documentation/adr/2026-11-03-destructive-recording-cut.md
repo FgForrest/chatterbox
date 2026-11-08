@@ -1,20 +1,24 @@
 ---
 title: Cutting a recording deletes the cut part; there is no hide mode
 date: 2026-11-03
-updated: 2026-11-03 09:25
-status: accepted
+updated: 2026-11-08 19:20
+status: superseded
 kind: feature
 issues: [327]
 prs: []
 areas: [src/lib/recordings, src/components/recordings/recording-cut.tsx, src/lib/sync/sync-recordings.ts, src/db/schema.ts]
 supersedes: [2026-09-30-learn]
-superseded-by: []
-relates: []
+superseded-by: [2026-11-08-shared-recordings-cut-in-place, 2026-11-08-recording-cut-sentence-boundaries]
+relates: [2026-11-08-ai-trim-proposal-before-learn]
 ---
 
 # Cutting a recording deletes the cut part; there is no hide mode
 
 Owners can cut the beginning and end of a recording. The cut deletes those parts from stored audio and every transcript. The remaining timeline starts at zero, and the processing pipeline requests fresh derived results. There is no saved hidden range and no cut annotation in the recording view.
+
+**Superseded in part** by [shared recordings cut in place](2026-11-08-shared-recordings-cut-in-place.md): cuts preserve Organization placements, Organization facts receive the same keep-as-manual exception as private facts, generated title markers in either stored view count, and intended sharing waits for an active cut. The destructive operation and all other rules still hold.
+
+**Superseded in part** by [sentence-boundary recording cuts](2026-11-08-recording-cut-sentence-boundaries.md): sentence starts replace turn midpoints for retention, turns can be split, typed times snap to sentence starts, transcript controls sit at paragraph boundaries, and scissors appear only in the transcript header. The remaining destructive-cut rules still hold.
 
 ## Why
 
@@ -65,6 +69,8 @@ Delete the cut parts. Only the owner can request the operation. A shared recordi
 ## Related work
 
 [Learn](2026-09-30-learn/README.md) is superseded only for "Facts die with their transcript": a destructive cut preserves confirmed private facts as manual assertions when their last supported evidence is removed. The rest holds, including normal Organization withdrawal.
+
+- [AI trim proposals before Learn](2026-11-08-ai-trim-proposal-before-learn.md): reuses this contract for whole-transcript suggestions and an owner decision before automatic work.
 
 ## Timeline
 

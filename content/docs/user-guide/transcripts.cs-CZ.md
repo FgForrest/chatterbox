@@ -62,10 +62,11 @@ Změna jazyka sama nic znovu nespouští. Pokud se existující výstup jazykov�
 
 - Klikněte na jméno ve štítku, například **Mluvčí 2**, a vyberte, kdo to je, ze svého [Almanachu](almanac.md), vytvořte novou osobu nebo označte mluvčího jako **Neznámý**.
 - Přerušovaný štítek končící na **?**, například **Priya Raman?**, je návrh. Klikněte na **✓** pro potvrzení nebo **×** pro odmítnutí; odmítnuté jméno již nebude tomuto mluvčímu nabídnuto. **▶** přehraje okamžik, na jehož základě návrh vznikl. Pokud návrh nemá ukázku, přehraje další promluvu tohoto mluvčího.
-- **Hádaní mluvčích** nad přepisem jsou poznatky z Učení. Viz [Učení](learn.md).
 - Barevné **▶** má každý štítek, i ten, u kterého jste mluvčího ještě neurčili. Přehraje další promluvu tohoto mluvčího. Pravé tlačítko myši zůstává zkratkou. Kliknutím na potvrzené jméno vyberete jinou osobu nebo zvolíte **Otevřít v Almanachu**, **×** jméno odpojíte. Kliknutí na jméno neznámého mluvčího otevře stejný výběr.
 
 Zadaná jména se zobrazují všude tam, kde vystupuje přepis: ve shrnutí, exportech, zkopírovaném Markdown i v API.
+
+Když pojmenujete kolegu, jehož záznam osoby obsahuje jeho hlavní e-mail, jeho AI klient může pro vykazování času vypsat název, začátek a délku této nahrávky i bez přístupu k ní, ale jen pokud začala v okamžiku jeho prvního jednotného přihlášení nebo později. Pozdější doplnění e-mailu zpřístupní i nahrávky, kde je osoba už pojmenovaná, nikdy však ty z doby před jejím prvním přihlášením.
 
 Návrhy mluvčích ukazují původ a u odhadu také vysvětlení modelu v nápovědě. Kalendář a Meet se používají při automatickém i ručním běhu. Návrh s **?** potvrdíte jedním kliknutím; nezaškrtnutý návrh mluvčího nikdy nepojmenuje. Identita vychází z pozvánek, účasti a vodítek v přepisu, nikdy z hlasových dat.
 
@@ -99,13 +100,19 @@ Přednáška nebo dlouhý monolog se rozdělí do odstavců zhruba po půl minut
 
 ## Oříznutí začátku a konce
 
-Nahrávku může oříznout jen její vlastník. Klikněte na nůžky vedle stažení v přehrávači nebo vedle opětovného přepisu. Najeďte na promluvu nebo ji zaměřte klávesnicí a zvolte **Začít tady** či **Skončit tady**. Stejná tlačítka v připnuté liště použijí aktuální místo přehrávání a posunou hranici na okraj promluvy. Pokud nahrávka nemá přepis, použijí místo přehrávání přesně.
+Nahrávku může oříznout jen její vlastník. Nůžky vedle opětovného přepisu otevřou panel ořezu. Zadejte čas začátku nebo konce, který se posune na nejbližší začátek věty, nebo najeďte na mezeru mezi odstavci či ji zaměřte klávesnicí a zvolte **Začít tady** nebo **Skončit tady**.
 
-Vybledlé přeškrtnuté promluvy a vyšrafované okraje přehrávače ukazují, co se smaže. **×** vrátí příslušnou hranici, **Zrušit** ponechá vše beze změny. **Oříznout…** otevře potvrzení smazání. Nahrávka sdílená s Organizací ji musí nejprve opustit. Potvrzení zobrazí upozornění na odebrání z Organizace a na pravidla uchovávání.
+Vybledlé přeškrtnuté promluvy a vyšrafované okraje přehrávače ukazují, co se smaže. **×** vrátí příslušnou hranici, **Zrušit** ponechá vše beze změny. **Oříznout…** otevře potvrzení smazání. Sdílená nahrávka zůstane ve svých složkách Organizace. Kolegové uvidí oříznutou verzi a její shrnutí v Organizaci se vytvoří znovu. Plánované sdílení počká na dokončení oříznutí a nové shrnutí. Pokud se oříznutí odmítne nebo selže, lišta zachová vybraný rozsah a zobrazí důvod.
 
 Oříznutí je nevratné: smaže zvuk i promluvy přepisu a zbývající nahrávka začne v čase 0:00. Pokud už pravidla uchovávání odstranila zvuk, oříznou se jen přepisy. Shrnutí, vygenerovaný název, témata, návrhy úkolů a výsledky Učení se obnoví podle profilu zpracování, bez nového přepisu. Přijaté úkoly, potvrzené znalosti v Almanachu, připomínky ke shrnutí, ručně zadaný název a opravy zachovaných promluv zůstanou. Oříznutí není dostupné během přepisu ani jiného oříznutí a také tehdy, když některý přepis nemá časování promluv.
 
 Původní nahrávka zůstává v aplikaci Plaud a ve starších exportech a zálohách. Klepna po oříznutí už z Plaudu nepřevezme původní zvuk, přepis ani shrnutí, a to ani přes obnovení zvuku.
+
+<span id="ai-trim-proposal" />
+
+### Návrh ořezu od AI
+
+Před Učením přečte zvukový profil se zapnutým ořezem celý přepis a může nabídnout **Oříznout řeči mimo téma?** Oranžové značky ukazují navržená odstranění, i když je běžný režim ořezu zavřený; text stále existuje a lze jej přehrát. Zrušením zaškrtnutí okraj zachováte. **Oříznout vybrané…** otevře stejné potvrzení nevratného smazání s prohlédnutými revizemi přepisu. **Upravit v přepisu** otevře panel s těmito hranicemi; **Neořezávat** pokračuje bez ořezu. Zrušení panelu ponechá původní čtyřhodinovou lhůtu. Změna přepisu návrh zneplatní. Dokončený ruční i navržený ořez uzavře posouzení na zachovaném vstupu a další ořez stejného výřezu už nenavrhne.
 
 <span id="corrected-words" />
 

@@ -83,7 +83,9 @@ function picker(folders: RecordingFolder[]) {
 describe("FolderPicker live folders", () => {
     it("updates an open search, keeps its query and active folder, and falls back when that folder is deleted", async () => {
         const { rerender } = render(picker([root, parent, child]));
-        const dialog = screen.getByRole("dialog");
+        const dialog = screen.getByRole("presentation", {
+            name: "Choose a folder",
+        });
         const input = screen.getByPlaceholderText("Find a folder…");
         fireEvent.change(input, { target: { value: "tavri" } });
         fireEvent.keyDown(input, { key: "ArrowDown" });
@@ -93,7 +95,9 @@ describe("FolderPicker live folders", () => {
         expect(active.getAttribute("aria-selected")).toBe("true");
         const newChild = { ...added, parentId: parent.id };
         rerender(picker([root, parent, child, newChild]));
-        expect(screen.getByRole("dialog")).toBe(dialog);
+        expect(
+            screen.getByRole("presentation", { name: "Choose a folder" }),
+        ).toBe(dialog);
         expect(screen.getByPlaceholderText("Find a folder…")).toBe(input);
         expect(input).toHaveProperty("value", "tavri");
         expect(
@@ -166,7 +170,9 @@ describe("FolderPicker live folders", () => {
         render(picker([root, parent, child]));
         const input = screen.getByPlaceholderText("Find a folder…");
         fireEvent.keyDown(input, { key: "ArrowDown" });
-        const active = screen.getByRole("option", { name: "Zulno" });
+        const active = screen.getByRole("option", {
+            name: "Zulno Private › Tavri",
+        });
         expect(active.getAttribute("aria-selected")).toBe("true");
         fireEvent.keyDown(input, { key: "Enter" });
         expect(active.getAttribute("aria-disabled")).toBe("true");
@@ -178,13 +184,15 @@ describe("FolderPicker live folders", () => {
         expect(onOpenChange).not.toHaveBeenCalled();
     });
 
-    it("lets Dialog handle Escape exactly once and sees Tab", () => {
+    it("closes on Tab and handles Escape exactly once", () => {
         render(picker([root, parent]));
         const input = screen.getByPlaceholderText("Find a folder…");
         fireEvent.keyDown(input, { key: "Tab", shiftKey: true });
         expect(document.activeElement).toBe(
-            screen.getByRole("button", { name: "Close" }),
+            screen.getAllByRole("combobox", { name: "Choose a folder" })[0],
         );
+        expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(false);
+        onOpenChange.mockClear();
         fireEvent.keyDown(input, { key: "Escape" });
         expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(false);
     });
@@ -238,7 +246,9 @@ describe("FolderPicker live folders", () => {
             );
         }
         render(<Library />);
-        const dialog = screen.getByRole("dialog");
+        const dialog = screen.getByRole("presentation", {
+            name: "Choose a folder",
+        });
         fireEvent.change(screen.getByPlaceholderText("Find a folder…"), {
             target: { value: "Felvora" },
         });
@@ -247,7 +257,9 @@ describe("FolderPicker live folders", () => {
         );
         fireEvent.click(screen.getByRole("button", { name: "Create folder" }));
         await waitFor(() => expect(select).toHaveBeenCalledWith(created.id));
-        expect(screen.getByRole("dialog")).toBe(dialog);
+        expect(
+            screen.getByRole("presentation", { name: "Choose a folder" }),
+        ).toBe(dialog);
         expect(screen.getByPlaceholderText("Find a folder…")).toHaveProperty(
             "value",
             "Felvora",

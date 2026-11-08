@@ -1,14 +1,14 @@
 ---
 title: External MCP server in the app, gated by Keycloak client roles from the SSO realm
 date: 2026-10-07
-updated: 2026-10-23 07:00
+updated: 2026-11-07 18:15
 status: superseded
 kind: feature
 issues: []
 prs: [98]
 areas: [src/app/api/mcp/route.ts, src/lib/mcp, src/app/.well-known/oauth-protected-resource, content/docs/self-hosting/mcp.mdx, e2e/keycloak/riffado-e2e-realm.json]
 supersedes: []
-superseded-by: [2026-10-11-claude-connector-through-sso-realm, 2026-10-14-identity-provider-authorization]
+superseded-by: [2026-10-11-claude-connector-through-sso-realm, 2026-10-14-identity-provider-authorization, 2026-11-07-attended-recordings-for-time-reporting]
 relates: [2026-10-06-oidc-single-sign-on, 2026-10-20-mail-search-respects-visibility, 2026-10-18-inbound-mail, 2026-10-22-assignee-task-list, 2026-10-22-security-assessment-hardening]
 ---
 
@@ -25,8 +25,11 @@ through the existing `updateTask` rules.
 **Superseded in part:** the per-IP limit before token validation was removed
 ([Claude connector](2026-10-11-claude-connector-through-sso-realm.md)), and the token rules (unknown
 key id, allowed clients, MCP token type, service clients) changed with
-[identity-provider authorization](2026-10-14-identity-provider-authorization.md). The rest still
-holds.
+[identity-provider authorization](2026-10-14-identity-provider-authorization.md).
+[Attended recordings for time reporting](2026-11-07-attended-recordings-for-time-reporting.md)
+partially reverses “An external role must never widen what a person sees in the app”: only
+`list_attended_recordings` may disclose title, start and duration through confirmed speaker email
+matching without read access. The rest still holds.
 
 ## Why
 

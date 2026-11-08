@@ -2,7 +2,10 @@ import { providerFetch } from "@/lib/ai/provider-fetch";
 import { env } from "@/lib/env";
 import {
     renderTurnsAsText,
+    type TimedTextUnit,
     type TranscriptTurn,
+    trimTimedText,
+    withSentenceTiming,
 } from "@/lib/transcription/turns";
 
 /**
@@ -396,7 +399,15 @@ function renderPlain(
     results: SpeechmaticsResultItem[],
     wordDelimiter: string | undefined,
 ): string {
+    return renderTimedWords(results, wordDelimiter).text;
+}
+
+function renderTimedWords(
+    results: SpeechmaticsResultItem[],
+    wordDelimiter: string | undefined,
+): { text: string; units: TimedTextUnit[] } {
     const delimiter = wordDelimiter ?? " ";
+    const units: TimedTextUnit[] = [];
     let out = "";
     let needsDelimiter = false;
 
@@ -411,11 +422,23 @@ function renderPlain(
         if (out && needsDelimiter && attaches !== "previous") {
             out += delimiter;
         }
+        if (
+            item.type !== "punctuation" &&
+            typeof item.start_time === "number" &&
+            typeof item.end_time === "number"
+        )
+            units.push({
+                charStart: out.length,
+                charEnd: out.length + content.length,
+                startMs: toMs(item.start_time),
+                endMs: toMs(item.end_time),
+                word: true,
+            });
         out += content;
         needsDelimiter = attaches !== "next";
     }
 
-    return out.trim();
+    return trimTimedText(out, units);
 }
 
 /**
@@ -452,15 +475,21 @@ function renderDiarized(
     }
 
     const rendered = turns
-        .map((turn) => ({
-            speaker: turn.speaker || "speaker",
-            text: renderPlain(turn.items, wordDelimiter),
-            startMs: toMs(turn.items[0]?.start_time),
-            endMs: turn.items.reduce(
-                (latest, item) => Math.max(latest, toMs(item.end_time)),
-                0,
-            ),
-        }))
+        .map((turn) => {
+            const { text, units } = renderTimedWords(turn.items, wordDelimiter);
+            return withSentenceTiming(
+                {
+                    speaker: turn.speaker || "speaker",
+                    text,
+                    startMs: toMs(turn.items[0]?.start_time),
+                    endMs: turn.items.reduce(
+                        (latest, item) => Math.max(latest, toMs(item.end_time)),
+                        0,
+                    ),
+                },
+                units,
+            );
+        })
         .filter((turn) => turn.text.length > 0);
 
     if (rendered.length === 0) {

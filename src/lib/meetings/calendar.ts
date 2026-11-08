@@ -209,18 +209,20 @@ export async function matchRecorderAgendas(
         from: new Date(at.getTime() - 24 * 3600000),
         to: new Date(at.getTime() + 15 * 60000),
         includePast: true,
+        excludeAbsorbed: true,
     });
     const code = meetCode
         ? extractMeetCode({
               hangoutLink: `https://meet.google.com/${meetCode}`,
           })
         : null;
-    if (meetCode && !code) return [];
+    if (meetCode && (!code || code !== meetCode.toLowerCase())) return [];
     const viewer = await meetingViewer(userId);
     const agendas = await listMeetingRows(userId, viewer.orgUserId, {
         from: new Date(at.getTime() - 24 * 3600000),
         to: new Date(at.getTime() + 15 * 60000),
         includePast: true,
+        excludeAbsorbed: true,
     });
     const byId = new Map(agendas.map((row) => [row.agenda.id, row.agenda]));
     scheduleRefresh?.(async () => {
@@ -232,21 +234,36 @@ export async function matchRecorderAgendas(
         rows.map(async (row) => {
             if (
                 !row.start ||
-                at.getTime() >
+                at.getTime() >=
                     (row.end?.getTime() ?? row.start.getTime() + 2 * 3600000)
             )
                 return null;
             if (code) {
                 if (!row.calendarEventId) return null;
                 const agenda = byId.get(row.id);
-                const event = agenda
+                let event = agenda
                     ? cachedMeetingCalendarSnapshot(agenda)
                     : null;
+                if (agenda && !event?.meetingCode) {
+                    let timeout: ReturnType<typeof setTimeout> | undefined;
+                    try {
+                        event = await Promise.race([
+                            readMeetingCalendarSnapshot(agenda),
+                            new Promise<typeof event>((resolve) => {
+                                timeout = setTimeout(() => resolve(event), 700);
+                            }),
+                        ]);
+                    } finally {
+                        clearTimeout(timeout);
+                    }
+                }
 
                 if (event?.meetingCode !== code) return null;
             }
             return row;
         }),
     );
-    return matches.filter((row) => row !== null);
+    return matches
+        .filter((row) => row !== null)
+        .sort((a, b) => Number(b.own) - Number(a.own));
 }

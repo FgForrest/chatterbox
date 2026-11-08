@@ -35,6 +35,13 @@ describe.each(["cs-CZ", "en"] as const)("ReviewSpeaker in %s", (locale) => {
         render(
             <PlaybackProvider playback={createTestPlayback().playback}>
                 <ReviewSpeaker
+                    stats={{ durationMs: 0, replies: 0 }}
+                    samples={{
+                        samples: [],
+                        fallback: false,
+                        longestTurnMs: 0,
+                        longestStretchMs: 0,
+                    }}
                     label={label}
                     person={{ name: "Neri Vosk" }}
                     accent={speakerAccent(0)}
@@ -44,7 +51,7 @@ describe.each(["cs-CZ", "en"] as const)("ReviewSpeaker in %s", (locale) => {
                     recorder={false}
                     onlyFirstName={false}
                     reason="Stored reason remains unchanged."
-                    evidence={null}
+                    evidence={[]}
                     waits={null}
                     onTick={onTick}
                     onPick={vi.fn()}
@@ -86,6 +93,13 @@ it("uses a confirmed merged voice's colour in the review", () => {
     const { container } = render(
         <SpeakerAccentContext value={new Map([["speaker_1", 0]])}>
             <ReviewSpeaker
+                stats={{ durationMs: 0, replies: 0 }}
+                samples={{
+                    samples: [],
+                    fallback: false,
+                    longestTurnMs: 0,
+                    longestStretchMs: 0,
+                }}
                 label="speaker_1"
                 person={{ name: "Jan" }}
                 accent={speakerAccent(1)}
@@ -95,7 +109,7 @@ it("uses a confirmed merged voice's colour in the review", () => {
                 recorder={false}
                 onlyFirstName={false}
                 reason=""
-                evidence={null}
+                evidence={[]}
                 waits={null}
                 onTick={vi.fn()}
                 onPick={vi.fn()}

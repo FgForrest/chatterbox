@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import {
+    act,
     cleanup,
     fireEvent,
     render,
@@ -10,6 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
 import { PlaybackProvider } from "@/components/playback/playback-context";
+import type { TranscriptPlayback } from "@/hooks/use-transcript-follow";
 import { createTestPlayback } from "@/tests/helpers/playback";
 import type { Recording } from "@/types/recording";
 
@@ -48,6 +50,74 @@ const turns = [
     { speaker: "speaker_1", startMs: 3000, endMs: 4000, text: "Reply." },
     { speaker: "speaker_0", startMs: 5000, endMs: 6000, text: "Again." },
 ];
+
+function renderPendingSpeakerReview(playback?: TranscriptPlayback) {
+    vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) =>
+            Response.json(
+                url.includes("/review")
+                    ? {
+                          run: { id: "run-1", status: "ready" },
+                          available: true,
+                          names: { "person-1": "Jan" },
+                          types: {},
+                          relations: {},
+                          items: [
+                              {
+                                  id: "i-speaker",
+                                  kind: "speaker",
+                                  preTicked: false,
+                                  decision: null,
+                                  choice: null,
+                                  version: 0,
+                                  dependsOnLabel: null,
+                                  payload: {
+                                      label: "speaker_1",
+                                      personId: "person-1",
+                                      evidenceMs: [1000],
+                                      reason: "",
+                                  },
+                              },
+                          ],
+                      }
+                    : url.includes("/speakers")
+                      ? {
+                            transcriptionId: "tx-1",
+                            revision: 1,
+                            speakers: [],
+                        }
+                      : { topics: null },
+            ),
+        ),
+    );
+    const onPlayFromTurn = vi.fn();
+    render(
+        <PlaybackProvider
+            playback={
+                playback ??
+                createTestPlayback({ play: onPlayFromTurn }).playback
+            }
+        >
+            <TranscriptionPanel
+                recording={recording}
+                transcripts={[
+                    {
+                        source: "riffado",
+                        text: turns
+                            .map((turn) => `${turn.speaker}: ${turn.text}`)
+                            .join("\n"),
+                        turns,
+                        version: { transcriptionId: "tx-1", revision: 1 },
+                    },
+                ]}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+            />
+        </PlaybackProvider>,
+    );
+    return onPlayFromTurn;
+}
 
 describe("speaker playback navigation", () => {
     beforeEach(() => {
@@ -221,68 +291,29 @@ describe("speaker playback navigation", () => {
         expect(Element.prototype.scrollTo).toHaveBeenCalled();
     });
 
+    it("keeps waiting speaker proposals in the review without a duplicate region", async () => {
+        renderPendingSpeakerReview();
+        const review = await screen.findByRole("button", { name: "Review" });
+        expect(
+            screen.queryByRole("region", { name: /speaker guesses/i }),
+        ).toBeNull();
+        fireEvent.click(review);
+        expect(
+            await screen.findByRole("checkbox", {
+                name: "Accept Speaker 1 as Jan",
+            }),
+        ).toHaveProperty("checked", false);
+        expect(screen.getByText("Speakers")).toBeTruthy();
+        expect(
+            screen.queryByRole("region", { name: /speaker guesses/i }),
+        ).toBeNull();
+        expect(
+            screen.getByRole("group", { name: "Transcript speakers" }),
+        ).toBeTruthy();
+    });
+
     it("plays only the speaker's turn from a review's speaker", async () => {
-        vi.stubGlobal(
-            "fetch",
-            vi.fn(async (url: string) =>
-                Response.json(
-                    url.includes("/review")
-                        ? {
-                              run: { id: "run-1", status: "ready" },
-                              available: true,
-                              names: { "person-1": "Jan" },
-                              types: {},
-                              relations: {},
-                              items: [
-                                  {
-                                      id: "i-speaker",
-                                      kind: "speaker",
-                                      preTicked: false,
-                                      decision: null,
-                                      choice: null,
-                                      version: 0,
-                                      dependsOnLabel: null,
-                                      payload: {
-                                          label: "speaker_1",
-                                          personId: "person-1",
-                                          evidenceMs: [],
-                                          reason: "",
-                                      },
-                                  },
-                              ],
-                          }
-                        : url.includes("/speakers")
-                          ? {
-                                transcriptionId: "tx-1",
-                                revision: 1,
-                                speakers: [],
-                            }
-                          : { topics: null },
-                ),
-            ),
-        );
-        const onPlayFromTurn = vi.fn();
-        render(
-            <PlaybackProvider
-                playback={createTestPlayback({ play: onPlayFromTurn }).playback}
-            >
-                <TranscriptionPanel
-                    recording={recording}
-                    transcripts={[
-                        {
-                            source: "riffado",
-                            text: turns
-                                .map((turn) => `${turn.speaker}: ${turn.text}`)
-                                .join("\n"),
-                            turns,
-                            version: { transcriptionId: "tx-1", revision: 1 },
-                        },
-                    ]}
-                    isTranscribing={false}
-                    onTranscribe={vi.fn()}
-                />
-            </PlaybackProvider>,
-        );
+        const onPlayFromTurn = renderPendingSpeakerReview();
         fireEvent.click(await screen.findByRole("button", { name: "Review" }));
         fireEvent.click(
             await screen.findByRole("button", {
@@ -294,6 +325,46 @@ describe("speaker playback navigation", () => {
             expect.any(String),
             4000,
         );
+    });
+
+    it.each([
+        false,
+        true,
+    ])("review playback keeps transcript expansion and window position (expanded: %s)", async (expanded) => {
+        const { playback, emit } = createTestPlayback();
+        renderPendingSpeakerReview(playback);
+        fireEvent.click(await screen.findByRole("button", { name: "Review" }));
+        await screen.findByRole("button", { name: "Play a turn of Speaker 1" });
+        if (!expanded)
+            fireEvent.click(
+                screen.getByRole("button", { name: "Collapse transcript" }),
+            );
+        const windowScroll = vi
+            .spyOn(window, "scrollTo")
+            .mockImplementation(() => {});
+        const intoView = vi.fn();
+        Element.prototype.scrollIntoView = intoView;
+        const before = window.scrollY;
+        for (const name of [
+            "Play a turn of Speaker 1",
+            "Play from 00:02",
+            "Play from 00:01",
+        ]) {
+            fireEvent.click(screen.getByRole("button", { name }));
+            const owner = vi.mocked(playback.play).mock.calls.at(-1)?.[1];
+            act(() => emit({ ms: 3500, owner, playing: true }));
+            expect(
+                screen.getByRole("button", {
+                    name: expanded
+                        ? "Collapse transcript"
+                        : "Expand transcript",
+                }),
+            ).toBeTruthy();
+            expect(window.scrollY).toBe(before);
+            expect(windowScroll).not.toHaveBeenCalled();
+            expect(intoView).not.toHaveBeenCalled();
+        }
+        windowScroll.mockRestore();
     });
 });
 

@@ -203,6 +203,7 @@ const turns = [
             .returning();
         transcriptId = transcript.id;
         const settings = defaultProfileSettings("audio");
+        settings.steps.trim.automatic = false;
         settings.steps.summary.automatic = true;
         await db()
             .insert(processingProfiles)
@@ -613,6 +614,7 @@ const turns = [
     }
     async function correctAfterLearn(enabled: boolean) {
         const settings = defaultProfileSettings("audio");
+        settings.steps.trim.automatic = false;
         settings.steps.summary.automatic = true;
         settings.steps.learn.correctAfterLearn = enabled;
         await db()
@@ -1213,6 +1215,7 @@ const turns = [
         "no provider",
     ])("does not pre-skip tasks when %s", async (mode) => {
         const settings = defaultProfileSettings("audio");
+        settings.steps.trim.automatic = false;
         settings.steps.summary.automatic = mode !== "manual";
         settings.steps.tasks.enabled = mode !== "tasks off";
         await db()

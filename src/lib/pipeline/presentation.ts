@@ -11,6 +11,7 @@ import {
 } from "drizzle-orm";
 import { db } from "@/db";
 import { loadPipelineProcessingJobs } from "@/db/queries/pipeline-processing";
+import { readOwnerTrimProposal } from "@/db/queries/trim-proposal";
 import {
     aiEnhancements,
     asyncJobs,
@@ -28,11 +29,12 @@ import {
     users,
 } from "@/db/schema";
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
-import { decryptText } from "@/lib/encryption/fields";
+import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { folderDisplayName, folderDisplayPath } from "@/lib/folders/labels";
 import { type AppLocale, normalizeLocale } from "@/lib/i18n/config";
 import { translatedSourceMessage } from "@/lib/i18n/messages";
 import { learnRunCurrentScope } from "@/lib/learn/learn-open";
+import { needsLearnReview } from "@/lib/learn/review-policy";
 import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
 import { pipelineDriver } from "@/lib/pipeline/driver";
 import { effectiveManualOnly } from "@/lib/pipeline/effective-profile";
@@ -52,6 +54,7 @@ import type {
 } from "@/lib/pipeline/types";
 import { profileHistoryName } from "@/lib/profiles/history-name";
 import { parseProfileSettings } from "@/lib/profiles/settings";
+import type { StoredTrimProposal } from "@/lib/recordings/trim-proposal";
 import { isRecordingShared } from "@/lib/sharing/shared";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
@@ -84,12 +87,13 @@ export interface ProcessingPhaseFailure {
 }
 
 export interface ItemProcessingPresentation {
+    trimProposal?: StoredTrimProposal | null;
     itemId: string;
     kind: "audio" | "mail";
     legacy: boolean;
     manualOnly: boolean;
     phases: PipelinePhases;
-    steps: Record<PhaseName, ProcessingStep>;
+    steps: Record<Exclude<PhaseName, "trim">, ProcessingStep>;
     nextCheckAt: string;
     nextCheckInMs: number;
     profile:
@@ -380,7 +384,8 @@ export async function loadPrivateItemProcessing(
         recentTranscriptionJobs,
         recentTopicsJobs,
         recentSummaryJobs,
-        [learnFindings],
+        nonSpeakerFindings,
+        speakerFindings,
         transcripts,
         mailContent,
         summaries,
@@ -487,7 +492,9 @@ export async function loadPrivateItemProcessing(
             .orderBy(desc(asyncJobs.createdAt))
             .limit(1),
         db
-            .select({ count: count() })
+            .select({
+                n: count(),
+            })
             .from(learnReviewItems)
             .innerJoin(
                 learnRuns,
@@ -504,6 +511,30 @@ export async function loadPrivateItemProcessing(
                     eq(learnRuns.status, "ready"),
                     eq(learnReviewItems.userId, learnRuns.scopeUserId),
                     ne(learnReviewItems.kind, "known_fact"),
+                    ne(learnReviewItems.kind, "speaker"),
+                ),
+            ),
+        db
+            .select({
+                kind: learnReviewItems.kind,
+                payload: learnReviewItems.payload,
+            })
+            .from(learnReviewItems)
+            .innerJoin(
+                learnRuns,
+                and(
+                    eq(learnRuns.id, learnReviewItems.runId),
+                    eq(learnRuns.userId, ownerUserId),
+                ),
+            )
+            .where(
+                and(
+                    eq(learnRuns.itemId, itemId),
+                    eq(learnRuns.userId, ownerUserId),
+                    learnRunCurrentScope(orgUserId),
+                    eq(learnRuns.status, "ready"),
+                    eq(learnReviewItems.userId, learnRuns.scopeUserId),
+                    eq(learnReviewItems.kind, "speaker"),
                 ),
             ),
         item.kind === "audio"
@@ -714,7 +745,7 @@ export async function loadPrivateItemProcessing(
         );
     });
 
-    const phases = settleTaskReviewPhase(
+    let phases = settleTaskReviewPhase(
         item.phases ?? {},
         taskReviewWaiting,
         summaryCurrent,
@@ -725,10 +756,40 @@ export async function loadPrivateItemProcessing(
         automatic !== null &&
         Object.values(automatic).some(Boolean) &&
         processAgainPending(item.phases ?? {});
+    const ownerTrim =
+        viewerUserId === ownerUserId &&
+        view === "private" &&
+        item.kind === "audio";
+    const trimProposal =
+        ownerTrim &&
+        phases.trim?.state === "waiting" &&
+        phases.trim.waitingFor?.kind === "trimReview"
+            ? await readOwnerTrimProposal(ownerUserId, itemId)
+            : null;
+    if (
+        ownerTrim &&
+        !trimProposal &&
+        phases.trim?.state === "waiting" &&
+        phases.trim.waitingFor?.kind === "trimReview"
+    ) {
+        const [current] = await db
+            .select({ phases: itemProcessing.phases })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, itemId),
+                    eq(itemProcessing.userId, ownerUserId),
+                    eq(itemProcessing.view, "private"),
+                ),
+            )
+            .limit(1);
+        if (current) phases = { ...phases, trim: current.phases.trim };
+    }
     const presentation: Omit<
         ItemProcessingPresentation,
         "steps" | "nextCheckAt" | "nextCheckInMs"
     > = {
+        ...(ownerTrim ? { trimProposal } : {}),
         itemId,
         kind: item.kind,
         legacy,
@@ -746,7 +807,14 @@ export async function loadPrivateItemProcessing(
         processAgainReason: processAgain
             ? processingOutdatedReason(item.phases ?? {})
             : null,
-        learnFindingsWaiting: learnFindings?.count ?? 0,
+        learnFindingsWaiting:
+            (nonSpeakerFindings[0]?.n ?? 0) +
+            speakerFindings.filter((item) =>
+                needsLearnReview({
+                    ...item,
+                    payload: decryptJsonField(item.payload),
+                }),
+            ).length,
         latestLearnRun: learnRunRows[0]
             ? {
                   status: learnRunRows[0].status,

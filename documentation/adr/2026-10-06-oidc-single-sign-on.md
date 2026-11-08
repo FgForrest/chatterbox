@@ -1,7 +1,7 @@
 ---
 title: Self-host sign-in through one OpenID Connect provider, password login switched off
 date: 2026-10-06
-updated: 2026-11-03 15:24
+updated: 2026-11-07 21:50
 status: accepted
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [88]
 areas: [src/lib/sso, src/lib/auth.ts, src/db/schema.ts, content/docs/self-hosting/sso.mdx, docker-compose.e2e.sso.yml, e2e/keycloak]
 supersedes: []
 superseded-by: []
-relates: [2026-10-14-identity-provider-authorization, 2026-10-07-external-mcp-server]
+relates: [2026-10-14-identity-provider-authorization, 2026-10-07-external-mcp-server, 2026-11-07-first-sign-in-keeps-other-records]
 ---
 
 # Self-host sign-in through one OpenID Connect provider, password login switched off
@@ -181,6 +181,8 @@ provider sign-out across applications.
   of this sign-in.
 - [2026-10-07-external-mcp-server](2026-10-07-external-mcp-server.md): trusts this realm for MCP
   bearer tokens.
+- [2026-11-07-first-sign-in-keeps-other-records](2026-11-07-first-sign-in-keeps-other-records.md): a
+  first sign-in no longer renames a record whose name does not fit; the Almanac recording here holds.
 
 ## Timeline
 

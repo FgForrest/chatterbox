@@ -26,6 +26,7 @@ const h = vi.hoisted(() => {
                 children: [],
                 scrollIntoView: vi.fn(),
                 querySelector: (selector) => node(`${id}:${selector}`),
+                closest: (selector) => node(`${id}:closest:${selector}`),
                 querySelectorAll: () => [],
                 addEventListener: (type, listener) => {
                     handlers[`${id}:${type}`] = listener;
@@ -350,9 +351,60 @@ describe("agenda options capability", () => {
             ),
         );
         if (defaults?.agendas) {
-            expect(h.node("agenda-reminders").checked).toBe(false);
+            expect(h.node("meeting-notifications").checked).toBe(false);
             expect(h.node("agenda-banner").checked).toBe(true);
         }
+    });
+});
+
+describe("Calendar notification options", () => {
+    it.each([
+        [{ agendas: true }, false],
+        [{ nextMeeting: true }, false],
+        [{ agendas: true, nextMeeting: true }, false],
+        [{ agendas: false, nextMeeting: false }, true],
+    ])("shows notification controls for either capability: %j", async (defaults, hidden) => {
+        h.local.serverDefaults = defaults;
+        h.local.meetingNotifications = false;
+        h.local.meetingLeadMinutes = 5;
+        chrome.storage.onChanged.addListener.mock.calls[0][0](
+            { serverDefaults: { newValue: h.local.serverDefaults } },
+            "local",
+        );
+        await vi.waitFor(() => {
+            expect(h.node("meeting-notifications-section").hidden).toBe(hidden);
+            expect(h.node("meeting-notifications").checked).toBe(false);
+            expect(h.node("meeting-lead").value).toBe("5");
+        });
+    });
+    it("defaults to meeting start and saves the lead and notification switch on a released agenda server", async () => {
+        h.local.serverDefaults = { agendas: true };
+        delete h.local.meetingLeadMinutes;
+        delete h.local.meetingNotifications;
+        h.local.agendaReminders = false;
+        chrome.storage.onChanged.addListener.mock.calls[0][0](
+            { serverDefaults: { newValue: h.local.serverDefaults } },
+            "local",
+        );
+        await vi.waitFor(() => {
+            expect(h.node("meeting-notifications-section").hidden).toBe(false);
+            expect(h.node("meeting-lead").value).toBe("0");
+            expect(h.node("meeting-notifications").checked).toBe(false);
+        });
+        await h.handlers["meeting-lead:change"]({ target: { value: "10" } });
+        await h.handlers["meeting-notifications:change"]({
+            target: { checked: true },
+        });
+        expect(h.local.meetingLeadMinutes).toBe(10);
+        expect(h.local.meetingNotifications).toBe(true);
+        chrome.storage.onChanged.addListener.mock.calls[0][0](
+            { serverDefaults: { newValue: h.local.serverDefaults } },
+            "local",
+        );
+        await vi.waitFor(() => {
+            expect(h.node("meeting-lead").value).toBe("10");
+            expect(h.node("meeting-notifications").checked).toBe(true);
+        });
     });
 });
 

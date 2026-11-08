@@ -1,14 +1,14 @@
 ---
 title: A pipeline step names its job and the worker settles both, one reconciler repairs drift, and the server says what each step waits for
 date: 2026-10-22
-updated: 2026-10-22 22:30
-status: accepted
+updated: 2026-11-08 19:20
+status: superseded
 kind: fix
 issues: []
 prs: [209, 216, 220, 221]
 areas: [src/lib/pipeline, src/db/queries/pipeline-jobs.ts, src/db/queries/pipeline-reconciler.ts, src/db/queries/async-jobs.ts, src/lib/jobs, src/hooks/use-item-processing.ts, src/lib/summary]
 supersedes: [2026-10-19-processing-profiles-and-workflow]
-superseded-by: []
+superseded-by: [2026-11-08-ai-trim-proposal-before-learn]
 relates: [2026-10-22-owner-edits-shared-recording, 2026-09-13-durable-job-queue, 2026-10-22-summary-reads-the-preferred-transcript]
 ---
 
@@ -24,6 +24,8 @@ and what it waits for, and the client stopped guessing. Three summary rulings fr
 investigation are recorded here too: an old summary stays visible after a re-transcription, with a
 note; naming speakers does not gate the summary; and where workflow order matters, the UI enforces
 it, not the server.
+
+**Superseded in part** by [AI trim proposals before Learn](2026-11-08-ai-trim-proposal-before-learn.md): Automatic downstream work now rechecks the owner trim decision under writer locks. Explicit manual runs remain permissive, and job settlement and reconciliation keep their existing contracts.
 
 ## Why
 

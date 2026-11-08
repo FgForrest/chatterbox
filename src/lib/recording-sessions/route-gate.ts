@@ -28,8 +28,11 @@ export type RecordingSessionGate =
  */
 export async function gateRecordingSessionRequest(
     request: Request,
+    { rateLimit = true } = {},
 ): Promise<RecordingSessionGate> {
-    const ipLimitResponse = await enforceV1IpRateLimit(request);
+    const ipLimitResponse = rateLimit
+        ? await enforceV1IpRateLimit(request)
+        : null;
     if (ipLimitResponse) return { response: ipLimitResponse };
 
     const authn = await authenticateRequest(request);
@@ -37,7 +40,9 @@ export async function gateRecordingSessionRequest(
         throw new AppError(ErrorCode.UNAUTHORIZED, "Unauthorized", 401);
     }
 
-    const authLimitResponse = await enforceV1AuthenticatedRateLimit(authn);
+    const authLimitResponse = rateLimit
+        ? await enforceV1AuthenticatedRateLimit(authn)
+        : null;
     if (authLimitResponse) return { response: authLimitResponse };
 
     requireApiScope(authn, "recordings:write");

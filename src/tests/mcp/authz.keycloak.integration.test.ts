@@ -165,7 +165,11 @@ const KNOWLEDGE_TOOLS = [
     "list_mishearings",
     "list_types",
 ];
-const RECORDING_TOOLS = ["list_folders", "list_recordings"];
+const RECORDING_TOOLS = [
+    "list_folders",
+    "list_recordings",
+    "list_attended_recordings",
+];
 const TRANSCRIPT_TOOLS = ["get_transcript", "search_transcripts"];
 const TASK_READ_TOOLS = ["list_tasks", "search_tasks"];
 const MEETING_READ_TOOLS = ["get_meeting", "list_meetings"];

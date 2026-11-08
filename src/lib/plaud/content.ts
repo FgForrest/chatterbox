@@ -172,6 +172,11 @@ export function segmentsToTurns(
                         ? start
                         : Math.round(seg.end_time * scale),
                 text: (seg.content ?? "").trim(),
+                units:
+                    typeof seg.start_time === "number" &&
+                    Number.isFinite(seg.start_time)
+                        ? undefined
+                        : [],
             };
         }),
     );

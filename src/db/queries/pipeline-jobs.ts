@@ -67,6 +67,7 @@ export function jobBindings(
             [
                 "categorize",
                 "transcribe",
+                "trim",
                 "learn",
                 "summary",
                 "taskReview",
@@ -79,6 +80,7 @@ export function jobBindings(
 }
 
 function jobPhase(kind: string): PhaseName | undefined {
+    if (kind === "trim.propose") return "trim";
     if (kind === "transcription") return "transcribe";
     if (["summary", "topics", "title.generate"].includes(kind))
         return "summary";
@@ -619,7 +621,14 @@ export async function settlePipelineBindingInTx(
                 eq(itemProcessing.view, driver.view),
             ),
         );
-    if (!(binding.phase === "share" && outcome.kind === "waiting"))
+    if (
+        !(
+            binding.phase === "share" &&
+            outcome.kind === "waiting" &&
+            outcome.reason !== "cut" &&
+            outcome.reason !== "trim"
+        )
+    )
         await wakePipelineInTx(tx, binding.itemId, binding.userId);
     return true;
 }

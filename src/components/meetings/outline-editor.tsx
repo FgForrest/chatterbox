@@ -7,8 +7,10 @@ import { Button } from "@/components/ui/button";
 import type { TreePoint } from "@/lib/meetings/model";
 import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import { cn } from "@/lib/utils";
+import { AgendaAttribution } from "./agenda-attribution";
 import { outlineMove, outlineRows } from "./outline";
 import type { MeetingDetail, MeetingPoint } from "./types";
+import { useAgendaText } from "./use-agenda-text";
 
 type PointPatch = {
     text?: string;
@@ -18,6 +20,7 @@ type PointPatch = {
     note?: string | null;
 };
 export type { PointPatch };
+type PointBindings = Map<string, ReturnType<typeof useAgendaText>>;
 
 function PointField({
     point,
@@ -27,6 +30,8 @@ function PointField({
     onEmpty,
     pending,
     onRelease,
+    collaborative = false,
+    bindings,
 }: {
     point: MeetingPoint;
     editable: boolean;
@@ -39,6 +44,8 @@ function PointField({
     onEmpty: () => void;
     pending: boolean;
     onRelease: () => void;
+    collaborative?: boolean;
+    bindings: PointBindings;
 }) {
     const i18n = useExtracted();
     const [draft, setDraft] = useState(point.text);
@@ -49,6 +56,21 @@ function PointField({
     const [failed, setFailed] = useState(false);
     const released = useRef(false);
     const input = useRef<HTMLTextAreaElement>(null);
+    const textSync = useAgendaText(
+        input,
+        point.agendaId,
+        `point:${point.id}:text`,
+        collaborative && editable,
+        point.version,
+        setDraft,
+    );
+    useEffect(() => {
+        const key = `${point.id}:text`;
+        bindings.set(key, textSync);
+        return () => {
+            bindings.delete(key);
+        };
+    }, [bindings, point.id, textSync]);
     useEffect(() => {
         const field = input.current;
         if (!editable || !field || field.value !== draft) return;
@@ -73,6 +95,19 @@ function PointField({
         if (!focused.current && !dirty.current) setDraft(point.text);
     }, [point.text]);
     const save = (outdent?: boolean) => {
+        if (textSync.enabled) {
+            void textSync.flush().then((saved) => {
+                if (saved && outdent !== undefined)
+                    onSave({
+                        version: Math.max(
+                            point.version,
+                            textSync.materializedVersion() ?? 0,
+                        ),
+                        outdent,
+                    });
+            });
+            return;
+        }
         if (saving.current) return;
         const text = draft.trim();
         if (!text && outdent === undefined) return;
@@ -132,7 +167,8 @@ function PointField({
                 }}
                 onBlur={() => {
                     focused.current = false;
-                    if (!draft.trim()) setDraft(point.text);
+                    if (!textSync.enabled && !draft.trim())
+                        setDraft(point.text);
                     else save();
                 }}
                 onKeyDown={(event) => {
@@ -174,6 +210,8 @@ function PointNote({
     point,
     editable,
     onSave,
+    collaborative = false,
+    bindings,
 }: {
     point: MeetingPoint;
     editable: boolean;
@@ -181,6 +219,8 @@ function PointNote({
         note: string | null,
         version: number,
     ) => Promise<boolean> | undefined;
+    collaborative?: boolean;
+    bindings: PointBindings;
 }) {
     const i18n = useExtracted();
     const format = useFormatter();
@@ -189,6 +229,21 @@ function PointNote({
     const dirty = useRef(false);
     const editing = useRef(point);
     const input = useRef<HTMLInputElement>(null);
+    const textSync = useAgendaText(
+        input,
+        point.agendaId,
+        `point:${point.id}:note`,
+        collaborative && editable,
+        point.version,
+        setDraft,
+    );
+    useEffect(() => {
+        const key = `${point.id}:note`;
+        bindings.set(key, textSync);
+        return () => {
+            bindings.delete(key);
+        };
+    }, [bindings, point.id, textSync]);
     useEffect(() => {
         if (!focused.current && !dirty.current) setDraft(point.note ?? "");
     }, [point.note]);
@@ -221,6 +276,10 @@ function PointNote({
                     }}
                     onBlur={() => {
                         focused.current = false;
+                        if (textSync.enabled) {
+                            void textSync.flush();
+                            return;
+                        }
                         if (!dirty.current) return;
                         const note = draft.trim() || null;
                         void Promise.resolve(
@@ -272,6 +331,48 @@ export function OutlineEditor({
 }) {
     const i18n = useExtracted();
     const format = useFormatter();
+    const bindings = useRef<PointBindings>(new Map());
+    const flushPoint = async (point: MeetingPoint) => {
+        const fields = ["text", "note"]
+            .map((field) => bindings.current.get(`${point.id}:${field}`))
+            .filter((binding) => binding?.enabled);
+        try {
+            if (
+                !(
+                    await Promise.all(fields.map((field) => field?.flush()))
+                ).every(Boolean)
+            )
+                return null;
+            return {
+                ...point,
+                version: Math.max(
+                    point.version,
+                    ...fields.map((field) => field?.materializedVersion() ?? 0),
+                ),
+            };
+        } catch {
+            return null;
+        }
+    };
+    const hasBindings = (point: MeetingPoint) =>
+        ["text", "note"].some(
+            (field) => bindings.current.get(`${point.id}:${field}`)?.enabled,
+        );
+    const patchPoint = (point: MeetingPoint, patch: PointPatch) => {
+        if (!hasBindings(point)) return onPatch(point, patch);
+        return flushPoint(point).then(async (latest) =>
+            latest ? ((await onPatch(latest, patch)) ?? false) : false,
+        );
+    };
+    const removePoint = (point: MeetingPoint, mergeUp?: boolean) => {
+        const remove = (latest: MeetingPoint | null) => {
+            if (!latest) return;
+            if (mergeUp === undefined) onRemove(latest);
+            else onRemove(latest, mergeUp);
+        };
+        if (!hasBindings(point)) return remove(point);
+        return flushPoint(point).then(remove);
+    };
     const [insertion, setInsertion] = useState<{
         parentId: string | null;
         position: number;
@@ -483,7 +584,7 @@ export function OutlineEditor({
                                                 point.id.startsWith("pending-")
                                             }
                                             onChange={(event) =>
-                                                onPatch(point, {
+                                                patchPoint(point, {
                                                     discussed:
                                                         event.target.checked,
                                                 })
@@ -495,8 +596,10 @@ export function OutlineEditor({
                                     )}
                                 </span>
                                 <PointField
+                                    bindings={bindings.current}
                                     point={point}
                                     editable={editable}
+                                    collaborative={detail.textProtocol === 1}
                                     pending={subtreePending}
                                     onSave={(edit) => {
                                         const move =
@@ -512,7 +615,7 @@ export function OutlineEditor({
                                             ...(move ?? {}),
                                         };
                                         if (!Object.keys(patch).length) return;
-                                        return onPatch(
+                                        return patchPoint(
                                             { ...point, version: edit.version },
                                             patch,
                                         );
@@ -521,7 +624,7 @@ export function OutlineEditor({
                                     onRelease={() => exit.current?.focus()}
                                     onEmpty={() => {
                                         if (canRemove && !subtreePending) {
-                                            onRemove(point, true);
+                                            void removePoint(point, true);
                                             const previous = displayRows
                                                 .slice(0, index)
                                                 .reverse()
@@ -571,7 +674,10 @@ export function OutlineEditor({
                                             disabled={!indent || subtreePending}
                                             onClick={() => {
                                                 if (indent)
-                                                    onPatch(point, indent);
+                                                    void patchPoint(
+                                                        point,
+                                                        indent,
+                                                    );
                                             }}
                                         >
                                             <IndentIncrease className="size-3.5" />
@@ -585,7 +691,10 @@ export function OutlineEditor({
                                             }
                                             onClick={() => {
                                                 if (outdent)
-                                                    onPatch(point, outdent);
+                                                    void patchPoint(
+                                                        point,
+                                                        outdent,
+                                                    );
                                             }}
                                         >
                                             <IndentDecrease className="size-3.5" />
@@ -598,7 +707,9 @@ export function OutlineEditor({
                                                     "Remove point",
                                                 )}
                                                 disabled={subtreePending}
-                                                onClick={() => onRemove(point)}
+                                                onClick={() =>
+                                                    void removePoint(point)
+                                                }
                                             >
                                                 <Trash2 className="size-3.5" />
                                             </Button>
@@ -611,9 +722,22 @@ export function OutlineEditor({
                                     {i18n("Added during the meeting")}
                                 </span>
                             )}
+                            <AgendaAttribution
+                                name={
+                                    detail.authors.find(
+                                        (author) =>
+                                            author.id ===
+                                            (point.updatedByUserId ??
+                                                point.authorUserId),
+                                    )?.name
+                                }
+                                at={point.updatedAt}
+                            />
                             {(live || point.note) && (
                                 <PointNote
+                                    bindings={bindings.current}
                                     point={point}
+                                    collaborative={detail.textProtocol === 1}
                                     editable={
                                         canAdd &&
                                         !point.id.startsWith("pending-")

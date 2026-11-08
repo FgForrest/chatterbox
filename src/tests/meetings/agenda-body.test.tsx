@@ -240,6 +240,34 @@ describe.each([
         ).toBeTruthy();
         expect(screen.getByText("Assignee update")).toBeTruthy();
     });
+    it.each([
+        ["2026-11-03T11:00:00.000Z", at, "Status editor", "2026-11-03T11:00"],
+        [at, "2026-11-03T11:00:00.000Z", "Agenda editor", "2026-11-03T11:00"],
+        [at, at, "Agenda editor", "2026-11-03T10:00"],
+        [at, undefined, "Status editor", "2026-11-03T10:00"],
+        [null, at, "Agenda editor", "2026-11-03T10:00"],
+        [null, undefined, null, null],
+    ])("attributes the latest task change with its matching actor and timestamp (%s, %s)", async (statusChangedAt, agendaUpdatedAt, name, time) => {
+        await mount({
+            authors: [
+                { id: "status-editor", name: "Status editor" },
+                { id: "agenda-editor", name: "Agenda editor" },
+            ],
+            tasks: [
+                task("Follow up", null, {
+                    statusChangedAt: statusChangedAt ?? null,
+                    statusChangedByUserId: "status-editor",
+                    agendaUpdatedAt: agendaUpdatedAt ?? undefined,
+                    agendaUpdatedByUserId: "agenda-editor",
+                }),
+            ],
+        });
+        if (name)
+            expect(
+                screen.getByText(`Changed by ${name} at ${time}`),
+            ).toBeTruthy();
+        else expect(screen.queryByText(/^Changed by /)).toBeNull();
+    });
     it("keeps read-only controls out of the recording variant and offers correct live/preparation actions", async () => {
         await mount();
         if (variant === "recording") {

@@ -251,7 +251,7 @@ it.each([
     ).toBeTruthy();
     expect(screen.getByText(/Acme, Private planning/)).toBeTruthy();
     expect(
-        screen.getByText(/filed into all of the agenda’s folders/),
+        screen.getByText(/filed into the agenda’s folders you can file into/),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("radio"));
     await act(async () =>
@@ -677,7 +677,9 @@ describe.each([
                 ),
             ).toBeTruthy();
         expect(
-            screen.getByText(/filed into all of the agenda’s folders/),
+            screen.getByText(
+                /filed into the agenda’s folders you can file into/,
+            ),
         ).toBeTruthy();
         expect(
             fetchMock.mock.calls.some((call) => call[1]?.method === "POST"),

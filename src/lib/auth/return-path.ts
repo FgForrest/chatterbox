@@ -1,3 +1,6 @@
+/** The proxy uses this header to pass the requested page to server components. */
+export const LOGIN_RETURN_PATH_HEADER = "x-login-return-path";
+
 /** Validate a login destination as a local path, falling back to the dashboard. */
 export function loginReturnPath(value: unknown): string {
     if (typeof value !== "string" || !value.startsWith("/")) {
@@ -25,7 +28,39 @@ export function loginReturnPath(value: unknown): string {
     }
 }
 
+const MAX_LOGIN_REDIRECT_DESTINATION_LENGTH = 1024;
 const SSO_RETURN_PATH_KEY = "auth.ssoReturnPath";
+
+/** Build a login redirect, omitting the default dashboard destination. */
+export function loginRedirectPath(value: unknown, error?: string): string {
+    const destination = loginReturnPath(value);
+    const params = new URLSearchParams();
+    if (error) params.set("error", error);
+    if (
+        destination !== "/dashboard" &&
+        destination.length <= MAX_LOGIN_REDIRECT_DESTINATION_LENGTH
+    ) {
+        params.set("returnTo", destination);
+    }
+    const query = params.toString();
+    return query ? `/login?${query}` : "/login";
+}
+
+/** Add an inherited login fragment to an explicit, non-default destination. */
+export function loginReturnPathWithFragment(
+    value: unknown,
+    fragment: string,
+): string {
+    const destination = loginReturnPath(value);
+    if (
+        destination === "/dashboard" ||
+        destination.includes("#") ||
+        !fragment.startsWith("#")
+    ) {
+        return destination;
+    }
+    return loginReturnPath(`${destination}${fragment}`);
+}
 
 /** Retain the destination across provider redirects that omit the OAuth state. */
 export function rememberSsoReturnPath(value: string): void {

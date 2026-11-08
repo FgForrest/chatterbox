@@ -9,6 +9,7 @@ import {
     PencilLine,
     Play,
     Square,
+    UserPlus,
     WandSparkles,
     X,
 } from "lucide-react";
@@ -26,6 +27,11 @@ import {
     useState,
 } from "react";
 import { ItemHeader } from "@/components/items/item-header";
+import {
+    PersonShareDialog,
+    ReceivedItemBanner,
+    usePersonSharing,
+} from "@/components/sharing/person-sharing";
 import { announceTasksChanged } from "@/components/tasks/task-api";
 import { TaskRow } from "@/components/tasks/task-row";
 import { Button } from "@/components/ui/button";
@@ -42,7 +48,8 @@ import type { TaskChange, TaskView } from "@/lib/tasks/tasks";
 import { cn } from "@/lib/utils";
 import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
-import { AgendaExport } from "./agenda-export";
+import { AgendaAttribution } from "./agenda-attribution";
+import { AgendaCalendarExport, AgendaExport } from "./agenda-export";
 import { AgendaFolderTags } from "./agenda-folder-tags";
 import { AttachRecordingDialog } from "./attach-recording-dialog";
 import { MeetingSettings } from "./meeting-settings";
@@ -50,8 +57,15 @@ import { OlderTasksDialog } from "./older-tasks-dialog";
 import { OutlineEditor, type PointPatch } from "./outline-editor";
 import type { MeetingDetail, MeetingPoint, MeetingTask } from "./types";
 import { useAgenda } from "./use-agenda";
+import { useAgendaText } from "./use-agenda-text";
 
 export type AgendaVariant = "meeting" | "live" | "recording";
+function taskAttribution(task: MeetingTask) {
+    return task.statusChangedAt &&
+        (!task.agendaUpdatedAt || task.statusChangedAt > task.agendaUpdatedAt)
+        ? { at: task.statusChangedAt, userId: task.statusChangedByUserId }
+        : { at: task.agendaUpdatedAt, userId: task.agendaUpdatedByUserId };
+}
 function elapsed(start: string | null, now: number) {
     const seconds = start
         ? Math.max(0, Math.floor((now - Date.parse(start)) / 1000))
@@ -95,6 +109,8 @@ export function AgendaBody({
     const [collapsed, setCollapsed] = useState(variant === "recording");
     const [olderOpen, setOlderOpen] = useState(false);
     const [attachOpen, setAttachOpen] = useState(false);
+    const [shareOpen, setShareOpen] = useState(false);
+    const personSharing = usePersonSharing();
     const [now, setNow] = useState(Date.now());
     const suggestionsReasonId = useId();
     const sourceRecordings = useMemo(() => {
@@ -430,6 +446,18 @@ export function AgendaBody({
                                     <AgendaTaskRow
                                         key={task.id}
                                         task={task}
+                                        agendaId={detail.id}
+                                        collaborative={
+                                            detail.textProtocol === 1
+                                        }
+                                        attribution={
+                                            detail.authors.find(
+                                                (author) =>
+                                                    author.id ===
+                                                    taskAttribution(task)
+                                                        .userId,
+                                            )?.name
+                                        }
                                         recording={task.recording}
                                         evidence={task.evidence}
                                         readOnly={
@@ -663,6 +691,7 @@ export function AgendaBody({
                             discussedByUserId: null,
                             note: null,
                             noteAt: null,
+                            updatedByUserId: userId ?? null,
                             summaryOutcome: null,
                             version: 0,
                             createdAt: at,
@@ -746,13 +775,37 @@ export function AgendaBody({
                     <ItemHeader
                         itemId={detail.meetingItemId ?? detail.id}
                         kind="meeting"
+                        isOwn={detail.userId === userId}
+                        shared={detail.shared}
+                        sharingManageOnly={readOnly}
+                        received={Boolean(detail.receivedShare)}
+                        view={
+                            detail.shared
+                                ? "org"
+                                : detail.userId !== userId
+                                  ? "received"
+                                  : undefined
+                        }
+                        ownerName={
+                            detail.authors.find(
+                                (author) => author.id === detail.userId,
+                            )?.name
+                        }
                         title={detail.title}
                         metadata={meetingMetadata}
                         readOnly
                         action={
                             <>
                                 <AgendaExport detail={detail} disabled={busy} />
-                                {(!readOnly || detail.calendarEventId) && (
+                                {(!detail.permissions.manage || readOnly) &&
+                                    detail.calendarEventId &&
+                                    detail.canExportCalendar !== false && (
+                                        <AgendaCalendarExport
+                                            detail={detail}
+                                            disabled={busy}
+                                        />
+                                    )}
+                                {detail.permissions.manage && !readOnly && (
                                     <MeetingSettings
                                         detail={detail}
                                         recordings={recordings}
@@ -808,7 +861,24 @@ export function AgendaBody({
                         }
                         folders={
                             <AgendaFolderTags
-                                detail={detail}
+                                detail={
+                                    detail.receivedShare
+                                        ? {
+                                              ...detail,
+                                              folders: detail.folders.filter(
+                                                  (folder) =>
+                                                      folder.id !==
+                                                          detail.receivedShare
+                                                              ?.filingFolderId ||
+                                                      detail.receivedFolders?.some(
+                                                          (path) =>
+                                                              path.id ===
+                                                              folder.id,
+                                                      ),
+                                              ),
+                                          }
+                                        : detail
+                                }
                                 userId={userId}
                                 folders={folders}
                                 disabled={busy || readOnly}
@@ -817,6 +887,34 @@ export function AgendaBody({
                             />
                         }
                     />
+                    {detail.receivedShare && (
+                        <ReceivedItemBanner
+                            readOnly={readOnly}
+                            recording={{
+                                id: detail.meetingItemId ?? detail.id,
+                                filename: detail.title,
+                                kind: "meeting",
+                                ownerName: detail.authors.find(
+                                    (author) => author.id === detail.userId,
+                                )?.name,
+                                receivedShare: detail.receivedShare,
+                                receivedFolderIds: detail.receivedFolders?.map(
+                                    (folder) => folder.id,
+                                ),
+                            }}
+                            folders={folders}
+                            shared={detail.shared}
+                            onFiled={() => void agenda.reload().catch(() => {})}
+                            onRemoved={() => {
+                                onChanged?.();
+                                if (
+                                    !detail.shared &&
+                                    !detail.receivedFolders?.length
+                                )
+                                    onDeleted?.();
+                            }}
+                        />
+                    )}
                     {live && (
                         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-meeting/30 bg-meeting/5 p-3 text-sm">
                             <time className="font-mono tabular-nums">
@@ -881,6 +979,31 @@ export function AgendaBody({
                     />
                 </button>
             )}
+            {variant === "recording" &&
+                readOnly &&
+                personSharing &&
+                detail.userId === userId &&
+                detail.meetingItemId && (
+                    <>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShareOpen(true)}
+                        >
+                            <UserPlus className="size-4 text-person-share" />
+                            {i18n("Manage agenda sharing")}
+                        </Button>
+                        <PersonShareDialog
+                            itemId={detail.meetingItemId}
+                            title={detail.agendaTitle ?? detail.title}
+                            kind="meeting"
+                            open={shareOpen}
+                            onOpenChange={setShareOpen}
+                            allowInvite={false}
+                            absorbed
+                        />
+                    </>
+                )}
             {detail.attachedRecording?.visible === false && (
                 <output className="block rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
                     {i18n(
@@ -888,8 +1011,20 @@ export function AgendaBody({
                     )}
                 </output>
             )}
+            {!!detail.recordingBy?.length && (
+                <p className="text-sm text-muted-foreground">
+                    {i18n("Recording this meeting: {names}", {
+                        names: detail.recordingBy
+                            .map(
+                                (person) =>
+                                    person.name ?? i18n("Unknown author"),
+                            )
+                            .join(", "),
+                    })}
+                </p>
+            )}
             {agenda.colleagueChange && (
-                <output className="flex items-center justify-between rounded-lg border bg-muted/30 p-3 text-sm">
+                <output className="fixed right-4 bottom-4 z-50 flex max-w-md items-center justify-between rounded-lg border bg-background p-3 text-sm shadow-lg">
                     {i18n(
                         "A colleague changed the agenda. Their changes are shown below.",
                     )}
@@ -1116,6 +1251,7 @@ export function AgendaBody({
             {attachOpen && (
                 <AttachRecordingDialog
                     detail={detail}
+                    userId={userId}
                     recordings={recordings.filter(
                         (recording) =>
                             recording.kind !== "mail" &&
@@ -1144,6 +1280,9 @@ function AgendaTaskRow({
     changed,
     onRemove,
     onNote,
+    agendaId,
+    collaborative,
+    attribution,
     ...rowProps
 }: Omit<ComponentProps<typeof TaskRow>, "task"> & {
     task: MeetingTask;
@@ -1153,6 +1292,9 @@ function AgendaTaskRow({
     changed: boolean;
     onRemove: () => void;
     onNote: (note: string | null) => Promise<boolean>;
+    agendaId: string;
+    collaborative: boolean;
+    attribution?: string | null;
 }) {
     const i18n = useExtracted();
     const [noteOpen, setNoteOpen] = useState(false);
@@ -1188,12 +1330,18 @@ function AgendaTaskRow({
                             {i18n("Changed during the meeting")}
                         </span>
                     )}
+                    <AgendaAttribution
+                        name={attribution}
+                        at={taskAttribution(task).at}
+                    />
                 </>
             }
             extraNotes={
                 noteOpen && canEdit ? (
                     <AgendaTaskNote
                         task={task}
+                        agendaId={agendaId}
+                        collaborative={collaborative}
                         saving={pending}
                         onCancel={closeNote}
                         onSave={async (note) => {
@@ -1267,15 +1415,27 @@ function AgendaTaskNote({
     saving,
     onCancel,
     onSave,
+    agendaId,
+    collaborative,
 }: {
     task: MeetingTask;
     saving: boolean;
     onCancel: () => void;
     onSave: (note: string | null) => Promise<void>;
+    agendaId: string;
+    collaborative: boolean;
 }) {
     const i18n = useExtracted();
     const [draft, setDraft] = useState(task.agendaNote ?? "");
     const input = useRef<HTMLTextAreaElement>(null);
+    const textSync = useAgendaText(
+        input,
+        agendaId,
+        `task:${task.id}:note`,
+        collaborative,
+        task.agendaVersion ?? 0,
+        setDraft,
+    );
     useEffect(() => input.current?.focus(), []);
     return (
         <div className="space-y-2">
@@ -1291,11 +1451,17 @@ function AgendaTaskNote({
                 onChange={(event) => setDraft(event.target.value)}
             />
             <EditorActions
-                cancelLabel={i18n("Cancel")}
+                cancelLabel={textSync.enabled ? i18n("Close") : i18n("Cancel")}
                 saveLabel={i18n("Save")}
                 saving={saving}
                 onCancel={onCancel}
-                onSave={() => void onSave(draft.trim() || null)}
+                onSave={() => {
+                    if (textSync.enabled)
+                        void textSync.flush().then((saved) => {
+                            if (saved) onCancel();
+                        });
+                    else void onSave(draft.trim() || null);
+                }}
             />
         </div>
     );

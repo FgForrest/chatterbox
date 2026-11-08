@@ -2,25 +2,32 @@ import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { enqueueJobInTx } from "@/db/queries/async-jobs";
-import { asyncJobs, recordings, transcriptions } from "@/db/schema";
-import { encryptText } from "@/lib/encryption/fields";
+import { trimSnapshotMatches } from "@/db/queries/trim-proposal";
+import {
+    asyncJobs,
+    itemProcessing,
+    recordings,
+    transcriptions,
+} from "@/db/schema";
+import { decryptJsonField, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { nudge } from "@/lib/jobs/nudge";
+import { RECORDING_CUT_KIND } from "@/lib/recordings/cut-kind";
 import {
     type CutRange,
     cutTranscript,
     validCutRange,
 } from "@/lib/recordings/cut-range";
-import { isRecordingShared } from "@/lib/sharing/shared";
+import type { StoredTrimProposal } from "@/lib/recordings/trim-proposal";
 import { recordingJobSubject } from "@/lib/sharing/view";
-import { recordingShared, sharingOrgUserId } from "@/lib/sharing/writer";
+import { sharingOrgUserId } from "@/lib/sharing/writer";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 
-export const RECORDING_CUT_KIND = "recording.cut";
+export { RECORDING_CUT_KIND } from "@/lib/recordings/cut-kind";
 export const cutRequestSchema = z.object({
+    trimProposalId: z.string().min(1).optional(),
     startMs: z.number().int().nonnegative(),
     endMs: z.number().int().positive(),
-    withdraw: z.boolean().optional(),
     revisions: z
         .array(z.object({ id: z.string(), revision: z.number().int() }))
         .optional(),
@@ -152,6 +159,42 @@ export async function requestRecordingCut(
             recordingId,
             range,
         );
+        if (range.trimProposalId) {
+            const [processing] = await tx
+                .select({ phases: itemProcessing.phases })
+                .from(itemProcessing)
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, recordingId),
+                        eq(itemProcessing.userId, userId),
+                        eq(itemProcessing.view, "private"),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            const phase = processing?.phases.trim;
+            const proposal = decryptJsonField<StoredTrimProposal>(
+                recording.trimProposal,
+            );
+            if (
+                !proposal ||
+                phase?.state !== "waiting" ||
+                phase.waitingFor?.kind !== "trimReview" ||
+                phase.proposalId !== range.trimProposalId ||
+                proposal.id !== range.trimProposalId ||
+                Date.parse(proposal.deadline) <= Date.now() ||
+                !range.revisions ||
+                !(await trimSnapshotMatches(
+                    { recording, transcripts },
+                    proposal,
+                ))
+            )
+                throw new AppError(
+                    ErrorCode.CONFLICT,
+                    "The trim proposal changed or expired. Reload the recording.",
+                    409,
+                );
+        }
         if (
             range.revisions &&
             (range.revisions.length !== transcripts.length ||
@@ -170,12 +213,6 @@ export async function requestRecordingCut(
                 409,
             );
         }
-        if (
-            orgUserId &&
-            (await isRecordingShared(recordingId, orgUserId, tx)) &&
-            !range.withdraw
-        )
-            throw recordingShared();
         const payload: CutPayload = {
             ...range,
             recordingId,
@@ -241,6 +278,7 @@ export async function latestRecordingCut(userId: string, recordingId: string) {
             id: asyncJobs.id,
             status: asyncJobs.status,
             error: asyncJobs.lastError,
+            payload: asyncJobs.payload,
         })
         .from(asyncJobs)
         .where(
@@ -252,5 +290,14 @@ export async function latestRecordingCut(userId: string, recordingId: string) {
         )
         .orderBy(desc(asyncJobs.createdAt))
         .limit(1);
-    return job ?? null;
+    if (!job) return null;
+    const parsed = cutPayloadSchema.safeParse(job.payload);
+    return {
+        id: job.id,
+        status: job.status,
+        error: job.error,
+        range: parsed.success
+            ? { startMs: parsed.data.startMs, endMs: parsed.data.endMs }
+            : null,
+    };
 }

@@ -4,6 +4,7 @@ import {
     type WorkflowStep,
     type WorkflowStepId,
 } from "@/lib/pipeline/workflow-status";
+import { trimHolds } from "@/lib/recordings/trim-proposal";
 
 export type WorkflowWidgetFrame = "inline" | "dialog";
 export type WorkflowWidgetTone = "quiet" | "next" | "review" | "working";
@@ -139,6 +140,7 @@ export function deriveWorkflowWidgets(
         (data.outputs.transcript || hasReached(transcriptStep));
     const learnManual = data.steps.learn.state === "manual";
     const learnVisible =
+        !trimHolds(data.phases.trim) &&
         categorized &&
         contentReady &&
         (data.outputs.learn || hasReached(learnStep) || learnManual);

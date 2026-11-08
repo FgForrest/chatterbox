@@ -7,6 +7,7 @@ import {
     paragraphsFromTimedSegments,
     renderTurnsAsText,
     type TranscriptTurn,
+    timedWordsInText,
     turnsFromLabelledSegments,
 } from "@/lib/transcription/turns";
 
@@ -61,12 +62,43 @@ export function parseTranscriptionResponse(
         // is what seeking and topics are anchored to. Some OpenAI-compatible
         // servers answer this format without segments; those keep the flat
         // text alone, as before.
+        const words = (verbose.words ?? []).map((word) => ({
+            text: word.word,
+            startMs: Math.round(word.start * 1000),
+            endMs: Math.round(word.end * 1000),
+        }));
+        let wordIndex = 0;
         const turns = paragraphsFromTimedSegments(
-            (verbose.segments ?? []).map((seg) => ({
-                startMs: Math.round(seg.start * 1000),
-                endMs: Math.round(seg.end * 1000),
-                text: seg.text,
-            })),
+            (verbose.segments ?? []).map((seg) => {
+                const startMs = Math.round(seg.start * 1000);
+                const endMs = Math.round(seg.end * 1000);
+                const segmentWords: typeof words = [];
+                if (
+                    Number.isFinite(startMs) &&
+                    Number.isFinite(endMs) &&
+                    endMs >= startMs
+                ) {
+                    while (wordIndex < words.length) {
+                        const word = words[wordIndex];
+                        if (
+                            !Number.isFinite(word.startMs) ||
+                            word.startMs < startMs
+                        ) {
+                            wordIndex++;
+                            continue;
+                        }
+                        if (word.startMs >= endMs) break;
+                        segmentWords.push(word);
+                        wordIndex++;
+                    }
+                }
+                return {
+                    startMs,
+                    endMs,
+                    text: seg.text,
+                    units: timedWordsInText(seg.text, segmentWords),
+                };
+            }),
         );
         return {
             text: turns ? renderTurnsAsText(turns) : verbose.text,

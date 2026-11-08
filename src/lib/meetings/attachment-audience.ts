@@ -1,9 +1,11 @@
-import { and, inArray } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
+import { folderParticipantCondition } from "@/db/queries/folder-participants";
 import { meetingItemAudienceInTx } from "@/db/queries/meeting-audience";
 import type { MeetingTx } from "@/db/queries/meetings";
-import { folderShares, users } from "@/db/schema";
+import { activeShareRecipientCondition } from "@/db/queries/share-recipients";
+import { folderShares, recordingFolders, users } from "@/db/schema";
 
-/** Resolve the audience of attaching to an authorized agenda, including pending folder recipients. */
+/** Keep the agenda safety audience separate from the audience reached through fileable folders. */
 export async function meetingAttachmentAudienceInTx(
     tx: MeetingTx,
     input: {
@@ -20,21 +22,59 @@ export async function meetingAttachmentAudienceInTx(
         input.ownerUserId,
         input.orgUserId,
     );
-    const shares = input.folderIds.length
+    const folders = input.folderIds.length
+        ? await tx
+              .select({
+                  id: recordingFolders.id,
+                  userId: recordingFolders.userId,
+              })
+              .from(recordingFolders)
+              .where(
+                  and(
+                      inArray(recordingFolders.id, input.folderIds),
+                      or(
+                          input.orgUserId
+                              ? eq(recordingFolders.userId, input.orgUserId)
+                              : undefined,
+                          folderParticipantCondition(
+                              recordingFolders.userId,
+                              input.actorUserId,
+                              recordingFolders.id,
+                          ),
+                      ),
+                  ),
+              )
+        : [];
+    const shares = folders.length
         ? await tx
               .select({ userId: folderShares.receiverUserId })
               .from(folderShares)
+              .innerJoin(
+                  recordingFolders,
+                  and(
+                      eq(recordingFolders.id, folderShares.folderId),
+                      eq(recordingFolders.userId, folderShares.userId),
+                  ),
+              )
+              .innerJoin(users, eq(users.id, folderShares.receiverUserId))
               .where(
                   and(
-                      inArray(folderShares.folderId, input.folderIds),
+                      inArray(
+                          folderShares.folderId,
+                          folders.map((folder) => folder.id),
+                      ),
                       inArray(folderShares.state, ["accepted", "pending"]),
+                      activeShareRecipientCondition(),
                   ),
               )
         : [];
     const intended = {
-        organization: current.organization,
+        organization: folders.some(
+            (folder) => folder.userId === input.orgUserId,
+        ),
         userIds: new Set([
-            ...current.userIds,
+            input.actorUserId,
+            ...folders.map((folder) => folder.userId),
             ...shares.map((share) => share.userId),
         ]),
     };
@@ -43,7 +83,8 @@ export async function meetingAttachmentAudienceInTx(
         : await tx
               .select({ id: users.id, name: users.name })
               .from(users)
-              .where(inArray(users.id, [...intended.userIds]));
+              .where(inArray(users.id, [...intended.userIds]))
+              .orderBy(users.id);
     return {
         current,
         intended,
@@ -52,9 +93,9 @@ export async function meetingAttachmentAudienceInTx(
             organization: intended.organization,
             userIds: intended.organization
                 ? []
-                : [...intended.userIds].filter(
-                      (id) => id !== input.actorUserId,
-                  ),
+                : [...intended.userIds]
+                      .filter((id) => id !== input.actorUserId)
+                      .sort(),
             users: audienceUsers.filter(
                 (person) => person.id !== input.actorUserId,
             ),

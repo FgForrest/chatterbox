@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { MetalButton } from "@/components/metal-button";
 import { useProductName } from "@/components/product-name-provider";
 import {
-    loginReturnPath,
+    loginReturnPathWithFragment,
     recalledSsoReturnPath,
     rememberSsoReturnPath,
 } from "@/lib/auth/return-path";
@@ -89,8 +89,9 @@ export function SsoLogin({ providerName, error, returnTo }: SsoLoginProps) {
 
     const handleClick = async () => {
         setIsLoading(true);
-        const destination = loginReturnPath(
+        const destination = loginReturnPathWithFragment(
             returnTo ?? (error ? recalledSsoReturnPath() : undefined),
+            window.location.hash,
         );
         const callbackURL = new URL(destination, window.location.origin).href;
         const errorCallbackURL = new URL("/login", window.location.origin);

@@ -1,7 +1,7 @@
 ---
 title: Play a transcript sentence from a gutter control, and keep transcript and player on one position in both directions
 date: 2026-10-07
-updated: 2026-10-22 17:05
+updated: 2026-11-08 13:25
 status: accepted
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [75, 90]
 areas: [src/components/dashboard/transcript-view.tsx, src/hooks/use-transcript-follow.ts, src/hooks/use-playback-engine.ts, src/components/playback]
 supersedes: []
 superseded-by: []
-relates: [2026-10-05-timed-turns-topics-and-paragraphs, 2026-10-19-transcript-card-and-one-header]
+relates: [2026-10-05-timed-turns-topics-and-paragraphs, 2026-10-19-transcript-card-and-one-header, 2026-11-08-stored-sentence-start-times]
 ---
 
 # Play a transcript sentence from a gutter control, and keep transcript and player on one position in both directions
@@ -119,8 +119,9 @@ reader scrolls" reverses an explicit ruling and needs his confirmation and a new
 
 ## Consequences & open follow-ups
 
-- Exact sentence times need word timings stored at transcription time; the same deferral is recorded
-  for lecture paragraphs.
+- New transcripts store sentence start times
+  ([2026-11-08-stored-sentence-start-times](2026-11-08-stored-sentence-start-times.md)), and
+  playback starts there; older transcripts and turns without them still interpolate.
 - Audible output in a real Safari session was never verified for the engine rewrite.
 
 ## Related work
@@ -130,6 +131,8 @@ reader scrolls" reverses an explicit ruling and needs his confirmation and a new
 - [2026-10-19-transcript-card-and-one-header](2026-10-19-transcript-card-and-one-header.md): replaced
   the right-click speaker chips with play-button chips and added the sticky chapter bar that the
   reading line sits below.
+- [2026-11-08-stored-sentence-start-times](2026-11-08-stored-sentence-start-times.md): stored
+  sentence start times replace the interpolation this playback started from, where they exist.
 
 ## Timeline
 

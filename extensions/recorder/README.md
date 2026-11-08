@@ -17,7 +17,7 @@ system audio to extensions.
 With **In-meeting prompt** turned on, an audible meeting shows a banner at the
 top of the meeting page. Read the participant notice, then click the recorder
 icon at the top right to record that tab directly. The banner shows your actual
-keyboard shortcut if assigned. If the icon is hidden, it explains how to pin it
+keyboard shortcut if assigned. On agenda tabs the icon opens the agenda and recording controls; recording starts from its consent button. If the icon is hidden, it explains how to pin it
 from Chrome's extensions menu. The banner itself does not start direct tab
 capture: **Share through Chrome’s dialog** keeps the existing picker path.
 
@@ -129,61 +129,49 @@ meeting audio keeps recording with a persistent notification and popup warning
 explaining the failure. After deliberately recording without a microphone, you
 can dismiss permission reminders in the popup and re-enable them in Options.
 
-## Meeting agendas (0.8.3)
+## Agenda panels and Calendar meetings (0.9.0)
 
-A supporting server advertises `features.agendas: true`. The popup then shows an
-Agenda card for a meeting running now or starting within 15 minutes and preselects
-its folder. Meet matches by room code on the server; other platforms match by time.
-Several matches open a choice instead of selecting one silently.
+On a tab with matching agendas, the toolbar icon opens the agenda side panel; a second click closes it. Recording starts from the panel's consent button. The keyboard shortcut keeps starting/stopping recording. Popup and panel share one recording widget. A panel opened without a toolbar invocation falls back to Chrome's sharing dialog if direct tab capture is refused. The separate agenda window remains the fallback when Chrome refuses a side panel.
 
-**Show agenda** enables and opens Chrome's side panel for that tab only, after
-you click. The extension is absent from the side panel menu on tabs where no
-agenda has been opened. If Chrome refuses the request, the same page opens in a
-small extension window. Preparation shows the outline and task review; **Live meeting** enables
-discussed ticks, timestamped hints, notes, quick points and task **Done / Drop**.
-The "X of Y discussed" count includes only top-level points.
-Changes save to the server and colleagues' changes refresh every 15 seconds.
-Task actions change real tasks and honor their existing permissions. Absorbed
-agendas remain read-only. **Open in Chatterbox** opens the full meeting page.
+The panel keeps a selected agenda reachable while recording, including held agendas. At 560 px it places discussion points beside task review; narrower panels stack them. Preparation and Live meeting remain available throughout capture. The first edit during recording selects an editable agenda for completion, preferring your own agenda over a colleague's. An already selected own agenda does not switch because you edit a colleague's agenda. The teal attachment line offers Unlink; another selected agenda offers Switch to this agenda. Colleagues see who is recording and can reveal Record too controls.
 
-While recording, the popup shows an agenda card only for a selected agenda or
-matching agendas. Without a selection, **Choose an agenda** opens the picker.
-With a selection, **Another agenda…** offers agendas at the same time or **No agenda**.
-The panel shows which agenda will accompany the recording.
-The chosen ID survives upload recovery and is sent when the recording completes.
-Only an agenda shown before Record or explicitly chosen is sent. Unseen matches
-use the server's safe automatic rule unless you confirm a choice during recording.
-An agenda's folder applies to this recording only; your default folder stays unchanged.
-**No agenda** tells the server to skip automatic attachment. On a server that
-ignores this decision, automatic attachment may still apply.
-If the selected agenda becomes unavailable, the recording is saved without it
-and the completion message explains this.
-The optional in-meeting banner adds an Agenda line and the recording pill an
-Agenda button; neither reads page content.
+New server capabilities independently enable live event updates, shared Yjs text editing, recording presence and the next Calendar meeting. The open panel owns its authenticated stream and text documents; disconnected streams retry with backoff and fall back to 15-second polling. Text inputs fetch the server seed before editing and retain focus/carets across remote changes. Older servers keep polling and plain point-note PATCHes.
 
-With configuration refresh, the extension fetches the next 24 hours of timed
-agendas and schedules reminders one minute before each start. Refresh configuration
-in Options after adding or rescheduling a meeting to update reminders immediately.
-**Remind me of agendas at meeting time** and **Offer agendas in the meeting banner**
-are independent Options switches, both on by default. Older servers hide the
-agenda Options section and add no agenda UI or requests to recording.
-Version 0.8.2 keeps the fallback window's matched agenda if the requesting tab
-closes while matching. Version 0.8.3 counts only top-level points. Neither changes
-permissions; 0.8.0 added only `sidePanel`.
+A supporting server offers your next own primary-calendar Meet event in popup and panel, with Join in Meet and the connected Google account email. Joining never records. Options controls one notification per meeting and a 0/1/2/5/10-minute lead (default 0); the old agenda reminder preference is inherited. The room already being open suppresses the notification; the card is hidden on that room's tab. The badge says only now during the event when you are outside its room; REC takes priority. Background Calendar refresh is at most every five minutes, plus a page-open refresh only after 60 seconds.
+
+The popup and panel use the application's actual FolderCombobox, bundled locally with static light/dark Tailwind CSS and recent folder IDs in extension local storage. The in-page pill keeps its existing picker.
+
+### Server compatibility
+
+Every new request requires its advertised `/api/v1/recorder/config` capability:
+
+| Capability | Without it |
+| --- | --- |
+| `agendas` | Existing recording controls; no agenda requests or UI. |
+| `nextMeeting` | No Calendar card, join link or now badge; existing agenda reminders remain. |
+| `agendaLive` | Refresh the agenda every 15 seconds. |
+| `agendaText: 1` | Existing versioned point-note PATCHes; no collaborative text requests. |
+| `sessionAgenda` | No agenda field at session creation and no session agenda PATCH. Explicit completion choices still work. |
+
+Matching sends only a Meet room code and time to the server, never page content or a full tab URL. Other platforms match by time. Multiple matches offer a choice. The top-level discussed count excludes subpoints. Task Done/Drop changes real tasks under existing permissions, and absorbed agendas stay read-only. Open in Chatterbox leads to the full agenda.
+
+An explicit agenda choice survives upload recovery and is sent on completion. No agenda sends an explicit null; a server that ignores it may still attach automatically. Unseen matches leave the server's safe automatic rules in control. An agenda folder applies only to this recording; the default folder changes only after a user folder pick. If the agenda becomes unavailable, completion saves the recording without it and explains that result.
 
 ## Load it for development
 
-1. Open `chrome://extensions`.
-2. Turn on **Developer mode**.
-3. **Load unpacked** and select this `extensions/recorder` folder.
-4. Open the extension's **Options**, grant microphone access, and pair it with
+1. From the repository root run `node extensions/recorder/build.mjs`.
+2. Open `chrome://extensions`.
+3. Turn on **Developer mode**.
+4. **Load unpacked** and select this `extensions/recorder` folder.
+5. Open the extension's **Options**, grant microphone access, and pair it with
    your Chatterbox instance (see below).
 
 The unpacked build uses a different ID from the published extension. Set
 `NEXT_PUBLIC_RECORDER_EXTENSION_ID=hiipabbdnlhdkgldhkdndmohejoaecnh` when running
 Chatterbox against this development build.
 
-No build step is required: Chrome loads the extension's JavaScript directly.
+The build step creates gitignored `generated/` JavaScript and CSS using esbuild and the repository's Tailwind v4 toolchain. Run it again after changing shared components. `pack.mjs` builds these assets automatically; every dependency ships inside the ZIP. No remote code is loaded. Chrome loads the remaining extension JavaScript directly.
+Vitest also builds these assets once before each test run when any output is missing or older than its JavaScript, CSS or build dependencies. Tests work from a fresh checkout without a manual build, including sharded runs. Build failures stop the test run.
 Extension pages use ES modules. The meeting banner and shared folder combobox
 use classic scripts in Chrome's isolated world. A static ES-module wrapper
 exports the same combobox to the popup and recorder window. This avoids dynamic
@@ -214,7 +202,7 @@ repository root:
 node extensions/recorder/pack.mjs
 ```
 
-This writes `dist/chatterbox-recorder-<version>.zip`. The ZIP omits the
+This first builds the shared folder picker and text binding, then writes `dist/chatterbox-recorder-<version>.zip`. The ZIP omits the
 development-only manifest `key`, which the Chrome Web Store rejects.
 
 The published Chrome Web Store extension ID is

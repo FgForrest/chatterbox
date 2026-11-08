@@ -72,6 +72,23 @@ afterEach(() => {
 });
 
 describe("statistics page", () => {
+    it("uses the statistics series palette for trim spend and model legends, distinct from transcription", () => {
+        const data = statisticsFixture();
+        data.daily[metricIndex.trimCost][364] = 0.25;
+        render(<StatisticsPage initialData={data} scopes={["mine"]} />);
+        for (const title of ["AI spend", "Models"]) {
+            const panel = within(screen.getByRole("region", { name: title }));
+            const trim = panel.getByText("Trim proposal", { selector: "li" });
+            const transcription = panel.getByText("Transcription", {
+                selector: "li",
+            });
+            const color = trim.querySelector("i")?.style.background;
+            expect(color).toMatch(/^var\(--series-\d+\)$/);
+            expect(color).not.toBe(
+                transcription.querySelector("i")?.style.background,
+            );
+        }
+    });
     it("shows retained spend without activity and failed embedding calls in model tooltips and tables", async () => {
         const data = statisticsFixture();
         for (const metric of [

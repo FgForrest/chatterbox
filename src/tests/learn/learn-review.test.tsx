@@ -485,35 +485,57 @@ describe("LearnReview", () => {
         expect(onMarks).toHaveBeenLastCalledWith(null);
     });
 
-    it("holds Finish while the transcript names a speaker for it", async () => {
-        const fetch = respond({
-            "GET /api/recordings/rec-1/review?source=riffado": READY,
+    it("holds Finish while a non-speaker edit is being kept", async () => {
+        const respondFetch = respond({
+            "GET /api/recordings/rec-1/review?source=riffado": {
+                ...READY,
+                items: [
+                    {
+                        ...READY.items[1],
+                        id: "i-phrase",
+                        kind: "relation_phrase",
+                        payload: {
+                            phrase: "guides",
+                            subject: { personId: "p-jan" },
+                            object: { entityId: "e-orion" },
+                            objectKind: "entity",
+                            count: 1,
+                        },
+                    },
+                ],
+            },
             "POST /api/recordings/rec-1/review/finish?source=riffado": {
                 status: "finished",
-                applied: 1,
-                dismissed: 0,
+                applied: 0,
+                dismissed: 1,
                 skipped: [],
             },
         });
-        const onMarks = vi.fn();
-        render(
-            <LearnReview
-                recordingId="rec-1"
-                source="riffado"
-                turns={TURNS}
-                onMarks={onMarks}
-            />,
-        );
-        await waitFor(() =>
-            expect(onMarks).toHaveBeenLastCalledWith(expect.anything()),
-        );
-        let release: (value: boolean) => void = () => {};
-        const naming = new Promise<boolean>((resolve) => {
+        let release: (value: Response) => void = () => {};
+        const pending = new Promise<Response>((resolve) => {
             release = resolve;
         });
-        void onMarks.mock.lastCall?.[0].track(naming);
+        const fetch = vi.fn((url: string, init?: RequestInit) =>
+            init?.method === "PATCH" && !url.includes("/items/")
+                ? pending
+                : respondFetch(url, init),
+        );
+        vi.stubGlobal("fetch", fetch);
+        render(
+            <LearnReview recordingId="rec-1" source="riffado" turns={TURNS} />,
+        );
         fireEvent.click(
-            await screen.findByRole("button", { name: /Review \(2\)/ }),
+            await screen.findByRole("button", { name: "Review (1)" }),
+        );
+        fireEvent.change(
+            screen.getByRole("textbox", { name: "Name of the relation" }),
+            {
+                target: { value: "directs" },
+            },
+        );
+        expect(fetch).toHaveBeenCalledWith(
+            "/api/recordings/rec-1/review?source=riffado",
+            { method: "PATCH" },
         );
         const finish = screen.getByRole("button", { name: "Finish review" });
         await waitFor(() => expect(finish).toHaveProperty("disabled", true));
@@ -523,7 +545,7 @@ describe("LearnReview", () => {
             expect.anything(),
         );
 
-        release(true);
+        await act(async () => release(Response.json({ changed: true })));
         await waitFor(() => expect(finish).toHaveProperty("disabled", false));
         fireEvent.click(finish);
         await waitFor(() =>
@@ -829,13 +851,13 @@ describe("LearnReview", () => {
             name: "Tick all: Speakers",
         }) as HTMLInputElement;
         expect(all.indeterminate).toBe(true);
-        expect(screen.getByText("1 of 3 selected")).toBeTruthy();
+        expect(screen.getByText(/1 of 2 selected/)).toBeTruthy();
         fireEvent.click(all);
-        await screen.findByText("2 of 3 selected");
+        await screen.findByText(/2 of 2 selected/);
         expect(all.checked).toBe(true);
         expect(all.indeterminate).toBe(false);
         fireEvent.click(all);
-        await screen.findByText("0 of 3 selected");
+        await screen.findByText(/0 of 2 selected/);
         expect(
             fetch.mock.calls
                 .filter(
@@ -934,7 +956,7 @@ describe("LearnReview", () => {
         }) as HTMLInputElement;
         expect(accept.disabled).toBe(true);
         expect(
-            screen.getByRole("button", { name: "Someone else…" }),
+            screen.getByRole("button", { name: "Choose a person…" }),
         ).toBeTruthy();
         fireEvent.click(screen.getByRole("button", { name: "Unknown" }));
         await waitFor(() =>

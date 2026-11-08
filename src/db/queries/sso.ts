@@ -1,6 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { instanceState, sessions } from "@/db/schema";
+import { logSession } from "@/lib/auth/session-log";
 
 const SSO_SESSIONS_MARKER = "sso_sessions_revoked";
 
@@ -12,7 +13,7 @@ const SSO_SESSIONS_MARKER = "sso_sessions_revoked";
  * Returns how many sessions were ended, or null when it had already run.
  */
 export async function revokeSessionsOnSsoSwitch(): Promise<number | null> {
-    return db.transaction(async (tx) => {
+    const count = await db.transaction(async (tx) => {
         await tx.execute(
             sql`select pg_advisory_xact_lock(hashtextextended('riffado:sso-sessions', 0))`,
         );
@@ -30,6 +31,9 @@ export async function revokeSessionsOnSsoSwitch(): Promise<number | null> {
         });
         return ended.length;
     });
+    if (count !== null && count > 0)
+        logSession("ended", { cause: "sso-enabled", count });
+    return count;
 }
 
 /**

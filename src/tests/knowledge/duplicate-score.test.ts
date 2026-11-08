@@ -3,6 +3,7 @@ import {
     type DuplicateRecord,
     duplicateNameForms,
     duplicateNameIndex,
+    personNamesFit,
     proposedSurvivor,
     rankDuplicateRecords,
     scoreDuplicate,
@@ -181,5 +182,50 @@ describe("Organization duplicate scorer", () => {
                 { ...b, primaryEmail: null },
             ),
         ).toBe("a");
+    });
+});
+
+describe("personNamesFit", () => {
+    it.each([
+        ["Jan Dvořák", "Jan Dvorak"],
+        ["Dvořák, Jan", "Jan Dvořák"],
+        ["Honza Dvořák", "Jan Dvořák"],
+        ["Honza", "Jan Dvořák"],
+        ["Dvořák", "Jan Dvořák"],
+        ["J. Dvořák", "Jan Dvořák"],
+        ["Ing. Jan Dvořák", "Jan Dvořák"],
+        ["Ing. Jan Dvořák", "Jan Dvořák, Ph.D."],
+        ["B. Smith", "Bob Smith"],
+        ["MUDr. Jan Dvořák, CSc.", "doc. Ing. Jan Dvořák, Th.D."],
+        ["Jan Karel Dvořák", "Jan Dvořák"],
+        ["jan.dvorak", "Jan Dvořák"],
+    ])("fits %s to %s, either way round", (left, right) => {
+        expect(personNamesFit(left, right)).toBe(true);
+        expect(personNamesFit(right, left)).toBe(true);
+    });
+
+    it.each([
+        ["Ivana Malá", "Nora Veselá"],
+        ["Ivana", "Nora Veselá"],
+        ["Jan Malý", "Jan Dvořák"],
+        ["Jana Dvořáková", "Petra Dvořáková"],
+        ["Jana Dvořáková", "Jana Malá"],
+        ["J. Malý", "Jan Dvořák"],
+        ["Jan Malý, Ph.D.", "Jan Dvořák"],
+        ["Ivana Nováková", "Ivan Novák"],
+        ["Petra Svoboda", "Petr Svoboda"],
+        ["Jana Dvořáková", "Jana Dvořák"],
+        ["Ing. Petra Svoboda", "Ing. Petr Svoboda"],
+        ["?", "Jan Dvořák"],
+        ["---", "Jan Dvořák"],
+        ["🙂", "Jan Dvořák"],
+        ["Ing.", "Jan Dvořák"],
+        ["---", "?"],
+        ["J", "Jana Dvořáková"],
+        ["J. D.", "Jan Dvořák"],
+        ["Jan Karel Dvořák", "Jan Petr Dvořák"],
+    ])("does not fit %s to %s, either way round", (left, right) => {
+        expect(personNamesFit(left, right)).toBe(false);
+        expect(personNamesFit(right, left)).toBe(false);
     });
 });

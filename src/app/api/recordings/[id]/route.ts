@@ -647,7 +647,7 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
             // only want to emit `recording.deleted` for the winning request.
             const tombstoned = await tx
                 .update(recordings)
-                .set({ deletedAt: now, updatedAt: now })
+                .set({ deletedAt: now, trimProposal: null, updatedAt: now })
                 .where(
                     and(
                         eq(recordings.id, id),

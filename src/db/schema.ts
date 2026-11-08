@@ -21,6 +21,7 @@ import {
     varchar,
 } from "drizzle-orm/pg-core";
 import { nanoid } from "nanoid";
+import type { EncryptedJsonEnvelope } from "@/lib/encryption/fields";
 import type { PipelinePhases } from "@/lib/pipeline/types";
 
 export const userPlanEnum = pgEnum("user_plan", [
@@ -807,6 +808,7 @@ export const recordings = pgTable(
         // audio, a manual re-run rewrites the transcript or summary.
         audioReapedAt: timestamp("audio_reaped_at"),
         cutAt: timestamp("cut_at"),
+        trimProposal: jsonb("trim_proposal").$type<EncryptedJsonEnvelope>(),
         // DB-backed claim for the external remote-trash operation. The
         // retention worker runs in every app process, so this prevents two
         // processes from moving the same remote original concurrently.
@@ -5247,6 +5249,9 @@ export const agendaPoints = pgTable(
         ),
         note: text("note"),
         noteAt: timestamp("note_at"),
+        updatedByUserId: text("updated_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
         summaryOutcome: varchar("summary_outcome", { length: 16 }).$type<
             "covered" | "not_covered"
         >(),
@@ -5274,6 +5279,9 @@ export const agendaPoints = pgTable(
         parentIdx: index("agenda_points_parent_idx").on(table.parentId),
         originPointIdx: index("agenda_points_origin_point_idx").on(
             table.originPointId,
+        ),
+        updatedByIdx: index("agenda_points_updated_by_idx").on(
+            table.updatedByUserId,
         ),
         originCheck: check(
             "agenda_points_origin_check",
@@ -5304,13 +5312,69 @@ export const agendaTasks = pgTable(
         removedAt: timestamp("removed_at"),
         position: integer("position").notNull().default(0),
         note: text("note"),
+        version: integer("version").notNull().default(0),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+        updatedByUserId: text("updated_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
     },
     (table) => ({
         pk: primaryKey({ columns: [table.agendaId, table.taskId] }),
         taskIdx: index("agenda_tasks_task_idx").on(table.taskId),
+        updatedByIdx: index("agenda_tasks_updated_by_idx").on(
+            table.updatedByUserId,
+        ),
         originCheck: check(
             "agenda_tasks_origin_check",
             sql`${table.origin} in ('last_meeting', 'older')`,
+        ),
+    }),
+);
+
+export const agendaTextDocs = pgTable(
+    "agenda_text_docs",
+    {
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        agendaId: text("agenda_id")
+            .notNull()
+            .references(() => meetingAgendas.id, { onDelete: "cascade" }),
+        field: varchar("field", { length: 270 }).notNull(),
+        state: text("state").notNull(),
+        version: integer("version").notNull().default(0),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+        updatedByUserId: text("updated_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+    },
+    (table) => ({
+        pk: primaryKey({ columns: [table.agendaId, table.field] }),
+        userIdx: index("agenda_text_docs_user_idx").on(table.userId),
+        updatedByIdx: index("agenda_text_docs_updated_by_idx").on(
+            table.updatedByUserId,
+        ),
+    }),
+);
+
+export const agendaEventStreams = pgTable(
+    "agenda_event_streams",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        expiresAt: timestamp("expires_at").notNull(),
+    },
+    (table) => ({
+        userExpiresIdx: index("agenda_event_streams_user_expires_idx").on(
+            table.userId,
+            table.expiresAt,
+        ),
+        expiresIdx: index("agenda_event_streams_expires_idx").on(
+            table.expiresAt,
         ),
     }),
 );

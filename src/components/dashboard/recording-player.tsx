@@ -5,7 +5,6 @@ import { type RefObject, useImperativeHandle } from "react";
 import { RecordingPlayerControls } from "@/components/dashboard/recording-player-controls";
 import { RecordingWaveformStatus } from "@/components/dashboard/recording-player-header";
 import { DownloadAudioButton } from "@/components/recordings/download-audio-button";
-import { RecordingCutButton } from "@/components/recordings/recording-cut";
 import { Card, CardContent } from "@/components/ui/card";
 import { usePlaybackEngine } from "@/hooks/use-playback-engine";
 import { usePlaybackKeyboard } from "@/hooks/use-playback-keyboard";
@@ -192,10 +191,7 @@ export function RecordingPlayer({
                     scrubberStyle={scrubberStyle}
                     waveformPeaks={waveformPeaks}
                     trailingAction={
-                        <>
-                            <DownloadAudioButton recordingId={recording.id} />
-                            <RecordingCutButton />
-                        </>
+                        <DownloadAudioButton recordingId={recording.id} />
                     }
                 />
 

@@ -13,9 +13,11 @@ import {
     lockPipelineTargetsInTx,
 } from "@/db/queries/pipeline-jobs";
 import { lockProfileRevisionInTx } from "@/db/queries/profile-revision-guard";
+import { lockTrimRecording, resolveTrimInTx } from "@/db/queries/trim-state";
 import {
     asyncJobs,
     chatterItems,
+    itemProcessing,
     learnRuns,
     mailContents,
     mailMessages,
@@ -25,6 +27,7 @@ import {
 import { AppError, ErrorCode } from "@/lib/errors";
 import type { AppLocale } from "@/lib/i18n/config";
 import { nudge } from "@/lib/jobs/nudge";
+import { JobDeferredError } from "@/lib/jobs/retryable";
 import { InvalidJobPayloadError } from "@/lib/jobs/types";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { isUntimed } from "@/lib/knowledge/correction-anchors";
@@ -35,6 +38,7 @@ import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
 import { resolveStepProvider } from "@/lib/profiles/providers";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
+import { trimHolds } from "@/lib/recordings/trim-proposal";
 import type { RecordingViewContext } from "@/lib/sharing/access";
 import { type RecordingView, recordingJobSubject } from "@/lib/sharing/view";
 import { contentWriterScope, writerRefusalError } from "@/lib/sharing/writer";
@@ -303,6 +307,8 @@ export async function startLearnRun(input: {
         };
     };
     const started = await db.transaction(async (tx) => {
+        if (access.kind === "audio")
+            await lockTrimRecording(tx, access.ownerUserId, access.recordingId);
         await tx
             .select({
                 id: access.kind === "mail" ? chatterItems.id : recordings.id,
@@ -325,6 +331,30 @@ export async function startLearnRun(input: {
             [{ itemId: access.recordingId, userId: access.ownerUserId }],
             trigger !== "manual",
         );
+        if (access.kind === "audio") {
+            const [processing] = await tx
+                .select({ phases: itemProcessing.phases })
+                .from(itemProcessing)
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, access.recordingId),
+                        eq(itemProcessing.userId, access.ownerUserId),
+                        eq(itemProcessing.view, "private"),
+                    ),
+                )
+                .limit(1);
+            if (trigger === "auto" && trimHolds(processing?.phases.trim))
+                throw new JobDeferredError(
+                    1000,
+                    "Waiting for the trim decision",
+                );
+            if (trigger === "manual" && actorUserId === access.ownerUserId)
+                await resolveTrimInTx(tx, {
+                    userId: actorUserId,
+                    recordingId: access.recordingId,
+                    reason: "bypassed_manual",
+                });
+        }
         const inserted = await insertRun(tx);
         if ("open" in inserted) {
             if (inserted.open.jobId) {

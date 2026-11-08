@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
@@ -39,6 +39,7 @@ import {
 } from "@/lib/profiles/resolve";
 import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
 import type { ProviderPin } from "@/lib/profiles/settings";
+import { RECORDING_CUT_KIND } from "@/lib/recordings/cut";
 import { loadShareGate } from "@/lib/sharing/load-share-gate";
 import { isRecordingShared } from "@/lib/sharing/shared";
 import { recordingJobSubject } from "@/lib/sharing/view";
@@ -47,6 +48,7 @@ import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
 import { plaudActionItemsFingerprint } from "@/lib/tasks/plaud-proposals";
 import { waitingTaskDecisions } from "@/lib/tasks/waiting-review";
 import { TOPICS_JOB_KIND } from "@/lib/topics/topics-job";
+import { readPreferredTranscript } from "@/lib/transcription/read-source";
 import { TRANSCRIPTION_JOB_KIND } from "@/lib/transcription/transcription-job";
 
 async function providerAvailable(
@@ -306,11 +308,22 @@ export async function gatherFacts(
             .where(
                 and(
                     eq(asyncJobs.userId, userId),
-                    inArray(asyncJobs.kind, [
-                        SUMMARY_JOB_KIND,
-                        TOPICS_JOB_KIND,
-                    ]),
-                    eq(asyncJobs.subjectId, recordingJobSubject(itemId, view)),
+                    or(
+                        and(
+                            inArray(asyncJobs.kind, [
+                                SUMMARY_JOB_KIND,
+                                TOPICS_JOB_KIND,
+                            ]),
+                            eq(
+                                asyncJobs.subjectId,
+                                recordingJobSubject(itemId, view),
+                            ),
+                        ),
+                        and(
+                            eq(asyncJobs.kind, RECORDING_CUT_KIND),
+                            eq(asyncJobs.subjectId, itemId),
+                        ),
+                    ),
                     inArray(asyncJobs.status, ["pending", "processing"]),
                 ),
             ),
@@ -613,6 +626,14 @@ export async function gatherFacts(
     const profile = resolvedProfile
         ? {
               revisionId: resolvedProfile.revisionId,
+              trim:
+                  "trim" in resolvedProfile.settings.steps
+                      ? {
+                            automatic:
+                                !manualOnly &&
+                                resolvedProfile.settings.steps.trim.automatic,
+                        }
+                      : undefined,
               tasksEnabled: resolvedProfile.settings.steps.tasks.enabled,
               transcribe:
                   "transcribe" in resolvedProfile.settings.steps
@@ -723,7 +744,19 @@ export async function gatherFacts(
               : "riffado";
     const summaryContent =
         summarySource === "plaud" ? plaudTranscript : content;
+    const trimTranscript =
+        item.kind === "audio"
+            ? await readPreferredTranscript(itemId, userId)
+            : null;
     return {
+        trimContent: trimTranscript
+            ? {
+                  contentId: trimTranscript.id,
+                  contentSourceId: trimTranscript.source,
+                  contentRevision: trimTranscript.revision,
+                  timed: trimTranscript.turns !== null,
+              }
+            : null,
         item: {
             exists: true,
             deleted: item.deletedAt !== null,
@@ -844,7 +877,9 @@ export async function gatherFacts(
             jobActive: activeSummaryJobs.some(
                 (job) => job.kind === SUMMARY_JOB_KIND,
             ),
-            phaseJobActive: activeSummaryJobs.length > 0,
+            phaseJobActive: activeSummaryJobs.some(
+                (job) => job.kind !== RECORDING_CUT_KIND,
+            ),
             failed: Object.fromEntries(
                 [...failedSummaryJobs].reverse().flatMap((job) => {
                     const step =
@@ -872,6 +907,9 @@ export async function gatherFacts(
             followUps: taskDecisions.followUps,
         },
         share: {
+            cutJobActive: activeSummaryJobs.some(
+                (job) => job.kind === RECORDING_CUT_KIND,
+            ),
             problems: shareProblems,
             confirmationRequired:
                 manualOnly &&

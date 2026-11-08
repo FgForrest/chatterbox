@@ -3,10 +3,12 @@ import {
     isEnhancementOnlyProvider,
     isTranscriptionOnlyProvider,
 } from "@/lib/ai/provider-presets";
+import type { ProviderPin } from "@/lib/profiles/settings";
 
 export type ResolutionStep =
     | "transcription"
     | "summary"
+    | "trim"
     | "learn"
     | "topics"
     | "title";
@@ -14,12 +16,16 @@ export type ResolutionStep =
 export interface DefaultProviderCandidate {
     source:
         | "member-role"
+        | "profile-pin"
+        | "member-title"
+        | "organization-title"
         | "member-summary"
         | "organization-role"
         | "organization-summary"
         | "member-fallback"
         | "organization-fallback";
     providerId: string;
+    scope?: ProviderPin["scope"];
 }
 
 interface DefaultProviderCredential {
@@ -39,6 +45,7 @@ export function providerPointersFromFlags(
         isDefaultLearn?: boolean;
         isDefaultTopics?: boolean;
         isDefaultTitle?: boolean;
+        isDefaultTrim?: boolean;
     }[],
 ): DefaultProviderPointers {
     return {
@@ -49,6 +56,7 @@ export function providerPointersFromFlags(
         learn: credentials.find((row) => row.isDefaultLearn)?.id ?? null,
         topics: credentials.find((row) => row.isDefaultTopics)?.id ?? null,
         title: credentials.find((row) => row.isDefaultTitle)?.id ?? null,
+        trim: credentials.find((row) => row.isDefaultTrim)?.id ?? null,
     };
 }
 
@@ -81,7 +89,52 @@ export function defaultProviderCandidates(
     organization: DefaultProviderPointers | null,
     memberCredentials: DefaultProviderCredential[] = [],
     organizationCredentials: DefaultProviderCredential[] = [],
+    inheritedPins?: { title: ProviderPin | null; summary: ProviderPin | null },
 ): DefaultProviderCandidate[] {
+    if (step === "trim") {
+        const choices: (DefaultProviderCandidate | null)[] = [
+            member.trim
+                ? { source: "member-role", providerId: member.trim }
+                : null,
+            inheritedPins?.title
+                ? {
+                      source: "profile-pin",
+                      providerId: inheritedPins.title.credentialId,
+                      scope: inheritedPins.title.scope,
+                  }
+                : null,
+            member.title
+                ? { source: "member-title", providerId: member.title }
+                : null,
+            inheritedPins?.summary
+                ? {
+                      source: "profile-pin",
+                      providerId: inheritedPins.summary.credentialId,
+                      scope: inheritedPins.summary.scope,
+                  }
+                : null,
+            member.summary
+                ? { source: "member-summary", providerId: member.summary }
+                : null,
+            organization?.trim
+                ? { source: "organization-role", providerId: organization.trim }
+                : null,
+            organization?.title
+                ? {
+                      source: "organization-title",
+                      providerId: organization.title,
+                  }
+                : null,
+            organization?.summary
+                ? {
+                      source: "organization-summary",
+                      providerId: organization.summary,
+                  }
+                : null,
+        ];
+        const chosen = choices.find((choice) => choice !== null);
+        if (chosen) return [chosen];
+    }
     const candidates: DefaultProviderCandidate[] = [];
     const memberRole = member[step];
     if (memberRole) {

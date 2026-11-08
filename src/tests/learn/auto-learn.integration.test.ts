@@ -415,6 +415,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         for (const job of jobs) {
             const result = await pipelineActionJobHandler.run({
                 jobId: job.id,
+                claimToken: job.claimToken,
                 userId: job.userId,
                 attempt: job.attempts,
                 maxAttempts: job.maxAttempts,
@@ -447,6 +448,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         const profileOwner = input.ownerUserId ?? OWNER;
         const resolved = await resolveDefaultProfile(profileOwner, "audio");
         const settings = resolved.settings;
+        settings.steps.trim.automatic = false;
         if (!("transcribe" in settings.steps)) {
             throw new Error("audio profile");
         }

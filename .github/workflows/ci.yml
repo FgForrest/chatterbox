@@ -119,10 +119,14 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
 
-  test:
-    name: Test
+  test_shards:
+    name: Test shard ${{ matrix.shard }}/4
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     services:
       postgres:
@@ -160,9 +164,18 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run tests
-        run: pnpm test
+        run: pnpm exec vitest run --shard=${{ matrix.shard }}/4
         env:
           TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+
+  test:
+    name: Test
+    needs: test_shards
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every test shard to succeed
+        run: test "${{ needs.test_shards.result }}" = "success"
 
   build:
     name: Build

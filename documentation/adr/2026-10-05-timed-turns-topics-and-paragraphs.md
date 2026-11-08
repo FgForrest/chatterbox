@@ -1,7 +1,7 @@
 ---
 title: Topics exist only for timed transcripts and take their times from the transcript; lecture paragraphs are cut at display time
 date: 2026-10-05
-updated: 2026-10-22 16:00
+updated: 2026-11-08 13:25
 status: accepted
 kind: feature
 issues: [202]
@@ -9,7 +9,7 @@ prs: [57, 58, 59, 86]
 areas: [src/lib/topics, src/lib/transcription/turns.ts, src/lib/transcription/format.ts, src/components/dashboard/transcript-view.tsx, src/db/schema.ts]
 supersedes: []
 superseded-by: []
-relates: [2026-10-07-sentence-playback-two-way-sync]
+relates: [2026-10-07-sentence-playback-two-way-sync, 2026-11-08-stored-sentence-start-times]
 ---
 
 # Topics exist only for timed transcripts and take their times from the transcript; lecture paragraphs are cut at display time
@@ -151,8 +151,9 @@ and needs its own.
 ## Consequences & open follow-ups
 
 - Issue #202 proposes summarizing long recordings chapter by chapter on top of the topics windows.
-- Splitting long turns at transcription time with word timings remains the path to exact paragraph
-  times.
+- Exact paragraph and topic times inside a turn now come from stored sentence start times on new
+  transcripts ([2026-11-08-stored-sentence-start-times](2026-11-08-stored-sentence-start-times.md));
+  splitting long turns at transcription time stays unbuilt.
 - Re-transcribing a recording always drops its topics; getting them back is a new model call.
 
 ## Related work
@@ -160,6 +161,8 @@ and needs its own.
 - [2026-10-07-sentence-playback-two-way-sync](2026-10-07-sentence-playback-two-way-sync.md): builds
   sentence playback on the same timed turns and the same character-position interpolation, and keeps
   the chapter display in step with playback.
+- [2026-11-08-stored-sentence-start-times](2026-11-08-stored-sentence-start-times.md): new transcripts
+  store sentence start times, which `paragraphsOf` and the time marks use instead of interpolation.
 
 ## Timeline
 

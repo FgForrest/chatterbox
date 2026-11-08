@@ -49,8 +49,14 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     },
     "meetings/[id]/folders/[folderId]/route.ts": { DELETE: "meeting" },
     "meetings/[id]/attach/route.ts": { POST: "meeting" },
+    "meetings/[id]/recording-shares/route.ts": {
+        GET: "meeting",
+        POST: "meeting",
+    },
     "meetings/[id]/calendar-export/route.ts": { POST: "meeting" },
     "meetings/[id]/markdown/route.ts": { GET: "meeting" },
+    "meetings/[id]/events/route.ts": { GET: "meeting" },
+    "meetings/[id]/text/route.ts": { GET: "meeting", POST: "meeting" },
     "meetings/[id]/older-tasks/route.ts": { GET: "meeting" },
     "meetings/[id]/points/route.ts": { POST: "meeting" },
     "meetings/[id]/points/[pointId]/route.ts": {
@@ -95,6 +101,7 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     "recordings/[id]/peaks/route.ts": { POST: "access", PUT: "access" },
     "recordings/[id]/process-again/route.ts": { POST: "owner" },
     "recordings/[id]/erase/route.ts": { POST: "owner" },
+    "recordings/[id]/trim-proposal/route.ts": { POST: "view" },
     "recordings/[id]/cut/route.ts": { GET: "owner", POST: "owner" },
     "recordings/[id]/folders/route.ts": {
         POST: "folders",
@@ -246,7 +253,9 @@ describe("recording route classification", () => {
             const rules = new Set(Object.values(methods));
             const source = readFileSync(join(API_ROOT, file), "utf8");
             if (rules.has("meeting"))
-                expect(source, file).toMatch(/meetingRoute|requireApiSession/);
+                expect(source, file).toMatch(
+                    /meetingRoute|requireApiSession|agendaTextRoutes/,
+                );
             if (rules.has("shares"))
                 expect(source, file).toContain("requirePersonShareSession");
             if (rules.has("session")) {

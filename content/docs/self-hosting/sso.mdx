@@ -131,6 +131,14 @@ verified email on their next sign-in.
   Chatterbox within that window.
 - **Sign out** ends the Chatterbox session only. The provider's own session
   stays, so the next **Sign in** may go straight through without a prompt.
+- Chatterbox logs `[session] started`, `ended` and `renew-failed` with user and
+  session ids, reasons and available timings in minutes. Search by `user=` or
+  `session=`; `expiresAt` is the fixed deadline, `authAgeMin` / `sinceAuthMin`
+  show the provider sign-in's age, and a negative `refreshExpiresInMin` means
+  the refresh token has expired. `renew-failed` keeps the session; endings made
+  by an administrator, cleanup or the switch to single sign-on carry `count`.
+  Expired sessions are logged when read or cleaned up, so a
+  `started` line without an `ended` line can already be past `expiresAt`.
 - Personal API tokens are not sessions and keep working.
 
 ## The Almanac
@@ -140,6 +148,14 @@ Organization's Almanac, or in their own when the
 [Organization](./organization) is not enabled. A known person is matched
 by email and takes the provider's current name; nicknames, notes and facts
 added in Chatterbox are kept.
+
+In the Organization's Almanac, a record with a person's address but a name that
+does not fit theirs is treated as someone else's at their first sign-in, because
+members can put an address on the wrong person before its holder ever signs in.
+That record keeps its name and loses the address, the person gets a new record,
+and a warning goes to the server log. If the two were the same person after all
+(a nickname Chatterbox does not know, a name change), a curator can merge them
+in the Almanac.
 
 ## The organization account
 

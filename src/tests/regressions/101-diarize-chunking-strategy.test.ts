@@ -419,3 +419,7 @@ describe("issue #101 — transcribeRecording sends chunking_strategy for diarize
         expect(audioCreate).not.toHaveBeenCalled();
     });
 });
+
+vi.mock("@/db/queries/trim-state", () => ({
+    resolveTrimInTx: vi.fn(async () => false),
+}));

@@ -103,21 +103,17 @@ export function createAgendaCard(container, { tab, onFolder }) {
                 return;
             }
             const rows = response?.agendas ?? [];
-            current = recording
-                ? null
-                : "selectedAgenda" in (response ?? {})
-                  ? response.selectedAgenda
-                  : rows.length === 1
-                    ? rows[0]
-                    : null;
-            explicitNone = !recording &&
-                "selectedAgenda" in (response ?? {}) && !current;
+            const hasSelection = !recording && "selectedAgenda" in (response ?? {});
+            if (hasSelection) current = response.selectedAgenda;
+            else if (rows.length === 1) current = rows[0];
+            else current = null;
+            explicitNone = hasSelection && !current;
             initialized = true;
             matchedAt = Date.now();
             retryAt = 0;
             retryAttempt = 0;
             schedule(settings, 60000);
-            container.hidden = rows.length === 0 && !current && !explicitNone;
+            container.hidden = rows.length === 0 && !current && !explicitNone && !recording;
             title.textContent =
                 current?.title ??
                 t(

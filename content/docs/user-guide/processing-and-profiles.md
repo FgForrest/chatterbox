@@ -17,7 +17,7 @@ You can also drag an item onto a folder in the folder tree. Items addressed or u
 
 After categorizing, the row under the title shows the folder chips, **Add to folder**, any intended Organization folders, and the profile chip on the right. Open the profile chip to change the profile or choose **Nothing automatic**.
 
-Choosing an Organization folder records an intended placement. The item remains private while it is processed. Chatterbox shares it automatically after the transcript, speaker, and Learn checks pass. Task review does not delay sharing. With **Nothing automatic**, it waits instead: the intended folder in the folder row offers **Share now** and a cancel button.
+Choosing an Organization folder records an intended placement. The item remains private while it is processed. Chatterbox shares it automatically after the transcript, speaker, and Learn checks pass. Intended sharing waits while trim is running or awaiting your decision, as well as during a cut. Declining, the four-hour timeout or a completed cut releases that wait. Already-shared recordings stay shared. Task review does not delay sharing. With **Nothing automatic**, it waits instead: the intended folder in the folder row offers **Share now** and a cancel button.
 
 <span id="profiles-are-processing-recipes" />
 
@@ -27,7 +27,7 @@ A processing profile is a recipe for one kind of item. Open **Settings → Profi
 
 ![The processing profiles list](images/profiles.png)
 
-Each profile contains the steps that apply to that kind of item. Recording profiles can transcribe, Learn, generate a title, write a summary, find topics, and find tasks. Mail profiles start with Learn and the summary steps. Every paid step has its own **Run automatically** switch. An automatic title is generated once, from the first completed summary. Re-summarizing, re-transcribing, correcting with Learn, changing the profile, or choosing **Process again** does not replace it. A step that is off can still be run by hand.
+Each profile contains the steps that apply to that kind of item. Recording profiles can transcribe, propose an edge trim, Learn, generate a title, write a summary, find topics, and find tasks. Mail profiles start with Learn and the summary steps. Every paid step has its own **Run automatically** switch. An automatic title is generated once, from the first completed summary. Re-summarizing, re-transcribing, correcting with Learn, changing the profile, or choosing **Process again** does not replace it. A step that is off can still be run by hand.
 
 A profile also holds the choices for that work: provider and model, transcription language, summary instructions, output language and output format, and multi-pass settings. **Auto (match content)** keeps the output in the item's language. Editing a profile creates a new revision; items already in progress keep the revision they started with.
 
@@ -38,6 +38,14 @@ At the top of the list, choose separate defaults for recordings and mail. Each c
 **Organization profiles** are shared recipes. Members can use them on private items and duplicate them into a personal profile. **Your default** marks the profile you currently use; **Organization default** marks the Organization's choice. When you follow the Organization default, both labels appear on that profile. Curators can create and edit the Organization versions.
 
 If a specific Organization profile you selected is archived or you lose access to it, Chatterbox keeps your choice and marks it unavailable in Profiles, folder settings, and Categorize. New processing stops until you choose another default. Before archiving an Organization profile, the curator sees how many members selected it and the same warning.
+
+## Trim before Learn
+
+**Trim proposal** is on for every audio profile, including existing profiles whose old revision has no trim switch. Save a new revision to switch it off. **Nothing automatic** suppresses it, and mail never uses it. Updating does not revisit old recordings: new arrivals, new transcripts and explicit **Process again** are evaluated.
+
+One AI request reads the whole preferred transcript, including corrections, and can propose only a prefix, a suffix, or both. It never cuts automatically. The Learn position shows **Assessing trim…**, then **Waiting for trim** when an amber decision card needs you. There is no extra workflow circle. An empty result continues immediately; unsupported timing, a context limit or an unusable answer shows a non-blocking skip. Choosing a longer-context model and explicitly processing again retries the whole input.
+
+A proposal waits for four hours from its creation. **Do not trim** or timeout continues without a cut. **Cut selected…** opens the existing irreversible confirmation; **Adjust in transcript** prefills the cut panel without accepting anything. Opening, editing or cancelling does not renew the deadline. Starting Learn or a summary manually bypasses the wait uncut. A curator's manual work does not decide for the owner.
 
 <span id="folder-default-profiles" />
 
@@ -68,7 +76,7 @@ The strip under an item's title shows every step in one row and what needs atten
 | **Record** or **Receive** | Shows that the recording or email arrived. |
 | **Categorize** | Waits for folders and resolves the profile. |
 | **Transcribe** | Produces the recording's transcript. Mail does not show this phase. |
-| **Learn** | Finds names, corrections, and facts for review. |
+| **Learn** | First assesses a trim proposal for audio, then finds names, corrections, and facts for review. |
 | **Summarize** | Generates the summary and topics selected by the profile. The first completed summary can generate the item's one automatic title. |
 | **Task review** | Waits for proposed tasks and changes to be reviewed. |
 | **Share** | Shares an intended Organization placement after its gates pass. |

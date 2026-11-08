@@ -25,8 +25,7 @@ import {
 import { PlayAtIcon } from "@/components/playback/play-at-button";
 import { usePlayback } from "@/components/playback/playback-context";
 import {
-    CutLine,
-    CutTurnAction,
+    CutParagraphBoundary,
     useRecordingCut,
 } from "@/components/recordings/recording-cut";
 import { useTranscriptFollow } from "@/hooks/use-transcript-follow";
@@ -38,7 +37,6 @@ import {
 } from "@/lib/knowledge/speaker-label-rules";
 import type { SpeakerAttributions } from "@/lib/knowledge/speaker-references";
 import type { OverlayCorrection } from "@/lib/learn/render";
-import { turnStays } from "@/lib/recordings/cut-range";
 import {
     formatClock,
     paragraphsOf,
@@ -109,6 +107,7 @@ interface TextChunk {
     /** Index into the sentence starts; null when sentences do not play. */
     sentence: number | null;
     pieces: TurnPiece[];
+    startMs: number | null;
 }
 
 /**
@@ -340,7 +339,10 @@ export function TranscriptView({
         }
         turns.forEach((turn, turnIndex) => {
             const paragraphCuts = cutsByTurn.get(turnIndex) ?? [];
-            const stored = bySentence ? storedTurns?.[turnIndex] : undefined;
+            const stored =
+                bySentence || cut?.open || cut?.proposalPreview
+                    ? storedTurns?.[turnIndex]
+                    : undefined;
             const sentences = stored ? sentenceStarts(stored) : [];
             const msAt = new Map(sentences.map(({ at, ms }) => [at, ms]));
             const cuts = stored
@@ -378,11 +380,24 @@ export function TranscriptView({
                     );
                     sentence = startsMs.length - 1;
                 }
-                chunks[chunks.length - 1].push({ sentence, pieces: part });
+                chunks[chunks.length - 1].push({
+                    sentence,
+                    pieces: part,
+                    startMs: msAt.get(at) ?? sentences[0]?.ms ?? null,
+                });
             });
         });
         return { chunks, startsMs };
-    }, [turns, storedTurns, corrections, marksByTurn, paragraphs, bySentence]);
+    }, [
+        turns,
+        storedTurns,
+        corrections,
+        marksByTurn,
+        paragraphs,
+        bySentence,
+        cut?.open,
+        cut?.proposalPreview,
+    ]);
     const rootRef = useRef<HTMLDivElement>(null);
     const follow = useTranscriptFollow({
         rootRef,
@@ -491,23 +506,29 @@ export function TranscriptView({
                 const turnIndex = paragraph.turnIndex;
                 const turn = turns[turnIndex];
                 const storedTurn = storedTurns?.[turnIndex];
+                const nextParagraph = paragraphs[index + 1];
+                const lastSentenceMs = chunks[index]?.at(-1)?.startMs;
                 const removed = Boolean(
                     cut?.open &&
-                        storedTurn &&
-                        !turnStays(storedTurn, cut.range),
+                        (paragraph.startMs >= cut.range.endMs ||
+                            (lastSentenceMs !== null &&
+                                lastSentenceMs !== undefined &&
+                                lastSentenceMs < cut.range.startMs)),
                 );
-                const closesTurn =
-                    paragraphs[index + 1]?.turnIndex !== turnIndex;
-                const firstKept = cut?.open
-                    ? storedTurns?.findIndex((candidate) =>
-                          turnStays(candidate, cut.range),
-                      )
-                    : -1;
-                const lastKept = cut?.open
-                    ? storedTurns?.findLastIndex((candidate) =>
-                          turnStays(candidate, cut.range),
-                      )
-                    : -1;
+                const startEdge = Boolean(
+                    cut?.open &&
+                        cut.range.startMs > 0 &&
+                        paragraph.startMs <= cut.range.startMs &&
+                        (!nextParagraph ||
+                            nextParagraph.startMs > cut.range.startMs),
+                );
+                const endEdge = Boolean(
+                    cut?.open &&
+                        cut.range.endMs < cut.recording.duration &&
+                        paragraph.startMs <= cut.range.endMs &&
+                        (!nextParagraph ||
+                            nextParagraph.startMs > cut.range.endMs),
+                );
                 const opensTurn =
                     paragraphs[index - 1]?.turnIndex !== turnIndex;
                 const named = showSpeakers && turn.label !== "";
@@ -560,210 +581,245 @@ export function TranscriptView({
                     />
                 );
                 return (
-                    <Fragment
+                    <div
                         key={`${turn.speaker}-${turnIndex}-${paragraph.charStart}`}
+                        className="relative"
                     >
-                        {topicsByParagraph.get(index)?.map((topicIndex) => {
-                            const topic = (topics as TranscriptTopic[])[
-                                topicIndex
-                            ];
-                            // The same form as the topics list, so both read alike.
-                            const time = formatClock(topic.fromMs);
-                            return (
-                                <div
-                                    key={`topic-${topicIndex}-${topic.fromMs}`}
-                                    data-topic-index={topicIndex}
-                                    className={`flex scroll-mt-2 items-baseline gap-2 rounded-md border-t border-border/60 px-1 pt-4 transition-colors duration-700 ${topicIndex === 0 && index === 0 ? "border-t-0 pt-0" : ""} ${highlightedTopic === topicIndex ? "bg-primary/10" : ""}`}
-                                >
-                                    <span className="w-7 shrink-0 text-base font-semibold tabular-nums text-primary">
-                                        {topicIndex + 1}.
-                                    </span>
-                                    <h4 className="min-w-0 flex-1 text-base font-semibold leading-snug">
-                                        {topic.title}
-                                    </h4>
-                                    {playback ? (
-                                        <button
-                                            type="button"
-                                            className="shrink-0 rounded-sm font-mono text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                            onClick={() =>
-                                                playback.seek(topic.fromMs)
-                                            }
-                                            aria-label={i18n(
-                                                "Jump to topic {title} at {time}",
-                                                { title: topic.title, time },
-                                            )}
-                                        >
-                                            {time}
-                                        </button>
-                                    ) : (
-                                        <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                                            {time}
+                        {storedTurn && (
+                            <CutParagraphBoundary
+                                ms={paragraph.startMs}
+                                startEdge={startEdge}
+                                endEdge={endEdge}
+                            />
+                        )}
+                        <div className="space-y-4">
+                            {topicsByParagraph.get(index)?.map((topicIndex) => {
+                                const topic = (topics as TranscriptTopic[])[
+                                    topicIndex
+                                ];
+                                // The same form as the topics list, so both read alike.
+                                const time = formatClock(topic.fromMs);
+                                return (
+                                    <div
+                                        key={`topic-${topicIndex}-${topic.fromMs}`}
+                                        data-topic-index={topicIndex}
+                                        className={`flex scroll-mt-2 items-baseline gap-2 rounded-md border-t border-border/60 px-1 pt-4 transition-colors duration-700 ${topicIndex === 0 && index === 0 ? "border-t-0 pt-0" : ""} ${highlightedTopic === topicIndex ? "bg-primary/10" : ""}`}
+                                    >
+                                        <span className="w-7 shrink-0 text-base font-semibold tabular-nums text-primary">
+                                            {topicIndex + 1}.
                                         </span>
-                                    )}
-                                </div>
-                            );
-                        })}
-                        {cut?.open &&
-                            cut.range.startMs > 0 &&
-                            turnIndex === firstKept &&
-                            opensTurn && <CutLine edge="start" />}
-                        <div
-                            data-turn-index={opensTurn ? turnIndex : undefined}
-                            data-accent={Math.max(0, position)}
-                            className={`group/para relative space-y-1 ${cut?.open ? "py-2" : ""} ${removed ? "opacity-40 line-through" : ""} rounded-md transition-colors duration-700 ${gutter ? "pl-6" : ""} ${firstTopicParagraph !== null && index >= firstTopicParagraph ? "ml-10" : ""} ${highlightedParagraph === index || highlightedTurnIndex === turnIndex ? "bg-primary/10" : ""}`}
-                        >
-                            {opensTurn && storedTurn && (
-                                <CutTurnAction turn={storedTurn} edge="start" />
-                            )}
-                            {!named && canSeek && playButton}
-                            {!named && canSeek && (
-                                <button
-                                    type="button"
-                                    className="inline-flex min-h-5 items-center rounded-sm text-xs text-muted-foreground tabular-nums underline-offset-2 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                    onClick={() =>
-                                        playback?.seek(paragraph.startMs)
-                                    }
-                                    aria-label={i18n("Seek audio to {time}", {
-                                        time: formatTimestamp(
-                                            paragraph.startMs,
-                                        ),
-                                    })}
-                                >
-                                    {time}
-                                </button>
-                            )}
-                            {named && opensTurn && (
-                                <div className="flex min-h-5 items-center gap-2">
-                                    {speakerMark}
-                                    {canSeek ? (
-                                        <button
-                                            type="button"
-                                            className={`rounded-sm text-xs font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${style.text} ${nameStyle}`}
-                                            onClick={() =>
-                                                playback?.seek(
-                                                    turn.startMs ?? 0,
-                                                )
-                                            }
-                                            aria-label={i18n(
-                                                "Seek audio to {time}, {speaker}",
-                                                {
-                                                    time: formatTimestamp(
-                                                        turn.startMs ?? 0,
-                                                    ),
-                                                    speaker: displayName,
-                                                },
-                                            )}
-                                            title={i18n(
-                                                "Seek audio to {time}",
-                                                {
-                                                    time: formatTimestamp(
-                                                        turn.startMs ?? 0,
-                                                    ),
-                                                },
-                                            )}
-                                        >
-                                            {displayName}
-                                        </button>
-                                    ) : (
-                                        <span
-                                            className={`text-xs font-medium ${style.text} ${nameStyle}`}
-                                        >
-                                            {displayName}
-                                        </span>
-                                    )}
-                                    {timed && (
-                                        <span className="font-mono text-xs text-muted-foreground tabular-nums">
-                                            {time}
-                                        </span>
-                                    )}
-                                    {proposed &&
-                                        learnMarks &&
-                                        firstTurnOf.get(key) === index && (
+                                        <h4 className="min-w-0 flex-1 text-base font-semibold leading-snug">
+                                            {topic.title}
+                                        </h4>
+                                        {playback ? (
                                             <button
                                                 type="button"
-                                                className={`inline-flex items-center gap-0.5 rounded-sm border px-1 text-[11px] leading-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${proposed.ticked ? "border-amber-500 bg-amber-500/15 text-amber-700 dark:text-amber-300" : "border-border text-muted-foreground hover:text-foreground"}`}
-                                                aria-pressed={proposed.ticked}
-                                                title={i18n(
-                                                    "Suggested by Learn. Applied when you finish the review.",
-                                                )}
-                                                aria-label={
-                                                    proposed.ticked
-                                                        ? i18n(
-                                                              "{name} is ticked for this speaker in the review: untick",
-                                                              {
-                                                                  name: proposed.name,
-                                                              },
-                                                          )
-                                                        : i18n(
-                                                              "Accept {name} for this speaker in the review",
-                                                              {
-                                                                  name: proposed.name,
-                                                              },
-                                                          )
-                                                }
+                                                className="shrink-0 rounded-sm font-mono text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                                 onClick={() =>
-                                                    learnMarks.decide(
-                                                        proposed.itemId,
-                                                        proposed.ticked
-                                                            ? "rejected"
-                                                            : "accepted",
+                                                    playback.seek(topic.fromMs)
+                                                }
+                                                aria-label={i18n(
+                                                    "Jump to topic {title} at {time}",
+                                                    {
+                                                        title: topic.title,
+                                                        time,
+                                                    },
+                                                )}
+                                            >
+                                                {time}
+                                            </button>
+                                        ) : (
+                                            <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                                                {time}
+                                            </span>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                            <div
+                                data-cut-removed={removed || undefined}
+                                data-turn-index={
+                                    opensTurn ? turnIndex : undefined
+                                }
+                                data-accent={Math.max(0, position)}
+                                className={`group/para relative space-y-1 ${removed ? "opacity-40 line-through" : ""} rounded-md transition-colors duration-700 ${gutter ? "pl-6" : ""} ${firstTopicParagraph !== null && index >= firstTopicParagraph ? "ml-10" : ""} ${highlightedParagraph === index || highlightedTurnIndex === turnIndex ? "bg-primary/10" : ""}`}
+                            >
+                                {!named && canSeek && playButton}
+                                {!named && canSeek && (
+                                    <button
+                                        type="button"
+                                        className="inline-flex min-h-5 items-center rounded-sm text-xs text-muted-foreground tabular-nums underline-offset-2 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                        onClick={() =>
+                                            playback?.seek(paragraph.startMs)
+                                        }
+                                        aria-label={i18n(
+                                            "Seek audio to {time}",
+                                            {
+                                                time: formatTimestamp(
+                                                    paragraph.startMs,
+                                                ),
+                                            },
+                                        )}
+                                    >
+                                        {time}
+                                    </button>
+                                )}
+                                {named && opensTurn && (
+                                    <div className="flex min-h-5 items-center gap-2">
+                                        {speakerMark}
+                                        {canSeek ? (
+                                            <button
+                                                type="button"
+                                                className={`rounded-sm text-xs font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${style.text} ${nameStyle}`}
+                                                onClick={() =>
+                                                    playback?.seek(
+                                                        turn.startMs ?? 0,
                                                     )
                                                 }
+                                                aria-label={i18n(
+                                                    "Seek audio to {time}, {speaker}",
+                                                    {
+                                                        time: formatTimestamp(
+                                                            turn.startMs ?? 0,
+                                                        ),
+                                                        speaker: displayName,
+                                                    },
+                                                )}
+                                                title={i18n(
+                                                    "Seek audio to {time}",
+                                                    {
+                                                        time: formatTimestamp(
+                                                            turn.startMs ?? 0,
+                                                        ),
+                                                    },
+                                                )}
                                             >
-                                                <Check className="size-3" />
+                                                {displayName}
                                             </button>
-                                        )}
-                                </div>
-                            )}
-                            <p className="text-sm whitespace-pre-wrap leading-relaxed">
-                                {chunksHere.map((chunk, chunkIndex) => {
-                                    if (chunk.sentence === null) {
-                                        return (
-                                            <Fragment
-                                                // Chunks are fixed by the text and its sentences.
-                                                // biome-ignore lint/suspicious/noArrayIndexKey: stable order
-                                                key={chunkIndex}
+                                        ) : (
+                                            <span
+                                                className={`text-xs font-medium ${style.text} ${nameStyle}`}
                                             >
-                                                {renderPieces(chunk.pieces)}
-                                            </Fragment>
+                                                {displayName}
+                                            </span>
+                                        )}
+                                        {timed && (
+                                            <span className="font-mono text-xs text-muted-foreground tabular-nums">
+                                                {time}
+                                            </span>
+                                        )}
+                                        {proposed &&
+                                            learnMarks &&
+                                            firstTurnOf.get(key) === index && (
+                                                <button
+                                                    type="button"
+                                                    className={`inline-flex items-center gap-0.5 rounded-sm border px-1 text-[11px] leading-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${proposed.ticked ? "border-amber-500 bg-amber-500/15 text-amber-700 dark:text-amber-300" : "border-border text-muted-foreground hover:text-foreground"}`}
+                                                    aria-pressed={
+                                                        proposed.ticked
+                                                    }
+                                                    title={i18n(
+                                                        "Suggested by Learn. Applied when you finish the review.",
+                                                    )}
+                                                    aria-label={
+                                                        proposed.ticked
+                                                            ? i18n(
+                                                                  "{name} is ticked for this speaker in the review: untick",
+                                                                  {
+                                                                      name: proposed.name,
+                                                                  },
+                                                              )
+                                                            : i18n(
+                                                                  "Accept {name} for this speaker in the review",
+                                                                  {
+                                                                      name: proposed.name,
+                                                                  },
+                                                              )
+                                                    }
+                                                    onClick={() =>
+                                                        learnMarks.decide(
+                                                            proposed.itemId,
+                                                            proposed.ticked
+                                                                ? "rejected"
+                                                                : "accepted",
+                                                        )
+                                                    }
+                                                >
+                                                    <Check className="size-3" />
+                                                </button>
+                                            )}
+                                    </div>
+                                )}
+                                <p className="text-sm whitespace-pre-wrap leading-relaxed">
+                                    {chunksHere.map((chunk, chunkIndex) => {
+                                        if (chunk.sentence === null) {
+                                            return (
+                                                <Fragment
+                                                    // Chunks are fixed by the text and its sentences.
+                                                    // biome-ignore lint/suspicious/noArrayIndexKey: stable order
+                                                    key={chunkIndex}
+                                                >
+                                                    {renderPieces(chunk.pieces)}
+                                                </Fragment>
+                                            );
+                                        }
+                                        const { body, trailing } =
+                                            withoutTrailingSpace(chunk.pieces);
+                                        if (body.length === 0) {
+                                            return (
+                                                <Fragment key={chunk.sentence}>
+                                                    {trailing}
+                                                </Fragment>
+                                            );
+                                        }
+                                        const wash = sentenceWash(
+                                            style,
+                                            follow.active === chunk.sentence,
+                                            follow.playing,
                                         );
-                                    }
-                                    const { body, trailing } =
-                                        withoutTrailingSpace(chunk.pieces);
-                                    if (body.length === 0) {
+                                        const proposed =
+                                            !cut?.open &&
+                                            cut?.proposalPreview &&
+                                            chunk.startMs !== null &&
+                                            (chunk.startMs <
+                                                cut.proposalPreview.startMs ||
+                                                chunk.startMs >=
+                                                    cut.proposalPreview.endMs);
                                         return (
                                             <Fragment key={chunk.sentence}>
+                                                <span
+                                                    data-trim-proposed={
+                                                        proposed || undefined
+                                                    }
+                                                    title={
+                                                        proposed
+                                                            ? i18n(
+                                                                  "Proposed for removal",
+                                                              )
+                                                            : undefined
+                                                    }
+                                                    data-sentence={
+                                                        chunk.sentence
+                                                    }
+                                                    className={`${bySentence ? "cursor-pointer" : ""} rounded-[3px] box-decoration-clone transition-colors ${!cut?.open && cut?.proposalPreview && chunk.startMs !== null && (chunk.startMs < cut.proposalPreview.startMs || chunk.startMs >= cut.proposalPreview.endMs) ? "bg-amber-500/15 underline decoration-dotted decoration-amber-500 underline-offset-4" : wash} ${cut?.open && !removed && chunk.startMs !== null && (chunk.startMs < cut.range.startMs || chunk.startMs >= cut.range.endMs) ? "opacity-40 line-through" : ""}`}
+                                                >
+                                                    {proposed && (
+                                                        <span className="sr-only">
+                                                            {i18n(
+                                                                "Proposed for removal",
+                                                            )}
+                                                            :{" "}
+                                                        </span>
+                                                    )}
+                                                    {renderPieces(body)}
+                                                </span>
                                                 {trailing}
                                             </Fragment>
                                         );
-                                    }
-                                    const wash = sentenceWash(
-                                        style,
-                                        follow.active === chunk.sentence,
-                                        follow.playing,
-                                    );
-                                    return (
-                                        <Fragment key={chunk.sentence}>
-                                            <span
-                                                data-sentence={chunk.sentence}
-                                                className={`cursor-pointer rounded-[3px] box-decoration-clone transition-colors ${wash}`}
-                                            >
-                                                {renderPieces(body)}
-                                            </span>
-                                            {trailing}
-                                        </Fragment>
-                                    );
-                                })}
-                            </p>
-                            {closesTurn && storedTurn && (
-                                <CutTurnAction turn={storedTurn} edge="end" />
-                            )}
+                                    })}
+                                </p>
+                            </div>
                         </div>
-                        {cut?.open &&
-                            cut.range.endMs < cut.recording.duration &&
-                            turnIndex === lastKept &&
-                            closesTurn && <CutLine edge="end" />}
-                    </Fragment>
+                    </div>
                 );
             })}
             {bySentence && (

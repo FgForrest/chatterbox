@@ -16,16 +16,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 import { AgendaBody } from "./agenda-body";
-import { meetingRequest, meetingUrl, recordingAudienceConflict } from "./api";
+import { meetingRequest } from "./api";
 import {
     AttachmentAudience,
     AttachmentFilingNotice,
+    AttachmentShareChoice,
+    useAgendaAttachment,
 } from "./attachment-disclosure";
 import { CreateMeetingDialog } from "./create-meeting-dialog";
 import {
     type AgendaSummaryState,
     RecordingAgendaContext,
 } from "./recording-agenda-context";
+import { RecordingShareBanner } from "./recording-share-banner";
 import type { AgendaCandidate, MeetingDetail, NextMeeting } from "./types";
 
 export function RecordingAgenda({
@@ -70,6 +73,11 @@ export function RecordingAgenda({
     const [candidates, setCandidates] = useState<AgendaCandidate[]>([]);
     const [next, setNext] = useState<NextMeeting["event"]>(null);
     const [chosen, setChosen] = useState("");
+    const { choice, attach: attachChosen } = useAgendaAttachment(
+        chosen,
+        recording.id,
+        userId,
+    );
     const [dismissed, setDismissed] = useState(false);
     const [busy, setBusy] = useState(false);
     const [prepareOpen, setPrepareOpen] = useState(false);
@@ -145,20 +153,10 @@ export function RecordingAgenda({
         setBusy(true);
         setCandidates([]);
         try {
-            await meetingRequest(meetingUrl(chosen, "/attach"), "POST", {
-                recordingItemId: recording.id,
-            });
-            await load(undefined, true);
-            onChanged();
-        } catch (error) {
-            setCandidates(previous);
-            toast.error(
-                recordingAudienceConflict(error)
-                    ? i18n(
-                          "This recording is shared with people who cannot see the agenda. Limit its sharing before attaching it.",
-                      )
-                    : i18n("Could not attach the agenda"),
-            );
+            if (await attachChosen(i18n("Could not attach the agenda"))) {
+                await load(undefined, true);
+                onChanged();
+            } else setCandidates(previous);
         } finally {
             setBusy(false);
         }
@@ -276,6 +274,7 @@ export function RecordingAgenda({
                           ))}
                       </fieldset>
                       <AttachmentFilingNotice />
+                      <AttachmentShareChoice choice={choice} />
                       <div className="flex justify-end gap-2">
                           <Button
                               variant="ghost"
@@ -296,6 +295,14 @@ export function RecordingAgenda({
     const card = attached && (
         <Card>
             <CardContent>
+                {own && (
+                    <RecordingShareBanner
+                        agendaId={attached.id}
+                        title={attached.agendaTitle ?? attached.title}
+                        recordingId={recording.id}
+                        userId={userId}
+                    />
+                )}
                 {summaryState?.hasSummary && !attached.outcomeSummaryId && (
                     <p className="mb-3 text-xs text-muted-foreground">
                         {i18n(

@@ -24,6 +24,7 @@ async function advancePipeline(
     payload: PipelineAdvancePayload,
     signal: AbortSignal,
 ): Promise<PipelineJobResult> {
+    let cutWaitLogged = false;
     for (let iteration = 0; iteration < MAX_STABLE_CHECKS; iteration++) {
         const facts = await gatherFacts(payload.itemId, payload.view, userId, {
             legacyIfEmpty: payload.reason !== "arrival",
@@ -42,6 +43,14 @@ async function advancePipeline(
             continue;
         const generation = facts.generation;
         const plan = planAdvance(facts);
+        if (
+            !cutWaitLogged &&
+            facts.share?.cutJobActive &&
+            facts.categorization.intendedFolderIds.length > 0
+        ) {
+            console.info(`[share] waiting item=${payload.itemId} reason=cut`);
+            cutWaitLogged = true;
+        }
         for (const action of plan.actions) {
             signal.throwIfAborted();
             await executePipelineAction({

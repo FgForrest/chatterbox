@@ -1,5 +1,6 @@
 import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { publishAgendaEventInTx } from "@/db/queries/agenda-events";
 import { meetingAgendas } from "@/db/schema";
 import { decryptJsonField, encryptJsonField } from "@/lib/encryption/fields";
 import {
@@ -93,7 +94,7 @@ export async function readMeetingCalendarSnapshot(
         );
         const { description: _description, ...snapshot } = event;
         const changed = JSON.stringify(cached) !== JSON.stringify(snapshot);
-        await db
+        const [updated] = await db
             .update(meetingAgendas)
             .set({
                 ...(changed
@@ -114,6 +115,13 @@ export async function readMeetingCalendarSnapshot(
                     eq(meetingAgendas.calendarRefreshedAt, now),
                     isNull(meetingAgendas.recordingItemId),
                 ),
+            )
+            .returning({ version: meetingAgendas.version });
+        if (changed && updated)
+            await publishAgendaEventInTx(
+                db,
+                agenda.id,
+                String(updated.version),
             );
         return snapshot;
     } catch {

@@ -12,6 +12,7 @@ import {
     sessions,
     users,
 } from "@/db/schema";
+import { logSession } from "@/lib/auth/session-log";
 import { recordAccessState } from "@/lib/authz/access-state";
 import {
     CAPABILITIES,
@@ -496,9 +497,19 @@ async function revokeEverywhere(
     port: AccessManagementPort,
     subject: string,
     localUserId: string | null,
+    cause: "access-withdrawn" | "access-revoked",
 ): Promise<Revocation> {
     if (localUserId) {
-        await db.delete(sessions).where(eq(sessions.userId, localUserId));
+        const ended = await db
+            .delete(sessions)
+            .where(eq(sessions.userId, localUserId))
+            .returning({ id: sessions.id });
+        if (ended.length > 0)
+            logSession("ended", {
+                user: localUserId,
+                cause,
+                count: ended.length,
+            });
     }
     if (!port.support.revokeSessions) return "pending";
     try {
@@ -660,6 +671,7 @@ export async function changeAccess(
                     port,
                     subjectId,
                     local?.userId ?? null,
+                    "access-withdrawn",
                 );
             } else if (changed) {
                 await invalidateSnapshots(local?.userId ?? null);
@@ -770,6 +782,7 @@ export async function revokeSessions(
         port,
         subjectId,
         local?.userId ?? null,
+        "access-revoked",
     );
     await audit({ ...base, outcome: "applied", revocation });
     return { revocation, correlationId };

@@ -11,6 +11,8 @@
     --error: #b42332;
     --success: #277a49;
     --meeting: #23766e;
+    --organization: #356cac;
+    --person-share: #9c5e8f;
     font-family:
         system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
@@ -28,6 +30,8 @@
         --error: #ff8b94;
         --success: #80d2a0;
         --meeting: #7bd4c8;
+        --organization: #8ebaf1;
+        --person-share: #d29bc5;
     }
 }
 
@@ -396,3 +400,5 @@ input[type="checkbox"] {
 .agenda-card[hidden] { display: none; }
 .agenda-card p { margin: 0; }
 .agenda-card button { justify-self: start; }
+
+[hidden] { display: none !important; }

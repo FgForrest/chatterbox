@@ -31,7 +31,7 @@ nástroje. Volání známého nástroje bez potřebného oprávnění vrátí
 | `tasks:write`      | `create_task`, `update_task`, `follow_task`, `merge_tasks`                                                            |
 | `mail:read`        | `list_mail`, `get_mail`, `search_mail`                                                             |
 
-`list_folders` a `list_recordings` jsou dostupné spolu s některou z
+`list_folders`, `list_recordings` a `list_attended_recordings` jsou dostupné spolu s některou z
 `transcripts:read`, `summaries:read` nebo `tasks:read`.
 
 - **Almanach** (`knowledge:read`): lidé a věci, jejich typy,
@@ -67,7 +67,9 @@ Oprávnění se kombinují a některá pole vyžadují dvě:
 - `tasks:write` zahrnuje `tasks:read`.
 
 Oprávnění nikdy nerozšiřuje rozsah již viděných dat: běžná pravidla aplikace Klepna
-vybírají řádky (viz [Co volající vidí](#what-callers-see)).
+vybírají řádky (viz [Co volající vidí](#what-callers-see)). Výjimkou je
+`list_attended_recordings`, který sděluje pouze název, začátek a délku
+nahrávek s účastí volajícího, včetně těch, které nemůže číst.
 
 Pole `language` nástroje `get_transcript` zůstává jazykem rozpoznaným poskytovatelem. `confirmed_language` je uživatelem potvrzený jazyk nahrávky jako kód ISO 639-1, nebo `null` při volbě Automaticky; `detected_language` opakuje původní odhad poskytovatele. Také `list_recordings` obsahuje `confirmed_language`. Tato pole nemění text přepisu.
 
@@ -304,7 +306,26 @@ neobsluhuje, a klient bez svého klíče konektoru dostanou 403
 "Forbidden". Důvod uvádí log aplikace (viz
 [Když se Claude nepřipojí](./claude#when-claude-cannot-connect)).
 
-**Přijaté položky** jsou dostupné po přijetí pozvánky na vlastní instanci se zobrazenou Organizací. Nástroje pro výpis, čtení a hledání nahrávek, přepisů, shrnutí a pošty je zahrnují při stejných oprávněních nástroje. Odkazy používají `view=received`; výsledky přijatých úkolů obsahují `received_owner_name`. Mluvčí mají prostá jména potvrzená vlastníkem; jeho soukromé osoby, fakta, aliasy a složky zůstávají skryté. Přijaté položky lze filtrovat podle vlastního zařazení příjemce i připojených přijatých složek. Servisní účty ani ostatní kurátoři přístup k osobním sdílením nezískávají.
+**Nahrávky s účastí:** `list_attended_recordings` vypíše vaše vlastní nahrávky,
+včetně nahraných souborů, a ty, kde potvrzený mluvčí odkazuje na nesloučenou osobu
+v Almanachu vlastníka nebo Organizace, jejíž hlavní e-mail odpovídá vašemu
+ověřenému e-mailu. Vrací pouze `title` (název), `recorded_at` (začátek v UTC)
+a `duration_ms` (délku), i u soukromých nahrávek, které nemůžete číst. Cizí nahrávky
+se vypisují jen tehdy, pokud začaly v okamžiku vašeho prvního jednotného přihlášení
+nebo později; dřívější nikdy.
+
+Chybný hlavní e-mail může tyto údaje zpřístupnit držiteli adresy u nahrávek
+od jeho prvního přihlášení; osoba bez e-mailu se nespáruje. Kurátor může změnit e-mail osoby Organizace a vlastník sdílené
+pošty může přes Učení doplnit prázdný e-mail osoby Organizace;
+záznamy zmizí, když pravidla uchovávání smažou nahrávku nebo se změněný zvuk
+znovu přepíše. Přístupový log zaznamená výpis, cíle a volajícího.
+Vlastník to nemůže vypnout.
+
+Servisní účty a neověřené e-maily jsou odmítnuty i u vlastních nahrávek.
+`from` i `to` jsou povinné; samotné datum v `to` zahrnuje celý den v UTC.
+Vrací se nejvýše 200 výsledků; `truncated: true` znamená zúžit období.
+
+**Přijaté položky** jsou dostupné po přijetí pozvánky na vlastní instanci se zobrazenou Organizací. Běžné nástroje pro výpis, čtení a hledání nahrávek, přepisů, shrnutí a pošty je zahrnují při stejných oprávněních nástroje. Odkazy používají `view=received`; výsledky přijatých úkolů obsahují `received_owner_name`. Mluvčí mají prostá jména potvrzená vlastníkem; jeho soukromé osoby, fakta, aliasy a složky zůstávají skryté. Přijaté položky lze filtrovat podle vlastního zařazení příjemce i připojených přijatých složek. Servisní účty ani ostatní kurátoři přístup k osobním sdílením nezískávají.
 
 **Sdílené složky:** `list_folders` obsahuje přijaté připojené složky v soukromém stromu příjemce, pod jeho zvoleným názvem, s `shared: true` a `read_only: true`. ID připojené složky pošlete jako `folder` nástrojům pro výpis a hledání nahrávek a pošty. Výsledky obsahují pouze aktuální položky vlastníka zařazené přímo ve složce, nikdy obsah podsložek; přímé i zděděné sdílení vracejí každou položku jednou. Původní název sdílené složky se zobrazuje v aplikaci, ostatní názvy složek vlastníka zůstávají skryté. Také vlastní odchozí sdílené složky mají `shared: true`; vlastník je může dál měnit. Odebráním připojení nebo smazáním originálu tento přístup skončí; soukromou složku nelze přesunout ani zařadit do Organizace. Do připojené složky nelze zařadit úkol a vlastní úkoly zařazené ve sdílené složce vidí dál jen jejich autor.
 
@@ -349,7 +370,8 @@ Každé také končí nejpozději za 10 sekund. Odpověď uvádí `scanned`,
 `complete` a `continue_before`; pošlete zpět `continue_before` jako `before`
 (respektive jako `cursor` pro `list_recordings`), pokud chcete hledat hlouběji.
 Hledání ignoruje diakritiku a velikost, rozpoznává tvary slov v jazyce
-nahrávky. Výpisy mají stránkování po 50 položkách přes `next_cursor`
+nahrávky. Kromě `list_attended_recordings` (nejvýše 200, bez kurzoru)
+mají výpisy stránkování po 50 položkách přes `next_cursor`
 (u `list_mishearings` 200); `get_transcript` stránkuje podle ~40 000 znaků,
 případnou delší repliku rozsekne do částí se zachováním mluvčího a času.
 

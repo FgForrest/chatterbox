@@ -1,4 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import "../../../extensions/recorder/popup/folder-combobox.js";
+
+vi.mock("../../../extensions/recorder/generated/folders.js", () => ({
+    createFolderField: (...args) =>
+        globalThis.recorderFolders.createFolderField(...args),
+    createRecordingFolder: (...args) =>
+        globalThis.recorderFolders.createRecordingFolder(...args),
+}));
 
 beforeEach(() => vi.resetModules());
 afterEach(() => vi.unstubAllGlobals());
@@ -44,6 +52,7 @@ function setupPopup(tabUrl, folderId = null, folderLabel = null) {
     const close = vi.fn();
 
     vi.stubGlobal("document", {
+        body: { querySelector: (selector) => node(selector.slice(1)) },
         documentElement: { lang: "" },
         title: "",
         getElementById: node,
@@ -58,6 +67,7 @@ function setupPopup(tabUrl, folderId = null, folderLabel = null) {
             getMessage: (key) => key,
         },
         storage: {
+            onChanged: { addListener: vi.fn() },
             local: {
                 get: async () => ({
                     serverUrl: "https://example.com",

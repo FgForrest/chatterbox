@@ -52,10 +52,11 @@ The chips above the transcript are the speakers.
 
 - Click the name on a chip such as **Speaker 2** and choose who it is from your [Almanac](almanac.md), create a new person, or mark the speaker **Unknown**.
 - A dashed chip ending in **?**, such as **Priya Raman?**, is a suggestion. Click **✓** to confirm it or **×** to reject it; a rejected name is never suggested for that speaker again. **▶** plays the moment the suggestion is based on, or the speaker’s next turn if there is no evidence clip.
-- **Speaker guesses** above the transcript are Learn's suggestions. See [Learn](learn.md).
 - Every chip has a coloured **▶**, including an unanswered one. Click it to hear that speaker’s next turn. Right-click remains a shortcut. Click a confirmed name to choose another person or **Open in Almanac**, or **×** to unlink it. An unknown speaker’s name opens the same picker.
 
 Names you give appear everywhere the transcript does: in the summary, in exports, in copied Markdown and in the API.
+
+When you name a colleague whose person record carries their primary email, their AI client can list this recording's title, start and duration for reporting time, even without access to the recording, only if it started at or after their first single sign-on. Adding the email later also lists recordings where the person is already named, but never those from before their first sign-in.
 
 Speaker suggestions show their source and, for a guess, the model's reason in the tooltip. Calendar and Meet are used on automatic and manual runs. Confirm a **?** suggestion with one click; leaving it unticked never names the speaker. Identity uses invitations, attendance and transcript clues, never voice data.
 
@@ -81,13 +82,17 @@ A lecture or a long monologue is split into paragraphs of about half a minute, a
 
 ## Cutting the start and end
 
-Only the owner can cut a recording. Open the scissors beside Download in the player or beside Re-transcribe in the transcript. Hover or focus a turn and choose **Start here** or **End here**. The same buttons in the pinned cut bar use the current playback position, snapped to a turn. Without a transcript they use the exact playback position.
+Only the owner can cut a recording. Open the scissors beside Re-transcribe in the transcript to open the cut panel. Type a start or end time, which snaps to the nearest sentence start, or hover or focus a paragraph gap and choose **Start here** or **End here**.
 
-Faded, struck-through turns and shaded ends of the scrubber show what will be deleted. Reset an edge with **×**, or choose **Cancel** to leave everything unchanged. **Cut…** opens the deletion confirmation. An Organization recording must leave the Organization first; the confirmation shows the withdrawal and retention warning.
+Faded, struck-through turns and shaded ends of the scrubber show what will be deleted. Reset an edge with **×**, or choose **Cancel** to leave everything unchanged. **Cut…** opens the deletion confirmation. A shared recording stays in its Organization folders. Colleagues see the cut version, and its summary in the Organization is generated again. An intended share waits until the cut finishes and the regenerated summary is ready. If cutting is refused or fails, the bar keeps your chosen range and shows the reason.
 
 The cut is permanent: it deletes audio and transcript turns, and the remaining recording starts at 0:00. If retention already removed the audio, only transcripts are cut. Summaries, generated titles, topics, task proposals and Learn results are refreshed through the processing profile, without another transcription. Accepted tasks, confirmed Almanac knowledge, summary remarks, manually set titles and corrections on retained turns stay. Cutting is unavailable during transcription, while another cut is running, or when any transcript lacks turn times.
 
 The original remains in Plaud and in exports and backups made earlier. Chatterbox never imports the original audio, transcript or summary from Plaud again after a cut, including through Restore audio.
+
+### AI trim proposal
+
+Before Learn, an enabled audio profile reads the whole transcript and may offer **Trim off-topic talk?**. Amber marks show proposed removals while ordinary cut mode is closed; the text is still present and playable. Uncheck an edge to keep it. **Cut selected…** opens the same destructive confirmation with the reviewed transcript revisions. **Adjust in transcript** opens the panel with those edges; **Do not trim** continues uncut. Cancelling the panel leaves the original four-hour decision deadline in effect. A changed transcript invalidates the proposal. A completed manual or proposed cut settles trim on the retained input and does not propose another trim of that slice.
 
 ## Corrected words
 

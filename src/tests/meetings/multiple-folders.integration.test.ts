@@ -446,8 +446,8 @@ describe.skipIf(!url)("agenda placements (PostgreSQL)", () => {
         const [candidate] = await agendaCandidates("owner", "rec");
         expect(candidate.widensSharing).toBe(true);
         expect(candidate.audience.organization).toBe(false);
-        expect(candidate.audience.userIds.sort()).toEqual(["other", "third"]);
-        expect(candidate.audience.users.map((user) => user.id).sort()).toEqual([
+        expect(candidate.audience.userIds).toEqual(["other", "third"]);
+        expect(candidate.audience.users.map((user) => user.id)).toEqual([
             "other",
             "third",
         ]);

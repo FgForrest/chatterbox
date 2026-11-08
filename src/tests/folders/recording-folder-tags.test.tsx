@@ -122,9 +122,9 @@ describe("recording folder tags", () => {
             screen.queryByRole("button", { name: "Remove from Organization" }),
         ).toBeNull();
         expect(
-            screen.queryByRole("button", { name: /Add to folder/ }),
+            screen.queryByRole("combobox", { name: /Add to folder/ }),
         ).toBeNull();
-        expect(screen.getByRole("button", { name: /Move to/ })).toBeTruthy();
+        expect(screen.getByRole("combobox", { name: /Move to/ })).toBeTruthy();
         // Private folders of the owner are not the member's to see.
         expect(screen.queryByRole("button", { name: "Meetings" })).toBeNull();
     });
@@ -176,7 +176,7 @@ describe("recording folder tags", () => {
                 organizationOnly
             />,
         );
-        const action = screen.getByRole("button", {
+        const action = screen.getByRole("combobox", {
             name: isOwn ? "Add to folder" : "Move to…",
         });
         if (!canWithdraw)
@@ -188,7 +188,7 @@ describe("recording folder tags", () => {
         fireEvent.click(action);
         expect(screen.queryByRole("option", { name: "Meetings" })).toBeNull();
         expect(screen.queryByText("Private")).toBeNull();
-        fireEvent.click(screen.getByRole("option", { name: "Sales" }));
+        fireEvent.click(screen.getByRole("option", { name: /Sales/ }));
         await vi.waitFor(() =>
             isOwn
                 ? expect(onAdd).toHaveBeenCalledWith("rec-1", sales.id)
@@ -216,7 +216,7 @@ describe("recording folder tags", () => {
                 organizationOnly
             />,
         );
-        expect(screen.queryByRole("button", { name: "Move to…" })).toBeNull();
+        expect(screen.queryByRole("combobox", { name: "Move to…" })).toBeNull();
     });
 
     it("labels Organization destinations as sharing for a private item", () => {
@@ -230,7 +230,9 @@ describe("recording folder tags", () => {
                 onRemove={vi.fn()}
             />,
         );
-        fireEvent.click(screen.getByRole("button", { name: "Add to folder" }));
+        fireEvent.click(
+            screen.getByRole("combobox", { name: "Add to folder" }),
+        );
         expect(screen.getByText("Share with the Organization")).toBeTruthy();
     });
 
@@ -348,7 +350,7 @@ describe("recording folder tags", () => {
         expect(screen.getByText(/Its owner gets it back/)).toBeTruthy();
         // Sharing stays the owner's.
         expect(
-            screen.queryByRole("button", { name: /Add to folder/ }),
+            screen.queryByRole("combobox", { name: /Add to folder/ }),
         ).toBeNull();
 
         fireEvent.click(

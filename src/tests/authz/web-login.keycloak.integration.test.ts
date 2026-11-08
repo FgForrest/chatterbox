@@ -228,6 +228,7 @@ describeWithKeycloak("web sign-in with identity-provider authorization", () => {
     });
 
     it("signs a person with use in and keeps the provider's tokens encrypted per session", async () => {
+        const info = vi.spyOn(console, "info");
         const { location, cookie } = await login("ann");
         expect(location).toBe("/dashboard");
         const ann = await userByEmail("ann@example.test");
@@ -257,6 +258,27 @@ describeWithKeycloak("web sign-in with identity-provider authorization", () => {
         expect(decodeJwt(accessToken).azp).toBe("chatterbox");
         const session = await sessionOf(cookie);
         expect(credential?.sessionId).toBe(session.id);
+        expect(
+            info.mock.calls.filter(([line]) =>
+                String(line).startsWith("[session] started"),
+            ),
+        ).toEqual([
+            [
+                expect.stringContaining(
+                    `user=${session.userId} session=${session.id} expiresAt=`,
+                ),
+            ],
+        ]);
+        expect(info.mock.calls.flat().join("\n")).toMatch(/authAgeMin=\d/);
+        const logOutput = info.mock.calls.flat().join("\n");
+        for (const secret of [
+            cookie,
+            accessToken,
+            decryptText(credential?.refreshToken ?? ""),
+            "ann@example.test",
+        ]) {
+            if (secret) expect(logOutput).not.toContain(secret);
+        }
 
         const [state] = await db()
             .select()
@@ -417,6 +439,7 @@ describeWithKeycloak("web sign-in with identity-provider authorization", () => {
 
     it("does not let a delayed sign-in overwrite a newer access change", async () => {
         await login("late");
+        const info = vi.spyOn(console, "info");
         const user = await userByEmail("late@example.test");
         if (!user) throw new Error("missing user");
         let reached!: () => void;
@@ -466,6 +489,11 @@ describeWithKeycloak("web sign-in with identity-provider authorization", () => {
                 source: "access-change",
             });
             expect(await credentialOf(user.id)).toHaveLength(1);
+            expect(
+                info.mock.calls.filter(([line]) =>
+                    String(line).includes("cause=sign-in-superseded"),
+                ),
+            ).toEqual([[expect.stringContaining(`user=${user.id}`)]]);
         } finally {
             release();
             await pending;
@@ -550,6 +578,7 @@ describeWithKeycloak("web sign-in with identity-provider authorization", () => {
     });
 
     it("ends a session the provider ended (invalid_grant)", async () => {
+        const info = vi.spyOn(console, "info");
         const { cookie } = await login("leo");
         const session = await sessionOf(cookie);
         await realm.admin.http.post(
@@ -569,6 +598,21 @@ describeWithKeycloak("web sign-in with identity-provider authorization", () => {
                 .where(eq(sessions.id, session.id)),
         ).toEqual([]);
         expect(await credentialOf(session.userId)).toEqual([]);
+        expect(
+            info.mock.calls.filter(([line]) =>
+                String(line).startsWith("[session] ended"),
+            ),
+        ).toEqual([
+            [
+                expect.stringContaining(
+                    `user=${session.userId} session=${session.id} cause=provider-refused`,
+                ),
+            ],
+        ]);
+        expect(info.mock.calls.flat().join("\n")).toContain(
+            "providerError=invalid_grant",
+        );
+        expect(info.mock.calls.flat().join("\n")).toContain('providerDetail="');
     });
 
     it("ends the session of a person who lost use at the provider", async () => {
@@ -630,6 +674,7 @@ describeWithKeycloak("web sign-in with identity-provider authorization", () => {
     });
 
     it("deletes the credential with the session on sign-out", async () => {
+        const info = vi.spyOn(console, "info");
         const { cookie } = await login("ann");
         const session = await sessionOf(cookie);
         expect(
@@ -652,11 +697,73 @@ describeWithKeycloak("web sign-in with identity-provider authorization", () => {
         expect(out.status).toBe(200);
         expect(await out.json()).toEqual({ success: true });
         expect(
+            info.mock.calls.filter(([line]) =>
+                String(line).startsWith("[session] ended"),
+            ),
+        ).toEqual([
+            [
+                expect.stringContaining(
+                    `user=${session.userId} session=${session.id} cause=sign-out`,
+                ),
+            ],
+        ]);
+        expect(info.mock.calls.flat().join("\n")).not.toContain(cookie);
+        expect(
             await db()
                 .select()
                 .from(sessionIdpCredentials)
                 .where(eq(sessionIdpCredentials.sessionId, session.id)),
         ).toEqual([]);
+    });
+
+    it("logs an expired session when Better Auth removes it on access", async () => {
+        const { cookie } = await login("ann");
+        const session = await sessionOf(cookie);
+        await db()
+            .update(sessions)
+            .set({ expiresAt: new Date(Date.now() - 60_000) })
+            .where(eq(sessions.id, session.id));
+        const info = vi.spyOn(console, "info");
+        expect(
+            await auth.api.getSession({ headers: new Headers({ cookie }) }),
+        ).toBeNull();
+        expect(info.mock.calls).toEqual([
+            [
+                expect.stringContaining(
+                    `user=${session.userId} session=${session.id} cause=expired`,
+                ),
+            ],
+        ]);
+        info.mockClear();
+        expect(
+            await auth.api.getSession({ headers: new Headers({ cookie }) }),
+        ).toBeNull();
+        expect(info).not.toHaveBeenCalled();
+    });
+
+    it("logs one ending when database deletes race without a shared renewal", async () => {
+        const { cookie } = await login("ann");
+        const session = await sessionOf(cookie);
+        await db()
+            .delete(sessionIdpCredentials)
+            .where(eq(sessionIdpCredentials.sessionId, session.id));
+        const warn = vi.spyOn(console, "warn");
+        const results = await Promise.all(
+            Array.from({ length: 6 }, () => sessionAccess(session)),
+        );
+        expect(results).toEqual(
+            Array.from({ length: 6 }, () => ({ ok: false, reason: "ended" })),
+        );
+        expect(warn.mock.calls).toEqual([
+            [
+                expect.stringContaining(
+                    `user=${session.userId} session=${session.id} cause=no-credential`,
+                ),
+            ],
+        ]);
+        warn.mockClear();
+        await sessionAccess(session);
+        expect(warn).not.toHaveBeenCalled();
     });
 
     it("refuses a sign-in for an account bound to another issuer", async () => {

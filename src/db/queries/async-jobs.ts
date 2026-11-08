@@ -9,6 +9,8 @@
 
 import { and, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { readActiveCutJob } from "@/db/queries/active-cut-job";
+import { isActive } from "@/db/queries/async-job-status";
 import {
     bindAvailableCorrectionInTx,
     bindPipelineJobInTx,
@@ -22,6 +24,8 @@ import {
     terminalStepOutcome,
     wakePipelineInTx,
 } from "@/db/queries/pipeline-jobs";
+import { wakeTrimDownstreamInTx } from "@/db/queries/trim-downstream";
+import { lockTrimRecording, resolveTrimInTx } from "@/db/queries/trim-state";
 import {
     asyncJobs,
     chatterItems,
@@ -30,7 +34,10 @@ import {
     transcriptCorrectionPasses,
 } from "@/db/schema";
 import { retryOnDeadlock } from "@/lib/deadlock-retry";
+import { JobDeferredError } from "@/lib/jobs/deferred";
 import type { StepOutcome } from "@/lib/pipeline/outcome";
+import type { PhaseRecord } from "@/lib/pipeline/types";
+import { trimHolds } from "@/lib/recordings/trim-proposal";
 
 export type AsyncJobStatus = "pending" | "processing" | "completed" | "failed";
 
@@ -70,19 +77,12 @@ export interface ClaimedAsyncJob {
 }
 
 /**
- * A job still to be finished. Also the predicate of `async_jobs_active_unique`,
- * which `enqueueJob` names as its conflict target, so the two must match.
- */
-function isActive() {
-    return sql`${asyncJobs.status} in ('pending', 'processing')`;
-}
-
-/**
  * A queued job that finishes between a conflicting insert and the read that
  * follows it leaves nothing to return; the next insert then succeeds. More
  * than a couple of such races in a row means something else is wrong.
  */
 const ENQUEUE_ATTEMPTS = 3;
+const TRIM_DEFERRAL_MS = 30_000;
 
 /**
  * `db.execute` returns an array on some drivers and `{ rows }` on others.
@@ -94,6 +94,40 @@ function rowsOf<T>(result: unknown): T[] {
 }
 
 type EnqueueExecutor = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function resolveManualOwnerTrimInTx(
+    tx: EnqueueExecutor,
+    manual: boolean,
+    actorUserId: string,
+    kind: string,
+    target: Pick<PipelineJobTarget, "userId" | "itemId">,
+): Promise<void> {
+    if (
+        manual &&
+        actorUserId === target.userId &&
+        (kind === "learn.run" || kind === "summary")
+    )
+        await resolveTrimInTx(tx, {
+            userId: target.userId,
+            recordingId: target.itemId,
+            reason: "bypassed_manual",
+        });
+}
+
+async function readTrimCutBlocker(
+    tx: EnqueueExecutor,
+    target: Pick<PipelineJobTarget, "userId" | "itemId">,
+    phase: PhaseRecord | undefined,
+) {
+    const cut = await readActiveCutJob(tx, target.userId, target.itemId);
+    return { cut, blocked: trimHolds(phase) || Boolean(cut) };
+}
+
+function compareItemIds(a: { itemId: string }, b: { itemId: string }): number {
+    if (a.itemId < b.itemId) return -1;
+    if (a.itemId > b.itemId) return 1;
+    return 0;
+}
 
 export interface EnqueueJobInput {
     userId: string;
@@ -186,6 +220,10 @@ export async function enqueueJob(
     const snapshot = input.subjectId
         ? await getActiveJob(input.kind, input.subjectId, executor)
         : null;
+    const downstream =
+        target && (target.phase === "learn" || target.phase === "summary");
+    if (downstream)
+        await lockTrimRecording(executor, target.userId, target.itemId);
     await lockPipelineTargetsInTx(executor, [
         ...(target ? [target] : []),
         ...(snapshot?.userId === input.userId
@@ -198,6 +236,40 @@ export async function enqueueJob(
             [target],
             input.payload?.trigger !== "manual" && target.existingOnly !== true,
         );
+    if (downstream) {
+        const manual =
+            input.payload?.trigger === "manual" || target.existingOnly === true;
+        const [processing] = await executor
+            .select({ phases: itemProcessing.phases })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, target.itemId),
+                    eq(itemProcessing.userId, target.userId),
+                    eq(itemProcessing.view, "private"),
+                ),
+            )
+            .limit(1);
+        await resolveManualOwnerTrimInTx(
+            executor,
+            manual,
+            input.userId,
+            input.kind,
+            target,
+        );
+        if (!manual) {
+            const { blocked } = await readTrimCutBlocker(
+                executor,
+                target,
+                processing?.phases.trim,
+            );
+            if (blocked)
+                throw new JobDeferredError(
+                    1000,
+                    "Waiting for the trim decision or cut",
+                );
+        }
+    }
     const bind = async (
         result: EnqueueJobResult,
     ): Promise<EnqueueJobResult> => {
@@ -452,6 +524,7 @@ export async function claimDueJobs(
 ): Promise<ClaimedAsyncJob[]> {
     if (limit <= 0) return [];
     const result =
+        kind === "trim.propose" ||
         kind === "pipeline.advance" ||
         kind === "pipeline.action" ||
         kind === "agenda.suggestions" ||
@@ -601,18 +674,6 @@ export async function prepareClaimedPipelineJob(
             )
             .limit(1);
         if (!job) return false;
-        if (jobBindings(job.payload).length > 0) {
-            const locked = await lockClaimedPipelineJobInTx(
-                tx,
-                jobId,
-                claimToken,
-            );
-            if (!locked) return false;
-            if ((await currentPipelineJobBindingsInTx(tx, locked)).length > 0)
-                return true;
-            await settleSupersededJobInTx(tx, jobId, locked.userId);
-            return false;
-        }
         let pipeline: PipelineJobTarget | undefined;
         if (job.kind === "learn.run" && typeof job.payload.runId === "string") {
             const [run] = await tx
@@ -662,16 +723,117 @@ export async function prepareClaimedPipelineJob(
                 userId: job.userId,
                 phase: "learn",
             };
+        if (
+            job.kind === "pipeline.action" &&
+            typeof job.payload.itemId === "string" &&
+            typeof job.payload.action === "object" &&
+            job.payload.action !== null &&
+            "type" in job.payload.action &&
+            job.payload.action.type === "applyPlaudTasks"
+        )
+            pipeline = {
+                itemId: job.payload.itemId,
+                userId: job.userId,
+                phase: "summary",
+                step: "summary",
+            };
         const target = pipelineJobTarget(job, pipeline);
-        if (target)
-            await lockPipelineTargetsInTx(
-                tx,
-                [target],
-                target.existingOnly !== true &&
-                    job.payload.trigger !== "manual",
-            );
+        const bindings = jobBindings(job.payload);
+        const targets = bindings.length ? bindings : target ? [target] : [];
+        const downstream = targets.filter(
+            (entry) => entry.phase === "learn" || entry.phase === "summary",
+        );
+        // Recording locks must precede processing/job locks, including already-bound claims.
+        for (const entry of [...downstream].sort(compareItemIds))
+            await lockTrimRecording(tx, entry.userId, entry.itemId);
+        await lockPipelineTargetsInTx(
+            tx,
+            targets,
+            bindings.length === 0 &&
+                target?.existingOnly !== true &&
+                job.payload.trigger !== "manual",
+        );
         const current = await lockClaimedPipelineJobInTx(tx, jobId, claimToken);
         if (!current) return false;
+        if (
+            jobBindings(current.payload).some(
+                (binding) =>
+                    !targets.some(
+                        (entry) =>
+                            entry.itemId === binding.itemId &&
+                            entry.userId === binding.userId,
+                    ),
+            )
+        )
+            throw new PipelineBindingsChangedError();
+        if (
+            bindings.length > 0 &&
+            (await currentPipelineJobBindingsInTx(tx, current)).length === 0
+        ) {
+            await settleSupersededJobInTx(tx, jobId, current.userId);
+            return false;
+        }
+        const manual =
+            job.payload.trigger === "manual" || pipeline?.existingOnly === true;
+        for (const entry of downstream) {
+            await resolveManualOwnerTrimInTx(
+                tx,
+                manual,
+                current.userId,
+                job.kind,
+                entry,
+            );
+            if (manual) continue;
+            const [processing] = await tx
+                .select({ phases: itemProcessing.phases })
+                .from(itemProcessing)
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, entry.itemId),
+                        eq(itemProcessing.userId, entry.userId),
+                        eq(itemProcessing.view, "private"),
+                    ),
+                )
+                .limit(1);
+            const { cut, blocked } = await readTrimCutBlocker(
+                tx,
+                entry,
+                processing?.phases.trim,
+            );
+            if (blocked) {
+                const now = new Date();
+                const trim = processing?.phases.trim;
+                const nextAttemptAt =
+                    !cut &&
+                    trim?.state === "waiting" &&
+                    trim.waitingFor?.kind === "trimReview" &&
+                    trim.waitingFor.until &&
+                    Date.parse(trim.waitingFor.until) > now.getTime()
+                        ? new Date(trim.waitingFor.until)
+                        : new Date(now.getTime() + TRIM_DEFERRAL_MS);
+                await tx
+                    .update(asyncJobs)
+                    .set({
+                        status: "pending",
+                        claimToken: null,
+                        heartbeatAt: null,
+                        startedAt: null,
+                        attempts: sql`greatest(0, ${asyncJobs.attempts} - 1)`,
+                        nextAttemptAt,
+                        updatedAt: now,
+                    })
+                    .where(
+                        and(
+                            eq(asyncJobs.id, current.id),
+                            eq(asyncJobs.userId, current.userId),
+                            eq(asyncJobs.claimToken, claimToken),
+                            eq(asyncJobs.status, "processing"),
+                        ),
+                    );
+                return false;
+            }
+        }
+        if (bindings.length > 0) return true;
         if (job.kind === "learn.correct" && pipeline) {
             const [processing] = await tx
                 .select({ phases: itemProcessing.phases })
@@ -775,6 +937,13 @@ async function lockPipelineJobInTx(
     )
         targets.push({
             itemId: snapshot.payload.itemId,
+            userId: snapshot.userId,
+            phase: "categorize",
+            generation: 0,
+        });
+    if (snapshot.kind === "recording.cut" && snapshot.subjectId)
+        targets.push({
+            itemId: snapshot.subjectId,
             userId: snapshot.userId,
             phase: "categorize",
             generation: 0,
@@ -989,6 +1158,16 @@ export async function settleTerminalJobInTx(
         if (processing && processing.requested > processing.processed)
             await wakePipelineInTx(tx, job.payload.itemId, job.userId);
     }
+    if (job.kind === "recording.cut" && job.subjectId) {
+        await wakePipelineInTx(tx, job.subjectId, job.userId);
+        await wakeTrimDownstreamInTx(tx, job.userId, job.subjectId);
+        if (input.status === "failed")
+            console.info(
+                `[cut] failed recording=${job.subjectId} job=${job.id} code=${input.code ?? "INTERNAL_ERROR"}`,
+            );
+    }
+    if (job.kind === "trim.propose" && job.subjectId)
+        await wakeTrimDownstreamInTx(tx, job.userId, job.subjectId);
     return true;
 }
 

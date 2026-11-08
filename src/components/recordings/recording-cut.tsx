@@ -8,15 +8,16 @@ import {
     useCallback,
     useContext,
     useEffect,
+    useId,
     useRef,
     useState,
 } from "react";
 import { toast } from "sonner";
-import { usePlayback } from "@/components/playback/playback-context";
 import {
-    useWithdrawPreview,
-    WithdrawRetentionWarning,
-} from "@/components/recordings/withdraw-retention-warning";
+    openWidget,
+    workflowScrollBehavior,
+} from "@/components/pipeline/workflow-widget";
+import { usePlayback } from "@/components/playback/playback-context";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -28,11 +29,13 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ActionTooltip } from "@/components/ui/tooltip";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import {
     type CutRange,
+    parseCutTime,
     snapCutEdge,
     validCutRange,
 } from "@/lib/recordings/cut-range";
@@ -41,10 +44,21 @@ import type { TranscriptTurn } from "@/lib/transcription/turns";
 import type { Recording } from "@/types/recording";
 
 interface CutState {
+    proposalPreview: CutRange | null;
+    proposalSource: string | null;
+    setProposalPreview: (range: CutRange | null) => void;
+    openWithRange: (input: {
+        range: CutRange;
+        revisions: { id: string; revision: number }[];
+        proposalId: string;
+        source?: string;
+        confirm: boolean;
+    }) => void;
     recording: Recording;
     owner: boolean;
     open: boolean;
     cutting: boolean;
+    error: string | null;
     disabledReason: string | null;
     range: CutRange;
     activeTurns: TranscriptTurn[] | null;
@@ -84,9 +98,15 @@ export function RecordingCutProvider({
     const i18n = useExtracted();
     const playback = usePlayback();
     const [open, setOpen] = useState(false);
+    const [error, setError] = useState<string | null>(null);
     const [cutting, setCutting] = useState(false);
     const [browserTranscribing, setBrowserTranscribing] = useState(false);
     const [confirming, setConfirming] = useState(false);
+    const [proposalPreview, setProposalPreview] = useState<CutRange | null>(
+        null,
+    );
+    const [proposalSource, setProposalSource] = useState<string | null>(null);
+    const proposalId = useRef<string | undefined>(undefined);
     const shownRevisions = useRef<
         { id: string; revision: number }[] | undefined
     >(undefined);
@@ -94,12 +114,19 @@ export function RecordingCutProvider({
         startMs: 0,
         endMs: recording.duration,
     });
-    const [jobId, setJobId] = useState<string | null>(null);
     const [activeTurns, setActiveTurns] = useState<TranscriptTurn[] | null>(
         transcripts[0]?.turns ?? null,
     );
     const identity = `${recording.id}:${recording.view ?? "private"}:${recording.cutAt ?? ""}`;
     const [currentIdentity, setCurrentIdentity] = useState(identity);
+    const identityRef = useRef(identity);
+    identityRef.current = identity;
+    useEffect(() => {
+        identityRef.current = identity;
+        return () => {
+            identityRef.current = "";
+        };
+    }, [identity]);
     const owner =
         recording.isOwn !== false &&
         recording.view !== "org" &&
@@ -118,10 +145,34 @@ export function RecordingCutProvider({
             : null;
     const changedRef = useRef(onChanged);
     changedRef.current = onChanged;
-    const submitting = useRef(false);
+    const discoveryVersion = useRef(0);
+    const watchedJobs = useRef(new Set<string>());
     const cutError = useCallback(
         (message: string) => {
             switch (message) {
+                case "Invalid cut range":
+                    return i18n(
+                        "Choose a valid range that keeps part of the recording.",
+                    );
+                case "Unauthorized":
+                case "Authentication required":
+                    return i18n("Sign in again before cutting the recording.");
+                case "The cut job is no longer running":
+                    return i18n("Cutting was interrupted. Try again.");
+                case "Your access to this application has been withdrawn":
+                    return i18n(
+                        "Your access to this application has been withdrawn.",
+                    );
+                case "Your access could not be verified right now. Try again shortly.":
+                    return i18n(
+                        "Your access could not be verified right now. Try again shortly.",
+                    );
+                case "Account suspended":
+                    return i18n(
+                        "Your account is suspended. Contact an administrator.",
+                    );
+                case "Processing was interrupted":
+                    return i18n("Cutting was interrupted. Try again.");
                 case "Only the recording owner may cut it":
                     return i18n("Only the recording's owner can cut it.");
                 case "Recording not found":
@@ -148,77 +199,130 @@ export function RecordingCutProvider({
                         "The recording or transcript changed. Reload it and choose the cut again.",
                     );
                 default:
-                    return i18n(
-                        "The recording could not be cut. Reload it and choose the cut again.",
-                    );
+                    return i18n("The recording could not be cut. Try again.");
             }
         },
         [i18n],
     );
-    const preview = useWithdrawPreview(
-        shared && confirming ? recording.id : null,
+    const showFailure = useCallback(
+        (message: string, failedIdentity: string) => {
+            if (identityRef.current !== failedIdentity) {
+                toast.error(message);
+                return;
+            }
+            setError(message);
+            setCutting(false);
+            setOpen(true);
+        },
+        [],
     );
     const refresh = useCallback(() => {
         invalidateItemProcessing(recording.id);
         changedRef.current();
     }, [recording.id]);
+    const watchCut = useCallback(
+        (id: string, watchedIdentity: string) => {
+            if (watchedJobs.current.has(id)) return;
+            watchedJobs.current.add(id);
+            let stopped = false;
+            let errors = 0;
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const controller = new AbortController();
+            const finish = (message?: string) => {
+                if (stopped) return;
+                stopped = true;
+                watchedJobs.current.delete(id);
+                clearTimeout(timer);
+                clearTimeout(deadline);
+                controller.abort();
+                if (message) showFailure(message, watchedIdentity);
+                else if (identityRef.current === watchedIdentity) {
+                    setCutting(false);
+                    refresh();
+                }
+            };
+            const deadline = setTimeout(
+                () => finish(cutError("")),
+                65 * 60 * 1000,
+            );
+            const poll = async () => {
+                try {
+                    const response = await fetch(`/api/jobs/${id}`, {
+                        signal: controller.signal,
+                    });
+                    if (!response.ok)
+                        throw new Error(await getApiErrorMessage(response, ""));
+                    const job = (await response.json()) as {
+                        status: string;
+                        error?: string;
+                    };
+                    if (stopped) return;
+                    if (job.status === "failed") {
+                        finish(cutError(job.error ?? ""));
+                        return;
+                    }
+                    if (job.status === "completed") {
+                        finish();
+                        return;
+                    }
+                    if (job.status !== "pending" && job.status !== "processing")
+                        throw new Error("status");
+                    errors = 0;
+                } catch (error) {
+                    if (stopped) return;
+                    if (++errors >= 3) {
+                        finish(
+                            cutError(
+                                error instanceof Error ? error.message : "",
+                            ),
+                        );
+                        return;
+                    }
+                }
+                if (!stopped) timer = setTimeout(() => void poll(), 2000);
+            };
+            void poll();
+        },
+        [cutError, refresh, showFailure],
+    );
+    const watchCutRef = useRef(watchCut);
+    watchCutRef.current = watchCut;
     useEffect(() => {
         if (!owner) return;
         let cancelled = false;
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        let observedRunning = jobId !== null;
-        const poll = async () => {
+        const version = discoveryVersion.current;
+        void (async () => {
             try {
                 const response = await fetch(
-                    jobId
-                        ? `/api/jobs/${jobId}`
-                        : `/api/recordings/${recording.id}/cut`,
+                    `/api/recordings/${recording.id}/cut`,
                 );
-                if (!response.ok) throw new Error("status");
-                const result = (await response.json()) as {
-                    job?: { status: string; error?: string } | null;
-                    status?: string;
-                    error?: string;
+                if (!response.ok) return;
+                const { job } = (await response.json()) as {
+                    job?: {
+                        id?: string;
+                        status: string;
+                        range?: CutRange | null;
+                    } | null;
                 };
-                const body = {
-                    job: jobId
-                        ? { status: result.status, error: result.error }
-                        : result.job,
-                };
-                if (cancelled) return;
-                if (submitting.current) {
-                    timer = setTimeout(() => void poll(), 1000);
-                    return;
-                }
-                const running =
-                    body.job?.status === "pending" ||
-                    body.job?.status === "processing";
-                setCutting(running);
-                if (running) {
-                    observedRunning = true;
+                if (cancelled || version !== discoveryVersion.current) return;
+                if (
+                    job?.id &&
+                    (job.status === "pending" || job.status === "processing")
+                ) {
+                    setCutting(true);
                     setOpen(false);
-                } else if (observedRunning) {
-                    observedRunning = false;
-                    if (body.job?.status === "failed")
-                        toast.error(cutError(body.job.error ?? ""));
-                    setJobId(null);
-                    refresh();
+                    if (job.range) setRange(job.range);
+                    watchCutRef.current(job.id, identity);
                 }
-            } catch {
-                if (cancelled) return;
-            }
-            if (!cancelled && observedRunning)
-                timer = setTimeout(() => void poll(), 2000);
-        };
-        void poll();
+            } catch {}
+        })();
         return () => {
             cancelled = true;
-            clearTimeout(timer);
         };
-    }, [recording.id, owner, refresh, cutError, jobId]);
+    }, [identity, recording.id, owner]);
     useEffect(() => {
-        if (disabledReason && !cutting) setOpen(false);
-    }, [disabledReason, cutting]);
+        if (disabledReason && !cutting && !error) setOpen(false);
+    }, [disabledReason, cutting, error]);
     const setEdge = useCallback(
         (edge: "start" | "end", ms: number) => {
             const snapped = Math.max(
@@ -234,10 +338,17 @@ export function RecordingCutProvider({
     );
     const cancel = () => {
         setOpen(false);
+        setConfirming(false);
+        proposalId.current = undefined;
+        shownRevisions.current = undefined;
+        setProposalSource(null);
+        setError(null);
         setRange({ startMs: 0, endMs: recording.duration });
     };
     const execute = async () => {
-        submitting.current = true;
+        const submittedIdentity = identity;
+        discoveryVersion.current++;
+        setError(null);
         setConfirming(false);
         setOpen(false);
         setCutting(true);
@@ -250,51 +361,84 @@ export function RecordingCutProvider({
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         ...range,
+                        ...(proposalId.current
+                            ? { trimProposalId: proposalId.current }
+                            : {}),
                         ...(shownRevisions.current
                             ? { revisions: shownRevisions.current }
                             : {}),
-                        ...(shared ? { withdraw: true } : {}),
                     }),
                 },
             );
             if (!response.ok)
-                throw new Error(
-                    cutError(
-                        await getApiErrorMessage(
-                            response,
-                            i18n("The recording could not be cut."),
-                        ),
-                    ),
-                );
+                throw new Error(await getApiErrorMessage(response, ""));
             const result = (await response.json()) as { jobId: string };
-            setJobId(result.jobId);
-            submitting.current = false;
+            watchCut(result.jobId, submittedIdentity);
         } catch (error) {
-            submitting.current = false;
-            toast.error(
-                error instanceof Error
-                    ? error.message
-                    : i18n("The recording could not be cut."),
+            showFailure(
+                cutError(error instanceof Error ? error.message : ""),
+                submittedIdentity,
             );
-            setCutting(false);
         }
     };
     if (currentIdentity !== identity) {
         setCurrentIdentity(identity);
+        setError(null);
         setOpen(false);
         setCutting(false);
         setBrowserTranscribing(false);
         setConfirming(false);
-        setJobId(null);
         setRange({ startMs: 0, endMs: recording.duration });
         setActiveTurns(transcripts[0]?.turns ?? null);
         shownRevisions.current = undefined;
+        proposalId.current = undefined;
+        setProposalPreview(null);
+        setProposalSource(null);
     }
     const state: CutState = {
+        proposalPreview,
+        proposalSource,
+        setProposalPreview,
+        openWithRange: (input) => {
+            if (!owner || disabledReason) return;
+            if (
+                input.confirm ||
+                proposalId.current !== input.proposalId ||
+                !open
+            )
+                setRange(input.range);
+            proposalId.current = input.proposalId;
+            shownRevisions.current = input.revisions;
+            setProposalSource(input.source ?? null);
+            setError(null);
+            setOpen(true);
+            setConfirming(input.confirm);
+            if (!input.confirm) {
+                openWidget(
+                    `recording-transcription-${recording.id}`,
+                    input.source,
+                );
+                requestAnimationFrame(() => {
+                    const boundary = document
+                        .getElementById(
+                            `recording-transcription-${recording.id}`,
+                        )
+                        ?.querySelector<HTMLElement>(
+                            `[data-cut-boundary="${input.range.startMs || input.range.endMs}"]`,
+                        );
+                    boundary?.scrollIntoView({
+                        block: "center",
+                        behavior: workflowScrollBehavior(),
+                    });
+                    boundary?.querySelector<HTMLElement>("button")?.focus();
+                });
+            }
+        },
         recording,
         owner,
         open,
         cutting,
+        error,
         disabledReason,
         range,
         activeTurns,
@@ -302,6 +446,9 @@ export function RecordingCutProvider({
             if (owner && !disabledReason) {
                 if (open) cancel();
                 else {
+                    proposalId.current = undefined;
+                    setProposalSource(null);
+                    setError(null);
                     setRange({ startMs: 0, endMs: recording.duration });
                     shownRevisions.current = transcripts.every(
                         (transcript) => transcript.version,
@@ -387,22 +534,16 @@ export function RecordingCutProvider({
                         </li>
                     </ul>
                     {shared && (
-                        <>
-                            <p className="text-sm font-medium">
-                                {i18n(
-                                    "This recording is shared with the Organization. It will be taken out of the Organization first, and colleagues will no longer see it.",
-                                )}
-                            </p>
-                            <WithdrawRetentionWarning preview={preview} />
-                        </>
+                        <p className="text-sm font-medium">
+                            {i18n(
+                                "This recording is shared with the Organization. Colleagues will see the cut version, and its summary in the Organization is generated again.",
+                            )}
+                        </p>
                     )}
                     <AlertDialogFooter>
                         <AlertDialogCancel>{i18n("Cancel")}</AlertDialogCancel>
                         <AlertDialogAction
-                            disabled={
-                                (shared && preview.status === "loading") ||
-                                !validCutRange(range, recording.duration)
-                            }
+                            disabled={!validCutRange(range, recording.duration)}
                             onClick={() => void execute()}
                         >
                             {i18n("Delete and cut")}
@@ -451,7 +592,7 @@ export function RecordingCutButton() {
 export function CutEdgeChip({ edge }: { edge: "start" | "end" }) {
     const cut = useRecordingCut();
     const i18n = useExtracted();
-    if (!cut) return null;
+    if (!cut?.owner) return null;
     const time = formatClock(
         edge === "start" ? cut.range.startMs : cut.range.endMs,
     );
@@ -460,14 +601,14 @@ export function CutEdgeChip({ edge }: { edge: "start" | "end" }) {
             ? cut.range.startMs > 0
             : cut.range.endMs < cut.recording.duration;
     return (
-        <span className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-background px-2 py-1 text-xs text-primary">
+        <span className="inline-flex h-4 items-center gap-1 rounded-full border border-primary/40 bg-background px-2 text-xs leading-none text-primary">
             {edge === "start"
                 ? i18n("Start {time}", { time })
                 : i18n("End {time}", { time })}
             {set && (
                 <button
                     type="button"
-                    className="rounded-full p-0.5 hover:bg-primary/10"
+                    className="inline-flex h-full items-center rounded-full hover:bg-primary/10"
                     onClick={() => cut.reset(edge)}
                     aria-label={
                         edge === "start"
@@ -482,164 +623,291 @@ export function CutEdgeChip({ edge }: { edge: "start" | "end" }) {
     );
 }
 
-export function RecordingCutBar() {
+function CutTimeField({
+    edge,
+    invalid,
+    hintId,
+    onInvalidChange,
+}: {
+    edge: "start" | "end";
+    invalid: boolean;
+    hintId: string;
+    onInvalidChange: (invalid: boolean) => void;
+}) {
     const cut = useRecordingCut();
     const i18n = useExtracted();
-    const playback = usePlayback();
-    const [position, setPosition] = useState(0);
-    useEffect(
-        () => playback?.subscribe((state) => setPosition(Math.round(state.ms))),
-        [playback],
+    const id = useId();
+    const [draft, setDraft] = useState<string | null>(null);
+    const value = edge === "start" ? cut?.range.startMs : cut?.range.endMs;
+    const [committedValue, setCommittedValue] = useState(value);
+    if (committedValue !== value) {
+        setCommittedValue(value);
+        setDraft(null);
+    }
+    if (!cut || value === undefined) return null;
+    const commit = () => {
+        if (draft === null) return;
+        const parsed = parseCutTime(draft);
+        const snapped =
+            parsed === null
+                ? null
+                : snapCutEdge(
+                      cut.activeTurns ?? [],
+                      parsed,
+                      edge,
+                      cut.recording.duration,
+                  );
+        const valid =
+            snapped !== null &&
+            (edge === "start"
+                ? snapped < cut.range.endMs
+                : snapped > cut.range.startMs);
+        onInvalidChange(!valid);
+        setDraft(null);
+        if (valid && snapped !== null) cut.setEdge(edge, snapped);
+    };
+    return (
+        <label
+            htmlFor={id}
+            className="flex items-center gap-2 text-sm text-muted-foreground"
+        >
+            {edge === "start"
+                ? i18n("From")
+                : i18n({ id: "recording-cut-to", message: "To" })}
+            <Input
+                id={id}
+                className="h-8 w-24 text-center font-mono text-sm text-foreground tabular-nums"
+                value={draft ?? formatClock(value)}
+                aria-invalid={invalid}
+                aria-describedby={invalid ? hintId : undefined}
+                onChange={(event) => {
+                    setDraft(event.target.value);
+                    onInvalidChange(false);
+                }}
+                onBlur={commit}
+                onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                        event.preventDefault();
+                        commit();
+                    }
+                }}
+            />
+        </label>
     );
-    if (cut?.cutting)
-        return (
-            <output className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" />
-                {i18n("Cutting…")}
-            </output>
-        );
-    if (!cut?.open) return null;
+}
+
+export function RecordingCutPanel() {
+    const cut = useRecordingCut();
+    const i18n = useExtracted();
+    const hintId = useId();
+    const [invalid, setInvalid] = useState({ start: false, end: false });
+    const identity = `${cut?.open}:${cut?.recording.id}`;
+    const [previousIdentity, setPreviousIdentity] = useState(identity);
+    if (identity !== previousIdentity) {
+        setPreviousIdentity(identity);
+        setInvalid({ start: false, end: false });
+    }
+    if (!cut?.owner || (!cut.open && !cut.cutting)) return null;
     const { range, recording } = cut;
-    const changed = range.startMs > 0 || range.endMs < recording.duration;
     const total = formatClock(recording.duration);
     const kept = formatClock(Math.max(0, range.endMs - range.startMs));
+    const start = formatClock(range.startMs);
+    const end = formatClock(recording.duration - range.endMs);
+    let removed = "";
+    if (range.startMs > 0 && range.endMs < recording.duration) {
+        removed = i18n(
+            "{start} will be removed from the start, {end} from the end.",
+            { start, end },
+        );
+    } else if (range.startMs > 0) {
+        removed = i18n("{start} will be removed from the start.", { start });
+    } else if (range.endMs < recording.duration) {
+        removed = i18n("{end} will be removed from the end.", { end });
+    }
     return (
         <section
-            className="sticky top-0 z-30 space-y-2 rounded-lg border border-primary/40 bg-background p-3 shadow-sm"
+            className="space-y-3 rounded-lg border border-primary/40 bg-card p-4"
             aria-label={i18n("Cut recording")}
         >
-            <div className="flex flex-wrap items-center gap-2">
-                <span className="mr-2 inline-flex items-center gap-2 text-sm font-medium">
-                    <Scissors className="size-4 text-primary" />
-                    {i18n("Cut recording")}
-                </span>
-                <CutEdgeChip edge="start" />
-                <CutEdgeChip edge="end" />
-                {!recording.audioReaped && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+                {cut.cutting ? (
+                    <output className="inline-flex items-center gap-2 text-sm font-medium">
+                        <Loader2 className="size-4 animate-spin text-primary" />
+                        {i18n("Cutting {start}–{end}", {
+                            start,
+                            end: formatClock(range.endMs),
+                        })}
+                    </output>
+                ) : (
                     <>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() =>
-                                cut.setEdge(
-                                    "start",
-                                    snapCutEdge(
-                                        cut.activeTurns ?? [],
-                                        position,
-                                        "start",
-                                    ),
-                                )
-                            }
-                        >
-                            {i18n({
-                                id: "recording-cut-start-here",
-                                message: "Start here",
-                            })}
-                        </Button>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() =>
-                                cut.setEdge(
-                                    "end",
-                                    snapCutEdge(
-                                        cut.activeTurns ?? [],
-                                        position,
-                                        "end",
-                                    ),
-                                )
-                            }
-                        >
-                            {i18n("End here")}
-                        </Button>
-                        <span
-                            className="font-mono text-xs tabular-nums"
-                            title={i18n("From the playback position")}
-                        >
-                            {formatClock(position)}
+                        <span className="inline-flex items-center gap-2 text-sm font-medium">
+                            <Scissors className="size-4 text-primary" />
+                            {i18n("Cut recording")}
                         </span>
+                        <div className="flex items-start gap-2">
+                            <CutTimeField
+                                edge="start"
+                                invalid={invalid.start}
+                                hintId={hintId}
+                                onInvalidChange={(value) =>
+                                    setInvalid((previous) => ({
+                                        ...previous,
+                                        start: value,
+                                    }))
+                                }
+                            />
+                            <span
+                                aria-hidden="true"
+                                className="pt-1 text-muted-foreground"
+                            >
+                                –
+                            </span>
+                            <CutTimeField
+                                edge="end"
+                                invalid={invalid.end}
+                                hintId={hintId}
+                                onInvalidChange={(value) =>
+                                    setInvalid((previous) => ({
+                                        ...previous,
+                                        end: value,
+                                    }))
+                                }
+                            />
+                        </div>
                     </>
                 )}
-                <span className="ml-auto inline-flex gap-2">
-                    <Button variant="outline" size="sm" onClick={cut.cancel}>
-                        {i18n("Cancel")}
-                    </Button>
-                    <Button
-                        size="sm"
-                        disabled={
-                            !changed ||
-                            !validCutRange(range, recording.duration)
-                        }
-                        onClick={cut.confirm}
-                    >
-                        {i18n("Cut…")}
-                    </Button>
+                <span className="text-sm">
+                    {i18n("{kept} of {total} stays", { kept, total })}
                 </span>
+                {!cut.cutting && (
+                    <span className="ml-auto inline-flex gap-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={cut.cancel}
+                        >
+                            {i18n("Cancel")}
+                        </Button>
+                        <Button
+                            size="sm"
+                            disabled={!validCutRange(range, recording.duration)}
+                            onClick={cut.confirm}
+                        >
+                            {i18n("Cut…")}
+                        </Button>
+                    </span>
+                )}
             </div>
-            <p className="text-sm font-medium">
-                {changed
-                    ? i18n("{kept} of {total} stays", { kept, total })
-                    : i18n("The whole recording for now, {total}", { total })}
-            </p>
-            <p className="text-xs text-muted-foreground">
-                {!changed
-                    ? i18n(
-                          "Hover the turn where the recording should start and click Start here. On the last turn to keep, click End here.",
-                      )
-                    : recording.audioReaped
-                      ? i18n(
-                            "The cut turns are deleted from the transcript and cannot be restored. The summary, title, topics and tasks are then generated again.",
+            {!cut.cutting && (invalid.start || invalid.end) && (
+                <p id={hintId} className="text-xs text-destructive">
+                    {i18n(
+                        "Enter mm:ss or h:mm:ss and keep the start before the end. The previous time was restored.",
+                    )}
+                </p>
+            )}
+            {cut.error && (
+                <p
+                    role="alert"
+                    className="rounded-md bg-destructive/10 p-3 text-sm text-destructive"
+                >
+                    {cut.error}
+                </p>
+            )}
+            <p className="text-xs leading-relaxed text-muted-foreground">
+                {cut.cutting ? (
+                    recording.audioReaped ? (
+                        i18n(
+                            "The transcript is being cut on the server. You can leave. Learn, summary, title and topics will then run again.",
                         )
-                      : i18n(
-                            "The cut part is deleted from the audio and the transcript and cannot be restored. The summary, title, topics and tasks are then generated again.",
+                    ) : (
+                        i18n(
+                            "Audio is cut on the server, about a minute for a half-hour recording. You can leave. Learn, summary, title and topics will then run again.",
+                        )
+                    )
+                ) : (
+                    <>
+                        {removed && <>{removed} </>}
+                        {i18n(
+                            "You can also choose the start and end in the transcript: hover between paragraphs. A typed time snaps to the nearest sentence start.",
                         )}
+                    </>
+                )}
             </p>
         </section>
     );
 }
 
-export function CutTurnAction({
-    turn,
-    edge,
+export function CutParagraphBoundary({
+    ms,
+    startEdge = false,
+    endEdge = false,
 }: {
-    turn: TranscriptTurn;
-    edge: "start" | "end";
+    ms: number;
+    startEdge?: boolean;
+    endEdge?: boolean;
 }) {
     const cut = useRecordingCut();
     const i18n = useExtracted();
-    if (!cut?.open) return null;
+    const timeId = useId();
+    if (!cut?.owner || !cut.open) return null;
     return (
-        <button
-            type="button"
-            className="relative z-10 inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-xs opacity-0 transition-opacity group-hover/para:opacity-100 group-focus-within/para:opacity-100 focus:opacity-100"
-            onClick={() =>
-                cut.setEdge(edge, edge === "start" ? turn.startMs : turn.endMs)
-            }
+        <div
+            data-cut-boundary={ms}
+            className="group/cut absolute inset-x-0 -top-4 z-20 h-4"
         >
-            <Scissors className="size-3 text-primary" />
-            {edge === "start"
-                ? i18n({
-                      id: "recording-cut-start-here",
-                      message: "Start here",
-                  })
-                : i18n("End here")}
-        </button>
-    );
-}
-
-export function CutLine({ edge }: { edge: "start" | "end" }) {
-    return (
-        <div className="flex items-center gap-2 py-1">
-            <span className="flex-1 border-t border-dashed border-primary" />
-            <CutEdgeChip edge={edge} />
-            <span className="flex-1 border-t border-dashed border-primary" />
+            {(startEdge || endEdge) && (
+                <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-center gap-2">
+                    <span className="pointer-events-none flex-1 border-t border-primary" />
+                    <span className="pointer-events-auto inline-flex gap-1">
+                        {startEdge && <CutEdgeChip edge="start" />}
+                        {endEdge && <CutEdgeChip edge="end" />}
+                    </span>
+                    <span className="pointer-events-none flex-1 border-t border-primary" />
+                </div>
+            )}
+            {!(startEdge || endEdge) && (
+                <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-center gap-2 opacity-0 transition-opacity group-hover/cut:opacity-100 group-focus-within/cut:opacity-100 motion-reduce:transition-none">
+                    <span className="pointer-events-none flex-1 border-t border-dashed border-primary" />
+                    <span className="pointer-events-none inline-flex h-4 shrink-0 items-center gap-1 rounded-full border border-primary/40 bg-background px-2 text-xs leading-none shadow-sm group-hover/cut:pointer-events-auto group-focus-within/cut:pointer-events-auto">
+                        <Scissors className="size-3 text-primary" />
+                        <span
+                            id={timeId}
+                            className="font-mono tabular-nums text-muted-foreground"
+                        >
+                            {formatClock(ms)}
+                        </span>
+                        <button
+                            type="button"
+                            aria-describedby={timeId}
+                            className="h-full rounded-full px-2 leading-none hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            disabled={ms >= cut.range.endMs}
+                            onClick={() => cut.setEdge("start", ms)}
+                        >
+                            {i18n({
+                                id: "recording-cut-start-here",
+                                message: "Start here",
+                            })}
+                        </button>
+                        <button
+                            type="button"
+                            aria-describedby={timeId}
+                            className="h-full rounded-full px-2 leading-none hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            disabled={ms <= cut.range.startMs}
+                            onClick={() => cut.setEdge("end", ms)}
+                        >
+                            {i18n("End here")}
+                        </button>
+                    </span>
+                    <span className="pointer-events-none flex-1 border-t border-dashed border-primary" />
+                </div>
+            )}
         </div>
     );
 }
 
 export function CutPreviewOverlay() {
     const cut = useRecordingCut();
-    if (!cut?.open) return null;
+    if (!cut?.owner || (!cut.open && !cut.cutting)) return null;
     const hatch = {
         backgroundImage:
             "repeating-linear-gradient(135deg, transparent, transparent 3px, var(--muted-foreground) 3px, var(--muted-foreground) 4px)",

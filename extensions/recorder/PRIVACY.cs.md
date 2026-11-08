@@ -1,6 +1,6 @@
 # Zásady ochrany soukromí rozšíření Klepna – nahrávání schůzek
 
-Aktualizováno: 28. října 2026
+Aktualizováno: 8. listopadu 2026
 
 Tyto zásady popisují **rozšíření prohlížeče Klepna – nahrávání schůzek**. Nenahrazují zásady ochrany soukromí serveru Klepny ani jiných služeb, které si zvolíte.
 
@@ -26,9 +26,7 @@ Nečte obsah stránek, neprovádí síťové požadavky a nikam neodesílá obsa
 ovládání nahrávání a výběru složky. Hledání složek používá již propojený server;
 klíč pro nahrávání se stránce schůzky nezpřístupňuje. Vypnutí přepínače odebere
 přístup k těmto webům, odregistruje skript a skryje jeho ovládání. Bez tohoto
-volitelného přístupu zůstává systémové oznámení. Kliknutí na ikonu rozšíření při
-zobrazené výzvě uloží vaše potvrzení upozornění účastníkům; samo o sobě nezískává
-souhlas ostatních účastníků.
+volitelného přístupu zůstává systémové oznámení. Na kartě s agendou ikona přepíná panel; upozornění účastníkům potvrzujete až tlačítkem nahrávání. Na ostatních kartách se dosavadní ovládání nemění. Potvrzení samo nezískává souhlas ostatních účastníků.
 
 Stránka schůzky může prostřednictvím posluchačů klávesnice ve fázi zachytávání sledovat stisky kláves při hledání složek v liště Klepny.
 
@@ -46,7 +44,7 @@ a nabídku v liště lze vypnout samostatně. Serverům bez podpory agend nepos�
 
 Při párování Google Meetu proces na pozadí odesílá pouze kód místnosti z adresy
 karty a aktuální čas na propojený server. U ostatních platforem páruje podle času.
-Kódy schůzek z kalendáře se do prohlížeče neposílají. Rozšíření nesbírá obsah
+Odkazy pro připojení ke schůzce přicházejí pouze prostřednictvím níže popsané funkce Kalendáře. Rozšíření nesbírá obsah
 stránek ani další zvuk. Izolovaná lišta zobrazuje údaje agendy ze serveru a posílá
 jen ovládací zprávy procesu na pozadí; klíč se stránce schůzky nezpřístupňuje.
 Zaškrtnutí bodů, poznámky, nové body a označení úkolů Hotovo nebo Zrušit ukládá
@@ -55,6 +53,12 @@ ID vybrané agendy zůstává v metadatech pro obnovení odesílání do
 dokončení nebo zahození nahrávky; ID se posílá při dokončení. Při odpojení nebo novém propojení se dočasné agendy a volby smažou.
 Názvy v připomínkách mohou být viditelné v systémových oznámeních; připomínky
 můžete vypnout v Možnostech.
+
+## Schůzky z Kalendáře a živá spolupráce
+
+Na podporovaných serverech rozšíření získá název, čas začátku a konce, ověřený odkaz na Meet a e-mail připojeného účtu Google pro vaši nejbližší vlastní schůzku v hlavním kalendáři (pořadatel nebo pozvaný, který neodmítl). Odkaz vybere tento účet pomocí `authuser`. Údaje zůstávají v dočasném úložišti relace rozšíření a při změně propojení či souhlasu se smažou. Na pozadí se Kalendář kontroluje nejvýš každých pět minut; při otevření okna či panelu pouze po uplynutí jedné minuty od posledního načtení. Připojení otevře Meet a nikdy nespustí nahrávání. Volitelné systémové oznámení může zobrazit název schůzky. Jeho předstih a vypnutí najdete v Možnostech. Pokud už máte místnost otevřenou, oznámení nepřijde.
+
+Po dobu otevření panelu agendy přicházejí změny přes ověřený kanál událostí. Společné textové úpravy i jména kolegů, kteří schůzku nahrávají, se vyměňují pouze s propojeným serverem podle stávajících oprávnění. Textové dokumenty jsou jen v paměti panelu, nikoli v trvalém úložišti rozšíření. Výběr agendy při spuštění nebo její úprava během nahrávání může oznámit agendu ostatním oprávněným čtenářům a připojit ji k nahrávce; můžete ji odpojit. Místně se pamatují ID nedávných složek a připomenutých výskytů schůzek, nikoli názvy z Kalendáře nebo text agendy. Rozšíření nenačítá vzdálený kód.
 
 ## Kam se data odesílají
 

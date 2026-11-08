@@ -27,6 +27,7 @@ export function meetingsInLocation(
             ? meeting.folders.some((folder) => descendants.has(folder.id))
             : isOrgAccount ||
               meeting.author.id === userId ||
+              meeting.received ||
               meeting.folders.some((folder) =>
                   participantFolders.has(folder.id),
               ),

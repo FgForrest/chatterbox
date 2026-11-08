@@ -95,7 +95,6 @@ describe("the corrected transcript", () => {
                 learnMarks={{
                     speakers: {},
                     decide,
-                    track: (work) => work,
                     corrections: [
                         {
                             itemId: "i-honza",

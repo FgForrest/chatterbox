@@ -177,7 +177,9 @@
             });
         }
         text("title", t("meetingPromptTitle", t("appName")));
-        if (message.pinned && !message.policyRequired) {
+        if (message.agendaPanel) {
+            text("how", t("agendaPanelIcon", t("appName")));
+        } else if (message.pinned && !message.policyRequired) {
             const icon = node("strong", {}, [t("meetingPromptIcon", t("appName"))]);
             const shortcut = message.shortcut
                 ? [t("meetingPromptPinnedShortcut"), " ", node("kbd", {}, [message.shortcut])]
@@ -195,7 +197,7 @@
         }
         text("notice-label", t("meetingPromptNoticeLabel"));
         text("notice", message.notice);
-        text("consent", t(message.policyRequired ? "meetingPromptPolicyConsent" : "meetingPromptConsent"));
+        text("consent", message.agendaPanel ? "" : t(message.policyRequired ? "meetingPromptPolicyConsent" : "meetingPromptConsent"));
         text("dialog", t("meetingPromptDialog"));
         text("not-now", t("notNow"));
         el("close").setAttribute("aria-label", t("meetingPromptDismiss"));

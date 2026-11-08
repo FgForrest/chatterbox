@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { LearnNewRecord, LearnOutput } from "@/lib/learn/output";
-import { type LearnRunFrame, validateLearnOutput } from "@/lib/learn/validate";
+import type { LearnRunFrame } from "@/lib/learn/validate";
 import {
     MAX_NEW_RECORDS,
     newRecordFingerprint,
 } from "@/lib/learn/validate-new-records";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
+import { validateLearnProposals } from "@/tests/helpers/learn-proposals";
 
 const TURNS: TranscriptTurn[] = [
     {
@@ -117,12 +118,12 @@ const worksFor = (
     sensitivity: "none",
 });
 
-const kinds = (result: ReturnType<typeof validateLearnOutput>) =>
+const kinds = (result: ReturnType<typeof validateLearnProposals>) =>
     result.items.map((item) => item.kind);
 
 describe("Learn's new records", () => {
     it("proposes a thing named in its evidence, unticked, and what refers to it by its ref", () => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [record("n1", "Veltrix", "0:00")],
                 facts: [worksFor({ personId: "p-marek" }, { newRef: "n1" })],
@@ -150,7 +151,7 @@ describe("Learn's new records", () => {
     });
 
     it("takes a name the Almanac has for that record, a nickname included", () => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [
                     record("n1", "Orbita", "0:10", { typeKey: "product" }),
@@ -176,7 +177,7 @@ describe("Learn's new records", () => {
     });
 
     it("names nobody where two people have that name, and drops what refers to it", () => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [
                     record("n1", "Marek Holub", "0:30", {
@@ -201,7 +202,7 @@ describe("Learn's new records", () => {
     });
 
     it("drops a thing of a type a new thing may not take, and a ref nobody declared", () => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [
                     record("n1", "Veltrix", "0:00", { typeKey: "planet" }),
@@ -219,14 +220,14 @@ describe("Learn's new records", () => {
 
     it("needs the name said where its evidence is, or written there by a correction for it", () => {
         const heardAt = TURNS[3]?.text.indexOf("Velrix") ?? -1;
-        const dropped = validateLearnOutput(
+        const dropped = validateLearnProposals(
             output({ newRecords: [record("n1", "Veltrix", "0:30")] }),
             frame(),
         );
         expect(dropped.items).toEqual([]);
         expect(dropped.dropped).toMatchObject({ notInEvidence: 1 });
 
-        const misheard = validateLearnOutput(
+        const misheard = validateLearnProposals(
             output({
                 newRecords: [record("n1", "Veltrix", "0:30")],
                 corrections: [
@@ -260,7 +261,7 @@ describe("Learn's new records", () => {
             },
         ];
         const heardAt = turns[0]?.text.indexOf("Weltriksem") ?? -1;
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [record("n1", "Veltrix", "0:00")],
                 corrections: [
@@ -289,7 +290,7 @@ describe("Learn's new records", () => {
                 text: "Jana chodí na Therapy Hub každý týden.",
             },
         ];
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [
                     record("n1", "Therapy Hub", "0:00", {
@@ -304,7 +305,7 @@ describe("Learn's new records", () => {
     });
 
     it("asks whether a name close to a known one is that one, misheard", () => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [
                     record("n1", "Orbitta", "0:00", { typeKey: "project" }),
@@ -330,7 +331,7 @@ describe("Learn's new records", () => {
     });
 
     it("hints a known record behind a first name, or a letter off, and not behind a longer name or another person's forms", () => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [
                     record("n1", "Marek", "0:00", {
@@ -397,7 +398,7 @@ describe("Learn's new records", () => {
                 ["e-komet", { typeKey: "project", name: "Kometta s.r.o." }],
             ]),
         });
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [
                     record("n1", "Apolo", "0:00", { typeKey: "project" }),
@@ -413,7 +414,7 @@ describe("Learn's new records", () => {
     });
 
     it("finds a name inflected as Czech says it", () => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [
                     record("n1", "Lumenka", "0:20", { typeKey: "project" }),
@@ -425,7 +426,7 @@ describe("Learn's new records", () => {
     });
 
     it("keeps a common word out: a person needs a capital, a term two turns", () => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [
                     record("n1", "backlog", "0:10", { typeKey: "term" }),
@@ -445,7 +446,7 @@ describe("Learn's new records", () => {
     });
 
     it("joins refs that name one record, and points what refers to either at it", () => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [
                     record("w1n1", "Veltrix", "0:00"),
@@ -479,7 +480,7 @@ describe("Learn's new records", () => {
     });
 
     it("takes a ref the answer defines twice, differently, for nothing", () => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [
                     record("n1", "Veltrix", "0:00"),
@@ -498,7 +499,7 @@ describe("Learn's new records", () => {
     });
 
     it("does not propose again a record rejected on any recording, nor what refers to it", () => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [record("n1", "Veltrix", "0:00")],
                 facts: [worksFor({ personId: "p-marek" }, { newRef: "n1" })],
@@ -518,7 +519,7 @@ describe("Learn's new records", () => {
             { length: MAX_NEW_RECORDS + 2 },
             (_, index) => `Firma${String.fromCharCode(65 + index)}`,
         );
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: text.map((name, index) =>
                     record(`n${index}`, name, "0:00"),
@@ -540,7 +541,7 @@ describe("Learn's new records", () => {
     });
 
     it("marks a person named by one word, for the reviewer", () => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [
                     record("n1", "Ondřej", "0:10", {
@@ -563,7 +564,7 @@ describe("Learn's new records", () => {
     });
 
     it("proposes a new person as the speaker they introduce themselves as", () => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [
                     record("n1", "Petra Kolářová", "0:00", {
@@ -638,7 +639,7 @@ describe("Learn's new records", () => {
                 evidence,
             });
         // Addressed as Vilda, answers; the surname only far off.
-        const addressed = validateLearnOutput(
+        const addressed = validateLearnProposals(
             output({ newRecords: [vilda(["0:00", "0:50"])] }),
             frame({ turns }),
         );
@@ -649,7 +650,7 @@ describe("Learn's new records", () => {
             onlyFirstName: true,
         });
         // Only mentioned: no speaker at all.
-        const mentioned = validateLearnOutput(
+        const mentioned = validateLearnProposals(
             output({ newRecords: [vilda(["0:50"])] }),
             frame({ turns }),
         );
@@ -684,7 +685,7 @@ describe("Learn's new records", () => {
                 text: "Jo, chápu.",
             },
         ];
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [
                     record("n1", "Alena Brabcová", "0:00", {
@@ -707,13 +708,13 @@ describe("Learn's new records", () => {
             typeKey: null,
             speakerLabel: "speaker_0",
         });
-        const answered = validateLearnOutput(
+        const answered = validateLearnProposals(
             output({ newRecords: [newPerson] }),
             frame({ answeredLabels: new Map([["speaker_0", "p-marek"]]) }),
         );
         expect(kinds(answered)).toEqual(["new_record"]);
 
-        const disagreeing = validateLearnOutput(
+        const disagreeing = validateLearnProposals(
             output({
                 newRecords: [newPerson],
                 speakers: [
@@ -732,7 +733,7 @@ describe("Learn's new records", () => {
     });
 
     it("names a known person as a speaker when the answer thought them new", () => {
-        const result = validateLearnOutput(
+        const result = validateLearnProposals(
             output({
                 newRecords: [
                     record("n1", "Marek Holub", "0:30", {

@@ -14,6 +14,7 @@ import { readScopedKnowledge } from "@/lib/knowledge/read-folder-knowledge";
 import { readableScopes } from "@/lib/knowledge/scope";
 import { labelsFromTurns } from "@/lib/knowledge/speaker-label-rules";
 import { loadReview } from "@/lib/learn/review";
+import { needsLearnReview } from "@/lib/learn/review-policy";
 import { withSpeakerProposalContext } from "@/lib/learn/speaker-proposal-context";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { readConfirmedLanguage } from "@/lib/recordings/read-language";
@@ -233,7 +234,8 @@ export async function readItemKnowledge(
                       dismissed: run.stats?.dismissed ?? null,
                       pending:
                           canReview && run.status === "ready"
-                              ? (review?.items.length ?? 0)
+                              ? (review?.items.filter(needsLearnReview)
+                                    .length ?? 0)
                               : 0,
                   }
                 : null,

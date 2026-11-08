@@ -14,6 +14,7 @@ export interface RecordingSessionMetadata {
     /** Label per audio channel, in channel order, e.g. `["microphone", "system"]`. */
     channelLayout: string[];
     agendaId?: string | null;
+    liveAgendaId?: string | null;
     /** Where the meeting ran, when the client could tell: `google-meet`, `zoom`, `teams`. */
     platformHint?: string;
     clientVersion?: string;
@@ -74,6 +75,24 @@ function parseFolderId(value: unknown): string | null {
     return parseOptionalString(value, "folderId", 255) ?? null;
 }
 
+/** Validate an explicit live agenda choice without changing completion metadata. */
+export function parseSessionAgendaBody(body: unknown): {
+    agendaId: string | null;
+} {
+    if (!body || typeof body !== "object" || !("agendaId" in body))
+        throw invalid("agendaId is required", "agendaId");
+    const value = body.agendaId;
+    if (
+        value !== null &&
+        (typeof value !== "string" || !value.trim() || value.length > 255)
+    )
+        throw invalid(
+            "agendaId must be null or a non-empty string of at most 255 characters",
+            "agendaId",
+        );
+    return { agendaId: value as string | null };
+}
+
 function parseOptionalString(
     value: unknown,
     field: string,
@@ -98,6 +117,10 @@ export function normalizeMimeType(value: string): string {
     return value.split(";")[0].trim().toLowerCase();
 }
 
+/**
+ * Parse session creation. The released wire field `agendaId` selects the live
+ * agenda and is stored as `metadata.liveAgendaId`; it does not request attachment.
+ */
 export function parseCreateRecordingSessionBody(
     body: unknown,
 ): CreateRecordingSessionInput {
@@ -171,6 +194,8 @@ export function parseCreateRecordingSessionBody(
     }
 
     const metadata: RecordingSessionMetadata = { channelLayout };
+    if (raw.agendaId !== undefined)
+        metadata.liveAgendaId = parseSessionAgendaBody(raw).agendaId;
     const platformHint = parseOptionalString(
         raw.platformHint,
         "platformHint",
@@ -201,6 +226,10 @@ export function parseCreateRecordingSessionBody(
     };
 }
 
+/**
+ * Parse session completion. The released wire field `agendaId` selects the agenda
+ * to attach to the finished recording, independently of `metadata.liveAgendaId`.
+ */
 export function parseCompleteRecordingSessionBody(
     body: unknown,
 ): CompleteRecordingSessionInput {
@@ -359,6 +388,8 @@ export function readRecordingSessionMetadata(
     const metadata: RecordingSessionMetadata = { channelLayout };
     if (raw.agendaId === null || typeof raw.agendaId === "string")
         metadata.agendaId = raw.agendaId;
+    if (raw.liveAgendaId === null || typeof raw.liveAgendaId === "string")
+        metadata.liveAgendaId = raw.liveAgendaId;
     if (typeof raw.platformHint === "string") {
         metadata.platformHint = raw.platformHint;
     }

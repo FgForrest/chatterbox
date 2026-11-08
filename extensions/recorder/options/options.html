@@ -137,11 +137,16 @@
                 </label>
                 <p id="meeting-prompt-hint" class="hint" data-i18n="meetingPromptDescription"></p>
             </section>
+            <section id="meeting-notifications-section" hidden aria-labelledby="meeting-notifications-title">
+                <h2 id="meeting-notifications-title" data-i18n="nextMeeting"></h2>
+                <label class="check"><input id="meeting-notifications" type="checkbox" role="switch" /><span data-i18n="meetingNotifications"></span></label>
+                <label for="meeting-lead" data-i18n="meetingLead"></label>
+                <select id="meeting-lead"><option value="0" data-i18n="meetingLeadZero"></option><option value="1">1 min</option><option value="2">2 min</option><option value="5">5 min</option><option value="10">10 min</option></select>
+                <p class="hint" data-i18n="meetingNotificationsHint"></p>
+            </section>
             <section id="agenda-section" hidden aria-labelledby="agenda-settings-title">
                 <h2 id="agenda-settings-title" data-i18n="agendaSettings"></h2>
                 <div id="agenda-settings">
-                    <label class="check"><input id="agenda-reminders" type="checkbox" role="switch" aria-describedby="agenda-reminders-hint" /><span data-i18n="agendaReminders"></span></label>
-                    <p id="agenda-reminders-hint" class="hint" data-i18n="agendaRemindersHint"></p>
                     <label class="check"><input id="agenda-banner" type="checkbox" role="switch" aria-describedby="agenda-banner-hint" /><span data-i18n="agendaBanner"></span></label>
                     <p id="agenda-banner-hint" class="hint" data-i18n="agendaBannerHint"></p>
                 </div>

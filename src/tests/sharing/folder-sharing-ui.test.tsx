@@ -450,7 +450,16 @@ describe("folder person sharing UI", () => {
         expect(
             screen.queryByRole("option", { name: "Local research" }),
         ).toBeNull();
-        fireEvent.click(screen.getByRole("option", { name: "Projects" }));
+        fireEvent.click(screen.getByRole("combobox", { name: "Place in" }));
+        expect(
+            screen.queryByRole("option", { name: /Organization/ }),
+        ).toBeNull();
+        expect(
+            screen.queryByRole("option", { name: /Local research/ }),
+        ).toBeNull();
+        fireEvent.click(
+            screen.getByRole("option", { name: "Projects Private" }),
+        );
         fireEvent.click(screen.getByRole("button", { name: "Attach" }));
         await waitFor(() =>
             expect(requests).toHaveBeenCalledWith(
@@ -543,10 +552,12 @@ describe("folder person sharing UI", () => {
                 screen.getByRole("textbox", { name: "Name in your tree" }),
                 { target: { value: "Renamed locally" } },
             );
-        else
+        else {
+            fireEvent.click(screen.getByRole("combobox", { name: "Place in" }));
             fireEvent.click(
-                screen.getByRole("button", { name: "Private root" }),
+                screen.getByRole("option", { name: "Private root" }),
             );
+        }
         fireEvent.click(screen.getByRole("button", { name: "Save" }));
         await waitFor(() =>
             expect(requests).toHaveBeenCalledWith(
@@ -657,12 +668,12 @@ describe("folder person sharing UI", () => {
         );
         expect(
             screen
-                .getByRole("option", { name: "Local research" })
+                .getByRole("option", { name: "Local research Private" })
                 .querySelector(".lucide-folder-input"),
         ).toBeTruthy();
         expect(
             screen
-                .getByRole("option", { name: "Research" })
+                .getByRole("option", { name: "Research Private" })
                 .querySelector(".lucide-folder-output"),
         ).toBeTruthy();
         expect(

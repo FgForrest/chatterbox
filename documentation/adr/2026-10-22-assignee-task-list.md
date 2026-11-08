@@ -1,7 +1,7 @@
 ---
 title: Own tasks share the task table, follows stay personal, and assignees merge with explicit disclosure
 date: 2026-10-22
-updated: 2026-10-23 09:35
+updated: 2026-11-07 18:18
 status: accepted
 kind: feature
 issues: [253]
@@ -9,7 +9,7 @@ prs: [264, 272]
 areas: [src/lib/tasks, src/lib/folders, src/components/tasks, src/app/api/tasks, src/lib/mcp/tools/tasks.ts, src/lib/export, src/db/schema.ts]
 supersedes: []
 superseded-by: []
-relates: [2026-10-07-tasks-from-summaries, 2026-10-07-external-mcp-server]
+relates: [2026-10-07-tasks-from-summaries, 2026-10-07-external-mcp-server, 2026-11-07-attended-recordings-for-time-reporting]
 ---
 
 # Own tasks share the task table, follows stay personal, and assignees merge with explicit disclosure
@@ -140,6 +140,8 @@ Merges are irreversible and retain links, followers, pending proposals and cross
 
 ## Related work
 
+- [Attended recordings](2026-11-07-attended-recordings-for-time-reporting.md): reuses primary-email
+  matching to connect a person in the Almanac to the caller's account for time reporting.
 - [Tasks from summaries](2026-10-07-tasks-from-summaries.md): the task lifecycle and assignment model,
   extended here with tasks without items.
 - [External MCP server](2026-10-07-external-mcp-server.md): the same identity, roles and row-scoping

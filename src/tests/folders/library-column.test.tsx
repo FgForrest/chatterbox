@@ -6,6 +6,7 @@ import {
     fireEvent,
     render,
     screen,
+    waitFor,
     within,
 } from "@testing-library/react";
 import type { ComponentProps } from "react";
@@ -727,6 +728,47 @@ it("offers no folder settings for a received folder", async () => {
 });
 
 describe("library item list", () => {
+    it.each([
+        "Escape",
+        "outside",
+    ])("keeps the row folder popup after the menu closes and returns focus on %s", async (exit) => {
+        render(
+            <ConfirmDialogProvider>
+                <RecordingList
+                    recordings={[recordings[0]]}
+                    transcriptions={new Map()}
+                    currentRecording={null}
+                    pendingUploads={[]}
+                    inFlightActions={new Map()}
+                    onSelect={vi.fn()}
+                    onDelete={vi.fn()}
+                    initialDateTimeFormat="relative"
+                    initialSortOrder="newest"
+                    initialChunkSize={50}
+                    folders={folders}
+                    assignments={assignments}
+                    onAssignRecording={assign}
+                />
+            </ConfirmDialogProvider>,
+        );
+        const anchor = screen.getByRole("button", { name: "Row actions" });
+        fireEvent.pointerDown(anchor, { button: 0, ctrlKey: false });
+        fireEvent.click(
+            screen.getByRole("menuitem", { name: "Add to folder" }),
+        );
+        await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+        act(() => anchor.focus());
+        expect(screen.getByRole("listbox")).toBeTruthy();
+        expect(screen.queryByRole("dialog")).toBeNull();
+        const input = screen.getByPlaceholderText("Find a folder…");
+        act(() => input.focus());
+        if (exit === "Escape") fireEvent.keyDown(input, { key: "Escape" });
+        else fireEvent.pointerDown(document.body);
+        await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+        expect(document.activeElement).toBe(anchor);
+        expect(assign).not.toHaveBeenCalled();
+    });
+
     it.each(
         roles.flatMap((role) =>
             [false, true].map((fromFolder) => ({ ...role, fromFolder })),
@@ -788,9 +830,9 @@ describe("library item list", () => {
             }),
         );
         expect(
-            screen.queryByRole("option", { name: "Folder 0" }) !== null,
+            screen.queryByRole("option", { name: /Folder 0/ }) !== null,
         ).toBe(isOwn && !fromFolder);
-        fireEvent.click(screen.getByRole("option", { name: "Shared target" }));
+        fireEvent.click(screen.getByRole("option", { name: /Shared target/ }));
         await act(async () => {});
         if (fromFolder) {
             expect(move).toHaveBeenCalledExactlyOnceWith(
@@ -927,7 +969,7 @@ describe("library item list", () => {
                 name: folder.kind === "custom" ? "Move to…" : "Add to folder",
             }),
         );
-        fireEvent.click(screen.getByRole("option", { name: "Folder 11" }));
+        fireEvent.click(screen.getByRole("option", { name: /Folder 11/ }));
         await act(async () => {});
         if (folder.kind === "custom")
             expect(move).toHaveBeenCalledWith("r0", "f0", "f11");

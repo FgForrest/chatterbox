@@ -41,6 +41,7 @@ export function AiCostSummary({
         title: i18n("Title"),
         topics: i18n("Topics"),
         learn: i18n("Learn"),
+        trim: i18n("Trim proposal"),
         correction: i18n("Correction pass"),
         embedding: i18n("Embeddings"),
     };
