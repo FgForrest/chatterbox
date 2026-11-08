@@ -133,6 +133,7 @@ describe("parseTranscriptionResponse", () => {
                     startMs: 0,
                     endMs: 2500,
                     text: "Ahoj. Jak se máš?",
+                    sentenceStartsMs: [0, 1200],
                 },
                 { speaker: "", startMs: 6000, endMs: 7000, text: "Dobře." },
             ]);

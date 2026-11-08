@@ -2,7 +2,10 @@ import { providerFetch } from "@/lib/ai/provider-fetch";
 import { env } from "@/lib/env";
 import {
     renderTurnsAsText,
+    type TimedTextUnit,
     type TranscriptTurn,
+    trimTimedText,
+    withSentenceTiming,
 } from "@/lib/transcription/turns";
 
 const DEFAULT_API_BASE = "https://api.elevenlabs.io";
@@ -164,6 +167,7 @@ function formatDiarizedText(
         text: string;
         startMs: number;
         endMs: number;
+        units: TimedTextUnit[];
     }[] = [];
     let sawSpeaker = false;
 
@@ -183,6 +187,18 @@ function formatDiarizedText(
             continue;
         }
         const speaker = word.speaker_id || "";
+        const unit =
+            typeof word.start === "number" &&
+            typeof word.end === "number" &&
+            word.type !== "audio_event"
+                ? {
+                      charStart: 0,
+                      charEnd: text.length,
+                      startMs: toMs(word.start),
+                      endMs: toMs(word.end),
+                      word: true,
+                  }
+                : null;
         if (speaker) {
             sawSpeaker = true;
         }
@@ -192,8 +208,15 @@ function formatDiarizedText(
                 text,
                 startMs: toMs(word.start),
                 endMs: toMs(word.end),
+                units: unit ? [unit] : [],
             });
         } else {
+            if (unit)
+                last.units.push({
+                    ...unit,
+                    charStart: last.text.length,
+                    charEnd: last.text.length + text.length,
+                });
             last.text += text;
             last.endMs = Math.max(last.endMs, toMs(word.end));
         }
@@ -204,12 +227,18 @@ function formatDiarizedText(
     }
 
     const rendered = segments
-        .map((segment) => ({
-            speaker: segment.speaker || "speaker",
-            text: segment.text.trim(),
-            startMs: segment.startMs,
-            endMs: segment.endMs,
-        }))
+        .map((segment) => {
+            const { text, units } = trimTimedText(segment.text, segment.units);
+            return withSentenceTiming(
+                {
+                    speaker: segment.speaker || "speaker",
+                    text,
+                    startMs: segment.startMs,
+                    endMs: segment.endMs,
+                },
+                units,
+            );
+        })
         .filter((segment) => segment.text.length > 0);
 
     if (rendered.length === 0) {

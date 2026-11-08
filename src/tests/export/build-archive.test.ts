@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as Schema from "@/db/schema";
 import type { StorageProvider } from "@/lib/storage/types";
 import type { ArchivedTaskReview } from "@/lib/tasks/archive";
+import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 
 const { dbMock, archivedTasks, archivedMeetings, archivedReviews } = vi.hoisted(
     () => ({
@@ -1487,7 +1488,8 @@ describe("buildAndUploadExportArchive", () => {
                                 speaker: "speaker_0",
                                 startMs: 0,
                                 endMs: 1000,
-                                text: "Ahoj.",
+                                text: "Ahoj. Again.",
+                                sentenceStartsMs: [0, 800],
                             },
                         ]),
                     },
@@ -1518,7 +1520,19 @@ describe("buildAndUploadExportArchive", () => {
             ),
         );
         expect(record[0].id).toBe("tr-1");
-        expect(record[0].turns).not.toBeNull();
+        expect(record[0].turns).toEqual([
+            {
+                speaker: "speaker_0",
+                startMs: 0,
+                endMs: 1000,
+                text: "Ahoj. Again.",
+                sentenceStartsMs: [0, 800],
+            },
+        ]);
+        const restored = readTranscriptTurns({
+            turns: { c: JSON.stringify(record[0].turns) },
+        });
+        expect(restored).toEqual(record[0].turns);
     });
 
     it("keeps both transcripts when a recording has two", async () => {

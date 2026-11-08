@@ -126,6 +126,33 @@ describe("TranscriptView sentence playback", () => {
         expect(playback.play).toHaveBeenLastCalledWith(12_000);
     });
 
+    it("plays and follows a stored sentence time after a pause", () => {
+        const { playback, emit } = fakePlayback();
+        render(
+            <PlaybackProvider playback={playback}>
+                <TranscriptView
+                    text={TEXT}
+                    source="riffado"
+                    model="scribe_v1"
+                    storedTurns={[
+                        { ...TURNS[0], sentenceStartsMs: [0, 8000] },
+                        TURNS[1],
+                    ]}
+                />
+            </PlaybackProvider>,
+        );
+        fireEvent.click(sentence("Second one follows."));
+        expect(playback.play).toHaveBeenCalledWith(7700);
+        emit({ ms: 6000, playing: true });
+        expect(sentence("First sentence here.").className).toContain(
+            "bg-primary/20",
+        );
+        emit({ ms: 8100, playing: true });
+        expect(sentence("Second one follows.").className).toContain(
+            "bg-primary/20",
+        );
+    });
+
     it("plays a turn from its start with the gutter button", () => {
         const { playback } = fakePlayback();
         render(

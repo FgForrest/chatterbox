@@ -1,5 +1,8 @@
 import { decryptJsonField } from "@/lib/encryption/fields";
-import type { TranscriptTurn } from "@/lib/transcription/turns";
+import {
+    sanitizeTurnTiming,
+    type TranscriptTurn,
+} from "@/lib/transcription/turns";
 
 /** The shape every transcript reader already selects, narrowed to what matters. */
 export interface TurnsBearingRow {
@@ -19,5 +22,7 @@ export function readTranscriptTurns(
 ): TranscriptTurn[] | null {
     if (!row || row.turns === null || row.turns === undefined) return null;
     const turns = decryptJsonField<TranscriptTurn[]>(row.turns);
-    return Array.isArray(turns) && turns.length > 0 ? turns : null;
+    return Array.isArray(turns) && turns.length > 0
+        ? turns.map(sanitizeTurnTiming)
+        : null;
 }
