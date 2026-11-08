@@ -5,7 +5,7 @@ updated: 2026-11-08 16:52
 status: accepted
 kind: feature
 issues: [327]
-prs: []
+prs: [352]
 areas: [src/lib/recordings, src/lib/knowledge/correction-recheck.ts, src/components/recordings/recording-cut.tsx, src/components/dashboard/transcript-view.tsx]
 supersedes: [2026-11-03-destructive-recording-cut, 2026-11-08-shared-recordings-cut-in-place]
 superseded-by: []
@@ -60,7 +60,7 @@ Only the transcript-header scissors open the panel. Paragraph-gap controls occup
 
 ## Verification
 
-The final focused run passed all 189 tests across 7 files, with PostgreSQL and ffmpeg enabled.
+The focused run passes with PostgreSQL and ffmpeg enabled. A browser check on the demo stack covered the panel, the gap controls at a paragraph inside a turn, typed snapping, and a real cut whose start split a turn.
 
 - `327-recording-cut.test.ts`: stored and interpolated split turns, both edges in one turn, raw whitespace, whole-turn equality for non-overlapping turns, stable overlapping-turn order, repeated legacy cuts, the clamped sentence-zero start, candidate sets and clock validation.
 - `327-recording-cut-ui.test.tsx`: paragraph-gap actions at a topic inside a turn, typed clocks, invalid input restoration, player scissors removal, previews, running and inline-error states, pointer-transparent gap rows, Enter focus retention, foreground time values and full-width invalid hints.
@@ -69,7 +69,7 @@ The final focused run passed all 189 tests across 7 files, with PostgreSQL and f
 
 ## Consequences & open follow-ups
 
-Legacy transcripts still use interpolated times, which can differ from the spoken word boundary. Both deployment modes retain the same owner authorization, encryption, job coordination and destructive recovery limits. A committed cut affects the owner and authorized readers; removed content requires an external original or older backup to recover. A failed preparation leaves the original intact. Application rollback requires no migration and cannot restore removed content. Real-browser visual review remains a deployment check.
+Legacy transcripts still use interpolated times, which can differ from the spoken word boundary. Both deployment modes retain the same owner authorization, encryption, job coordination and destructive recovery limits. A committed cut affects the owner and authorized readers; removed content requires an external original or older backup to recover. A failed preparation leaves the original intact. Application rollback requires no migration and cannot restore removed content. A cut of a real Plaud-synced recording remains a deployment check.
 
 ## Related work
 
@@ -79,4 +79,4 @@ Legacy transcripts still use interpolated times, which can differ from the spoke
 
 ## Timeline
 
-- **2026-11-08**: maintainer chose sentence retention, typed-time snapping and paragraph-gap controls; implemented in the recording cut UI v2 worktree.
+- **2026-11-08**: maintainer chose sentence retention, typed-time snapping and paragraph-gap controls; implemented in PR #352.
