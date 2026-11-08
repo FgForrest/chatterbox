@@ -1294,6 +1294,8 @@ export async function deleteMeeting(userId: string, id: string) {
                         eq(chatterItems.userId, agenda.userId),
                     ),
                 );
+        await publishAgendaEventInTx(tx, agenda.id, String(agenda.version + 1));
+        return false;
     });
 }
 
