@@ -40,6 +40,7 @@ field, a filename date disagrees with `date:`, a value is not one of the allowed
 
 | Date | Record | Kind | Status | Refs |
 |------|--------|------|--------|------|
+| 2026-11-08 | [New transcripts store each sentence's start time, aligned with the sentence split, only when every sentence has its own timed unit](2026-11-08-stored-sentence-start-times.md) | feature | accepted |  |
 | 2026-11-07 | [Attended recordings disclose only title, start and duration for time reporting](2026-11-07-attended-recordings-for-time-reporting.md) | feature | accepted | [PR #340](https://github.com/FgForrest/chatterbox/pull/340) |
 | 2026-11-07 | [A first single sign-on no longer takes over a record whose name does not fit](2026-11-07-first-sign-in-keeps-other-records.md) | fix | accepted | [PR #341](https://github.com/FgForrest/chatterbox/pull/341) |
 | 2026-11-03 | [Cutting a recording deletes the cut part; there is no hide mode](2026-11-03-destructive-recording-cut.md) | feature | accepted | [#327](https://github.com/FgForrest/chatterbox/issues/327) |
