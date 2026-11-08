@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { db } from "@/db";
 import { wakePipelineInTx } from "@/db/queries/pipeline-jobs";
+import { wakeTrimDownstreamInTx } from "@/db/queries/trim-downstream";
 import { asyncJobs, itemProcessing, recordings } from "@/db/schema";
 import type { ContentRevisionInput } from "@/lib/pipeline/types";
 import { trimHolds } from "@/lib/recordings/trim-proposal";
@@ -128,5 +129,6 @@ export async function resolveTrimInTx(
             ),
         );
     await wakePipelineInTx(tx, input.recordingId, input.userId);
+    await wakeTrimDownstreamInTx(tx, input.userId, input.recordingId);
     return true;
 }

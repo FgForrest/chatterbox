@@ -22,6 +22,7 @@ import {
     terminalStepOutcome,
     wakePipelineInTx,
 } from "@/db/queries/pipeline-jobs";
+import { wakeTrimDownstreamInTx } from "@/db/queries/trim-downstream";
 import { lockTrimRecording, resolveTrimInTx } from "@/db/queries/trim-state";
 import {
     asyncJobs,
@@ -793,6 +794,14 @@ export async function prepareClaimedPipelineJob(
                 .limit(1);
             if (trimHolds(processing?.phases.trim) || cut) {
                 const now = new Date();
+                const trim = processing?.phases.trim;
+                const nextAttemptAt =
+                    !cut &&
+                    trim?.state === "waiting" &&
+                    trim.waitingFor?.kind === "trimReview" &&
+                    trim.waitingFor.until
+                        ? new Date(trim.waitingFor.until)
+                        : new Date(now.getTime() + 30_000);
                 await tx
                     .update(asyncJobs)
                     .set({
@@ -801,7 +810,7 @@ export async function prepareClaimedPipelineJob(
                         heartbeatAt: null,
                         startedAt: null,
                         attempts: sql`greatest(0, ${asyncJobs.attempts} - 1)`,
-                        nextAttemptAt: new Date(now.getTime() + 1000),
+                        nextAttemptAt,
                         updatedAt: now,
                     })
                     .where(
@@ -1142,11 +1151,14 @@ export async function settleTerminalJobInTx(
     }
     if (job.kind === "recording.cut" && job.subjectId) {
         await wakePipelineInTx(tx, job.subjectId, job.userId);
+        await wakeTrimDownstreamInTx(tx, job.userId, job.subjectId);
         if (input.status === "failed")
             console.info(
                 `[cut] failed recording=${job.subjectId} job=${job.id} code=${input.code ?? "INTERNAL_ERROR"}`,
             );
     }
+    if (job.kind === "trim.propose" && job.subjectId)
+        await wakeTrimDownstreamInTx(tx, job.userId, job.subjectId);
     return true;
 }
 

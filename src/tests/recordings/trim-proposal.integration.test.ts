@@ -122,7 +122,9 @@ import {
     claimDueJobs,
     completeJob,
     enqueueJob,
+    failJobAttempt,
     prepareClaimedPipelineJob,
+    settleTerminalJobInTx,
 } from "@/db/queries/async-jobs";
 import { reconcilePipelineSteps } from "@/db/queries/pipeline-reconciler";
 import { reapAudioForRecording } from "@/db/queries/retention";
@@ -139,6 +141,7 @@ import {
 import { AppError, ErrorCode } from "@/lib/errors";
 import { collectTrimProposals } from "@/lib/export/trim-proposal";
 import { importTrimProposalInTx } from "@/lib/export/trim-proposal-import";
+import { nudge } from "@/lib/jobs/nudge";
 import * as learnInput from "@/lib/learn/llm-input";
 import { executeIntendedSharesWithOutcome } from "@/lib/pipeline/share-intent";
 import { defaultProfileSettings } from "@/lib/profiles/settings";
@@ -789,6 +792,9 @@ ${reply}`,
     it.each([
         "declined",
         "timed_out",
+        "bypassed_manual",
+        "profile_off",
+        "content_changed",
         "cut_applied",
     ])("defers a queued-before-hold summary without spending an attempt, then runs after %s", async (reason) => {
         if (reason === "cut_applied")
@@ -835,6 +841,9 @@ ${reply}`,
             attempts: 0,
             claimToken: null,
         });
+        expect(deferred.nextAttemptAt.toISOString()).toBe(proposal?.deadline);
+        expect(await claimDueJobs("summary", 1)).toEqual([]);
+        vi.mocked(nudge).mockClear();
         if (reason === "cut_applied") {
             await requestRecordingCut("owner", "recording", {
                 startMs: 3000,
@@ -889,13 +898,11 @@ ${reply}`,
                         : {}),
                 }),
             );
-            await db()
-                .update(asyncJobs)
-                .set({ nextAttemptAt: new Date(0) })
-                .where(eq(asyncJobs.id, job.id));
         }
+        expect(nudge).toHaveBeenCalled();
         expect((await current()).processing.phases.trim?.reason).toBe(reason);
         const [released] = await claimDueJobs("summary", 1);
+        expect(released).toBeDefined();
         expect(await executeSummary(released)).toBe(true);
         expect(mocks.summary).toHaveBeenCalledOnce();
     });
@@ -907,8 +914,20 @@ ${reply}`,
         const queued = await enqueueJob({
             userId: "owner",
             kind,
-            subjectId: "recording",
-            payload: { recordingId: "recording", trigger: "auto" },
+            subjectId:
+                kind === "pipeline.action"
+                    ? "applyPlaudTasks:recording"
+                    : "recording",
+            payload: {
+                recordingId: "recording",
+                trigger: "auto",
+                ...(kind === "pipeline.action"
+                    ? {
+                          itemId: "recording",
+                          action: { type: "applyPlaudTasks" },
+                      }
+                    : {}),
+            },
             pipeline: {
                 itemId: "recording",
                 userId: "owner",
@@ -928,6 +947,298 @@ ${reply}`,
             .from(asyncJobs)
             .where(eq(asyncJobs.id, queued.job.id));
         expect(deferred).toMatchObject({ status: "pending", attempts: 0 });
+        expect(deferred.nextAttemptAt.toISOString()).toBe(
+            (await current()).proposal?.deadline,
+        );
+        expect(await claimDueJobs(kind, 1)).toEqual([]);
+        await db().transaction((tx) =>
+            resolveTrimInTx(tx, {
+                userId: "owner",
+                recordingId: "recording",
+                reason: "declined",
+            }),
+        );
+        expect((await claimDueJobs(kind, 1))[0]?.id).toBe(queued.job.id);
+    });
+    it("wakes only pending automatic jobs for the owner and recording subjects", async () => {
+        await run();
+        const deadline = new Date((await current()).proposal?.deadline ?? "");
+        await db().insert(learnRuns).values({
+            id: "manual-held-run",
+            itemId: "recording",
+            userId: "owner",
+            scopeUserId: "owner",
+            actorUserId: "owner",
+            view: "org",
+            trigger: "manual",
+            transcriptionId: "transcript",
+            transcriptRevision: 0,
+            vocabularyVersion: 1,
+            inputs: content,
+        });
+        const jobs = [
+            { id: "auto-summary", kind: "summary", subjectId: "recording" },
+            { id: "auto-topics", kind: "topics", subjectId: "recording" },
+            { id: "auto-learn", kind: "learn.run", subjectId: "recording" },
+            {
+                id: "auto-release",
+                kind: "learn.release",
+                subjectId: "org:recording",
+            },
+            {
+                id: "auto-plaud",
+                kind: "pipeline.action",
+                subjectId: "applyPlaudTasks:recording",
+            },
+            {
+                id: "manual-summary",
+                kind: "summary",
+                subjectId: "org:recording",
+                payload: { trigger: "manual" },
+            },
+            {
+                id: "manual-learn",
+                kind: "learn.run",
+                subjectId: "org:recording",
+                payload: { runId: "manual-held-run" },
+            },
+            {
+                id: "other-user",
+                kind: "topics",
+                subjectId: "org:recording",
+                userId: "other",
+            },
+            {
+                id: "other-recording",
+                kind: "summary",
+                subjectId: "unrelated-recording",
+            },
+            {
+                id: "sharing",
+                kind: "pipeline.action",
+                subjectId: "executeShares:recording",
+            },
+            {
+                id: "processing",
+                kind: "learn.release",
+                subjectId: "recording",
+                status: "processing" as const,
+            },
+            {
+                id: "completed",
+                kind: "topics",
+                subjectId: "recording",
+                status: "completed" as const,
+            },
+        ];
+        await db()
+            .insert(asyncJobs)
+            .values(
+                jobs.map((job) => ({
+                    userId: "owner",
+                    status: "pending" as const,
+                    payload: {},
+                    ...job,
+                    nextAttemptAt: deadline,
+                })),
+            );
+        const before = Date.now();
+        await db().transaction((tx) =>
+            resolveTrimInTx(tx, {
+                userId: "owner",
+                recordingId: "recording",
+                reason: "declined",
+            }),
+        );
+        const after = Date.now();
+        const rows = await db().select().from(asyncJobs);
+        for (const job of jobs) {
+            const row = rows.find((entry) => entry.id === job.id);
+            expect(row).toBeDefined();
+            if (job.id.startsWith("auto-")) {
+                expect(row?.nextAttemptAt.getTime()).toBeGreaterThanOrEqual(
+                    before,
+                );
+                expect(row?.nextAttemptAt.getTime()).toBeLessThanOrEqual(after);
+            } else {
+                expect(row?.nextAttemptAt.getTime()).toBe(deadline.getTime());
+            }
+        }
+    });
+    it.each([
+        "pending",
+        "running",
+    ] as const)("defers during %s inference for 30 seconds and wakes on no-proposal publication", async (state) => {
+        const queued = await enqueueJob({
+            userId: "owner",
+            kind: "summary",
+            subjectId: "recording",
+            payload: { recordingId: "recording", trigger: "auto" },
+        });
+        await queueTrim("owner", "recording", content);
+        const { processing } = await current();
+        if (!processing.phases.trim) throw new Error("Missing trim phase");
+        await db()
+            .update(itemProcessing)
+            .set({
+                phases: {
+                    ...processing.phases,
+                    trim: { ...processing.phases.trim, state },
+                },
+            })
+            .where(
+                and(
+                    eq(itemProcessing.itemId, "recording"),
+                    eq(itemProcessing.userId, "owner"),
+                ),
+            );
+        const [summary] = await claimDueJobs("summary", 1);
+        const before = Date.now();
+        expect(
+            await prepareClaimedPipelineJob(summary.id, summary.claimToken),
+        ).toBe(false);
+        const after = Date.now();
+        const [deferred] = await db()
+            .select()
+            .from(asyncJobs)
+            .where(eq(asyncJobs.id, queued.job.id));
+        expect(deferred.attempts).toBe(0);
+        expect(deferred.nextAttemptAt.getTime()).toBeGreaterThanOrEqual(
+            before + 30_000,
+        );
+        expect(deferred.nextAttemptAt.getTime()).toBeLessThanOrEqual(
+            after + 30_000,
+        );
+        expect(await claimDueJobs("summary", 1)).toEqual([]);
+        mocks.complete.mockResolvedValue({
+            choices: [
+                {
+                    finish_reason: "stop",
+                    message: { content: '{"start":null,"end":null}' },
+                },
+            ],
+        });
+        vi.mocked(nudge).mockClear();
+        await run();
+        expect((await current()).processing.phases.trim?.reason).toBe(
+            "no_proposal",
+        );
+        expect(nudge).toHaveBeenCalled();
+        expect((await claimDueJobs("summary", 1))[0]?.id).toBe(queued.job.id);
+    });
+    it("wakes inference-held work on proposal publication and defers it to the decision deadline", async () => {
+        const queued = await enqueueJob({
+            userId: "owner",
+            kind: "summary",
+            subjectId: "recording",
+            payload: { recordingId: "recording", trigger: "auto" },
+        });
+        await queueTrim("owner", "recording", content);
+        const [summary] = await claimDueJobs("summary", 1);
+        expect(
+            await prepareClaimedPipelineJob(summary.id, summary.claimToken),
+        ).toBe(false);
+        expect(await claimDueJobs("summary", 1)).toEqual([]);
+        await run();
+        const [woken] = await claimDueJobs("summary", 1);
+        expect(woken.id).toBe(queued.job.id);
+        expect(
+            await prepareClaimedPipelineJob(woken.id, woken.claimToken),
+        ).toBe(false);
+        const [deferred] = await db()
+            .select()
+            .from(asyncJobs)
+            .where(eq(asyncJobs.id, woken.id));
+        expect(deferred.nextAttemptAt.toISOString()).toBe(
+            (await current()).proposal?.deadline,
+        );
+    });
+    it("claims another user's ordinary summary while the oldest summary is held", async () => {
+        const held = await enqueueJob({
+            userId: "owner",
+            kind: "summary",
+            subjectId: "recording",
+            payload: { recordingId: "recording", trigger: "auto" },
+        });
+        await run();
+        const [summary] = await claimDueJobs("summary", 1);
+        expect(summary.id).toBe(held.job.id);
+        expect(
+            await prepareClaimedPipelineJob(summary.id, summary.claimToken),
+        ).toBe(false);
+        await recording("other-recording", "other", "other-transcript");
+        const ordinary = await enqueueJob({
+            userId: "other",
+            kind: "summary",
+            subjectId: "other-recording",
+            payload: { recordingId: "other-recording", trigger: "auto" },
+        });
+        expect((await claimDueJobs("summary", 1)).map((job) => job.id)).toEqual(
+            [ordinary.job.id],
+        );
+    });
+    it.each([
+        "failed",
+        "cancelled",
+    ] as const)("wakes a cut-held summary as soon as the cut is %s", async (outcome) => {
+        const queued = await enqueueJob({
+            userId: "owner",
+            kind: "summary",
+            subjectId: "recording",
+            payload: { recordingId: "recording", trigger: "auto" },
+        });
+        await requestRecordingCut("owner", "recording", {
+            startMs: 3000,
+            endMs: 10000,
+            revisions: [{ id: "transcript", revision: 0 }],
+        });
+        const [summary] = await claimDueJobs("summary", 1);
+        const before = Date.now();
+        expect(
+            await prepareClaimedPipelineJob(summary.id, summary.claimToken),
+        ).toBe(false);
+        const after = Date.now();
+        const [deferred] = await db()
+            .select()
+            .from(asyncJobs)
+            .where(eq(asyncJobs.id, summary.id));
+        expect(deferred.nextAttemptAt.getTime()).toBeGreaterThanOrEqual(
+            before + 30_000,
+        );
+        expect(deferred.nextAttemptAt.getTime()).toBeLessThanOrEqual(
+            after + 30_000,
+        );
+        expect(await claimDueJobs("summary", 1)).toEqual([]);
+        vi.mocked(nudge).mockClear();
+        if (outcome === "failed") {
+            const [cut] = await claimDueJobs("recording.cut", 1);
+            await failJobAttempt({
+                jobId: cut.id,
+                claimToken: cut.claimToken,
+                message: "Cut failed",
+                retryable: false,
+                delayMs: 0,
+            });
+        } else {
+            const [cut] = await db()
+                .select()
+                .from(asyncJobs)
+                .where(eq(asyncJobs.kind, "recording.cut"));
+            await db().transaction((tx) =>
+                settleTerminalJobInTx(tx, {
+                    jobId: cut.id,
+                    cancelForUserId: "owner",
+                    status: "failed",
+                    code: "cancelled",
+                }),
+            );
+        }
+        expect(nudge).toHaveBeenCalled();
+        const [released] = await claimDueJobs("summary", 1);
+        expect(released.id).toBe(queued.job.id);
+        expect(
+            await prepareClaimedPipelineJob(released.id, released.claimToken),
+        ).toBe(true);
     });
     it.each([
         "owner",

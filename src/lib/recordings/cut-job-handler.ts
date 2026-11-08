@@ -8,6 +8,7 @@ import { and, eq, inArray, isNull, notExists, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { cancelAgendaSuggestionsForRecordingInTx } from "@/db/queries/agenda-suggestions";
 import { lockPipelineTargetsInTx } from "@/db/queries/pipeline-jobs";
+import { wakeTrimDownstreamInTx } from "@/db/queries/trim-downstream";
 import { trimSnapshotMatches } from "@/db/queries/trim-proposal";
 import {
     agendaPoints,
@@ -652,6 +653,7 @@ export async function commitRecordingCut(
             view: "private",
             reason: "transcript",
         });
+    await wakeTrimDownstreamInTx(tx, userId, recording.id);
     const cleanup = { oldPath: recording.storagePath, audio: audio !== null };
     await tx
         .update(asyncJobs)
