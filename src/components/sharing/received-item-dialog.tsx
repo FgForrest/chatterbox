@@ -37,6 +37,8 @@ export interface SharedItemPreview {
     ownerName: string;
     invitedAt?: Date | string;
     visibleInFolders: { id: string; name: string }[];
+    /** An agenda a recording has absorbed, read-only for its receivers. */
+    recorded?: boolean;
 }
 
 /** One acceptance and filing body for recordings and email, with optional existing folder paths. */
@@ -118,6 +120,18 @@ export function ReceivedItemDialog({
                 : item.kind === "mail"
                   ? i18n("Accept email")
                   : i18n("Accept recording");
+    let access: string;
+    if (item.kind === "meeting")
+        access = item.recorded
+            ? i18n(
+                  "The agenda is recorded. Its points and notes are read-only. Recordings and their tasks keep their own sharing.",
+              )
+            : i18n(
+                  "You can co-edit the agenda. Recordings and their tasks keep their own sharing.",
+              );
+    else if (item.kind === "mail")
+        access = i18n("You can read the email and summary.");
+    else access = i18n("You can read the transcript and summary.");
     const save = async () => {
         if (saving || (chooseFolder && !folderId)) return;
         setSaving(true);
@@ -241,17 +255,7 @@ export function ReceivedItemDialog({
                         <ul className="space-y-2 text-sm">
                             <li className="flex items-center gap-2">
                                 <FileText className="size-4 shrink-0 text-muted-foreground" />
-                                {item.kind === "meeting"
-                                    ? i18n(
-                                          "You can co-edit the agenda. Recordings and their tasks keep their own sharing.",
-                                      )
-                                    : item.kind === "mail"
-                                      ? i18n(
-                                            "You can read the email and summary.",
-                                        )
-                                      : i18n(
-                                            "You can read the transcript and summary.",
-                                        )}
+                                {access}
                             </li>
                             <li className="flex items-center gap-2">
                                 <ListChecks className="size-4 shrink-0 text-muted-foreground" />

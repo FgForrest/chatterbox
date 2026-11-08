@@ -989,9 +989,13 @@ function InvitationCard({
             )}
             <p className="text-sm leading-relaxed">
                 {invitation.kind === "meeting"
-                    ? i18n(
-                          "You can co-edit the agenda. Recordings and their tasks keep their own sharing.",
-                      )
+                    ? invitation.recorded
+                        ? i18n(
+                              "The agenda is recorded. Its points and notes are read-only. Recordings and their tasks keep their own sharing.",
+                          )
+                        : i18n(
+                              "You can co-edit the agenda. Recordings and their tasks keep their own sharing.",
+                          )
                     : invitation.kind === "folder"
                       ? i18n(
                             "It becomes a new folder in your tree. You see everything directly in it, including what is added later.",
@@ -1336,6 +1340,7 @@ export function PersonInvitations({
                     item={{
                         ...filing,
                         visibleInFolders: filing.visibleInFolders ?? [],
+                        recorded: filing.recorded === true,
                     }}
                     folders={folders}
                     onFolderCreated={onFolderCreated}
@@ -1554,6 +1559,7 @@ export function ReceivedItemBanner({
                         kind: recording.kind ?? "audio",
                         ownerName: recording.ownerName ?? i18n("A colleague"),
                         visibleInFolders: paths,
+                        recorded: readOnly,
                     }}
                     folders={folders}
                     action="file"
