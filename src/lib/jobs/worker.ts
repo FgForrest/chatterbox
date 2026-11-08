@@ -168,6 +168,7 @@ async function runJob(
         const result = await Promise.race([
             handler.run({
                 jobId: job.id,
+                claimToken: job.claimToken,
                 userId: job.userId,
                 attempt: job.attempts,
                 maxAttempts: job.maxAttempts,

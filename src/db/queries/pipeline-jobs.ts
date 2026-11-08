@@ -619,7 +619,13 @@ export async function settlePipelineBindingInTx(
                 eq(itemProcessing.view, driver.view),
             ),
         );
-    if (!(binding.phase === "share" && outcome.kind === "waiting"))
+    if (
+        !(
+            binding.phase === "share" &&
+            outcome.kind === "waiting" &&
+            outcome.reason !== "cut"
+        )
+    )
         await wakePipelineInTx(tx, binding.itemId, binding.userId);
     return true;
 }
