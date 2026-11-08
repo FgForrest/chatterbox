@@ -23,9 +23,11 @@ import {
     QUOTE_SIMILARITY_THRESHOLD,
     quoteFromTurns,
     quoteSimilarity,
+    quoteSpansFromTurns,
 } from "@/lib/knowledge/fact-rules";
 import { demoteAll, mapLabels } from "@/lib/knowledge/label-mapping";
 import type { SpeakerVersion } from "@/lib/knowledge/speaker-label-rules";
+import { type CutRange, cutTurn } from "@/lib/recordings/cut-range";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -140,12 +142,15 @@ export async function recheckEvidenceInTx(
         previous,
         next,
         audioChanged = false,
+        cutRange,
     }: {
         transcriptionId: string;
         previous: SpeakerVersion;
         next: SpeakerVersion;
         /** The audio under it changed: no voice carries for certain. */
         audioChanged?: boolean;
+        /** Validate original quote spans against retained raw slices, then shift times. */
+        cutRange?: CutRange;
     },
 ): Promise<Set<string>> {
     const rows = await tx
@@ -180,7 +185,51 @@ export async function recheckEvidenceInTx(
     const untimed = [previous.turns, next.turns].some(
         (turns) => turns !== null && isUntimed(turns),
     );
+    const retained = cutRange
+        ? (previous.turns?.map((turn) => cutTurn(turn, cutRange)) ?? [])
+        : [];
     for (const row of rows) {
+        if (cutRange) {
+            const quote =
+                row.startMs !== null && row.endMs !== null
+                    ? quoteFromTurns(previous.turns, row.startMs, row.endMs)
+                    : null;
+            const spans =
+                row.startMs !== null && row.endMs !== null
+                    ? quoteSpansFromTurns(
+                          previous.turns,
+                          row.startMs,
+                          row.endMs,
+                      )
+                    : [];
+            const survives =
+                row.startMs !== null &&
+                row.endMs !== null &&
+                row.startMs >= cutRange.startMs &&
+                row.endMs <= cutRange.endMs &&
+                quote !== null &&
+                quoteSimilarity(quote, decryptText(row.quote)) === 1 &&
+                spans.length > 0 &&
+                spans.every((span) => {
+                    const slice = retained[span.turnIndex];
+                    return (
+                        slice &&
+                        span.charStart >= slice.charStart &&
+                        span.charEnd <= slice.charEnd
+                    );
+                });
+            if (!survives) {
+                await tx
+                    .delete(knowledgeFactEvidence)
+                    .where(
+                        and(
+                            eq(knowledgeFactEvidence.id, row.id),
+                            eq(knowledgeFactEvidence.userId, row.userId),
+                        ),
+                    );
+                continue;
+            }
+        }
         const carried = row.speakerLabel
             ? mapping.carried.get(row.speakerLabel)
             : undefined;
@@ -190,13 +239,17 @@ export async function recheckEvidenceInTx(
             row.startMs !== null &&
             row.endMs !== null
         ) {
-            const cut = quoteFromTurns(next.turns, row.startMs, row.endMs);
+            const cut = cutRange
+                ? null
+                : quoteFromTurns(next.turns, row.startMs, row.endMs);
             const quote = decryptText(row.quote);
             if (
-                !cut ||
-                (untimed
-                    ? cut !== quote
-                    : quoteSimilarity(quote, cut) < QUOTE_SIMILARITY_THRESHOLD)
+                !cutRange &&
+                (!cut ||
+                    (untimed
+                        ? cut !== quote
+                        : quoteSimilarity(quote, cut) <
+                          QUOTE_SIMILARITY_THRESHOLD))
             ) {
                 status = "wording_changed";
             } else if (row.dependsOnSpeaker && !carried) {
@@ -209,6 +262,12 @@ export async function recheckEvidenceInTx(
                 status,
                 speakerLabel: carried ?? row.speakerLabel,
                 transcriptRevision: revision,
+                ...(cutRange && row.startMs !== null && row.endMs !== null
+                    ? {
+                          startMs: row.startMs - cutRange.startMs,
+                          endMs: row.endMs - cutRange.startMs,
+                      }
+                    : {}),
             })
             .where(eq(knowledgeFactEvidence.id, row.id));
     }

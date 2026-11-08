@@ -55,30 +55,51 @@ export function quoteFromTurns(
     startMs: number,
     endMs: number,
 ): string | null {
-    if (!turns) return null;
-    const parts: string[] = [];
-    for (const turn of turns) {
-        const duration = turn.endMs - turn.startMs;
-        if (duration <= 0) {
-            if (turn.startMs >= startMs && turn.startMs <= endMs) {
-                parts.push(turn.text.trim());
-            }
-            continue;
-        }
-        const from = Math.max(startMs, turn.startMs);
-        const to = Math.min(endMs, turn.endMs);
-        if (to <= from) continue;
-        const text = turn.text;
-        let charFrom = Math.floor(
-            ((from - turn.startMs) / duration) * text.length,
-        );
-        let charTo = Math.ceil(((to - turn.startMs) / duration) * text.length);
-        while (charFrom > 0 && !isSpace(text[charFrom - 1])) charFrom--;
-        while (charTo < text.length && !isSpace(text[charTo])) charTo++;
-        parts.push(text.slice(charFrom, charTo).trim());
-    }
-    const quote = parts.filter(Boolean).join(" ");
+    const quote = quoteSpansFromTurns(turns, startMs, endMs)
+        .map(({ turnIndex, charStart, charEnd }) =>
+            turns?.[turnIndex].text.slice(charStart, charEnd).trim(),
+        )
+        .filter(Boolean)
+        .join(" ");
     return quote || null;
+}
+
+/** Original character spans used by quoteFromTurns, widened to whole words. */
+export function quoteSpansFromTurns(
+    turns: readonly TranscriptTurn[] | null,
+    startMs: number,
+    endMs: number,
+): { turnIndex: number; charStart: number; charEnd: number }[] {
+    const spans: { turnIndex: number; charStart: number; charEnd: number }[] =
+        [];
+    for (const [turnIndex, turn] of (turns ?? []).entries()) {
+        const duration = turn.endMs - turn.startMs;
+        let charStart = 0;
+        let charEnd = turn.text.length;
+        if (duration <= 0) {
+            if (turn.startMs < startMs || turn.startMs > endMs) continue;
+        } else {
+            const from = Math.max(startMs, turn.startMs);
+            const to = Math.min(endMs, turn.endMs);
+            if (to <= from) continue;
+            charStart = Math.floor(
+                ((from - turn.startMs) / duration) * turn.text.length,
+            );
+            charEnd = Math.ceil(
+                ((to - turn.startMs) / duration) * turn.text.length,
+            );
+            while (charStart > 0 && !isSpace(turn.text[charStart - 1]))
+                charStart--;
+            while (charEnd < turn.text.length && !isSpace(turn.text[charEnd]))
+                charEnd++;
+        }
+        while (charStart < charEnd && isSpace(turn.text[charStart]))
+            charStart++;
+        while (charEnd > charStart && isSpace(turn.text[charEnd - 1]))
+            charEnd--;
+        if (charEnd > charStart) spans.push({ turnIndex, charStart, charEnd });
+    }
+    return spans;
 }
 
 /** Lowercased words without diacritics or punctuation, for comparing quotes. */

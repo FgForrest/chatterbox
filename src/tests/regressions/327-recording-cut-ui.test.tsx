@@ -8,22 +8,32 @@ import {
     screen,
     within,
 } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RecordingPlayer } from "@/components/dashboard/recording-player";
 import { TranscriptView } from "@/components/dashboard/transcript-view";
+import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
 import { PlaybackProvider } from "@/components/playback/playback-context";
 import { EraseRecordingMenu } from "@/components/recordings/erase-recording-menu";
 import {
     CutPreviewOverlay,
-    RecordingCutBar,
     RecordingCutButton,
+    RecordingCutPanel,
     RecordingCutProvider,
 } from "@/components/recordings/recording-cut";
 import { useWaveform } from "@/hooks/use-waveform";
 import type { Recording } from "@/types/recording";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
+
+vi.mock("@/components/summary/summary-widget", () => ({
+    SummaryWidget: () => null,
+}));
+vi.mock("@/components/learn/learn-review", () => ({ LearnReview: () => null }));
+vi.mock("@/components/dashboard/transcribe-in-browser-button", () => ({
+    TranscribeInBrowserButton: () => null,
+}));
 
 vi.mock("@/hooks/use-playback-engine", () => ({
     usePlaybackEngine: () => ({
@@ -38,19 +48,24 @@ vi.mock("@/hooks/use-playback-keyboard", () => ({
 vi.mock("@/components/dashboard/recording-player-controls", () => ({
     RecordingPlayerControls: ({
         waveformPeaks,
+        trailingAction,
     }: {
+        trailingAction?: ReactNode;
         waveformPeaks: number[] | null;
     }) => (
-        <output data-testid="waveform-peaks">
-            {JSON.stringify(waveformPeaks)}
-        </output>
+        <>
+            <div data-testid="waveform-peaks">
+                {JSON.stringify(waveformPeaks)}
+            </div>
+            {trailingAction}
+        </>
     ),
 }));
 
 const turns = [
     { speaker: "S1", startMs: 0, endMs: 2000, text: "Private beginning." },
     { speaker: "S2", startMs: 3000, endMs: 6000, text: "Keep the middle." },
-    { speaker: "S1", startMs: 7000, endMs: 10000, text: "Private end." },
+    { speaker: "S1", startMs: 6000, endMs: 10000, text: "Private end." },
 ];
 const recording: Recording = {
     id: "recording",
@@ -89,9 +104,15 @@ function view(
                 shared={shared}
                 onChanged={changed}
             >
-                <RecordingCutBar />
+                <RecordingCutPanel />
                 <div data-testid="player">
-                    <RecordingCutButton />
+                    <RecordingPlayer
+                        recording={{
+                            ...recording,
+                            ...overrides,
+                            waveformPeaks: [0.1, 1],
+                        }}
+                    />
                 </div>
                 <div data-testid="transcript">
                     <RecordingCutButton />
@@ -108,6 +129,20 @@ function view(
             </RecordingCutProvider>
         </PlaybackProvider>,
     );
+}
+
+function typeTime(label: string, value: string, enter = false) {
+    const field = screen.getByRole("textbox", { name: label });
+    fireEvent.change(field, { target: { value } });
+    if (enter) fireEvent.keyDown(field, { key: "Enter" });
+    else fireEvent.blur(field);
+}
+function boundary(ms: number): HTMLElement {
+    const element = document.querySelector<HTMLElement>(
+        `[data-cut-boundary="${ms}"]`,
+    );
+    if (!element) throw new Error(`Missing boundary ${ms}`);
+    return element;
 }
 
 describe("shared recording cut mode", () => {
@@ -141,18 +176,23 @@ describe("shared recording cut mode", () => {
             screen.queryByRole("button", { name: "Cut the start and end" }),
         ).toBeNull();
     });
-    it("both buttons toggle one mode and only take colour while it is open", () => {
+    it("only the transcript scissors toggle the panel", () => {
         view();
-        const player = within(screen.getByTestId("player"));
         const transcript = within(screen.getByTestId("transcript"));
-        expect(player.getByRole("button").getAttribute("aria-pressed")).toBe(
-            "false",
-        );
-        fireEvent.click(player.getByRole("button"));
         expect(
-            screen.getByRole("region", { name: "Cut recording" }),
-        ).toBeTruthy();
-        expect(player.getByRole("button").className).toContain("text-primary");
+            within(screen.getByTestId("player")).queryByRole("button", {
+                name: "Cut the start and end",
+            }),
+        ).toBeNull();
+        expect(
+            transcript.getByRole("button").getAttribute("aria-pressed"),
+        ).toBe("false");
+        fireEvent.click(transcript.getByRole("button"));
+        const panel = screen.getByRole("region", { name: "Cut recording" });
+        expect(panel.className).not.toMatch(/sticky|fixed/);
+        expect(transcript.getByRole("button").className).toContain(
+            "text-primary",
+        );
         expect(
             transcript.getByRole("button").getAttribute("aria-pressed"),
         ).toBe("true");
@@ -160,22 +200,25 @@ describe("shared recording cut mode", () => {
         expect(
             screen.queryByRole("region", { name: "Cut recording" }),
         ).toBeNull();
-        expect(player.getByRole("button").getAttribute("aria-pressed")).toBe(
-            "false",
-        );
     });
-    it("snaps the playback controls to a turn and previews the removed text", () => {
+    it("accepts typed boundaries and previews the removed text", () => {
         view();
         fireEvent.click(
-            within(screen.getByTestId("player")).getByRole("button"),
+            within(screen.getByTestId("transcript")).getByRole("button"),
         );
         const bar = within(
             screen.getByRole("region", { name: "Cut recording" }),
         );
-        fireEvent.click(bar.getByRole("button", { name: "Start here" }));
-        fireEvent.click(bar.getByRole("button", { name: "End here" }));
-        expect(bar.getByText("Start 00:03")).toBeTruthy();
-        expect(bar.getByText("End 00:06")).toBeTruthy();
+        typeTime("From", "00:03");
+        typeTime("To", "00:06");
+        expect(
+            (bar.getByRole("textbox", { name: "From" }) as HTMLInputElement)
+                .value,
+        ).toBe("00:03");
+        expect(
+            (bar.getByRole("textbox", { name: "To" }) as HTMLInputElement)
+                .value,
+        ).toBe("00:06");
         expect(bar.getByText("00:03 of 00:10 stays")).toBeTruthy();
         expect(
             screen.getByText("Private beginning.").closest(".group\\/para")
@@ -189,22 +232,22 @@ describe("shared recording cut mode", () => {
             screen.getByText("Keep the middle.").closest(".group\\/para")
                 ?.className,
         ).not.toContain("line-through");
-        fireEvent.click(bar.getByRole("button", { name: "Reset start" }));
-        expect(bar.getByText("Start 00:00")).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Reset start" }));
+        expect(
+            (screen.getByRole("textbox", { name: "From" }) as HTMLInputElement)
+                .value,
+        ).toBe("00:00");
     });
     it("turn buttons set boundaries without seeking and Cancel changes nothing", async () => {
         view();
         fireEvent.click(
             within(screen.getByTestId("transcript")).getByRole("button"),
         );
-        const middle = screen
-            .getByText("Keep the middle.")
-            .closest(".group\\/para") as HTMLElement;
         fireEvent.click(
-            within(middle).getByRole("button", { name: "Start here" }),
+            within(boundary(3000)).getByRole("button", { name: "Start here" }),
         );
         fireEvent.click(
-            within(middle).getByRole("button", { name: "End here" }),
+            within(boundary(6000)).getByRole("button", { name: "End here" }),
         );
         expect(playback.seek).not.toHaveBeenCalled();
         expect(playback.play).not.toHaveBeenCalled();
@@ -224,13 +267,13 @@ describe("shared recording cut mode", () => {
     ])("confirmation describes the deletion and original copies (Plaud=%s)", (plaud) => {
         view({ deviceSn: plaud ? "SN-test" : "local" });
         fireEvent.click(
-            within(screen.getByTestId("player")).getByRole("button"),
+            within(screen.getByTestId("transcript")).getByRole("button"),
         );
         const bar = within(
             screen.getByRole("region", { name: "Cut recording" }),
         );
-        fireEvent.click(bar.getByRole("button", { name: "Start here" }));
-        fireEvent.click(bar.getByRole("button", { name: "End here" }));
+        typeTime("From", "00:03");
+        typeTime("To", "00:06");
         fireEvent.click(bar.getByRole("button", { name: "Cut…" }));
         const dialog = within(screen.getByRole("alertdialog"));
         expect(
@@ -254,13 +297,13 @@ describe("shared recording cut mode", () => {
         view({}, transcribing, timed);
         expect(
             (
-                within(screen.getByTestId("player")).getByRole(
+                within(screen.getByTestId("transcript")).getByRole(
                     "button",
                 ) as HTMLButtonElement
             ).disabled,
         ).toBe(true);
         fireEvent.click(
-            within(screen.getByTestId("player")).getByRole("button"),
+            within(screen.getByTestId("transcript")).getByRole("button"),
         );
         expect(screen.queryByRole("region")).toBeNull();
     });
@@ -273,11 +316,8 @@ describe("shared recording cut mode", () => {
             screen.getByRole("region", { name: "Cut recording" }),
         );
         expect(bar.queryByRole("button", { name: "Start here" })).toBeNull();
-        const middle = screen
-            .getByText("Keep the middle.")
-            .closest(".group\\/para") as HTMLElement;
         fireEvent.click(
-            within(middle).getByRole("button", { name: "Start here" }),
+            within(boundary(3000)).getByRole("button", { name: "Start here" }),
         );
         fireEvent.click(bar.getByRole("button", { name: "Cut…" }));
         expect(
@@ -289,12 +329,12 @@ describe("shared recording cut mode", () => {
     it("explains the shared cut without withdrawal or retention warnings", async () => {
         view({}, false, true, true);
         fireEvent.click(
-            within(screen.getByTestId("player")).getByRole("button"),
+            within(screen.getByTestId("transcript")).getByRole("button"),
         );
         const bar = within(
             screen.getByRole("region", { name: "Cut recording" }),
         );
-        fireEvent.click(bar.getByRole("button", { name: "Start here" }));
+        typeTime("From", "00:03");
         fireEvent.click(bar.getByRole("button", { name: "Cut…" }));
         expect(
             screen.getByText(
@@ -336,13 +376,13 @@ describe("shared recording cut mode", () => {
         view();
         await act(async () => {});
         fireEvent.click(
-            within(screen.getByTestId("player")).getByRole("button"),
+            within(screen.getByTestId("transcript")).getByRole("button"),
         );
         const bar = within(
             screen.getByRole("region", { name: "Cut recording" }),
         );
-        fireEvent.click(bar.getByRole("button", { name: "Start here" }));
-        fireEvent.click(bar.getByRole("button", { name: "End here" }));
+        typeTime("From", "00:03");
+        typeTime("To", "00:06");
         fireEvent.click(bar.getByRole("button", { name: "Cut…" }));
         fireEvent.click(screen.getByRole("button", { name: "Delete and cut" }));
         expect(fetchMock).toHaveBeenCalledWith(
@@ -356,15 +396,15 @@ describe("shared recording cut mode", () => {
         expect(playback.pause).toHaveBeenCalledOnce();
         expect(screen.queryByRole("alertdialog")).toBeNull();
         expect(
-            screen.queryByRole("region", { name: "Cut recording" }),
-        ).toBeNull();
-        expect(screen.getByRole("status").textContent).toBe("Cutting…");
+            screen.getByRole("region", { name: "Cut recording" }),
+        ).toBeTruthy();
+        expect(screen.getByRole("status").textContent).toMatch(/^Cutting /);
         await act(async () => {
             post.resolve(Response.json({ jobId: "cut-job" }, { status: 202 }));
         });
         expect(polls).toBe(1);
-        expect(screen.getByRole("status").textContent).toBe("Cutting…");
-        for (const widget of ["player", "transcript"])
+        expect(screen.getByRole("status").textContent).toMatch(/^Cutting /);
+        for (const widget of ["transcript"])
             expect(
                 (
                     within(screen.getByTestId(widget)).getByRole("button", {
@@ -385,8 +425,20 @@ describe("shared recording cut mode", () => {
             const reopened = within(
                 screen.getByRole("region", { name: "Cut recording" }),
             );
-            expect(reopened.getByText("Start 00:03")).toBeTruthy();
-            expect(reopened.getByText("End 00:06")).toBeTruthy();
+            expect(
+                (
+                    reopened.getByRole("textbox", {
+                        name: "From",
+                    }) as HTMLInputElement
+                ).value,
+            ).toBe("00:03");
+            expect(
+                (
+                    reopened.getByRole("textbox", {
+                        name: "To",
+                    }) as HTMLInputElement
+                ).value,
+            ).toBe("00:06");
             expect(changed).not.toHaveBeenCalled();
         } else {
             expect(
@@ -422,12 +474,12 @@ describe("shared recording cut mode", () => {
         view();
         await act(async () => {});
         fireEvent.click(
-            within(screen.getByTestId("player")).getByRole("button"),
+            within(screen.getByTestId("transcript")).getByRole("button"),
         );
         const bar = within(
             screen.getByRole("region", { name: "Cut recording" }),
         );
-        fireEvent.click(bar.getByRole("button", { name: "Start here" }));
+        typeTime("From", "00:03");
         fireEvent.click(bar.getByRole("button", { name: "Cut…" }));
         await act(async () => {
             fireEvent.click(
@@ -436,10 +488,10 @@ describe("shared recording cut mode", () => {
         });
         expect(screen.getByRole("alert").textContent).toBe(message);
         expect(
-            within(
-                screen.getByRole("region", { name: "Cut recording" }),
-            ).getByText("Start 00:03"),
-        ).toBeTruthy();
+            within(screen.getByRole("region", { name: "Cut recording" }))
+                .getByRole("textbox", { name: "From" })
+                .getAttribute("value"),
+        ).toBe("00:03");
         expect(toast.error).not.toHaveBeenCalled();
         expect(screen.queryByRole("status")).toBeNull();
         expect(changed).not.toHaveBeenCalled();
@@ -454,15 +506,290 @@ describe("shared recording cut mode", () => {
         );
         view();
         await act(async () => {});
-        expect(screen.getByRole("status").textContent).toBe("Cutting…");
+        expect(screen.getByRole("status").textContent).toMatch(/^Cutting /);
         expect(
-            screen.queryByRole("region", { name: "Cut recording" }),
-        ).toBeNull();
-        const button = within(screen.getByTestId("player")).getByRole(
+            screen.getByRole("region", { name: "Cut recording" }),
+        ).toBeTruthy();
+        const button = within(screen.getByTestId("transcript")).getByRole(
             "button",
             { name: "Cutting…" },
         ) as HTMLButtonElement;
         expect(button.disabled).toBe(true);
+    });
+    it.each([
+        false,
+        true,
+    ])("keeps the panel directly above the transcript card (agenda=%s)", async (agenda) => {
+        render(
+            <RecordingCutProvider
+                recording={recording}
+                transcripts={[{ turns }]}
+                transcribing={false}
+                shared={false}
+                onChanged={changed}
+            >
+                <TranscriptionPanel
+                    recording={recording}
+                    transcripts={[
+                        { source: "riffado", text: "Meeting", turns },
+                    ]}
+                    isTranscribing={false}
+                    onTranscribe={vi.fn()}
+                    agenda={agenda ? <div>Agenda</div> : undefined}
+                />
+            </RecordingCutProvider>,
+        );
+        await act(async () => {});
+        fireEvent.click(
+            screen.getByRole("button", { name: "Cut the start and end" }),
+        );
+        const panel = screen.getByRole("region", { name: "Cut recording" });
+        const card = screen
+            .getByRole("button", { name: "Close cutting" })
+            .closest('[data-slot="card"]');
+        expect(card?.parentElement).toBe(panel.parentElement);
+        expect(card?.previousElementSibling?.className).toBe("contents");
+        expect(card?.previousElementSibling?.previousElementSibling).toBe(
+            panel,
+        );
+        expect(panel.parentElement?.className).toBe(
+            agenda ? "order-4 flex flex-col gap-3" : "flex flex-col gap-3",
+        );
+    });
+    it("offers gap actions at a topic inside a turn without adding controls to the text", () => {
+        const longTurn = {
+            speaker: "S1",
+            startMs: 1000,
+            endMs: 121000,
+            text: "Opening sentence. Chapter sentence. Following sentence. Final sentence.",
+            sentenceStartsMs: [1000, 19000, 37000, 79000],
+        };
+        render(
+            <RecordingCutProvider
+                recording={{ ...recording, duration: 125000 }}
+                transcripts={[{ turns: [longTurn] }]}
+                transcribing={false}
+                shared={false}
+                onChanged={changed}
+            >
+                <RecordingCutButton />
+                <RecordingCutPanel />
+                <TranscriptView
+                    text={longTurn.text}
+                    storedTurns={[longTurn]}
+                    topics={[{ title: "Chapter", fromMs: 19000, toMs: 121000 }]}
+                />
+            </RecordingCutProvider>,
+        );
+        const before = [...document.querySelectorAll(".group\\/para")].map(
+            (element) => element.className,
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Cut the start and end" }),
+        );
+        expect(
+            [...document.querySelectorAll(".group\\/para")].map(
+                (element) => element.className,
+            ),
+        ).toEqual(before);
+        const pill = boundary(19000);
+        expect(pill.className).toContain("absolute");
+        expect(pill.querySelector(".group\\/para")).toBeNull();
+        expect(
+            document.querySelector(".group\\/para [data-cut-boundary]"),
+        ).toBeNull();
+        expect(pill.textContent).toContain("00:19");
+        expect(
+            within(pill).getByRole("button", { name: "Start here" }).className,
+        ).toContain("focus-visible:ring");
+        fireEvent.focus(
+            within(pill).getByRole("button", { name: "Start here" }),
+        );
+        fireEvent.click(
+            within(pill).getByRole("button", { name: "Start here" }),
+        );
+        expect(
+            (screen.getByRole("textbox", { name: "From" }) as HTMLInputElement)
+                .value,
+        ).toBe("00:19");
+        expect(screen.getByText("Start 00:19")).toBeTruthy();
+        expect(
+            screen.getByText("Opening sentence.").closest(".group\\/para")
+                ?.className,
+        ).toContain("line-through");
+        fireEvent.click(
+            within(boundary(79000)).getByRole("button", { name: "End here" }),
+        );
+        expect(
+            (screen.getByRole("textbox", { name: "To" }) as HTMLInputElement)
+                .value,
+        ).toBe("01:19");
+        expect(
+            screen.getByText("Final sentence.").closest(".group\\/para")
+                ?.className,
+        ).toContain("line-through");
+        expect(
+            screen.getByText("Chapter sentence.").closest(".group\\/para")
+                ?.className,
+        ).not.toContain("line-through");
+        expect(document.querySelectorAll("[data-cut-boundary]")).toHaveLength(
+            3,
+        );
+    });
+    it("snaps typed fields on blur and Enter and restores invalid or crossed edges inline", () => {
+        view();
+        fireEvent.click(
+            within(screen.getByTestId("transcript")).getByRole("button"),
+        );
+        typeTime("From", "00:02", true);
+        expect(
+            (screen.getByRole("textbox", { name: "From" }) as HTMLInputElement)
+                .value,
+        ).toBe("00:03");
+        typeTime("To", "00:09");
+        expect(
+            (screen.getByRole("textbox", { name: "To" }) as HTMLInputElement)
+                .value,
+        ).toBe("00:10");
+        typeTime("To", "00:06");
+        for (const value of ["5", "nonsense", "00:99", "00:10"]) {
+            typeTime("From", value);
+            const field = screen.getByRole("textbox", { name: "From" });
+            expect((field as HTMLInputElement).value).toBe("00:03");
+            expect(field.getAttribute("aria-invalid")).toBe("true");
+            expect(
+                document.getElementById(
+                    field.getAttribute("aria-describedby") ?? "",
+                )?.textContent,
+            ).toMatch(/previous time was restored/);
+        }
+        expect(toast.error).not.toHaveBeenCalled();
+    });
+    it.each([
+        "From",
+        "To",
+    ])("keeps %s focused when Enter commits a changed time", (label) => {
+        view();
+        fireEvent.click(
+            within(screen.getByTestId("transcript")).getByRole("button"),
+        );
+        const field = screen.getByRole("textbox", { name: label });
+        field.focus();
+        typeTime(label, label === "From" ? "00:03" : "00:06", true);
+        expect(document.activeElement).toBe(field);
+        expect(screen.getByRole("textbox", { name: label })).toBe(field);
+        fireEvent.change(field, { target: { value: "unfinished" } });
+        fireEvent.click(
+            within(boundary(3000)).getByRole("button", {
+                name: label === "From" ? "Reset start" : "End here",
+            }),
+        );
+        expect((field as HTMLInputElement).value).toBe(
+            label === "From" ? "00:00" : "00:03",
+        );
+    });
+    it("renders time values as foreground text while labels stay muted", () => {
+        view();
+        fireEvent.click(
+            within(screen.getByTestId("transcript")).getByRole("button"),
+        );
+        for (const label of ["From", "To"]) {
+            const field = screen.getByRole("textbox", { name: label });
+            expect(field.classList.contains("text-foreground")).toBe(true);
+            expect(
+                field
+                    .closest("label")
+                    ?.classList.contains("text-muted-foreground"),
+            ).toBe(true);
+        }
+    });
+    it("places the invalid-time hint below the control row and describes only invalid fields", () => {
+        view();
+        fireEvent.click(
+            within(screen.getByTestId("transcript")).getByRole("button"),
+        );
+        const panel = screen.getByRole("region", { name: "Cut recording" });
+        typeTime("From", "invalid");
+        const from = screen.getByRole("textbox", { name: "From" });
+        const to = screen.getByRole("textbox", { name: "To" });
+        const hint = document.getElementById(
+            from.getAttribute("aria-describedby") ?? "",
+        );
+        expect(hint).not.toBeNull();
+        expect(hint?.parentElement).toBe(panel);
+        expect(panel.firstElementChild?.contains(hint)).toBe(false);
+        expect(to.hasAttribute("aria-describedby")).toBe(false);
+        typeTime("To", "invalid");
+        expect(to.getAttribute("aria-describedby")).toBe(hint?.id);
+        fireEvent.change(from, { target: { value: "00:03" } });
+        expect(from.getAttribute("aria-invalid")).toBe("false");
+        expect(
+            document.getElementById(to.getAttribute("aria-describedby") ?? ""),
+        ).toBe(hint);
+    });
+    it("limits gap hit testing to visible pills and keeps keyboard reveal", () => {
+        view();
+        fireEvent.click(
+            within(screen.getByTestId("transcript")).getByRole("button"),
+        );
+        const gap = boundary(3000);
+        expect(gap.className).toContain("h-4");
+        const button = within(gap).getByRole("button", { name: "Start here" });
+        const pill = button.parentElement;
+        const row = pill?.parentElement;
+        expect(row?.classList.contains("pointer-events-none")).toBe(true);
+        for (const line of row?.querySelectorAll(".border-t") ?? []) {
+            expect(line.classList.contains("pointer-events-none")).toBe(true);
+        }
+        expect(pill?.classList.contains("pointer-events-none")).toBe(true);
+        expect(
+            pill?.classList.contains("group-hover/cut:pointer-events-auto"),
+        ).toBe(true);
+        expect(
+            pill?.classList.contains(
+                "group-focus-within/cut:pointer-events-auto",
+            ),
+        ).toBe(true);
+        expect(pill?.classList.contains("h-4")).toBe(true);
+        expect(
+            row?.classList.contains("group-focus-within/cut:opacity-100"),
+        ).toBe(true);
+        button.focus();
+        expect(document.activeElement).toBe(button);
+    });
+    it("accepts hour clocks and snaps to stored sentence times inside a paragraph", () => {
+        const longTurn = {
+            speaker: "S1",
+            startMs: 0,
+            endMs: 3800000,
+            text: "Opening. Keep. Ending.",
+            sentenceStartsMs: [0, 3723456, 3750000],
+        };
+        render(
+            <RecordingCutProvider
+                recording={{ ...recording, duration: 3800000 }}
+                transcripts={[{ turns: [longTurn] }]}
+                transcribing={false}
+                shared={false}
+                onChanged={changed}
+            >
+                <RecordingCutButton />
+                <RecordingCutPanel />
+            </RecordingCutProvider>,
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Cut the start and end" }),
+        );
+        typeTime("From", "1:02:04");
+        expect(
+            (screen.getByRole("textbox", { name: "From" }) as HTMLInputElement)
+                .value,
+        ).toBe("1:02:03");
+        typeTime("To", "1:02:30", true);
+        expect(
+            (screen.getByRole("textbox", { name: "To" }) as HTMLInputElement)
+                .value,
+        ).toBe("1:02:30");
     });
     it.each([
         true,

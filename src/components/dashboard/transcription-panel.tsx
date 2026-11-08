@@ -38,6 +38,7 @@ import { usePlayback } from "@/components/playback/playback-context";
 import { useProductName } from "@/components/product-name-provider";
 import {
     RecordingCutButton,
+    RecordingCutPanel,
     useRecordingCut,
 } from "@/components/recordings/recording-cut";
 import { SourceSwitcher } from "@/components/source-switcher";
@@ -842,7 +843,14 @@ export function TranscriptionPanel({
                     />
                 )}
             {(!widgets || widgets.transcript.visible) && (
-                <div className={agenda ? "order-4" : "contents"}>
+                <div
+                    className={
+                        agenda
+                            ? "order-4 flex flex-col gap-3"
+                            : "flex flex-col gap-3"
+                    }
+                >
+                    <RecordingCutPanel />
                     <WorkflowWidget
                         id={transcriptWidgetId}
                         frame="inline"
