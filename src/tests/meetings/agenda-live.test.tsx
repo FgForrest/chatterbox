@@ -126,7 +126,8 @@ describe("web agenda live updates", () => {
         vi.stubGlobal("fetch", fetchMock);
         const initial = detail({ cursor: "1:standalone:idle" });
         const { rerender } = renderHook(
-            ({ active }) => useAgenda("agenda", initial, active, false),
+            ({ active }) =>
+                useAgenda("agenda", initial, { active, pollEnabled: false }),
             { initialProps: { active: true } },
         );
         const source = sources.get("/api/meetings/agenda/events");
@@ -227,7 +228,7 @@ it("reconciles after readiness even when the initial detail response is still pe
         )
         .mockResolvedValue(Response.json({ unchanged: true, version: 1 }));
     vi.stubGlobal("fetch", fetchMock);
-    renderHook(() => useAgenda("agenda", undefined, true, false));
+    renderHook(() => useAgenda("agenda", undefined, { pollEnabled: false }));
     await act(async () => {
         ready();
     });

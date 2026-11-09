@@ -104,7 +104,11 @@ export function AgendaBody({
     const i18n = useExtracted();
     const format = useFormatter();
     const router = useRouter();
-    const agenda = useAgenda(id, initial, active, variant !== "recording");
+    const agenda = useAgenda(id, initial, {
+        active,
+        pollEnabled: variant !== "recording",
+        userId,
+    });
     const { detail, mutate } = agenda;
     const [collapsed, setCollapsed] = useState(variant === "recording");
     const [olderOpen, setOlderOpen] = useState(false);

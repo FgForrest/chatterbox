@@ -42,12 +42,9 @@ it.each([
     false,
 ])("closes stream errors, caps exponential backoff and keeps polling with pollEnabled=%s", async (pollEnabled) => {
     renderHook(() =>
-        useAgenda(
-            "agenda",
-            detail({ cursor: "1:standalone:idle" }),
-            true,
+        useAgenda("agenda", detail({ cursor: "1:standalone:idle" }), {
             pollEnabled,
-        ),
+        }),
     );
     for (const delay of [1000, 2000, 4000, 8000, 16000, 32000, 60000, 60000]) {
         const source = sources[sources.length - 1];
@@ -78,7 +75,7 @@ it.each([
 it("cancels pending reconnects on deactivation and unmount", async () => {
     const initial = detail();
     const { rerender, unmount } = renderHook(
-        ({ active }) => useAgenda("agenda", initial, active),
+        ({ active }) => useAgenda("agenda", initial, { active }),
         { initialProps: { active: true } },
     );
     act(() => sources[0].onerror?.());
