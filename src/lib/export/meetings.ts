@@ -15,6 +15,7 @@ import {
     type ArchiveScope,
     archivedItemCondition,
 } from "@/lib/export/archive-scope";
+import { taskGroupOrderInput } from "@/lib/meetings/model";
 import { archivedTaskCondition } from "@/lib/tasks/archive";
 
 const id = z.string().min(1).max(255);
@@ -57,6 +58,7 @@ export const archivedMeetingSchema = z.object({
     absorbedAt: date.nullable(),
     taskSourceItemId: id.nullable(),
     noTaskSource: z.boolean().default(false),
+    taskGroupOrder: taskGroupOrderInput.default([]),
     snapshotSourceItemId: id.nullable().default(null),
     outcomeUnplanned: z.array(z.string().max(2000)).max(100),
     outcomeSummaryId: id.nullable(),
@@ -209,6 +211,8 @@ export async function collectArchivedMeetings(
         } = agenda;
         result.push({
             ...archivedAgenda,
+            taskGroupOrder:
+                decryptJsonField<string[]>(agenda.taskGroupOrder) ?? [],
             recordingItemId: includesRecording ? agenda.recordingItemId : null,
             outcomeSummaryId: includesRecording
                 ? agenda.outcomeSummaryId

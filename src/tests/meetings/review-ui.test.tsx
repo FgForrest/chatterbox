@@ -223,7 +223,9 @@ describe.each([
             ).toBeNull();
             return;
         }
-        fireEvent.click(screen.getByRole("combobox", { name: "Task source" }));
+        fireEvent.click(
+            screen.getByRole("button", { name: "Change task source" }),
+        );
         fireEvent.change(screen.getByPlaceholderText("Search…"), {
             target: { value: "unmatched" },
         });
@@ -270,10 +272,15 @@ describe.each([
         };
         await act(async () => finish(Response.json(server)));
         expect(
-            screen.getByRole("combobox", { name: "Task source" }).textContent,
-        ).toContain("No source");
+            screen.getByText("No tasks from other meetings").closest("footer"),
+        ).toBeTruthy();
+        expect(
+            screen.queryByRole("combobox", { name: "Task source" }),
+        ).toBeNull();
         fetchMock.mockClear();
-        fireEvent.click(screen.getByRole("combobox", { name: "Task source" }));
+        fireEvent.click(
+            screen.getByRole("button", { name: "Change task source" }),
+        );
         await act(async () =>
             fireEvent.click(screen.getByRole("option", { name: "Automatic" })),
         );
@@ -459,7 +466,7 @@ it("task source sends its previous field and task notes respect composition", as
             ]}
         />,
     );
-    fireEvent.click(screen.getByRole("combobox", { name: "Task source" }));
+    fireEvent.click(screen.getByRole("button", { name: "Change task source" }));
     await act(async () =>
         fireEvent.click(screen.getByRole("option", { name: /Previous/ })),
     );

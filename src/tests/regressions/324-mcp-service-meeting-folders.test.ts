@@ -50,6 +50,7 @@ beforeEach(() => {
         id: "agenda",
         folders: [sharedFolder],
         tasks: [],
+        taskGroupOrder: [],
         points: [],
         suggestions: [],
         invitees: [],

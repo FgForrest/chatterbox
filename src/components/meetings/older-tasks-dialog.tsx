@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, Search } from "lucide-react";
+import { ListPlus, Search } from "lucide-react";
 import { useExtracted, useFormatter } from "next-intl";
 import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog";
+import { ActionTooltip } from "@/components/ui/tooltip";
 import { OLDER_TASK_POSITION_BASE } from "@/lib/meetings/positions";
 import { groupAgendaTasks } from "@/lib/meetings/task-groups";
 import { getPasswordManagerAttributes } from "@/lib/password-manager";
@@ -185,9 +186,11 @@ export function OlderTasksDialog({
     const matching = available.filter((task) =>
         searchText(task.text).includes(searchText(query.trim())),
     );
-    const groups = groupAgendaTasks(matching, detail.invitees).filter(
-        (group) => group.tasks.length,
-    );
+    const groups = groupAgendaTasks(
+        matching,
+        detail.invitees,
+        detail.taskGroupOrder,
+    ).filter((group) => group.tasks.length);
     const selection = [...selected.values()].filter(
         (task) => !inAgenda.has(task.id),
     );
@@ -263,12 +266,17 @@ export function OlderTasksDialog({
                 onOpenChange(next);
             }}
         >
-            <DialogTrigger asChild>
-                <Button variant="ghost" size="sm">
-                    <Plus className="mr-1 size-3.5" aria-hidden="true" />
-                    {i18n("Add older tasks…")}
-                </Button>
-            </DialogTrigger>
+            <ActionTooltip label={i18n("Add older tasks…")}>
+                <DialogTrigger asChild>
+                    <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={i18n("Add older tasks…")}
+                    >
+                        <ListPlus className="size-4" aria-hidden="true" />
+                    </Button>
+                </DialogTrigger>
+            </ActionTooltip>
             <DialogContent className="sm:max-w-xl">
                 <DialogHeader>
                     <DialogTitle>{i18n("Add older tasks")}</DialogTitle>

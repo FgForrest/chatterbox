@@ -68,7 +68,7 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
         POST: "meeting",
     },
     "meetings/[id]/suggestions/[sid]/route.ts": { PATCH: "meeting" },
-    "meetings/[id]/tasks/route.ts": { POST: "meeting" },
+    "meetings/[id]/tasks/route.ts": { POST: "meeting", PATCH: "meeting" },
     "meetings/[id]/tasks/[taskId]/route.ts": {
         PATCH: "meeting",
         DELETE: "meeting",

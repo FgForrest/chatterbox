@@ -2,14 +2,7 @@
 
 import { FileText, Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { useExtracted } from "next-intl";
-import {
-    type ReactNode,
-    useCallback,
-    useEffect,
-    useMemo,
-    useRef,
-    useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { MarkdownActions } from "@/components/dashboard/markdown-actions";
 import { RecordingLanguage } from "@/components/dashboard/recording-language";
@@ -116,8 +109,6 @@ export interface TranscriptOption {
 
 interface TranscriptionPanelProps {
     recording: Recording;
-    agenda?: ReactNode;
-    nextMeeting?: ReactNode;
     /** Back-compat single transcript. Used only when `transcripts` is absent. */
     transcription?: Transcription;
     /** All transcripts for the recording, one per source, primary first. When
@@ -208,8 +199,6 @@ export function transcriptSpeakerTags(
 
 export function TranscriptionPanel({
     recording,
-    agenda,
-    nextMeeting,
     transcription,
     transcripts,
     isTranscribing,
@@ -820,13 +809,7 @@ export function TranscriptionPanel({
                 </p>
             )}
             {(!widgets || widgets.transcript.visible) && (
-                <div
-                    className={
-                        agenda
-                            ? "order-4 flex flex-col gap-3"
-                            : "flex flex-col gap-3"
-                    }
-                >
+                <div className="flex flex-col gap-3">
                     <RecordingCutPanel />
                     <WorkflowWidget
                         id={transcriptWidgetId}
@@ -1241,11 +1224,7 @@ export function TranscriptionPanel({
 
             {activeTranscript?.text &&
                 (!widgets || widgets.summary.visible) && (
-                    <div
-                        className={
-                            agenda ? "order-1 flex flex-col gap-4" : "contents"
-                        }
-                    >
+                    <div className="contents">
                         <SummaryWidget
                             itemId={recording.id}
                             onResummarizeReady={setResummarizeAction}
@@ -1281,8 +1260,6 @@ export function TranscriptionPanel({
                         />
                     </div>
                 )}
-            {nextMeeting && <div className="order-2">{nextMeeting}</div>}
-            {agenda && <div className="order-3">{agenda}</div>}
         </div>
     );
 }

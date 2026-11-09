@@ -18,7 +18,13 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useExtracted, useFormatter } from "next-intl";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+    type HTMLAttributes,
+    type ReactNode,
+    useEffect,
+    useRef,
+    useState,
+} from "react";
 import { toast } from "sonner";
 import { PlayAtButton } from "@/components/playback/play-at-button";
 import {
@@ -59,10 +65,13 @@ import type { RecordingFolder } from "@/types/folder";
 export function TaskRow({
     task: suppliedTask,
     readOnly = false,
+    readOnlyCheckbox = false,
     pending = false,
     notesReadOnly = false,
     actions,
     badges,
+    leading,
+    rowProps,
     extraNotes,
     recording,
     evidence,
@@ -78,11 +87,15 @@ export function TaskRow({
 }: {
     task: TaskView;
     readOnly?: boolean;
+    /** Keep a disabled native checkbox on agenda rows without close permission. */
+    readOnlyCheckbox?: boolean;
     /** A save is in flight: fields lock, the done checkbox stays in place, disabled. */
     pending?: boolean;
     notesReadOnly?: boolean;
     actions?: ReactNode;
     badges?: ReactNode;
+    leading?: ReactNode;
+    rowProps?: HTMLAttributes<HTMLLIElement>;
     extraNotes?: ReactNode;
     /** The recording it came from, on the Tasks page. */
     recording?: TaskListItem["recording"];
@@ -173,11 +186,12 @@ export function TaskRow({
     }
     const StatusIcon = dropped ? CircleSlash : done ? CircleCheck : Circle;
     const statusMark =
-        (pending ? suppliedTask.canClose && !readOnly : task.canClose) &&
+        (readOnlyCheckbox ||
+            (pending ? suppliedTask.canClose && !readOnly : task.canClose)) &&
         !dropped ? (
             <input
                 type="checkbox"
-                disabled={pending}
+                disabled={pending || !task.canClose}
                 className="mt-1 size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
                 checked={done}
                 onChange={(event) => {
@@ -205,7 +219,14 @@ export function TaskRow({
         );
 
     return (
-        <li className="task-row group flex items-start gap-3 p-3 text-sm">
+        <li
+            {...rowProps}
+            className={cn(
+                "task-row group relative flex items-start gap-3 p-3 text-sm",
+                rowProps?.className,
+            )}
+        >
+            {leading}
             {closeReason ? (
                 <TooltipProvider>
                     <Tooltip open={reasonOpen} onOpenChange={setReasonOpen}>

@@ -60,6 +60,7 @@ const recording: Recording = {
 const fetchMock = vi.fn();
 let choices: CalendarChoices;
 beforeEach(() => {
+    window.localStorage.clear();
     Element.prototype.scrollIntoView = vi.fn();
     choices = { reason: "not_configured", recurring: [], other: [] };
     fetchMock.mockReset();
@@ -258,7 +259,8 @@ it.each([
         fireEvent.click(screen.getByRole("button", { name: "Attach agenda" })),
     );
     expect(changed).toHaveBeenCalled();
-    expect(screen.getByText("Agenda attached")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Expand agenda" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Expand agenda" }));
     expect(screen.getByTestId("readonly-agenda")).toBeTruthy();
     expect(screen.queryByText(/published|now visible/)).toBeNull();
 });
@@ -437,7 +439,10 @@ it("uses summary presence for attached reads and offers manual re-summary only w
             )}
         </RecordingAgenda>,
     );
-    const action = await screen.findByRole("button", { name: "Re-summarize" });
+    fireEvent.click(
+        await screen.findByRole("button", { name: "Expand agenda" }),
+    );
+    const action = screen.getByRole("button", { name: "Re-summarize" });
     expect(
         screen.getByText(
             "This summary was made before the agenda was attached.",
@@ -540,7 +545,10 @@ it("refreshes agenda outcomes once a manual summary settles, without polling", a
         );
     }
     const { rerender } = render(frame(false));
-    await screen.findByRole("button", { name: "Re-summarize" });
+    fireEvent.click(
+        await screen.findByRole("button", { name: "Expand agenda" }),
+    );
+    expect(screen.getByRole("button", { name: "Re-summarize" })).toBeTruthy();
     fetchMock.mockClear();
     rerender(frame(true));
     await act(async () => {});
@@ -584,7 +592,7 @@ it("retains meeting presence while the summary widget refreshes or is hidden", a
                 folders={[folder]}
                 onChanged={vi.fn()}
             >
-                {({ notice }) => (
+                {({ agenda }) => (
                     <>
                         {show && (
                             <SummaryReporter
@@ -593,7 +601,7 @@ it("retains meeting presence while the summary widget refreshes or is hidden", a
                                 run={run}
                             />
                         )}
-                        {notice}
+                        {agenda}
                     </>
                 )}
             </RecordingAgenda>

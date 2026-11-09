@@ -20,6 +20,7 @@ import {
     listMeetings,
     prepareMeeting,
 } from "@/lib/meetings/service";
+import { projectAgendaTaskGroupOrder } from "@/lib/meetings/task-groups";
 
 const readOnly = { readOnlyHint: true, openWorldHint: false };
 const write = {
@@ -91,9 +92,18 @@ async function detailFor(caller: McpCaller, meetingId: string) {
             .filter((point) => point.parentId === parentId)
             .map((point) => ({ ...point, children: pointTree(point.id) }));
     }
+    const taskGroups = groupAgendaTasks(
+        tasks.filter((task) => !task.removedAt),
+        detail.invitees,
+        detail.taskGroupOrder,
+    );
     return {
         ...detail,
         tasks,
+        taskGroupOrder: projectAgendaTaskGroupOrder(
+            detail.taskGroupOrder,
+            taskGroups,
+        ),
         taskSource: caller.roles.has("tasks:read") ? detail.taskSource : null,
         noTaskSource: caller.roles.has("tasks:read")
             ? detail.noTaskSource
@@ -104,10 +114,7 @@ async function detailFor(caller: McpCaller, meetingId: string) {
         snapshotSourceItemId: caller.roles.has("tasks:read")
             ? detail.snapshotSourceItemId
             : null,
-        taskGroups: groupAgendaTasks(
-            tasks.filter((task) => !task.removedAt),
-            detail.invitees,
-        ),
+        taskGroups,
         suggestions: detail.suggestions.filter(
             (suggestion) => !mail?.suggestionIds.has(suggestion.id),
         ),

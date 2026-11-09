@@ -24,6 +24,24 @@ export const createMeetingInput = z.object({
     start: instant.optional(),
     end: instant.optional(),
 });
+export const taskGroupOrderInput = z
+    .array(z.string().min(1).max(2000))
+    .max(500)
+    .refine(
+        (keys) => new Set(keys).size === keys.length,
+        "Duplicate group keys",
+    );
+export const reorderAgendaTasksInput = z.object({
+    groupKey: z.string().min(1).max(2000),
+    taskIds: z
+        .array(id)
+        .min(1)
+        .max(500)
+        .refine(
+            (ids) => new Set(ids).size === ids.length,
+            "Duplicate task ids",
+        ),
+});
 const meetingPrevious = z.object({
     title: line.min(1).max(500).optional(),
     start: instant.nullable().optional(),
@@ -31,6 +49,7 @@ const meetingPrevious = z.object({
     calendarEventId: id.nullable().optional(),
     taskSourceItemId: id.nullable().optional(),
     noTaskSource: z.boolean().optional(),
+    taskGroupOrder: taskGroupOrderInput.optional(),
 });
 export const patchMeetingInput = z
     .object({
@@ -40,11 +59,21 @@ export const patchMeetingInput = z
         calendarEventId: id.nullable().optional(),
         taskSourceItemId: id.nullable().optional(),
         noTaskSource: z.boolean().optional(),
+        taskGroupOrder: taskGroupOrderInput.optional(),
         state: z.enum(["planned", "live", "held"]).optional(),
         version: z.number().int().nonnegative().optional(),
         previous: meetingPrevious.optional(),
     })
     .superRefine((input, ctx) => {
+        if (
+            input.taskGroupOrder !== undefined &&
+            !input.previous?.taskGroupOrder
+        )
+            ctx.addIssue({
+                code: "custom",
+                path: ["previous", "taskGroupOrder"],
+                message: "Previous value is required",
+            });
         if (!input.previous) return;
         const patchesTaskSource =
             input.taskSourceItemId !== undefined ||
@@ -56,6 +85,7 @@ export const patchMeetingInput = z
             "calendarEventId",
             "taskSourceItemId",
             "noTaskSource",
+            "taskGroupOrder",
         ] as const) {
             if (
                 (input[field] !== undefined ||
@@ -82,6 +112,7 @@ export const patchPointInput = createPointInput
     .partial()
     .extend({
         version: z.number().int().nonnegative(),
+        siblingIndex: z.number().int().nonnegative().max(100000).optional(),
         discussed: z.boolean().optional(),
         mergeUp: z.boolean().optional(),
         note: line.nullable().optional(),

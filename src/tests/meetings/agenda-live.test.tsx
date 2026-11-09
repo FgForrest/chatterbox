@@ -201,7 +201,7 @@ describe("web agenda live updates", () => {
         await waitFor(() => expect(input.value).toBe("Remote Planning"));
         expect(document.activeElement).toBe(input);
         expect(input.selectionStart).toBe(11);
-        expect(screen.getByText("Changed by Petr Král at 10:00")).toBeTruthy();
+        expect(screen.getByTitle("Changed by Petr Král at 10:00")).toBeTruthy();
         expect(callbacks.onPatch).not.toHaveBeenCalled();
         doc.destroy();
     });

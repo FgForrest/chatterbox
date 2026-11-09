@@ -20,6 +20,7 @@ import { TranscriptTopicsMenu } from "@/components/dashboard/transcript-topics-m
 import { ItemHeader } from "@/components/items/item-header";
 import { LearnWidget } from "@/components/learn/learn-widget";
 import { AgendaBody } from "@/components/meetings/agenda-body";
+import { RecordingAgenda } from "@/components/meetings/recording-agenda";
 import { PeopleList } from "@/components/people/people-list";
 import { ApiKeysSection } from "@/components/settings/api-keys-section";
 import { WebhooksSection } from "@/components/settings/webhooks-section";
@@ -79,6 +80,11 @@ vi.mock("@/components/recordings/recording-title", () => ({
     ),
 }));
 vi.mock("@/hooks/use-library-preferences", () => ({
+    useAgendaRecordingPrivacy: () => ({
+        ready: true,
+        dismissed: false,
+        dismiss: vi.fn(),
+    }),
     useLibraryPreferences: () => ({
         ready: true,
         preferences: {},
@@ -208,23 +214,57 @@ describe("block-heading counts", () => {
         "meeting",
         "live",
         "recording",
-    ] as const)("uses one count treatment for both agenda sections in %s", (variant) => {
+    ] as const)("uses recording widget headers and footer facts for both agenda sections in %s", (variant) => {
         const agenda = detail();
         mocks.fetch.mockResolvedValue(Response.json(agenda));
         render(<AgendaBody id="agenda" variant={variant} initial={agenda} />);
-        if (variant === "recording")
-            fireEvent.click(screen.getByRole("button", { name: /Agenda/ }));
-        countAfter("1 · Task review", "0 tasks · 0 done");
-        countAfter(
-            "2 · Discussion points",
-            variant !== "meeting" ? "0 of 1 discussed" : "1 point",
-        );
-        const header = screen.getByText("2 · Discussion points").parentElement;
-        expect(header?.classList.contains("justify-between")).toBe(false);
-        const suggest = screen.queryByRole("button", {
-            name: "Suggest points",
-        });
-        if (suggest) expect(suggest.classList.contains("ml-auto")).toBe(true);
+        for (const title of ["1 · Task review", "2 · Discussion points"]) {
+            if (variant === "recording") {
+                const section = screen
+                    .getByRole("heading", { name: title })
+                    .closest("section");
+                expect(section).toBeTruthy();
+                expect(section?.querySelector("footer")).toBeNull();
+                expect(
+                    section?.querySelector("[data-workflow-widget]"),
+                ).toBeNull();
+                for (const button of section?.firstElementChild?.querySelectorAll(
+                    "button",
+                ) ?? []) {
+                    expect(button.textContent).toBe("");
+                    expect(button.getAttribute("aria-label")).toBeTruthy();
+                }
+                continue;
+            }
+            const frame = screen
+                .getByRole("heading", { name: title })
+                .closest("[data-workflow-widget]");
+            expect(frame).toBeTruthy();
+            const header = frame?.querySelector("header");
+            expect(header?.textContent).toBe(title);
+            expect(
+                header?.querySelector('[data-slot="heading-count"]'),
+            ).toBeNull();
+            expect(header?.querySelector("select")).toBeNull();
+            for (const button of header?.querySelectorAll("button") ?? []) {
+                expect(button.textContent).toBe("");
+                expect(button.getAttribute("aria-label")).toBeTruthy();
+            }
+            const footer = frame?.querySelector("footer");
+            expect(
+                footer?.querySelector(".text-xs.text-muted-foreground"),
+            ).toBeTruthy();
+            if (title === "1 · Task review") {
+                expect(footer?.textContent).toContain("0 tasks");
+                expect(footer?.textContent).toContain("0 done");
+                expect(footer?.textContent).toContain(
+                    "No previous meeting with tasks",
+                );
+            } else
+                expect(footer?.textContent).toContain(
+                    variant === "meeting" ? "1 point" : "0 of 1 discussed",
+                );
+        }
     });
     it("uses the shared count in task review sections", () => {
         render(
@@ -723,31 +763,54 @@ describe("neutral commands and coloured open views", () => {
                 .classList.contains("text-person-share"),
         ).toBe(false);
     });
-    it("keeps the recording Agenda disclosure neutral with expandable metadata", () => {
-        const agenda = detail();
-        mocks.fetch.mockResolvedValue(Response.json(agenda));
-        render(<AgendaBody id="agenda" variant="recording" initial={agenda} />);
-        const trigger = screen.getByRole("button", { name: /Agenda/ });
-        const label = within(trigger).getByText("Agenda");
-        const metadata = within(trigger).getByText(/0 of 1 point discussed/);
-        expect(
-            trigger.classList.contains("grid-cols-[auto_minmax(0,1fr)_auto]"),
-        ).toBe(true);
-        expect(label.classList.contains("whitespace-nowrap")).toBe(true);
-        expect(metadata.classList.contains("text-right")).toBe(true);
-        expect(metadata.classList.contains("shrink-0")).toBe(false);
-        expect(
-            trigger.querySelector("svg")?.classList.contains("shrink-0"),
-        ).toBe(true);
+    it("keeps the recording Agenda disclosure neutral with expandable metadata", async () => {
+        const agenda = detail({ recordingItemId: recording.id });
+        mocks.fetch.mockImplementation(async (url: string) =>
+            Response.json(
+                url.endsWith("/agenda")
+                    ? { agenda }
+                    : url.endsWith("/next-meeting")
+                      ? { event: null }
+                      : agenda,
+            ),
+        );
+        render(
+            <RecordingAgenda
+                recording={{ ...recording, hasAgenda: true, isOwn: false }}
+                folders={[]}
+                onChanged={vi.fn()}
+            />,
+        );
+        await screen.findByRole("button", { name: "Expand agenda" });
         for (const expanded of [false, true, false]) {
+            const trigger = screen.getByRole("button", {
+                name: expanded ? "Collapse agenda" : "Expand agenda",
+            });
             expect(trigger.getAttribute("aria-expanded")).toBe(
                 String(expanded),
             );
             expect(trigger.hasAttribute("aria-pressed")).toBe(false);
-            expect(trigger.className).not.toMatch(/text-meeting|bg-accent/);
-            expect(Boolean(screen.queryByText("1 · Task review"))).toBe(
-                expanded,
+            expect(trigger.classList.contains("bg-accent")).toBe(false);
+            expect(trigger.className).not.toMatch(/text-meeting/);
+            const widget = trigger.closest(
+                "[data-workflow-widget-line], [data-workflow-widget]",
             );
+            expect(widget?.getAttribute("data-tone")).toBe("quiet");
+            expect(widget?.className).not.toMatch(/border-meeting|bg-meeting/);
+            if (!expanded) {
+                const metadata = widget?.querySelector(".truncate");
+                expect(metadata?.textContent).toContain(
+                    "0 of 1 point discussed",
+                );
+                expect(
+                    metadata?.classList.contains("text-muted-foreground"),
+                ).toBe(true);
+            }
+            expect(
+                Boolean(
+                    screen.queryByRole("heading", { name: "1 · Task review" }),
+                ),
+            ).toBe(expanded);
             fireEvent.click(trigger);
         }
     });

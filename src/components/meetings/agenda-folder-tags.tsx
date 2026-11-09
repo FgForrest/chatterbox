@@ -1,10 +1,6 @@
 "use client";
 
-import { FolderInput } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useExtracted } from "next-intl";
-import { useRef, useState } from "react";
-import { FolderPicker } from "@/components/recordings/folder-picker";
 import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
 import type { RecordingFolder } from "@/types/folder";
 import type { MeetingDetail } from "./types";
@@ -25,11 +21,7 @@ export function AgendaFolderTags({
     mutate: AgendaController["mutate"];
     onChanged?: () => void;
 }) {
-    const i18n = useExtracted();
     const router = useRouter();
-    const [moving, setMoving] = useState(false);
-    const [source, setSource] = useState<string | null>(null);
-    const selectingSource = useRef(false);
     const own = detail.userId === userId && !disabled;
     const itemId = detail.meetingItemId ?? detail.id;
     const navigationId = (id: string) =>
@@ -38,9 +30,6 @@ export function AgendaFolderTags({
     const sourceId = (id: string) =>
         folders.find((folder) => folder.id === id)?.receivedFolder
             ?.sourceFolderId ?? id;
-    const assigned = new Set(
-        detail.folders.map((folder) => navigationId(folder.id)),
-    );
     const available = [
         ...folders,
         ...detail.folders
@@ -159,69 +148,6 @@ export function AgendaFolderTags({
                         : undefined
                 }
             />
-            {own && assigned.size > 0 && (
-                <FolderPicker
-                    aria-label={i18n("Move to…")}
-                    actionTrigger={
-                        <>
-                            <FolderInput className="size-3.5" />
-                            {i18n("Move to…")}
-                        </>
-                    }
-                    folders={
-                        source
-                            ? available
-                            : available.filter((folder) =>
-                                  assigned.has(folder.id),
-                              )
-                    }
-                    assignedIds={source ? assigned : new Set()}
-                    allowCreate={Boolean(source)}
-                    open={moving}
-                    onOpenChange={(open) => {
-                        if (!open && selectingSource.current) {
-                            selectingSource.current = false;
-                            setMoving(false);
-                            setTimeout(() => setMoving(true), 0);
-                            return;
-                        }
-                        if (open && !moving)
-                            setSource(
-                                assigned.size === 1 ? [...assigned][0] : null,
-                            );
-                        setMoving(open);
-                    }}
-                    title={source ? i18n("Move to…") : i18n("Move from…")}
-                    onSelect={async (folderId) => {
-                        if (!source) {
-                            selectingSource.current = true;
-                            setSource(folderId);
-                            return;
-                        }
-                        await change(
-                            "PATCH",
-                            {
-                                fromFolderId: source,
-                                toFolderId: folderId,
-                                withdraw: true,
-                            },
-                            (value) => ({
-                                ...value,
-                                folders: addFolder(
-                                    {
-                                        ...value,
-                                        folders: value.folders.filter(
-                                            (folder) =>
-                                                folder.id !== sourceId(source),
-                                        ),
-                                    },
-                                    folderId,
-                                ),
-                            }),
-                        );
-                    }}
-                />
-            )}
         </div>
     );
 }

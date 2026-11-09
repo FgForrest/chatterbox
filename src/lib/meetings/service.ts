@@ -43,6 +43,7 @@ import {
     asyncJobs,
     chatterItems,
     meetingAgendas,
+    people,
     recordingFolderAssignments,
     recordingFolders,
     recordings,
@@ -54,6 +55,7 @@ import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import {
     decryptJsonField,
     decryptText,
+    encryptJsonField,
     encryptText,
 } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -72,6 +74,7 @@ import {
 } from "@/lib/meetings/access";
 import { meetingAttachmentAudienceInTx } from "@/lib/meetings/attachment-audience";
 import {
+    cachedMeetingCalendarSnapshot,
     calendarSnapshotWithEditors,
     encryptCalendarSnapshot,
     readMeetingCalendarSnapshot,
@@ -85,11 +88,23 @@ import {
     groupAgendaTasks,
     patchMeetingInput,
     patchPointInput,
+    reorderAgendaTasksInput,
+    taskGroupOrderInput,
     validatePointTree,
 } from "@/lib/meetings/model";
-import { OLDER_TASK_POSITION_BASE } from "@/lib/meetings/positions";
+import { moveAgendaPoint } from "@/lib/meetings/point-order";
+import {
+    AGENDA_TASK_POSITION_COMPACTION_BOUND,
+    agendaTaskOrderPositions,
+    OLDER_TASK_POSITION_BASE,
+} from "@/lib/meetings/positions";
 import { agendaRecordingBy } from "@/lib/meetings/recording-by";
 import { agendaSuggestionsAvailability } from "@/lib/meetings/suggestions-provider";
+import {
+    agendaTaskGroupKey,
+    mergeAgendaTaskGroupOrder,
+    projectAgendaTaskGroupOrder,
+} from "@/lib/meetings/task-groups";
 import {
     deletePointTextDocsInTx,
     replaceAgendaTextInTx,
@@ -251,6 +266,22 @@ async function snapshotTasks(
                 : undefined,
         ),
     );
+    const remaining = await tx
+        .select({ taskId: agendaTasks.taskId, position: agendaTasks.position })
+        .from(agendaTasks)
+        .where(
+            and(
+                eq(agendaTasks.agendaId, agenda.id),
+                eq(agendaTasks.userId, agenda.userId),
+            ),
+        )
+        .orderBy(asc(agendaTasks.position), asc(agendaTasks.taskId));
+    const firstPosition = await agendaTaskAppendPosition(
+        tx,
+        agenda,
+        remaining,
+        tasks.length,
+    );
     if (tasks.length)
         await tx
             .insert(agendaTasks)
@@ -260,10 +291,37 @@ async function snapshotTasks(
                     agendaId: agenda.id,
                     taskId: task.id,
                     origin: "last_meeting" as const,
-                    position,
+                    position: firstPosition + position,
                 })),
             )
             .onConflictDoNothing();
+}
+
+async function agendaTaskAppendPosition(
+    tx: MeetingTx,
+    agenda: Agenda,
+    links: readonly { taskId: string; position: number }[],
+    count: number,
+    minimum = 0,
+) {
+    const first = Math.max(
+        minimum,
+        links.reduce((max, link) => Math.max(max, link.position), -1) + 1,
+    );
+    if (!count || first + count - 1 <= AGENDA_TASK_POSITION_COMPACTION_BOUND)
+        return first;
+    for (const [position, link] of links.entries())
+        await tx
+            .update(agendaTasks)
+            .set({ position })
+            .where(
+                and(
+                    eq(agendaTasks.agendaId, agenda.id),
+                    eq(agendaTasks.userId, agenda.userId),
+                    eq(agendaTasks.taskId, link.taskId),
+                ),
+            );
+    return Math.max(minimum, links.length);
 }
 
 async function carryOverInFolders(
@@ -976,13 +1034,22 @@ export async function getMeeting(
               )
             : undefined,
     ]);
-    const tree = points.map((point) => ({
-        ...readPoint(point),
-        summaryOutcome:
-            agenda.recordingItemId && !access.recordingVisible
-                ? null
-                : point.summaryOutcome,
-    }));
+    const tree = points
+        .map((point) => ({
+            ...readPoint(point),
+            summaryOutcome:
+                agenda.recordingItemId && !access.recordingVisible
+                    ? null
+                    : point.summaryOutcome,
+        }))
+        .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
+    const storedGroupOrder =
+        decryptJsonField<string[]>(agenda.taskGroupOrder) ?? [];
+    const taskGroups = groupAgendaTasks(
+        tasks.filter((task) => !task.removedAt),
+        invitees,
+        storedGroupOrder,
+    );
     const {
         calendarSnapshot: _snapshot,
         calendarRefreshedAt: _refreshedAt,
@@ -993,6 +1060,10 @@ export async function getMeeting(
     return {
         unchanged: false as const,
         ...publicAgenda,
+        taskGroupOrder: projectAgendaTaskGroupOrder(
+            storedGroupOrder,
+            taskGroups,
+        ),
         recordingItemId: access.recordingVisible
             ? agenda.recordingItemId
             : null,
@@ -1060,10 +1131,7 @@ export async function getMeeting(
         textProtocol: 1,
         pointTree: buildPointTree(tree),
         tasks,
-        taskGroups: groupAgendaTasks(
-            tasks.filter((task) => !task.removedAt),
-            invitees,
-        ),
+        taskGroups,
         suggestions: visibleSuggestions.map((suggestion) => ({
             ...suggestion,
             text: decryptText(suggestion.text),
@@ -1106,6 +1174,114 @@ export async function getMeeting(
     };
 }
 
+async function agendaOrderContext(
+    userId: string,
+    id: string,
+    withInvitees = false,
+) {
+    const { agenda } = await requireMeetingAccess(userId, id, "edit");
+    const viewer = { ...(await taskViewerById(userId)), includeReceived: true };
+    const links = await agendaOrderLinks(db, agenda);
+    const event =
+        withInvitees && agenda.calendarEventId
+            ? cachedMeetingCalendarSnapshot(agenda)
+            : null;
+    const [tasks, invitees] = await Promise.all([
+        getVisibleTasks(
+            viewer,
+            links.filter((link) => !link.removedAt).map((link) => link.taskId),
+        ),
+        event ? meetingInvitees(userId, event.attendees) : [],
+    ]);
+    return { agenda, links, tasks, invitees, viewer };
+}
+
+function agendaOrderLinks(executor: Pick<MeetingTx, "select">, agenda: Agenda) {
+    return executor
+        .select()
+        .from(agendaTasks)
+        .where(
+            and(
+                eq(agendaTasks.agendaId, agenda.id),
+                eq(agendaTasks.userId, agenda.userId),
+            ),
+        )
+        .orderBy(asc(agendaTasks.taskId));
+}
+
+async function checkedAgendaOrderLinks(
+    tx: MeetingTx,
+    agenda: Agenda,
+    context: Awaited<ReturnType<typeof agendaOrderContext>>,
+) {
+    const links = await agendaOrderLinks(tx, agenda);
+    if (
+        agenda.id !== context.agenda.id ||
+        agenda.userId !== context.agenda.userId ||
+        links.length !== context.links.length ||
+        links.some(
+            (link, index) =>
+                link.taskId !== context.links[index].taskId ||
+                link.removedAt?.getTime() !==
+                    context.links[index].removedAt?.getTime(),
+        )
+    )
+        throw new AppError(ErrorCode.CONFLICT, "Agenda tasks changed", 409);
+    const taskIds = links
+        .filter((link) => !link.removedAt)
+        .map((link) => link.taskId);
+    const tasks = taskIds.length
+        ? await tx
+              .select({
+                  id: recordingTasks.id,
+                  assigneeName: people.displayName,
+                  assigneeHint: recordingTasks.assigneeHint,
+              })
+              .from(recordingTasks)
+              .leftJoin(
+                  chatterItems,
+                  eq(chatterItems.id, recordingTasks.itemId),
+              )
+              .leftJoin(people, eq(people.id, recordingTasks.assigneePersonId))
+              .where(
+                  and(
+                      inArray(recordingTasks.id, taskIds),
+                      ne(recordingTasks.status, "proposed"),
+                      isNull(chatterItems.deletedAt),
+                      or(
+                          isNull(recordingTasks.itemId),
+                          inArray(chatterItems.kind, ["audio", "mail"]),
+                      ),
+                      taskVisible(context.viewer, ANY_TASK_ITEM, true),
+                  ),
+              )
+              .for("share", { of: recordingTasks })
+        : [];
+    const groupKeys = new Map(
+        tasks.map((task) => [
+            task.id,
+            agendaTaskGroupKey(
+                (task.assigneeName ? decryptText(task.assigneeName) : null) ??
+                    (task.assigneeHint ? decryptText(task.assigneeHint) : null),
+            ),
+        ]),
+    );
+    if (
+        tasks.length !== context.tasks.length ||
+        context.tasks.some(
+            (task) =>
+                groupKeys.get(task.id) !==
+                agendaTaskGroupKey(task.assignee?.name ?? task.assigneeHint),
+        )
+    )
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            "Agenda task groups changed",
+            409,
+        );
+    return links;
+}
+
 /** Change meeting metadata or resnapshot its task source under the agenda lock. */
 export async function patchMeeting(
     userId: string,
@@ -1122,171 +1298,250 @@ export async function patchMeeting(
         ...(await taskViewerById(userId)),
         includeReceived: true,
     };
-    await editMeeting(userId, id, "manage", async (tx, access) => {
-        const agenda = access.agenda;
-        const current = {
-            title: decryptText(access.item.title),
-            start: agenda.plannedStart?.toISOString() ?? null,
-            end: agenda.plannedEnd?.toISOString() ?? null,
-            calendarEventId: agenda.calendarEventId,
-            taskSourceItemId: agenda.taskSourceItemId,
-            noTaskSource: agenda.noTaskSource,
-        };
-        const metadataFields = [
-            "title",
-            "start",
-            "end",
-            "calendarEventId",
-            "taskSourceItemId",
-            "noTaskSource",
-        ] as const;
-        const patchesTaskSource =
-            input.taskSourceItemId !== undefined ||
-            input.noTaskSource !== undefined;
-        const fields = metadataFields.filter(
-            (field) =>
-                input[field] !== undefined ||
-                (patchesTaskSource &&
-                    (field === "taskSourceItemId" || field === "noTaskSource")),
+    const orderContext =
+        input.taskGroupOrder !== undefined
+            ? await agendaOrderContext(userId, id, true)
+            : null;
+    const groupOrderOnly =
+        input.taskGroupOrder !== undefined &&
+        Object.keys(input).every((key) =>
+            ["taskGroupOrder", "previous", "version"].includes(key),
         );
-        if (fields.length === 0 && input.state === agenda.state) return false;
-        const conflict = input.previous
-            ? fields.some((field) => {
-                  const previous = input.previous?.[field];
-                  return (field === "start" || field === "end") &&
-                      typeof previous === "string"
-                      ? new Date(previous).toISOString() !== current[field]
-                      : previous !== current[field];
-              })
-            : fields.length > 0 &&
-              input.version !== undefined &&
-              input.version !== agenda.version;
-        if (conflict)
-            throw new AppError(ErrorCode.CONFLICT, "Meeting changed", 409, {
-                version: agenda.version,
-            });
-        if (event) {
-            await lockMeetingEvent(tx, event.id);
-            const existing = await listMeetingRows(
-                userId,
-                access.viewer.orgUserId,
-                {
-                    calendarEventId: event.id,
-                    includePast: true,
-                    includeAbsorbed: true,
-                },
-                tx,
+    await editMeeting(
+        userId,
+        id,
+        groupOrderOnly ? "edit" : "manage",
+        async (tx, access) => {
+            const agenda = access.agenda;
+            const storedOrder =
+                decryptJsonField<string[]>(agenda.taskGroupOrder) ?? [];
+            const visibleGroups = orderContext
+                ? groupAgendaTasks(
+                      orderContext.tasks,
+                      orderContext.invitees,
+                      storedOrder,
+                  )
+                : [];
+            if (orderContext) {
+                await checkedAgendaOrderLinks(tx, agenda, orderContext);
+                if (
+                    agenda.calendarEventId !==
+                        orderContext.agenda.calendarEventId ||
+                    JSON.stringify(agenda.calendarSnapshot) !==
+                        JSON.stringify(orderContext.agenda.calendarSnapshot)
+                )
+                    throw new AppError(
+                        ErrorCode.CONFLICT,
+                        "Meeting invitees changed",
+                        409,
+                    );
+            }
+            const current = {
+                title: decryptText(access.item.title),
+                start: agenda.plannedStart?.toISOString() ?? null,
+                end: agenda.plannedEnd?.toISOString() ?? null,
+                calendarEventId: agenda.calendarEventId,
+                taskSourceItemId: agenda.taskSourceItemId,
+                noTaskSource: agenda.noTaskSource,
+                taskGroupOrder: projectAgendaTaskGroupOrder(
+                    storedOrder,
+                    visibleGroups,
+                ),
+            };
+            const metadataFields = [
+                "title",
+                "start",
+                "end",
+                "calendarEventId",
+                "taskSourceItemId",
+                "noTaskSource",
+                "taskGroupOrder",
+            ] as const;
+            const patchesTaskSource =
+                input.taskSourceItemId !== undefined ||
+                input.noTaskSource !== undefined;
+            const fields = metadataFields.filter(
+                (field) =>
+                    input[field] !== undefined ||
+                    (patchesTaskSource &&
+                        (field === "taskSourceItemId" ||
+                            field === "noTaskSource")),
             );
-            if (existing.some((entry) => entry.agenda.id !== agenda.id))
+            if (fields.length === 0 && input.state === agenda.state)
+                return false;
+            const conflict = input.previous
+                ? fields.some((field) => {
+                      const previous = input.previous?.[field];
+                      return (field === "start" || field === "end") &&
+                          typeof previous === "string"
+                          ? new Date(previous).toISOString() !== current[field]
+                          : field === "taskGroupOrder"
+                            ? JSON.stringify(previous) !==
+                              JSON.stringify(current[field])
+                            : previous !== current[field];
+                  })
+                : fields.length > 0 &&
+                  input.version !== undefined &&
+                  input.version !== agenda.version;
+            if (conflict)
+                throw new AppError(ErrorCode.CONFLICT, "Meeting changed", 409, {
+                    version: agenda.version,
+                });
+            if (
+                input.taskGroupOrder !== undefined &&
+                (input.taskGroupOrder.length !== visibleGroups.length ||
+                    input.taskGroupOrder.some(
+                        (key) =>
+                            !visibleGroups.some(
+                                (group) =>
+                                    agendaTaskGroupKey(group.name) === key,
+                            ),
+                    ))
+            )
                 throw new AppError(
                     ErrorCode.CONFLICT,
-                    "A visible agenda already exists for this event",
+                    "Agenda task groups changed",
                     409,
-                    { agendaId: existing[0].agenda.id },
                 );
-        }
-        const start = event
-            ? new Date(event.start)
-            : input.start !== undefined
-              ? input.start
-                  ? new Date(input.start)
-                  : null
-              : agenda.plannedStart;
-        const end = event
-            ? new Date(event.end)
-            : input.end !== undefined
-              ? input.end
-                  ? new Date(input.end)
-                  : null
-              : agenda.plannedEnd;
-        if (end && (!start || end <= start))
-            invalid("Meeting end must follow its start");
-        const noTaskSource =
-            input.noTaskSource ??
-            (input.taskSourceItemId !== undefined
-                ? false
-                : agenda.noTaskSource);
-        const taskSourceItemId = noTaskSource
-            ? null
-            : input.taskSourceItemId !== undefined
-              ? input.taskSourceItemId
-              : agenda.taskSourceItemId;
-        const [updated] = await tx
-            .update(meetingAgendas)
-            .set({
-                plannedStart: start,
-                plannedEnd: end,
-                timeSet: start !== null,
-                ...(input.calendarEventId !== undefined
-                    ? {
-                          calendarEventId: event?.id ?? null,
-                          calendarSeriesId: event?.recurringEventId ?? null,
-                          calendarSnapshot: calendarSnapshotWithEditors(
-                              event ? encryptCalendarSnapshot(event) : null,
-                          ),
-                          calendarRefreshedAt: event ? new Date() : null,
-                      }
-                    : {}),
-                taskSourceItemId,
-                noTaskSource,
-                ...(input.state
-                    ? {
-                          state: input.state,
-                          ...(input.state === "live"
-                              ? {
-                                    liveStartedAt:
-                                        agenda.liveStartedAt ?? new Date(),
-                                    liveEndedAt: null,
-                                }
-                              : input.state === "held"
-                                ? {
-                                      liveEndedAt:
-                                          agenda.liveEndedAt ?? new Date(),
-                                  }
-                                : {}),
-                      }
-                    : {}),
-            })
-            .where(whereAgenda(agenda))
-            .returning();
-        if (agenda.meetingItemId)
-            await tx
-                .update(chatterItems)
+            if (event) {
+                await lockMeetingEvent(tx, event.id);
+                const existing = await listMeetingRows(
+                    userId,
+                    access.viewer.orgUserId,
+                    {
+                        calendarEventId: event.id,
+                        includePast: true,
+                        includeAbsorbed: true,
+                    },
+                    tx,
+                );
+                if (existing.some((entry) => entry.agenda.id !== agenda.id))
+                    throw new AppError(
+                        ErrorCode.CONFLICT,
+                        "A visible agenda already exists for this event",
+                        409,
+                        { agendaId: existing[0].agenda.id },
+                    );
+            }
+            const start = event
+                ? new Date(event.start)
+                : input.start !== undefined
+                  ? input.start
+                      ? new Date(input.start)
+                      : null
+                  : agenda.plannedStart;
+            const end = event
+                ? new Date(event.end)
+                : input.end !== undefined
+                  ? input.end
+                      ? new Date(input.end)
+                      : null
+                  : agenda.plannedEnd;
+            if (end && (!start || end <= start))
+                invalid("Meeting end must follow its start");
+            const noTaskSource =
+                input.noTaskSource ??
+                (input.taskSourceItemId !== undefined
+                    ? false
+                    : agenda.noTaskSource);
+            const taskSourceItemId = noTaskSource
+                ? null
+                : input.taskSourceItemId !== undefined
+                  ? input.taskSourceItemId
+                  : agenda.taskSourceItemId;
+            const [updated] = await tx
+                .update(meetingAgendas)
                 .set({
-                    ...(input.title || event
+                    plannedStart: start,
+                    plannedEnd: end,
+                    timeSet: start !== null,
+                    ...(input.taskGroupOrder !== undefined
                         ? {
-                              title: encryptText(
-                                  input.title ?? event?.title ?? "Meeting",
+                              taskGroupOrder: encryptJsonField(
+                                  taskGroupOrderInput.parse(
+                                      mergeAgendaTaskGroupOrder(
+                                          storedOrder,
+                                          input.taskGroupOrder,
+                                      ),
+                                  ),
                               ),
-                              titleEditedAt: new Date(),
                           }
                         : {}),
-                    occurredAt: start ?? agenda.createdAt,
-                    updatedAt: new Date(),
+                    ...(input.calendarEventId !== undefined
+                        ? {
+                              calendarEventId: event?.id ?? null,
+                              calendarSeriesId: event?.recurringEventId ?? null,
+                              calendarSnapshot: calendarSnapshotWithEditors(
+                                  event ? encryptCalendarSnapshot(event) : null,
+                              ),
+                              calendarRefreshedAt: event ? new Date() : null,
+                          }
+                        : {}),
+                    taskSourceItemId,
+                    noTaskSource,
+                    ...(input.state
+                        ? {
+                              state: input.state,
+                              ...(input.state === "live"
+                                  ? {
+                                        liveStartedAt:
+                                            agenda.liveStartedAt ?? new Date(),
+                                        liveEndedAt: null,
+                                    }
+                                  : input.state === "held"
+                                    ? {
+                                          liveEndedAt:
+                                              agenda.liveEndedAt ?? new Date(),
+                                      }
+                                    : {}),
+                          }
+                        : {}),
                 })
-                .where(
-                    and(
-                        eq(chatterItems.id, agenda.meetingItemId),
-                        eq(chatterItems.userId, agenda.userId),
-                    ),
+                .where(whereAgenda(agenda))
+                .returning();
+            if (agenda.meetingItemId)
+                await tx
+                    .update(chatterItems)
+                    .set({
+                        ...(input.title || event
+                            ? {
+                                  title: encryptText(
+                                      input.title ?? event?.title ?? "Meeting",
+                                  ),
+                                  titleEditedAt: new Date(),
+                              }
+                            : {}),
+                        occurredAt: start ?? agenda.createdAt,
+                        updatedAt: new Date(),
+                    })
+                    .where(
+                        and(
+                            eq(chatterItems.id, agenda.meetingItemId),
+                            eq(chatterItems.userId, agenda.userId),
+                        ),
+                    );
+            if (
+                updated.taskSourceItemId !== agenda.taskSourceItemId ||
+                updated.noTaskSource !== agenda.noTaskSource ||
+                (input.calendarEventId !== undefined &&
+                    input.calendarEventId !== agenda.calendarEventId)
+            ) {
+                const folders = agenda.meetingItemId
+                    ? await meetingFolders(
+                          tx,
+                          agenda.meetingItemId,
+                          agenda.userId,
+                      )
+                    : [];
+                await snapshotTasks(
+                    tx,
+                    updated,
+                    folders.map((folder) => folder.id),
+                    tasksViewer,
                 );
-        if (
-            updated.taskSourceItemId !== agenda.taskSourceItemId ||
-            updated.noTaskSource !== agenda.noTaskSource ||
-            (input.calendarEventId !== undefined &&
-                input.calendarEventId !== agenda.calendarEventId)
-        ) {
-            const folders = agenda.meetingItemId
-                ? await meetingFolders(tx, agenda.meetingItemId, agenda.userId)
-                : [];
-            await snapshotTasks(
-                tx,
-                updated,
-                folders.map((folder) => folder.id),
-                tasksViewer,
-            );
-        }
-    });
+            }
+        },
+    );
     return getMeeting(userId, id);
 }
 
@@ -1386,6 +1641,8 @@ export async function changePoint(
     remove = false,
 ) {
     const input = patchPointInput.parse(raw);
+    if (input.siblingIndex !== undefined && input.position !== undefined)
+        invalid("Use either a sibling index or a position");
     return editMeeting(
         userId,
         id,
@@ -1416,7 +1673,8 @@ export async function changePoint(
                 remove ||
                 input.text !== undefined ||
                 input.parentId !== undefined ||
-                input.position !== undefined;
+                input.position !== undefined ||
+                input.siblingIndex !== undefined;
             if (
                 structural &&
                 point.authorUserId !== userId &&
@@ -1472,19 +1730,50 @@ export async function changePoint(
                     );
                 return null;
             }
-            validatePointTree(
-                points.map((entry) =>
-                    entry.id === pointId
-                        ? {
-                              ...entry,
-                              parentId:
-                                  input.parentId !== undefined
-                                      ? input.parentId
-                                      : entry.parentId,
-                          }
-                        : entry,
-                ),
+            const moved =
+                input.siblingIndex !== undefined
+                    ? moveAgendaPoint(
+                          points,
+                          pointId,
+                          input.parentId !== undefined
+                              ? input.parentId
+                              : point.parentId,
+                          input.siblingIndex,
+                      )
+                    : points.map((entry) =>
+                          entry.id === pointId && input.parentId !== undefined
+                              ? { ...entry, parentId: input.parentId }
+                              : entry,
+                      );
+            if (!moved)
+                throw new AppError(
+                    ErrorCode.CONFLICT,
+                    "Agenda point siblings changed",
+                    409,
+                );
+            validatePointTree(moved);
+            const beforePositions = new Map(
+                points.map((point) => [point.id, point.position]),
             );
+            if (input.siblingIndex !== undefined)
+                for (const entry of moved) {
+                    if (
+                        entry.id !== pointId &&
+                        beforePositions.get(entry.id) !== entry.position
+                    )
+                        await tx
+                            .update(agendaPoints)
+                            .set({
+                                position: entry.position,
+                                version: sql`${agendaPoints.version} + 1`,
+                            })
+                            .where(
+                                and(
+                                    pointWhere(agenda),
+                                    eq(agendaPoints.id, entry.id),
+                                ),
+                            );
+                }
             if (input.position !== undefined)
                 await tx
                     .update(agendaPoints)
@@ -1523,9 +1812,15 @@ export async function changePoint(
                     ...(input.parentId !== undefined
                         ? { parentId: input.parentId }
                         : {}),
-                    ...(input.position !== undefined
-                        ? { position: input.position }
-                        : {}),
+                    ...(input.siblingIndex !== undefined
+                        ? {
+                              position: moved.find(
+                                  (entry) => entry.id === pointId,
+                              )?.position,
+                          }
+                        : input.position !== undefined
+                          ? { position: input.position }
+                          : {}),
                     ...(input.discussed !== undefined
                         ? {
                               discussedAt: input.discussed ? new Date() : null,
@@ -1605,7 +1900,8 @@ export async function addAgendaTasks(
                     eq(agendaTasks.agendaId, agenda.id),
                     eq(agendaTasks.userId, agenda.userId),
                 ),
-            );
+            )
+            .orderBy(asc(agendaTasks.position), asc(agendaTasks.taskId));
         const eligible = new Set(candidates.map((task) => task.id));
         const current = new Set(
             links.filter((link) => !link.removedAt).map((link) => link.taskId),
@@ -1622,12 +1918,11 @@ export async function addAgendaTasks(
             );
         const addedTaskIds = taskIds.filter((taskId) => !current.has(taskId));
         if (!addedTaskIds.length) return false;
-        const lastPosition = Math.max(
-            -1,
-            ...links.map((link) => link.position),
-        );
-        const firstPosition = Math.max(
-            lastPosition + 1,
+        const firstPosition = await agendaTaskAppendPosition(
+            tx,
+            agenda,
+            links,
+            addedTaskIds.length,
             OLDER_TASK_POSITION_BASE,
         );
         await tx
@@ -1646,6 +1941,49 @@ export async function addAgendaTasks(
                 set: { removedAt: null, position: sql`excluded.position` },
                 setWhere: eq(agendaTasks.userId, agenda.userId),
             });
+    });
+}
+
+/** Reorder exactly one current assignee group without changing its attribution or membership. */
+export async function reorderAgendaTasks(
+    userId: string,
+    id: string,
+    raw: z.input<typeof reorderAgendaTasksInput>,
+) {
+    const input = reorderAgendaTasksInput.parse(raw);
+    const context = await agendaOrderContext(userId, id);
+    await editMeeting(userId, id, "edit", async (tx, { agenda }) => {
+        const links = (
+            await checkedAgendaOrderLinks(tx, agenda, context)
+        ).filter((link) => !link.removedAt);
+        const visible = context.tasks;
+        const group = groupAgendaTasks(visible, []).find(
+            (group) => agendaTaskGroupKey(group.name) === input.groupKey,
+        );
+        const ids = new Set(group?.tasks.map((task) => task.id) ?? []);
+        if (
+            ids.size !== input.taskIds.length ||
+            input.taskIds.some((id) => !ids.has(id))
+        )
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "Agenda task group changed",
+                409,
+            );
+        const positions = agendaTaskOrderPositions(
+            links.filter((link) => ids.has(link.taskId)),
+        );
+        for (const [index, taskId] of input.taskIds.entries())
+            await tx
+                .update(agendaTasks)
+                .set({ position: positions[index] })
+                .where(
+                    and(
+                        eq(agendaTasks.agendaId, agenda.id),
+                        eq(agendaTasks.userId, agenda.userId),
+                        eq(agendaTasks.taskId, taskId),
+                    ),
+                );
     });
 }
 

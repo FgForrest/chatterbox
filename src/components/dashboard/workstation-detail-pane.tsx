@@ -407,45 +407,7 @@ export function WorkstationDetailPane({
                                         }
                                     />
                                 )}
-                                {audioAvailable && (
-                                    <RecordingPlayer
-                                        ref={playerRef}
-                                        recording={currentRecording}
-                                        initialPlaybackSpeed={
-                                            initialPlaybackSpeed
-                                        }
-                                        initialVolume={initialVolume}
-                                        initialAutoPlayNext={
-                                            initialAutoPlayNext
-                                        }
-                                        scrubberStyle={scrubberStyle}
-                                        onEnded={() => {
-                                            const currentIndex =
-                                                visibleRecordings.findIndex(
-                                                    (r) =>
-                                                        r.id ===
-                                                        currentRecording.id,
-                                                );
-                                            if (
-                                                currentIndex >= 0 &&
-                                                currentIndex <
-                                                    visibleRecordings.length - 1
-                                            ) {
-                                                onSelectRecording(
-                                                    visibleRecordings[
-                                                        currentIndex + 1
-                                                    ],
-                                                );
-                                            }
-                                        }}
-                                    />
-                                )}
-                                <TrimProposalCard
-                                    processing={processing}
-                                    userId={userId}
-                                />
                                 <RecordingAgenda
-                                    key={currentRecording.id}
                                     recording={currentRecording}
                                     folders={folders}
                                     folderId={
@@ -458,14 +420,55 @@ export function WorkstationDetailPane({
                                     userId={userId}
                                     onChanged={onArtifactsChanged}
                                 >
-                                    {({ notice, agenda, nextMeeting }) => (
+                                    {({ agenda, nextMeeting }) => (
                                         <>
-                                            {notice}
+                                            {agenda}
+                                            {audioAvailable && (
+                                                <RecordingPlayer
+                                                    ref={playerRef}
+                                                    recording={currentRecording}
+                                                    initialPlaybackSpeed={
+                                                        initialPlaybackSpeed
+                                                    }
+                                                    initialVolume={
+                                                        initialVolume
+                                                    }
+                                                    initialAutoPlayNext={
+                                                        initialAutoPlayNext
+                                                    }
+                                                    scrubberStyle={
+                                                        scrubberStyle
+                                                    }
+                                                    onEnded={() => {
+                                                        const currentIndex =
+                                                            visibleRecordings.findIndex(
+                                                                (r) =>
+                                                                    r.id ===
+                                                                    currentRecording.id,
+                                                            );
+                                                        if (
+                                                            currentIndex >= 0 &&
+                                                            currentIndex <
+                                                                visibleRecordings.length -
+                                                                    1
+                                                        ) {
+                                                            onSelectRecording(
+                                                                visibleRecordings[
+                                                                    currentIndex +
+                                                                        1
+                                                                ],
+                                                            );
+                                                        }
+                                                    }}
+                                                />
+                                            )}
+                                            <TrimProposalCard
+                                                processing={processing}
+                                                userId={userId}
+                                            />
                                             {!currentRecording.audioReaped ||
                                             hasTranscript ? (
                                                 <TranscriptionPanel
-                                                    agenda={agenda}
-                                                    nextMeeting={nextMeeting}
                                                     key={`${currentRecording.id}:${currentRecording.view ?? "private"}:${contentRevision}:${currentRecording.audioReaped ? 1 : 0}:${hasTranscript ? 1 : 0}:${currentRecording.hasSummary ? 1 : 0}`}
                                                     recording={currentRecording}
                                                     transcription={
@@ -488,12 +491,8 @@ export function WorkstationDetailPane({
                                                     shared={recordingShared}
                                                     processing={processing}
                                                 />
-                                            ) : (
-                                                <>
-                                                    {nextMeeting}
-                                                    {agenda}
-                                                </>
-                                            )}
+                                            ) : null}
+                                            {nextMeeting}
                                         </>
                                     )}
                                 </RecordingAgenda>

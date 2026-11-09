@@ -1,0 +1,1 @@
+ALTER TABLE "meeting_agendas" ADD COLUMN "task_group_order" jsonb;
