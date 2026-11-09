@@ -182,6 +182,7 @@ it("orders the unchanged recording options by own folder, then newest, and searc
         screen.getAllByRole("option").map((option) => option.textContent),
     ).toEqual([
         "Automatic",
+        "No source",
         "Folder newer2026-11-03T10:00",
         "Folder older2026-11-01T10:00",
         "Outside latest2026-11-05T10:00",
@@ -191,7 +192,7 @@ it("orders the unchanged recording options by own folder, then newest, and searc
     });
     expect(
         screen.getAllByRole("option").map((option) => option.textContent),
-    ).toEqual(["Automatic", "Outside latest2026-11-05T10:00"]);
+    ).toEqual(["Automatic", "No source", "Outside latest2026-11-05T10:00"]);
 });
 
 describe.each([

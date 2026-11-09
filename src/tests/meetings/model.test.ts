@@ -13,6 +13,7 @@ import { replaceAgendaDescription } from "@/lib/integrations/google/calendar-eve
 import {
     groupAgendaTasks,
     meetingOverlap,
+    patchMeetingInput,
     validatePointTree,
 } from "@/lib/meetings/model";
 
@@ -115,4 +116,42 @@ describe("Calendar agenda block", () => {
         ).toBe(
             "Before\n--- Agenda from Chatterbox ---\nNew agenda\n--- end of agenda ---\nAfter",
         ));
+});
+
+describe("task source previous values", () => {
+    it.each([
+        [
+            { taskSourceItemId: null },
+            { taskSourceItemId: null },
+            "noTaskSource",
+        ],
+        [{ noTaskSource: true }, { taskSourceItemId: null }, "noTaskSource"],
+        [
+            { taskSourceItemId: null },
+            { noTaskSource: false },
+            "taskSourceItemId",
+        ],
+        [{ noTaskSource: true }, { noTaskSource: false }, "taskSourceItemId"],
+    ] as const)("requires both previous source values for %j with %j", (patch, previous, missing) => {
+        const result = patchMeetingInput.safeParse({ ...patch, previous });
+        expect(result.success).toBe(false);
+        if (!result.success)
+            expect(result.error.issues).toContainEqual(
+                expect.objectContaining({
+                    path: ["previous", missing],
+                    message: "Previous value is required",
+                }),
+            );
+    });
+
+    it.each([
+        { taskSourceItemId: null },
+        { noTaskSource: true },
+    ])("accepts a partial source patch %j with both previous values, including a null source", (patch) => {
+        const input = {
+            ...patch,
+            previous: { taskSourceItemId: null, noTaskSource: false },
+        };
+        expect(patchMeetingInput.parse(input)).toEqual(input);
+    });
 });

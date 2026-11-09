@@ -95,6 +95,9 @@ async function detailFor(caller: McpCaller, meetingId: string) {
         ...detail,
         tasks,
         taskSource: caller.roles.has("tasks:read") ? detail.taskSource : null,
+        noTaskSource: caller.roles.has("tasks:read")
+            ? detail.noTaskSource
+            : null,
         taskSourceItemId: caller.roles.has("tasks:read")
             ? detail.taskSourceItemId
             : null,

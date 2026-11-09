@@ -56,6 +56,7 @@ export const archivedMeetingSchema = z.object({
     liveEndedAt: date.nullable(),
     absorbedAt: date.nullable(),
     taskSourceItemId: id.nullable(),
+    noTaskSource: z.boolean().default(false),
     snapshotSourceItemId: id.nullable().default(null),
     outcomeUnplanned: z.array(z.string().max(2000)).max(100),
     outcomeSummaryId: id.nullable(),

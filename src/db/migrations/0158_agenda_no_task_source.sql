@@ -1,0 +1,1 @@
+ALTER TABLE "meeting_agendas" ADD COLUMN "no_task_source" boolean DEFAULT false NOT NULL;

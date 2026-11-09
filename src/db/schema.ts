@@ -5170,6 +5170,7 @@ export const meetingAgendas = pgTable(
         liveStartedAt: timestamp("live_started_at"),
         liveEndedAt: timestamp("live_ended_at"),
         absorbedAt: timestamp("absorbed_at"),
+        noTaskSource: boolean("no_task_source").notNull().default(false),
         taskSourceItemId: text("task_source_item_id").references(
             () => chatterItems.id,
             { onDelete: "set null" },
