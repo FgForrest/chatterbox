@@ -986,16 +986,31 @@ suite("meeting planning server (PostgreSQL)", () => {
             "org",
             meeting.id,
         );
-        expect([...filtered.suggestionIds].sort()).toEqual([
-            "mail-item",
-            "mail-task",
-            "merged-task",
-            "mixed",
-        ]);
-        expect(filtered.pointIds.size).toBe(1);
+        expect(filtered).toEqual({
+            suggestionIds: new Set([
+                "mail-item",
+                "mail-task",
+                "merged-task",
+                "mixed",
+            ]),
+            pointIds: new Set([currentPoint.id]),
+            allSuggestionIds: new Set([
+                "mail-item",
+                "mail-task",
+                "merged-task",
+                "mixed",
+                "audio",
+            ]),
+            allPointIds: new Set([currentPoint.id]),
+        });
         expect(
             await agendaMailDerivedContent("stranger", "org", meeting.id),
-        ).toEqual({ suggestionIds: new Set(), pointIds: new Set() });
+        ).toEqual({
+            suggestionIds: new Set(),
+            pointIds: new Set(),
+            allSuggestionIds: new Set(),
+            allPointIds: new Set(),
+        });
         const tool = MEETING_TOOLS.find((tool) => tool.name === "get_meeting");
         if (!tool) throw new Error("Missing MCP tool");
         const caller: McpCaller = {
