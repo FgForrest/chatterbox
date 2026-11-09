@@ -173,6 +173,7 @@ describe("meeting MCP tools", () => {
             invitees: [],
             taskGroups: [{ tasks: ["task"] }],
             taskSource: { id: "source" },
+            noTaskSource: true,
         });
         service.list.mockResolvedValue([
             { id: "agenda", counts: { points: 1, tasks: 2 } },
@@ -185,7 +186,12 @@ describe("meeting MCP tools", () => {
         expect(JSON.stringify(result)).not.toContain("Private task");
         if (name === "get_meeting")
             expect(result).toMatchObject({
-                meeting: { tasks: [], taskGroups: [], taskSource: null },
+                meeting: {
+                    tasks: [],
+                    taskGroups: [],
+                    taskSource: null,
+                    noTaskSource: null,
+                },
             });
         else
             expect(result).toMatchObject({
@@ -200,9 +206,10 @@ describe("meeting MCP tools", () => {
             tasks: [{ id: "task", evidenceItemKind: "audio" }],
             invitees: [],
             taskGroups: [],
+            noTaskSource: true,
         });
         expect(await run("get_meeting", { meetingId: "agenda" })).toMatchObject(
-            { meeting: { tasks: [{ id: "task" }] } },
+            { meeting: { tasks: [{ id: "task" }], noTaskSource: true } },
         );
         service.list.mockResolvedValue([
             { id: "agenda", counts: { points: 1, tasks: 2 } },

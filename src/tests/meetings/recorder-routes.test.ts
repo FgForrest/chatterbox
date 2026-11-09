@@ -206,6 +206,7 @@ it.each([
         outcomeUnplanned: ["Transcript topic"],
         outcomeSummaryId: "summary",
         taskSourceItemId: "source",
+        noTaskSource: true,
         snapshotSourceItemId: "source",
         taskSource: { id: "source", title: "Previous summary title" },
         redirectTo: "/dashboard?recording=recording",

@@ -193,6 +193,106 @@ describe.each([
         );
         expect(mocks.error).not.toHaveBeenCalledWith("Agenda point changed");
     });
+    it("selects No source with both previous values and keeps only older tasks optimistically", async () => {
+        server = detail({
+            taskSourceItemId: "source",
+            snapshotSourceItemId: "source",
+            taskSource: {
+                id: "source",
+                title: "Previous",
+                occurredAt: at,
+                automatic: false,
+            },
+            tasks: [
+                task("Source task", null),
+                task("Older task", null, { agendaOrigin: "older" }),
+            ],
+        });
+        let finish: (response: Response) => void = () => {};
+        fetchMock.mockImplementation((_url: string, init: RequestInit) =>
+            init.method === "PATCH"
+                ? new Promise<Response>((resolve) => {
+                      finish = resolve;
+                  })
+                : Promise.resolve(Response.json(server)),
+        );
+        mount();
+        if (variant === "recording") {
+            expect(
+                screen.queryByRole("combobox", { name: "Task source" }),
+            ).toBeNull();
+            return;
+        }
+        fireEvent.click(screen.getByRole("combobox", { name: "Task source" }));
+        fireEvent.change(screen.getByPlaceholderText("Search…"), {
+            target: { value: "unmatched" },
+        });
+        expect(screen.getByRole("option", { name: "Automatic" })).toBeTruthy();
+        await act(async () =>
+            fireEvent.click(screen.getByRole("option", { name: "No source" })),
+        );
+        expect(
+            JSON.parse(
+                String(
+                    fetchMock.mock.calls.find(
+                        ([, init]) => init.method === "PATCH",
+                    )?.[1].body,
+                ),
+            ),
+        ).toEqual({
+            noTaskSource: true,
+            taskSourceItemId: null,
+            previous: { noTaskSource: false, taskSourceItemId: "source" },
+        });
+        expect(screen.getByText("No tasks from other meetings")).toBeTruthy();
+        expect(screen.queryByText("No previous meeting with tasks")).toBeNull();
+        expect(
+            screen.queryByRole("button", {
+                name: "Remove Source task from agenda",
+            }),
+        ).toBeNull();
+        expect(
+            screen.getByRole("button", {
+                name: "Remove Older task from agenda",
+            }),
+        ).toBeTruthy();
+        if (variant === "meeting")
+            expect(
+                screen.getByRole("button", { name: /older tasks/i }),
+            ).toBeTruthy();
+        server = {
+            ...server,
+            noTaskSource: true,
+            taskSourceItemId: null,
+            snapshotSourceItemId: null,
+            taskSource: null,
+            tasks: server.tasks.filter((task) => task.agendaOrigin === "older"),
+        };
+        await act(async () => finish(Response.json(server)));
+        expect(
+            screen.getByRole("combobox", { name: "Task source" }).textContent,
+        ).toContain("No source");
+        fetchMock.mockClear();
+        fireEvent.click(screen.getByRole("combobox", { name: "Task source" }));
+        await act(async () =>
+            fireEvent.click(screen.getByRole("option", { name: "Automatic" })),
+        );
+        expect(
+            JSON.parse(
+                String(
+                    fetchMock.mock.calls.find(
+                        ([, init]) => init.method === "PATCH",
+                    )?.[1].body,
+                ),
+            ),
+        ).toEqual({
+            noTaskSource: false,
+            taskSourceItemId: null,
+            previous: { noTaskSource: true, taskSourceItemId: null },
+        });
+        server = { ...server, noTaskSource: false };
+        await act(async () => finish(Response.json(server)));
+    });
     it("uses idempotent start/end actions without an agenda version", async () => {
         mount();
         if (variant === "recording") {
@@ -373,7 +473,8 @@ it("task source sends its previous field and task notes respect composition", as
         ),
     ).toEqual({
         taskSourceItemId: "source",
-        previous: { taskSourceItemId: null },
+        noTaskSource: false,
+        previous: { taskSourceItemId: null, noTaskSource: false },
     });
     fireEvent.click(screen.getByRole("button", { name: "Meeting note" }));
     const note = screen.getByLabelText("Meeting note for Follow up");

@@ -263,6 +263,7 @@ export async function restoreMeetings(
                         ? (at(meeting.absorbedAt) ?? new Date())
                         : null,
                     taskSourceItemId: source?.id,
+                    noTaskSource: meeting.noTaskSource,
                     snapshotSourceItemId: snapshot?.id,
                     outcomeUnplanned: encryptJsonField(
                         meeting.outcomeUnplanned,

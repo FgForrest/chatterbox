@@ -168,6 +168,7 @@ import {
 import { readMeetingCalendarSnapshot } from "@/lib/meetings/calendar-snapshot";
 import { meetingMarkdown } from "@/lib/meetings/export";
 import {
+    addAgendaTask,
     addPoint,
     changeAgendaTask,
     changePoint,
@@ -177,6 +178,7 @@ import {
     meetingFolderPaths,
     patchMeeting,
     prepareMeeting,
+    refreshMeetingFolderContext,
 } from "@/lib/meetings/service";
 import { requestArrivalInTx } from "@/lib/pipeline/arrival";
 import { requestAdvance } from "@/lib/pipeline/trigger";
@@ -496,6 +498,232 @@ suite("meeting planning server (PostgreSQL)", () => {
             ).toBe("done");
     });
 
+    it("None clears source tasks and their notes, preserves older tasks, and survives context changes", async () => {
+        await recording("source", "owner-folder");
+        await db
+            .update(chatterItems)
+            .set({ occurredAt: new Date(start.getTime() - 86400000) })
+            .where(eq(chatterItems.id, "source"));
+        await db.insert(recordingTasks).values({
+            id: "source-task",
+            itemId: "source",
+            userId: "owner",
+            status: "open",
+            source: "manual",
+            text: encryptText("Source task"),
+        });
+        const meeting = await create();
+        await changeAgendaTask("owner", meeting.id, "source-task", {
+            note: "Source note",
+        });
+        await db.insert(recordingTasks).values({
+            id: "older-task",
+            itemId: "source",
+            userId: "owner",
+            status: "open",
+            source: "manual",
+            text: encryptText("Older task"),
+        });
+        await addAgendaTask("owner", meeting.id, "older-task");
+        await patchMeeting("owner", meeting.id, { taskSourceItemId: "source" });
+        const none = await patchMeeting("owner", meeting.id, {
+            noTaskSource: true,
+            previous: { noTaskSource: false, taskSourceItemId: "source" },
+        });
+        expect(none).toMatchObject({
+            noTaskSource: true,
+            taskSourceItemId: null,
+            snapshotSourceItemId: null,
+            taskSource: null,
+            tasks: [{ id: "older-task", agendaOrigin: "older" }],
+        });
+        expect(await db.select().from(agendaTasks)).toMatchObject([
+            { taskId: "older-task", origin: "older" },
+        ]);
+        if (none.unchanged || !none.meetingItemId)
+            throw new Error("Missing detail");
+        await db.insert(recordingFolderAssignments).values({
+            userId: "owner",
+            itemId: none.meetingItemId,
+            folderId: "owner-root",
+        });
+        await refreshMeetingFolderContext("owner", none.meetingItemId);
+        await patchMeeting("owner", meeting.id, { calendarEventId: "event" });
+        expect(await getMeeting("owner", meeting.id)).toMatchObject({
+            noTaskSource: true,
+            snapshotSourceItemId: null,
+            tasks: [{ id: "older-task", agendaOrigin: "older" }],
+        });
+        expect(await db.select().from(agendaTasks)).toHaveLength(1);
+        await patchMeeting("owner", meeting.id, { calendarEventId: null });
+        const automatic = await patchMeeting("owner", meeting.id, {
+            taskSourceItemId: null,
+        });
+        expect(automatic).toMatchObject({
+            noTaskSource: false,
+            taskSourceItemId: null,
+            snapshotSourceItemId: "source",
+        });
+        if (automatic.unchanged) throw new Error("Missing detail");
+        expect(automatic.tasks).toHaveLength(2);
+        expect(automatic.tasks).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    id: "source-task",
+                    agendaOrigin: "last_meeting",
+                }),
+                expect.objectContaining({
+                    id: "older-task",
+                    agendaOrigin: "older",
+                }),
+            ]),
+        );
+        expect(
+            await patchMeeting("owner", meeting.id, { noTaskSource: true }),
+        ).toMatchObject({
+            noTaskSource: true,
+            snapshotSourceItemId: null,
+            tasks: [{ id: "older-task", agendaOrigin: "older" }],
+        });
+        expect(
+            await patchMeeting("owner", meeting.id, {
+                taskSourceItemId: "source",
+            }),
+        ).toMatchObject({
+            noTaskSource: false,
+            taskSourceItemId: "source",
+            snapshotSourceItemId: "source",
+        });
+    });
+
+    it("detects a stale None flag and rejects a contradictory task source", async () => {
+        const meeting = await create();
+        await patchMeeting("owner", meeting.id, { noTaskSource: true });
+        await expect(
+            patchMeeting("owner", meeting.id, {
+                noTaskSource: false,
+                taskSourceItemId: null,
+                previous: { noTaskSource: false, taskSourceItemId: null },
+            }),
+        ).rejects.toMatchObject({ statusCode: 409 });
+        await expect(
+            patchMeeting("owner", meeting.id, {
+                noTaskSource: true,
+                taskSourceItemId: "source",
+            }),
+        ).rejects.toMatchObject({ statusCode: 400 });
+        expect(await getMeeting("owner", meeting.id)).toMatchObject({
+            noTaskSource: true,
+        });
+    });
+
+    it.each([
+        "Automatic after None",
+        "None after recording",
+    ] as const)("rejects a stale partial source PATCH: %s", async (ordering) => {
+        for (const [id, daysAgo] of [
+            ["automatic-source", 1],
+            ["selected-source", 2],
+        ] as const) {
+            await recording(id, "org-folder");
+            await db
+                .update(chatterItems)
+                .set({
+                    occurredAt: new Date(start.getTime() - daysAgo * 86400000),
+                })
+                .where(
+                    and(
+                        eq(chatterItems.id, id),
+                        eq(chatterItems.userId, "owner"),
+                    ),
+                );
+            await db.insert(recordingTasks).values({
+                id: `${id}-task`,
+                itemId: id,
+                userId: "owner",
+                status: "open",
+                source: "manual",
+                text: encryptText("Source task"),
+            });
+        }
+        const meeting = await create("org-folder");
+        expect(meeting.meeting).toMatchObject({
+            taskSourceItemId: null,
+            noTaskSource: false,
+            snapshotSourceItemId: "automatic-source",
+            tasks: [{ id: "automatic-source-task" }],
+        });
+        await patchMeeting(
+            "curator",
+            meeting.id,
+            ordering === "Automatic after None"
+                ? { noTaskSource: true }
+                : { taskSourceItemId: "selected-source" },
+        );
+        if (ordering === "None after recording")
+            await changeAgendaTask(
+                "curator",
+                meeting.id,
+                "selected-source-task",
+                {
+                    note: "Keep source note",
+                },
+            );
+        const readAgenda = () =>
+            db
+                .select()
+                .from(meetingAgendas)
+                .where(
+                    and(
+                        eq(meetingAgendas.id, meeting.id),
+                        eq(meetingAgendas.userId, "owner"),
+                    ),
+                );
+        const readLinks = () =>
+            db
+                .select()
+                .from(agendaTasks)
+                .where(
+                    and(
+                        eq(agendaTasks.agendaId, meeting.id),
+                        eq(agendaTasks.userId, "owner"),
+                        eq(agendaTasks.origin, "last_meeting"),
+                    ),
+                );
+        const beforeAgenda = await readAgenda();
+        const beforeLinks = await readLinks();
+        if (ordering === "Automatic after None") {
+            expect(beforeAgenda).toMatchObject([
+                {
+                    noTaskSource: true,
+                    taskSourceItemId: null,
+                    snapshotSourceItemId: null,
+                },
+            ]);
+            expect(beforeLinks).toEqual([]);
+        } else {
+            expect(beforeAgenda).toMatchObject([
+                {
+                    noTaskSource: false,
+                    taskSourceItemId: "selected-source",
+                    snapshotSourceItemId: "selected-source",
+                },
+            ]);
+            expect(beforeLinks).toHaveLength(1);
+            expect(decryptText(beforeLinks[0].note)).toBe("Keep source note");
+        }
+        await expect(
+            patchMeeting("owner", meeting.id, {
+                ...(ordering === "Automatic after None"
+                    ? { taskSourceItemId: null }
+                    : { noTaskSource: true }),
+                previous: { taskSourceItemId: null, noTaskSource: false },
+            }),
+        ).rejects.toMatchObject({ statusCode: 409 });
+        expect(await readAgenda()).toEqual(beforeAgenda);
+        expect(await readLinks()).toEqual(beforeLinks);
+    });
+
     it("auto-attaches a single owned match in the same folder and detaches it", async () => {
         const meeting = await create();
         await recording("rec", "owner-folder");
@@ -652,6 +880,7 @@ suite("meeting planning server (PostgreSQL)", () => {
             title: "Next",
             start: "2026-11-10T10:00:00Z",
         });
+        await patchMeeting("owner", next.id, { noTaskSource: true });
         const [suggestion] = await db
             .select()
             .from(agendaSuggestions)
@@ -684,6 +913,7 @@ suite("meeting planning server (PostgreSQL)", () => {
 
     it("round-trips standalone and absorbed agendas while preserving scoped task references", async () => {
         const first = await create();
+        await patchMeeting("owner", first.id, { noTaskSource: true });
         const point = await addPoint("owner", first.id, { text: "Root" });
         await addPoint("owner", first.id, {
             text: "Child",
@@ -710,10 +940,16 @@ suite("meeting planning server (PostgreSQL)", () => {
             userId: "owner",
         });
         expect(archive).toHaveLength(2);
+        expect(
+            archive.find((entry) => entry.id === first.id)?.noTaskSource,
+        ).toBe(true);
+        const legacyArchive = archive.map(({ noTaskSource, ...entry }) =>
+            entry.id === first.id ? { ...entry, noTaskSource } : entry,
+        );
         await db.delete(meetingAgendas);
         await db.delete(chatterItems).where(eq(chatterItems.kind, "meeting"));
         const result = await restoreMeetings("owner", {
-            meetings: archive,
+            meetings: legacyArchive,
             itemIdMap: { rec: "rec" },
             folderIdMap: { "owner-folder": "owner-folder" },
             taskIdMap: { "archived-task": "archived-task" },
@@ -724,6 +960,12 @@ suite("meeting planning server (PostgreSQL)", () => {
             kind: "personal",
             userId: "owner",
         });
+        expect(
+            restored.find((entry) => entry.title === "Acme")?.noTaskSource,
+        ).toBe(true);
+        expect(
+            restored.find((entry) => entry.title === "Absorbed")?.noTaskSource,
+        ).toBe(false);
         expect(
             restored.flatMap((entry) => entry.tasks.map((task) => task.taskId)),
         ).toEqual(["archived-task"]);

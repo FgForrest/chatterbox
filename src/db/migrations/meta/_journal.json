@@ -1107,6 +1107,13 @@
       "when": 1794174168087,
       "tag": "0157_recorder_live_agendas",
       "breakpoints": true
+    },
+    {
+      "idx": 158,
+      "version": "7",
+      "when": 1794224746351,
+      "tag": "0158_agenda_no_task_source",
+      "breakpoints": true
     }
   ]
 }
