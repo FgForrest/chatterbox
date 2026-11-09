@@ -128,6 +128,17 @@ describe("hasColleagueAgendaChange", () => {
             expected: true,
         },
         {
+            name: "own discuss toggle bundled with a colleague text edit",
+            after: {
+                version: 2,
+                text: "Edited",
+                discussedAt: at,
+                discussedByUserId: "owner",
+                updatedByUserId: "colleague",
+            },
+            expected: true,
+        },
+        {
             name: "viewer discussed a colleague's point",
             after: {
                 version: 1,

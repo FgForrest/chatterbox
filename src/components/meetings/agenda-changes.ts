@@ -15,12 +15,17 @@ export function hasColleagueAgendaChange(
             const previous = points.get(point.id);
             if (!previous)
                 return isColleague(point.updatedByUserId ?? point.authorUserId);
-            if (Boolean(point.discussedAt) !== Boolean(previous.discussedAt))
-                return isColleague(
+            const discussedChanged =
+                Boolean(point.discussedAt) !== Boolean(previous.discussedAt);
+            if (
+                discussedChanged &&
+                isColleague(
                     point.discussedAt
                         ? (point.discussedByUserId ?? point.updatedByUserId)
                         : point.updatedByUserId,
-                );
+                )
+            )
+                return true;
             return (
                 (point.text !== previous.text ||
                     point.note !== previous.note ||
