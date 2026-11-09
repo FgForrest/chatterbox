@@ -19,6 +19,7 @@ import {
     recordingFolderAssignments,
     recordingFolders,
     recordingTasks,
+    taskMentions,
     users,
 } from "@/db/schema";
 import {
@@ -294,6 +295,300 @@ describe.skipIf(!url)("agenda MCP service boundaries (PostgreSQL)", () => {
             position: 1,
         });
     }
+
+    async function addMailContent(source: "item" | "task" = "item") {
+        await addMailTask();
+        const sources = {
+            itemIds: source === "item" ? ["mail-source"] : [],
+            taskIds: source === "task" ? ["hidden-task"] : [],
+        };
+        await database.db.insert(agendaSuggestions).values(
+            (["ai", "carry_over"] as const).map((kind) => ({
+                id: `mail-${kind}`,
+                kind,
+                userId: "owner",
+                agendaId: "agenda",
+                text: encryptText("Mail suggestion"),
+                sources,
+            })),
+        );
+        await database.db.insert(agendaPoints).values({
+            id: "mail-point",
+            userId: "owner",
+            agendaId: "agenda",
+            text: encryptText("Mail point"),
+            authorUserId: "owner",
+            position: 1,
+            sources,
+        });
+    }
+
+    it.each([
+        { action: "add_task", taskId: "hidden-task" },
+        { action: "remove_task", taskId: "hidden-task" },
+        { action: "restore_task", taskId: "hidden-task" },
+        { action: "set_task_note", taskId: "hidden-task", note: "Changed" },
+    ])("requires mail:read for $action on a mail-derived task", async (operation) => {
+        await addMailTask();
+        if (operation.action === "add_task")
+            await database.db
+                .delete(agendaTasks)
+                .where(eq(agendaTasks.taskId, "hidden-task"));
+        if (operation.action === "restore_task")
+            await database.db
+                .update(agendaTasks)
+                .set({ removedAt: new Date() })
+                .where(eq(agendaTasks.taskId, "hidden-task"));
+        const before = await database.db.select().from(agendaTasks);
+        const caller = principal("owner");
+        caller.roles.delete("mail:read");
+        const error = await run(
+            "edit_agenda",
+            { operations: [operation] },
+            caller,
+        ).catch((error: unknown) => error);
+        expect(error).toMatchObject({
+            outcome: "not_found",
+            details: { completed: 0 },
+        });
+        expect(JSON.stringify(error)).not.toContain("hidden-task");
+        expect(await database.db.select().from(agendaTasks)).toEqual(before);
+        expect(
+            await run("edit_agenda", { operations: [operation] }),
+        ).toMatchObject({ completed: 1 });
+        const [link] = await database.db
+            .select()
+            .from(agendaTasks)
+            .where(eq(agendaTasks.taskId, "hidden-task"));
+        expect(Boolean(link.removedAt)).toBe(
+            operation.action === "remove_task",
+        );
+        if (operation.action === "set_task_note")
+            expect(decryptText(link.note)).toBe("Changed");
+    });
+
+    it("refuses agenda notes on an audio task with merged mail provenance", async () => {
+        await addMailTask();
+        await database.db.insert(taskMentions).values({
+            taskId: "one",
+            userId: "owner",
+            itemId: "mail-source",
+            view: "private",
+            matchDecision: "accepted",
+            statementAt: new Date(),
+        });
+        const caller = principal("owner");
+        caller.roles.delete("mail:read");
+        const operations = [
+            { action: "set_task_note", taskId: "one", note: "Changed" },
+        ];
+        await expect(
+            run("edit_agenda", { operations }, caller),
+        ).rejects.toMatchObject({ outcome: "not_found" });
+        expect(await run("edit_agenda", { operations })).toMatchObject({
+            completed: 1,
+        });
+    });
+
+    it.each([
+        ["add_suggestion", "item"],
+        ["dismiss_suggestion", "item"],
+        ["add_suggestion", "task"],
+        ["dismiss_suggestion", "task"],
+    ] as const)("requires mail:read for %s with %s provenance", async (action, source) => {
+        await addMailContent(source);
+        const caller = principal("owner");
+        caller.roles.delete("mail:read");
+        const operation = { action, suggestionId: "mail-ai" };
+        const before = await database.db.select().from(agendaSuggestions);
+        const error = await run(
+            "edit_agenda",
+            { operations: [operation] },
+            caller,
+        ).catch((error: unknown) => error);
+        expect(error).toMatchObject({
+            outcome: "not_found",
+            details: { completed: 0 },
+        });
+        expect(JSON.stringify(error)).not.toContain("mail-ai");
+        expect(await database.db.select().from(agendaSuggestions)).toEqual(
+            before,
+        );
+        expect(await database.db.select().from(agendaPoints)).toHaveLength(2);
+        expect(
+            await run("edit_agenda", { operations: [operation] }),
+        ).toMatchObject({ completed: 1 });
+        const [suggestion] = await database.db
+            .select()
+            .from(agendaSuggestions)
+            .where(eq(agendaSuggestions.id, "mail-ai"));
+        expect(suggestion.state).toBe(
+            action === "add_suggestion" ? "added" : "dismissed",
+        );
+        expect(await database.db.select().from(agendaPoints)).toHaveLength(
+            action === "add_suggestion" ? 3 : 2,
+        );
+    });
+
+    it.each([
+        "ai",
+        "carry_over",
+    ] as const)("bulk dismisses only visible %s suggestions without exposing hidden ids or counts", async (kind) => {
+        await addMailContent();
+        const caller = principal("owner");
+        caller.roles.delete("mail:read");
+        const operation = { action: "dismiss_suggestions", kind };
+        const result = await run(
+            "edit_agenda",
+            { operations: [operation] },
+            caller,
+        );
+        expect(result).toMatchObject({ completed: 1 });
+        expect(JSON.stringify(result)).not.toMatch(
+            /mail-ai|mail-carry_over|Mail suggestion/,
+        );
+        expect(
+            await database.db
+                .select({
+                    id: agendaSuggestions.id,
+                    state: agendaSuggestions.state,
+                })
+                .from(agendaSuggestions)
+                .orderBy(agendaSuggestions.id),
+        ).toEqual([
+            { id: "ai", state: kind === "ai" ? "dismissed" : "open" },
+            {
+                id: "carry_over",
+                state: kind === "carry_over" ? "dismissed" : "open",
+            },
+            { id: "mail-ai", state: "open" },
+            { id: "mail-carry_over", state: "open" },
+        ]);
+        expect(
+            await run("edit_agenda", { operations: [operation] }, caller),
+        ).toMatchObject({ completed: 1 });
+        await run("edit_agenda", { operations: [operation] });
+        const [hidden] = await database.db
+            .select()
+            .from(agendaSuggestions)
+            .where(eq(agendaSuggestions.id, `mail-${kind}`));
+        expect(hidden.state).toBe("dismissed");
+    });
+
+    it.each([
+        {
+            action: "update_point",
+            pointId: "mail-point",
+            version: 0,
+            note: "Changed",
+        },
+        { action: "remove_point", pointId: "mail-point", version: 0 },
+        { action: "add_point", parentId: "mail-point", text: "Child" },
+        {
+            action: "update_point",
+            pointId: "point",
+            version: 0,
+            parentId: "mail-point",
+        },
+        { action: "add_point", text: "Inserted", position: 0 },
+        { action: "update_point", pointId: "point", version: 0, position: 1 },
+        {
+            action: "update_point",
+            pointId: "point",
+            version: 0,
+            siblingIndex: 1,
+        },
+    ])("requires mail:read for a mail-derived point reference in $action", async (operation) => {
+        await addMailContent();
+        const caller = principal("owner");
+        caller.roles.delete("mail:read");
+        const before = await database.db.select().from(agendaPoints);
+        const error = await run(
+            "edit_agenda",
+            { operations: [operation] },
+            caller,
+        ).catch((error: unknown) => error);
+        expect(error).toMatchObject({
+            outcome: "not_found",
+            details: { completed: 0 },
+        });
+        expect(JSON.stringify(error)).not.toContain("mail-point");
+        expect(await database.db.select().from(agendaPoints)).toEqual(before);
+        expect(
+            await run("edit_agenda", { operations: [operation] }),
+        ).toMatchObject({ completed: 1 });
+    });
+
+    it.each([
+        { noTaskSource: true },
+        { taskSourceItemId: "source" },
+    ])("requires mail:read to replace a snapshot containing mail-derived tasks (%j)", async (patch) => {
+        await addMailTask();
+        await database.db
+            .update(agendaTasks)
+            .set({ origin: "last_meeting" })
+            .where(eq(agendaTasks.taskId, "hidden-task"));
+        const caller = principal("owner");
+        caller.roles.delete("mail:read");
+        const before = await database.db.select().from(agendaTasks);
+        const error = await run("update_agenda", patch, caller).catch(
+            (error: unknown) => error,
+        );
+        expect(error).toMatchObject({ outcome: "not_found" });
+        expect(JSON.stringify(error)).not.toContain("hidden-task");
+        expect(await database.db.select().from(agendaTasks)).toEqual(before);
+        await run("update_agenda", patch);
+        expect(
+            await database.db
+                .select()
+                .from(agendaTasks)
+                .where(eq(agendaTasks.taskId, "hidden-task")),
+        ).toEqual([]);
+    });
+
+    it("requires mail:read to accept a visible suggestion nested under a hidden point", async () => {
+        await addMailContent();
+        await database.db
+            .update(agendaSuggestions)
+            .set({ parentPointId: "mail-point" })
+            .where(eq(agendaSuggestions.id, "ai"));
+        const caller = principal("owner");
+        caller.roles.delete("mail:read");
+        const operations = [{ action: "add_suggestion", suggestionId: "ai" }];
+        await expect(
+            run("edit_agenda", { operations }, caller),
+        ).rejects.toMatchObject({ outcome: "not_found" });
+        expect(await run("edit_agenda", { operations })).toMatchObject({
+            completed: 1,
+        });
+    });
+
+    it.each([
+        false,
+        true,
+    ])("requires mail:read to remove a point with a mail-derived descendant (mergeUp=%s)", async (mergeUp) => {
+        await addMailContent();
+        await database.db
+            .update(agendaPoints)
+            .set({ parentId: "point" })
+            .where(eq(agendaPoints.id, "mail-point"));
+        const caller = principal("owner");
+        caller.roles.delete("mail:read");
+        const operation = {
+            action: "remove_point",
+            pointId: "point",
+            version: 0,
+            mergeUp,
+        };
+        await expect(
+            run("edit_agenda", { operations: [operation] }, caller),
+        ).rejects.toMatchObject({ outcome: "not_found" });
+        expect(await database.db.select().from(agendaPoints)).toHaveLength(2);
+        await run("edit_agenda", { operations: [operation] });
+        expect(await database.db.select().from(agendaPoints)).toHaveLength(
+            mergeUp ? 1 : 0,
+        );
+    });
 
     it.each([
         false,

@@ -21,7 +21,13 @@ const service = vi.hoisted(() => ({
     decide: vi.fn(),
     dismiss: vi.fn(),
     enqueue: vi.fn(),
+    visibleTask: vi.fn(),
 }));
+vi.mock("@/lib/tasks/access", () => ({
+    taskViewerById: async (userId: string) => ({ userId }),
+}));
+vi.mock("@/lib/tasks/tasks", () => ({ getVisibleTask: service.visibleTask }));
+vi.mock("@/lib/meetings/access", () => ({ requireMeetingAccess: vi.fn() }));
 vi.mock("@/db/queries/agenda-mail-sources", () => ({
     agendaMailDerivedContent: service.mail,
 }));
@@ -73,6 +79,7 @@ async function run(
 }
 beforeEach(() => {
     vi.clearAllMocks();
+    service.visibleTask.mockResolvedValue({ id: "task" });
     service.mail.mockResolvedValue({
         suggestionIds: new Set(),
         pointIds: new Set(),

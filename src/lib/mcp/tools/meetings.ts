@@ -5,6 +5,7 @@ import type { McpCaller } from "@/lib/mcp/caller";
 import { McpToolError } from "@/lib/mcp/errors";
 import { defineTool, type McpToolDef } from "@/lib/mcp/registry";
 import { mayReadMail } from "@/lib/mcp/scope";
+import { requireMeetingAccess } from "@/lib/meetings/access";
 import { dismissSuggestions } from "@/lib/meetings/dismiss-suggestions";
 import {
     createMeetingInput,
@@ -15,6 +16,7 @@ import {
     patchPointInput,
     reorderAgendaTasksInput,
 } from "@/lib/meetings/model";
+import { moveAgendaPoint } from "@/lib/meetings/point-order";
 import {
     addAgendaTask,
     addPoint,
@@ -32,6 +34,8 @@ import {
     agendaTaskGroupKey,
     projectAgendaTaskGroupOrder,
 } from "@/lib/meetings/task-groups";
+import { taskViewerById } from "@/lib/tasks/access";
+import { getVisibleTask } from "@/lib/tasks/tasks";
 
 const readOnly = { readOnlyHint: true, openWorldHint: false };
 const write = {
@@ -451,7 +455,7 @@ const operation = z
         z.object({
             action: z
                 .literal("dismiss_suggestions")
-                .describe("Dismiss all open suggestions of one kind."),
+                .describe("Dismiss all visible open suggestions of one kind."),
             kind: z
                 .enum(["ai", "carry_over"])
                 .describe(
@@ -462,6 +466,95 @@ const operation = z
     .describe(
         "One agenda edit selected by action. Operations run sequentially, not atomically.",
     );
+
+async function requireVisibleOperation(
+    caller: McpCaller & { kind: "user" },
+    meetingId: string,
+    op: z.infer<typeof operation>,
+) {
+    if (mayReadMail(caller)) return;
+    if ("taskId" in op) {
+        const task = await getVisibleTask(
+            { ...(await taskViewerById(caller.userId)), includeReceived: true },
+            op.taskId,
+        );
+        if (
+            !task ||
+            task.evidenceItemKind === "mail" ||
+            task.recording?.kind === "mail" ||
+            task.noteMailSourced
+        )
+            throw new McpToolError("Agenda task not found", "not_found");
+    }
+    if (!(op.action === "add_point" || "pointId" in op || "suggestionId" in op))
+        return;
+    const mail = await agendaMailDerivedContent(
+        caller.userId,
+        caller.orgUserId,
+        meetingId,
+    );
+    if (
+        ("suggestionId" in op && mail.suggestionIds.has(op.suggestionId)) ||
+        ("pointId" in op && mail.pointIds.has(op.pointId)) ||
+        ("parentId" in op && op.parentId && mail.pointIds.has(op.parentId))
+    )
+        throw new McpToolError("Agenda content not found", "not_found");
+    if (
+        mail.pointIds.size &&
+        (op.action === "add_suggestion" ||
+            op.action === "remove_point" ||
+            (op.action === "add_point" && op.position !== undefined) ||
+            (op.action === "update_point" &&
+                (op.parentId !== undefined ||
+                    op.position !== undefined ||
+                    op.siblingIndex !== undefined)))
+    ) {
+        const detail = await getMeeting(caller.userId, meetingId);
+        if (detail.unchanged) return;
+        const affected = new Set<string>();
+        if (op.action === "add_suggestion") {
+            const parentId = detail.suggestions.find(
+                (suggestion) => suggestion.id === op.suggestionId,
+            )?.parentPointId;
+            if (parentId) affected.add(parentId);
+        }
+        if (op.action === "remove_point" || op.action === "update_point") {
+            affected.add(op.pointId);
+            if (op.action === "remove_point" || op.parentId !== undefined)
+                for (let depth = 0; depth < 3; depth++)
+                    for (const point of detail.points)
+                        if (point.parentId && affected.has(point.parentId))
+                            affected.add(point.id);
+            if (op.action === "update_point" && op.siblingIndex !== undefined) {
+                const point = detail.points.find(
+                    (point) => point.id === op.pointId,
+                );
+                const moved = moveAgendaPoint(
+                    detail.points,
+                    op.pointId,
+                    op.parentId !== undefined
+                        ? op.parentId
+                        : (point?.parentId ?? null),
+                    op.siblingIndex,
+                );
+                for (const point of moved ?? [])
+                    if (
+                        detail.points.find((before) => before.id === point.id)
+                            ?.position !== point.position
+                    )
+                        affected.add(point.id);
+            }
+        }
+        if (
+            (op.action === "add_point" || op.action === "update_point") &&
+            op.position !== undefined
+        )
+            for (const point of detail.points)
+                if (point.position >= op.position) affected.add(point.id);
+        if ([...affected].some((id) => mail.pointIds.has(id)))
+            throw new McpToolError("Agenda content not found", "not_found");
+    }
+}
 
 const update = defineTool({
     name: "update_agenda",
@@ -490,6 +583,34 @@ const update = defineTool({
                     "denied",
                 );
             const patch = patchMeetingInput.parse(input);
+            if (
+                !mayReadMail(caller) &&
+                (patch.taskSourceItemId !== undefined ||
+                    patch.noTaskSource !== undefined ||
+                    patch.calendarEventId !== undefined)
+            ) {
+                const full = await getMeeting(caller.userId, meetingId);
+                if (
+                    !full.unchanged &&
+                    ((patch.taskSourceItemId !== undefined &&
+                        patch.taskSourceItemId !== full.taskSourceItemId) ||
+                        (patch.noTaskSource !== undefined &&
+                            patch.noTaskSource !== full.noTaskSource) ||
+                        (patch.calendarEventId !== undefined &&
+                            patch.calendarEventId !== full.calendarEventId)) &&
+                    full.tasks.some(
+                        (task) =>
+                            task.agendaOrigin === "last_meeting" &&
+                            (task.evidenceItemKind === "mail" ||
+                                task.recording?.kind === "mail" ||
+                                task.noteMailSourced),
+                    )
+                )
+                    throw new McpToolError(
+                        "Agenda task not found",
+                        "not_found",
+                    );
+            }
             if (patch.taskGroupOrder !== undefined && !mayReadMail(caller)) {
                 const full = await getMeeting(caller.userId, meetingId);
                 const visible = await projectDetail(caller, full);
@@ -592,6 +713,7 @@ const edit = defineTool({
         try {
             await meetingCall(async () => {
                 for (const op of input.operations) {
+                    await requireVisibleOperation(caller, input.meetingId, op);
                     switch (op.action) {
                         case "add_point":
                             await addPoint(userId, input.meetingId, op);
@@ -686,13 +808,38 @@ const edit = defineTool({
                                     : "dismissed",
                             );
                             break;
-                        case "dismiss_suggestions":
-                            await dismissSuggestions(
-                                userId,
-                                input.meetingId,
-                                op.kind,
-                            );
+                        case "dismiss_suggestions": {
+                            if (mayReadMail(caller)) {
+                                await dismissSuggestions(
+                                    userId,
+                                    input.meetingId,
+                                    op.kind,
+                                );
+                            } else {
+                                await requireMeetingAccess(
+                                    userId,
+                                    input.meetingId,
+                                    "edit",
+                                );
+                                const detail = await detailFor(
+                                    caller,
+                                    input.meetingId,
+                                );
+                                if (!detail.unchanged)
+                                    for (const suggestion of detail.suggestions)
+                                        if (
+                                            suggestion.kind === op.kind &&
+                                            suggestion.state === "open"
+                                        )
+                                            await decideSuggestion(
+                                                userId,
+                                                input.meetingId,
+                                                suggestion.id,
+                                                "dismissed",
+                                            );
+                            }
                             break;
+                        }
                         case "remove_task":
                             await changeAgendaTask(
                                 userId,
