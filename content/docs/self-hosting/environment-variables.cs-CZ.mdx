@@ -185,10 +185,24 @@ Pouze vlastní hosting s jednotným přihlášením. Vypnuto, pokud není `AUTHZ
 | `KEYCLOAK_GROUP_USE_ID`           | —          | Id skupiny, která uděluje `use`. Všechna tři id skupin se nastavují společně a každé musí být jiné. S nimi administrátoři spravují přístup v **Nastavení → Přístupy**. |
 | `KEYCLOAK_GROUP_CURATE_ID`        | —          | Id skupiny, která uděluje `org.curate`. |
 | `KEYCLOAK_GROUP_ACCESS_MANAGE_ID` | —          | Id skupiny, která uděluje `access.manage`. |
-| `KEYCLOAK_VERIFIER_CLIENT_ID`     | —          | Servisní klient pouze pro čtení (`realm-management/view-users`), který znovu ověřuje přístup držitelů API klíčů a MCP. Nastavuje se spolu se svým tajemstvím; nesmí to být webový klient ani MCP klient. |
+| `KEYCLOAK_VERIFIER_CLIENT_ID`     | —          | Servisní klient pouze pro čtení (`realm-management/view-users`, `view-clients`), který znovu ověřuje přístup držitelů API klíčů a MCP. Nastavuje se spolu se svým tajemstvím; nesmí to být webový klient ani MCP klient. Keycloak 26.8.2+ navíc vyžaduje výchozí klientský rozsah `kc-admin-api`. |
 | `KEYCLOAK_VERIFIER_CLIENT_SECRET` | —          | Jeho tajemství. |
 | `AUTHZ_VERIFICATION_MAX_AGE`      | `1800`     | Počet sekund, po které se ověřený přístup používá, než se poskytovatel zeptá znovu (nejvýše 3600). |
 | `AUTHZ_ADMIN_MAX_AUTH_AGE`        | `28800`    | Počet sekund od posledního přihlášení administrátora u poskytovatele, během nichž smí měnit přístup. |
+
+V Keycloaku 26.8.2+ přiřaďte vestavěný klientský rozsah `kc-admin-api` jako
+**Default** ověřovacímu klientovi (`KEYCLOAK_VERIFIER_CLIENT_ID`) i webovému
+klientovi (`OIDC_CLIENT_ID`) používanému pro správu přístupů v Klepně. Dodává
+příjemce (audience) Admin API a potřebný rozsah; samotné role realm-management nestačí.
+Viz [oprávnění poskytovatele](./sso#what-the-provider-must-allow).
+
+Pokud po aktualizaci Keycloaku MCP odmítá každý token nebo záznamník vrací
+**503 `ACCESS_UNVERIFIABLE`**, hledejte v logu serveru **Admin API returned 401**
+a přiřaďte tento výchozí rozsah oběma klientům. Počkejte na vypršení tokenu
+ověřovatele v mezipaměti. Klepna webové tokeny před vypršením automaticky obnovuje,
+pokud má platný obnovovací token. Keycloak při obnově znovu vyhodnotí
+výchozí rozsahy. Správci se mohou znovu přihlásit, aby správa přístupů fungovala
+ihned, bez čekání na automatickou obnovu.
 
 <span id="learn-knowledge-from-recordings" />
 
