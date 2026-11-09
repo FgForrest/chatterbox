@@ -155,6 +155,7 @@ it.each([
     "text",
     "parentId",
     "position",
+    "siblingIndex",
     "mergeUp",
 ])("recorder PATCH refuses structural field %s", async (field) => {
     const response = await patchPoint(
@@ -165,7 +166,7 @@ it.each([
                 body: JSON.stringify({
                     version: 0,
                     [field]:
-                        field === "position"
+                        field === "position" || field === "siblingIndex"
                             ? 1
                             : field === "mergeUp"
                               ? true
@@ -207,6 +208,7 @@ it.each([
         outcomeSummaryId: "summary",
         taskSourceItemId: "source",
         noTaskSource: true,
+        taskGroupOrder: ["acme"],
         snapshotSourceItemId: "source",
         taskSource: { id: "source", title: "Previous summary title" },
         redirectTo: "/dashboard?recording=recording",

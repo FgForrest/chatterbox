@@ -11,13 +11,20 @@ const playFrom = vi.hoisted(() => vi.fn());
 vi.mock("@/components/meetings/recording-agenda", () => ({
     RecordingAgenda: ({
         children,
+        recording,
     }: {
+        recording: Recording;
         children: (parts: {
-            notice: ReactNode;
             agenda: ReactNode;
             nextMeeting: ReactNode;
         }) => ReactNode;
-    }) => children({ notice: null, agenda: null, nextMeeting: null }),
+    }) =>
+        children({
+            agenda: recording.hasAgenda ? (
+                <div data-testid="agenda-block" />
+            ) : null,
+            nextMeeting: <div data-testid="next-meeting" />,
+        }),
 }));
 vi.mock("@/components/dashboard/recording-player", () => ({
     RecordingPlayer: ({
@@ -79,7 +86,12 @@ vi.mock("@/components/dashboard/folder-knowledge-panel", () => ({
 }));
 
 vi.mock("@/components/dashboard/transcription-panel", () => ({
-    TranscriptionPanel: () => <div data-testid="transcription-panel" />,
+    TranscriptionPanel: () => (
+        <div data-testid="transcription-panel">
+            <div data-testid="transcript" />
+            <div data-testid="summary" />
+        </div>
+    ),
 }));
 
 vi.mock("@/components/recordings/erase-recording-menu", () => ({
@@ -252,6 +264,55 @@ describe("recording detail layout", () => {
                     Node.DOCUMENT_POSITION_FOLLOWING,
             ).toBeTruthy();
         }
+    });
+
+    it.each([
+        false,
+        true,
+    ])("keeps block order with attached agenda=%s", (hasAgenda) => {
+        render(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={{ ...recording, hasAgenda }}
+            />,
+        );
+        const ids = [
+            "workflow-strip",
+            ...(hasAgenda ? ["agenda-block"] : []),
+            "recording-player",
+            "transcript",
+            "summary",
+            "next-meeting",
+        ];
+        for (let index = 1; index < ids.length; index++) {
+            expect(
+                screen
+                    .getByTestId(ids[index - 1])
+                    .compareDocumentPosition(screen.getByTestId(ids[index])) &
+                    Node.DOCUMENT_POSITION_FOLLOWING,
+            ).toBeTruthy();
+        }
+    });
+    it("keeps agenda before next meeting when neither audio nor transcript remains", () => {
+        render(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={{
+                    ...recording,
+                    hasAgenda: true,
+                    hasTranscript: false,
+                    audioReaped: true,
+                }}
+            />,
+        );
+        expect(screen.queryByTestId("recording-player")).toBeNull();
+        expect(screen.queryByTestId("transcription-panel")).toBeNull();
+        expect(
+            screen
+                .getByTestId("agenda-block")
+                .compareDocumentPosition(screen.getByTestId("next-meeting")) &
+                Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy();
     });
 
     it("uses the current location and a kind-neutral empty state", () => {

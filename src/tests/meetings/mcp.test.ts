@@ -65,6 +65,7 @@ beforeEach(() => {
     service.list.mockResolvedValue([{ id: "agenda", folders: [] }]);
     service.get.mockResolvedValue({
         unchanged: false,
+        taskGroupOrder: [],
         points: [],
         suggestions: [],
         id: "agenda",
@@ -151,15 +152,24 @@ describe("meeting MCP tools", () => {
     it("does not disclose mail-origin tasks without mail:read", async () => {
         service.get.mockResolvedValue({
             unchanged: false,
+            taskGroupOrder: ["eliška veselá"],
             points: [],
             suggestions: [],
-            tasks: [{ id: "mail-task", evidenceItemKind: "mail" }],
+            tasks: [
+                {
+                    id: "mail-task",
+                    evidenceItemKind: "mail",
+                    assigneeHint: "Eliška Veselá",
+                },
+            ],
             invitees: [],
             taskGroups: [],
         });
-        expect(await run("get_meeting", { meetingId: "agenda" })).toMatchObject(
-            { meeting: { tasks: [], taskGroups: [] } },
-        );
+        const result = await run("get_meeting", { meetingId: "agenda" });
+        expect(result).toMatchObject({
+            meeting: { tasks: [], taskGroups: [], taskGroupOrder: [] },
+        });
+        expect(JSON.stringify(result)).not.toMatch(/eliška/iu);
     });
     it.each([
         "get_meeting",
@@ -167,6 +177,7 @@ describe("meeting MCP tools", () => {
     ])("%s conceals the task review without tasks:read", async (name) => {
         service.get.mockResolvedValue({
             unchanged: false,
+            taskGroupOrder: [],
             points: [],
             suggestions: [],
             tasks: [{ id: "task", text: "Private task", note: "Note" }],
@@ -201,6 +212,7 @@ describe("meeting MCP tools", () => {
     it("returns task review when tasks:read is granted", async () => {
         service.get.mockResolvedValue({
             unchanged: false,
+            taskGroupOrder: [],
             points: [],
             suggestions: [],
             tasks: [{ id: "task", evidenceItemKind: "audio" }],
@@ -252,6 +264,7 @@ it.each([
 ] as const)("filters mail-derived suggestions and accepted points with role %s", async (role) => {
     service.get.mockResolvedValue({
         unchanged: false,
+        taskGroupOrder: [],
         id: "agenda",
         tasks: [],
         invitees: [],
@@ -302,6 +315,7 @@ it.each([
 it("withholds a task with merged mail-derived notes even when its current evidence is audio", async () => {
     service.get.mockResolvedValue({
         unchanged: false,
+        taskGroupOrder: [],
         id: "agenda",
         points: [],
         suggestions: [],

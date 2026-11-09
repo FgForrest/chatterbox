@@ -177,7 +177,7 @@ it("orders the unchanged recording options by own folder, then newest, and searc
             />,
         ),
     );
-    fireEvent.click(screen.getByRole("combobox", { name: "Task source" }));
+    fireEvent.click(screen.getByRole("button", { name: "Change task source" }));
     expect(
         screen.getAllByRole("option").map((option) => option.textContent),
     ).toEqual([

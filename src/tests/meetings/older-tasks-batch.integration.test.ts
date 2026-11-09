@@ -205,7 +205,7 @@ describe.skipIf(!url)("older agenda task batches (PostgreSQL)", () => {
         ]);
         expect(await version()).toBe(1);
     });
-    it("keeps a larger replacement snapshot before older tasks in selection order", async () => {
+    it("appends a replacement snapshot after retained older tasks in selection order", async () => {
         await addAgendaTasks("owner", "agenda", ["two", "one"]);
         await database.db.insert(chatterItems).values({
             id: "replacement-source",
@@ -236,18 +236,21 @@ describe.skipIf(!url)("older agenda task batches (PostgreSQL)", () => {
         if (detail.unchanged) throw new Error("Expected meeting detail");
         expect(detail.snapshotSourceItemId).toBe("replacement-source");
         expect(detail.tasks.map((task) => task.agendaOrigin)).toEqual([
+            "older",
+            "older",
             ...snapshotIds.map(() => "last_meeting"),
-            "older",
-            "older",
         ]);
         expect(detail.tasks.map((task) => task.id)).toEqual([
-            ...snapshotIds,
             "two",
             "one",
+            ...snapshotIds,
         ]);
-        expect(detail.tasks.slice(-2).map((task) => task.position)).toEqual([
+        expect(detail.tasks.slice(0, 2).map((task) => task.position)).toEqual([
             100000, 100001,
         ]);
+        expect(detail.tasks.slice(2).map((task) => task.position)).toEqual(
+            snapshotIds.map((_, index) => 100002 + index),
+        );
     });
     it("orders equal agenda positions by task id", async () => {
         await database.db.insert(agendaTasks).values(

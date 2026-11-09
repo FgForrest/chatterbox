@@ -6,6 +6,7 @@ import {
     agendaTasks,
     chatterItems,
     meetingAgendas,
+    people,
     recordingFolderAssignments,
     recordingFolders,
     recordingTasks,
@@ -15,6 +16,8 @@ import {
     type ArchiveScope,
     archivedItemCondition,
 } from "@/lib/export/archive-scope";
+import { taskGroupOrderInput } from "@/lib/meetings/model";
+import { projectAgendaTaskGroupOrder } from "@/lib/meetings/task-groups";
 import { archivedTaskCondition } from "@/lib/tasks/archive";
 
 const id = z.string().min(1).max(255);
@@ -57,6 +60,7 @@ export const archivedMeetingSchema = z.object({
     absorbedAt: date.nullable(),
     taskSourceItemId: id.nullable(),
     noTaskSource: z.boolean().default(false),
+    taskGroupOrder: taskGroupOrderInput.default([]),
     snapshotSourceItemId: id.nullable().default(null),
     outcomeUnplanned: z.array(z.string().max(2000)).max(100),
     outcomeSummaryId: id.nullable(),
@@ -134,11 +138,19 @@ export async function collectArchivedMeetings(
                 )
                 .orderBy(asc(agendaPoints.position), asc(agendaPoints.id)),
             db
-                .select({ task: agendaTasks })
+                .select({
+                    task: agendaTasks,
+                    assigneeName: people.displayName,
+                    assigneeHint: recordingTasks.assigneeHint,
+                })
                 .from(agendaTasks)
                 .innerJoin(
                     recordingTasks,
                     eq(recordingTasks.id, agendaTasks.taskId),
+                )
+                .leftJoin(
+                    people,
+                    eq(people.id, recordingTasks.assigneePersonId),
                 )
                 .innerJoin(
                     chatterItems,
@@ -209,6 +221,14 @@ export async function collectArchivedMeetings(
         } = agenda;
         result.push({
             ...archivedAgenda,
+            taskGroupOrder: projectAgendaTaskGroupOrder(
+                decryptJsonField<string[]>(agenda.taskGroupOrder) ?? [],
+                tasks.map(({ assigneeName, assigneeHint }) => ({
+                    name:
+                        (assigneeName ? decryptText(assigneeName) : null) ??
+                        (assigneeHint ? decryptText(assigneeHint) : null),
+                })),
+            ),
             recordingItemId: includesRecording ? agenda.recordingItemId : null,
             outcomeSummaryId: includesRecording
                 ? agenda.outcomeSummaryId

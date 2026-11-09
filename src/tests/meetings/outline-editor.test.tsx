@@ -2,6 +2,7 @@
 import {
     act,
     cleanup,
+    createEvent,
     fireEvent,
     render,
     screen,
@@ -45,7 +46,7 @@ describe.each([
     "owner",
     "colleague",
 ])("point proposers viewed by %s", (userId) => {
-    it("implies the owner even when a sub-point has another author", () => {
+    it("shows proposer chips on main points when a colleague contributes a sub-point", () => {
         editor([], {
             userId,
             detail: detail({
@@ -62,7 +63,9 @@ describe.each([
                 ],
             }),
         });
-        expect(screen.queryByTitle("Jitka Dvořáková")).toBeNull();
+        expect(
+            screen.getByTitle("Changed by Jitka Dvořáková at 10:00"),
+        ).toBeTruthy();
         expect(screen.queryByTitle("Alex Novák")).toBeNull();
     });
     it("names every main point when colleagues collaborate, without naming sub-points", () => {
@@ -83,8 +86,12 @@ describe.each([
                 ],
             }),
         });
-        expect(screen.getAllByTitle("Jitka Dvořáková")).toHaveLength(1);
-        expect(screen.getAllByTitle("Alex Novák")).toHaveLength(1);
+        expect(
+            screen.getAllByTitle("Changed by Jitka Dvořáková at 10:00"),
+        ).toHaveLength(1);
+        expect(
+            screen.getAllByTitle("Changed by Alex Novák at 10:00"),
+        ).toHaveLength(1);
         const child = document.getElementById("point-Child");
         expect(child?.querySelector("[title]")).toBeNull();
     });
@@ -98,8 +105,12 @@ describe.each([
                 ],
             }),
         });
-        expect(screen.getByTitle("Jitka Dvořáková")).toBeTruthy();
-        expect(screen.getByTitle("Unknown author")).toBeTruthy();
+        expect(
+            screen.getByTitle("Changed by Jitka Dvořáková at 10:00"),
+        ).toBeTruthy();
+        expect(
+            screen.getByTitle("Changed by Unknown author at 10:00"),
+        ).toBeTruthy();
     });
 });
 describe("outline keyboard", () => {
@@ -151,7 +162,7 @@ describe("outline keyboard", () => {
         });
         expect(props.onPatch).toHaveBeenCalledWith(
             expect.objectContaining({ id: "Second" }),
-            { parentId: "Root" },
+            { parentId: "Root", siblingIndex: 0 },
         );
         unmount();
         const child = editor([
@@ -164,7 +175,7 @@ describe("outline keyboard", () => {
         });
         expect(child.props.onPatch).toHaveBeenCalledWith(
             expect.objectContaining({ id: "Child" }),
-            { parentId: null, position: 1 },
+            { parentId: null, siblingIndex: 1 },
         );
     });
     it("rejects fourth levels, cycles and moves that would deepen a subtree too far", () => {
@@ -201,7 +212,7 @@ describe("outline keyboard", () => {
         fireEvent.click(buttons[1]);
         expect(props.onPatch).toHaveBeenCalledWith(
             expect.objectContaining({ id: "Second" }),
-            { parentId: "Root" },
+            { parentId: "Root", siblingIndex: 0 },
         );
     });
     it("retains the focused draft across a polling update", () => {
@@ -365,10 +376,10 @@ it.each([
     act(() => input.focus());
     fireEvent.keyDown(input, { key: "Escape" });
     expect(document.activeElement).toBe(
-        screen.getByText(/Escape, then Tab: leave editor/),
+        document.querySelector('p[tabindex="-1"]'),
     );
     expect(fireEvent.keyDown(input, { key: "Tab" })).toBe(true);
-    expect(screen.getByText(/Escape, then Tab: leave editor/)).toBeTruthy();
+    expect(document.querySelector('p[tabindex="-1"]')).toBeTruthy();
 });
 it("does not send a note for a pending point and respects composition on saved notes", async () => {
     const { props, rerender } = editor([point("pending-new")], {
@@ -409,7 +420,7 @@ it("keeps focus at the end of the outline after Escape queues a filled draft", a
         2,
     );
     expect(document.activeElement).toBe(
-        screen.getByText(/Escape, then Tab: leave editor/),
+        document.querySelector('p[tabindex="-1"]'),
     );
 });
 
@@ -449,7 +460,7 @@ it("saves text and indentation in one versioned patch when Tab leaves an edited 
     await act(async () => fireEvent.keyDown(field, { key: "Tab" }));
     expect(props.onPatch).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ id: "Second", version: 0 }),
-        { text: "Edited second point", parentId: "Root" },
+        { text: "Edited second point", parentId: "Root", siblingIndex: 0 },
     );
 });
 
@@ -476,7 +487,7 @@ it.each([
     );
     expect(props.onPatch).toHaveBeenCalledWith(
         expect.objectContaining({ id: "Child" }),
-        { parentId: null, position: 1 },
+        { parentId: null, siblingIndex: 1 },
     );
     fireEvent.click(screen.getByRole("button", { name: "Add a point…" }));
     fireEvent.change(screen.getByLabelText("New discussion point"), {
@@ -522,4 +533,85 @@ it.each([
     expect(
         within(other).getByRole("button", { name: "Indent point" }),
     ).toHaveProperty("disabled", false);
+});
+
+it("moves a point with its children using icon actions and Alt+Arrow, saving a draft in the same patch", async () => {
+    const points = [
+        point("Root"),
+        point("Child", { parentId: "Root", position: 1 }),
+        point("Second", { position: 2 }),
+    ];
+    const { props } = editor(points, {
+        onPatch: vi.fn().mockResolvedValue(true),
+    });
+    const root = document.getElementById("point-Root");
+    if (!root) throw new Error("Missing point");
+    fireEvent.click(
+        within(root).getByRole("button", { name: "Move point down" }),
+    );
+    expect(props.onPatch).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "Root", version: 0 }),
+        { parentId: null, siblingIndex: 1 },
+    );
+    expect(screen.getByText("Point 2 of 3").getAttribute("aria-live")).toBe(
+        "polite",
+    );
+    props.onPatch.mockClear();
+    const input = within(root).getByLabelText("Discussion point");
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "Edited root" } });
+    await act(async () =>
+        fireEvent.keyDown(input, { key: "ArrowDown", altKey: true }),
+    );
+    expect(props.onPatch).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ id: "Root", version: 0 }),
+        { text: "Edited root", parentId: null, siblingIndex: 1 },
+    );
+});
+it("uses native point drag/drop and rejects a drop that would create a fourth level", () => {
+    const points = [
+        point("Root"),
+        point("Child", { parentId: "Root", position: 1 }),
+        point("Grandchild", { parentId: "Child", position: 2 }),
+        point("Second", { position: 3 }),
+    ];
+    const { props } = editor(points);
+    const dataTransfer = {
+        effectAllowed: "",
+        dropEffect: "",
+        setData: vi.fn(),
+    };
+    const root = screen.getByRole("group", { name: "Root" });
+    const second = screen.getByRole("group", { name: "Second" });
+    fireEvent.dragStart(
+        within(root).getByRole("button", { name: "Drag point" }),
+        { dataTransfer },
+    );
+    const invalid = createEvent.dragOver(second, { dataTransfer });
+    Object.defineProperties(invalid, {
+        clientX: { value: 20 },
+        clientY: { value: 1 },
+    });
+    fireEvent(second, invalid);
+    expect(second.className).not.toContain("agenda-insert");
+    fireEvent.dragEnd(within(root).getByRole("button", { name: "Drag point" }));
+    expect(props.onPatch).not.toHaveBeenCalled();
+    fireEvent.dragStart(
+        within(second).getByRole("button", { name: "Drag point" }),
+        { dataTransfer },
+    );
+    for (const type of ["dragOver", "drop"] as const) {
+        const event = createEvent[type](root, { dataTransfer });
+        Object.defineProperties(event, {
+            clientX: { value: 0 },
+            clientY: { value: 0 },
+        });
+        fireEvent(root, event);
+        if (type === "dragOver")
+            expect(root.className).toContain("agenda-insert-before");
+    }
+    expect(props.onPatch).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "Second", version: 0 }),
+        { parentId: null, siblingIndex: 0 },
+    );
 });

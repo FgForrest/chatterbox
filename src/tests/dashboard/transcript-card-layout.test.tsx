@@ -7,7 +7,6 @@ import {
     screen,
     waitFor,
 } from "@testing-library/react";
-import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
 
@@ -20,10 +19,9 @@ vi.mock("@/components/dashboard/transcribe-in-browser-button", () => ({
     TranscribeInBrowserButton: () => null,
 }));
 
-function panel(slots: { agenda?: ReactNode; nextMeeting?: ReactNode } = {}) {
+function panel() {
     return render(
         <TranscriptionPanel
-            {...slots}
             recording={{
                 id: "rec-layout",
                 filename: "Meeting",
@@ -131,32 +129,31 @@ describe("transcript card narrow controls", () => {
                 .getAttribute("href"),
         ).toContain("source=riffado");
     });
-    it("places recurring preparation and the absorbed agenda after summary/tasks and before the transcript", () => {
-        panel({
-            agenda: <div data-testid="absorbed-agenda" />,
-            nextMeeting: <div data-testid="next-meeting" />,
+    it("places the transcript before summary and task review in DOM order", () => {
+        const { container } = panel();
+        const transcript = screen.getByRole("region", {
+            name: "Transcript content",
         });
+        const summary = screen.getByTestId("summary-and-tasks");
         expect(
-            screen.getByTestId("summary-and-tasks").parentElement?.className,
-        ).toContain("order-1");
-        expect(
-            screen.getByTestId("next-meeting").parentElement?.className,
-        ).toContain("order-2");
-        expect(
-            screen.getByTestId("absorbed-agenda").parentElement?.className,
-        ).toContain("order-3");
-        expect(
-            screen
-                .getByRole("region", { name: "Transcript content" })
-                .closest(".order-4"),
+            transcript.compareDocumentPosition(summary) &
+                Node.DOCUMENT_POSITION_FOLLOWING,
         ).toBeTruthy();
+        expect(
+            container.querySelector(".order-1, .order-2, .order-3, .order-4"),
+        ).toBeNull();
     });
-    it("spaces the summary from its task review when an agenda reorders them", () => {
-        panel({ agenda: <div data-testid="absorbed-agenda" /> });
-        // space-y misses compact widget lines, which sit in display: contents spans.
+    it("spaces compact transcript and summary widgets through the shared flex layout", () => {
+        const { container } = panel();
+        expect(container.firstElementChild?.classList.contains("flex")).toBe(
+            true,
+        );
+        expect(container.firstElementChild?.classList.contains("gap-4")).toBe(
+            true,
+        );
         expect(
             screen.getByTestId("summary-and-tasks").parentElement?.className,
-        ).toBe("order-1 flex flex-col gap-4");
+        ).toBe("contents");
     });
     it("preserves the existing content layout for recordings without an agenda", () => {
         const { container } = panel();

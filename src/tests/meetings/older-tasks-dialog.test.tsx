@@ -80,6 +80,14 @@ function Harness() {
 }
 
 beforeEach(() => {
+    vi.stubGlobal(
+        "ResizeObserver",
+        class {
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        },
+    );
     server = detail({
         invitees: [{ name: invited }],
         tasks: [task("already-added", null)],

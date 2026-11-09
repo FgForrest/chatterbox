@@ -1,14 +1,31 @@
 "use client";
 
-import { IndentDecrease, IndentIncrease, Trash2 } from "lucide-react";
+import "./agenda-order.css";
+
+import {
+    ArrowDown,
+    ArrowUp,
+    GripVertical,
+    IndentDecrease,
+    IndentIncrease,
+    Trash2,
+} from "lucide-react";
 import { useExtracted, useFormatter } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { ActionTooltip } from "@/components/ui/tooltip";
+import { hasAgendaContributors } from "@/lib/meetings/attribution";
 import type { TreePoint } from "@/lib/meetings/model";
+import { moveAgendaPoint, pointSiblings } from "@/lib/meetings/point-order";
 import { getPasswordManagerAttributes } from "@/lib/password-manager";
 import { cn } from "@/lib/utils";
-import { AgendaAttribution } from "./agenda-attribution";
-import { outlineMove, outlineRows } from "./outline";
+import {
+    outlineDrop,
+    outlineMove,
+    outlineReorder,
+    outlineRows,
+} from "./outline";
+import { measureCaretLines, pointArrowDirection } from "./point-navigation";
 import type { MeetingDetail, MeetingPoint } from "./types";
 import { useAgendaText } from "./use-agenda-text";
 
@@ -16,6 +33,7 @@ type PointPatch = {
     text?: string;
     parentId?: string | null;
     position?: number;
+    siblingIndex?: number;
     discussed?: boolean;
     note?: string | null;
 };
@@ -30,6 +48,7 @@ function PointField({
     onEmpty,
     pending,
     onRelease,
+    onNavigate,
     collaborative = false,
     bindings,
 }: {
@@ -39,11 +58,13 @@ function PointField({
         text?: string;
         version: number;
         outdent?: boolean;
+        move?: -1 | 1;
     }) => Promise<boolean> | undefined;
     onEnter: () => void;
     onEmpty: () => void;
     pending: boolean;
     onRelease: () => void;
+    onNavigate: (direction: -1 | 1, input: HTMLTextAreaElement) => boolean;
     collaborative?: boolean;
     bindings: PointBindings;
 }) {
@@ -94,26 +115,27 @@ function PointField({
     useEffect(() => {
         if (!focused.current && !dirty.current) setDraft(point.text);
     }, [point.text]);
-    const save = (outdent?: boolean) => {
+    const save = (outdent?: boolean, move?: -1 | 1) => {
         if (textSync.enabled) {
             void textSync.flush().then((saved) => {
-                if (saved && outdent !== undefined)
+                if (saved && (outdent !== undefined || move !== undefined))
                     onSave({
                         version: Math.max(
                             point.version,
                             textSync.materializedVersion() ?? 0,
                         ),
                         outdent,
+                        move,
                     });
             });
             return;
         }
         if (saving.current) return;
         const text = draft.trim();
-        if (!text && outdent === undefined) return;
+        if (!text && outdent === undefined && move === undefined) return;
         const changed =
             Boolean(text) && dirty.current && text !== editing.current.text;
-        if (!changed && outdent === undefined) {
+        if (!changed && outdent === undefined && move === undefined) {
             dirty.current = false;
             if (!focused.current) setDraft(point.text);
             return;
@@ -122,6 +144,7 @@ function PointField({
             version: editing.current.version,
             ...(changed ? { text } : {}),
             ...(outdent !== undefined ? { outdent } : {}),
+            ...(move !== undefined ? { move } : {}),
         });
         if (!operation) return;
         saving.current = operation
@@ -142,7 +165,12 @@ function PointField({
     };
     if (!editable)
         return (
-            <span className="min-w-0 flex-1 border border-transparent px-1 py-1 leading-6 whitespace-pre-wrap">
+            <span
+                className={cn(
+                    "min-w-0 flex-1 border border-transparent px-1 py-1 leading-6 whitespace-pre-wrap",
+                    point.discussedAt && "text-muted-foreground line-through",
+                )}
+            >
                 {point.text}
             </span>
         );
@@ -151,11 +179,15 @@ function PointField({
             <textarea
                 {...getPasswordManagerAttributes()}
                 ref={input}
+                data-point-editor
                 rows={1}
                 aria-label={i18n("Discussion point")}
                 maxLength={2000}
                 value={draft}
-                className="min-w-0 flex-1 resize-none overflow-hidden rounded border border-transparent bg-transparent px-1 py-1 leading-6 focus:border-input focus:outline-none focus:ring-1 focus:ring-ring"
+                className={cn(
+                    "min-w-0 flex-1 resize-none overflow-hidden rounded border border-transparent bg-transparent px-1 py-1 leading-6 focus:border-input focus:outline-none focus:ring-1 focus:ring-ring",
+                    point.discussedAt && "text-muted-foreground line-through",
+                )}
                 onChange={(event) => {
                     dirty.current = true;
                     setDraft(event.target.value.replace(/[\r\n]/gu, " "));
@@ -173,6 +205,35 @@ function PointField({
                 }}
                 onKeyDown={(event) => {
                     if (event.nativeEvent.isComposing) return;
+                    if (
+                        event.altKey &&
+                        ["ArrowUp", "ArrowDown"].includes(event.key)
+                    ) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (!pending)
+                            save(undefined, event.key === "ArrowUp" ? -1 : 1);
+                        return;
+                    }
+                    if (["ArrowUp", "ArrowDown"].includes(event.key)) {
+                        const direction = pointArrowDirection(
+                            {
+                                ...event,
+                                isComposing: event.nativeEvent.isComposing,
+                                selectionStart:
+                                    event.currentTarget.selectionStart,
+                                selectionEnd: event.currentTarget.selectionEnd,
+                            },
+                            measureCaretLines(event.currentTarget),
+                        );
+                        if (
+                            direction &&
+                            onNavigate(direction, event.currentTarget)
+                        ) {
+                            event.preventDefault();
+                            return;
+                        }
+                    }
                     if (event.key === "Escape") {
                         event.preventDefault();
                         released.current = true;
@@ -309,6 +370,7 @@ export function OutlineEditor({
     readOnly = false,
     live = false,
     pendingPaths = [],
+    showProposers = hasAgendaContributors(detail),
     onPatch,
     onRemove,
     onAdd,
@@ -318,6 +380,7 @@ export function OutlineEditor({
     readOnly?: boolean;
     live?: boolean;
     pendingPaths?: readonly string[];
+    showProposers?: boolean;
     onPatch: (
         point: MeetingPoint,
         patch: PointPatch,
@@ -331,6 +394,7 @@ export function OutlineEditor({
 }) {
     const i18n = useExtracted();
     const format = useFormatter();
+    const editor = useRef<HTMLDivElement>(null);
     const bindings = useRef<PointBindings>(new Map());
     const flushPoint = async (point: MeetingPoint) => {
         const fields = ["text", "note"]
@@ -386,9 +450,38 @@ export function OutlineEditor({
         if (insertion && !draftReleased.current) newInput.current?.focus();
     }, [insertion]);
     const rows = outlineRows(detail.points);
-    const showProposers = detail.points.some(
-        (point) => !point.parentId && point.authorUserId !== detail.userId,
-    );
+    const [announcement, announce] = useState("");
+    const dragged = useRef<string | null>(null);
+    const [lifted, setLifted] = useState<string | null>(null);
+    const [drop, setDrop] = useState<{
+        id: string;
+        after: boolean;
+        depth: number;
+    } | null>(null);
+    const movePoint = (point: MeetingPoint, move: PointPatch | null) => {
+        if (!move) return;
+        const next =
+            move.siblingIndex !== undefined
+                ? (moveAgendaPoint(
+                      detail.points,
+                      point.id,
+                      move.parentId !== undefined
+                          ? move.parentId
+                          : point.parentId,
+                      move.siblingIndex,
+                  ) ?? detail.points)
+                : detail.points;
+        announce(
+            i18n("Point {position, number} of {count, number}", {
+                position:
+                    outlineRows(next).findIndex(
+                        (row) => row.point.id === point.id,
+                    ) + 1,
+                count: next.length,
+            }),
+        );
+        return patchPoint(point, move);
+    };
     const displayRows = outlineRows<TreePoint>([
         ...detail.points,
         ...(insertion ? [{ id: "draft", ...insertion }] : []),
@@ -416,6 +509,27 @@ export function OutlineEditor({
         });
         newDraft.current = "";
         setNewText("");
+    };
+    const focusPoint = (input: HTMLTextAreaElement, direction: -1 | 1) => {
+        input.focus();
+        const caret = direction === -1 ? input.value.length : 0;
+        input.setSelectionRange(caret, caret);
+    };
+    const navigatePoint = (direction: -1 | 1, input: HTMLTextAreaElement) => {
+        const fields = [
+            ...(editor.current?.querySelectorAll<HTMLTextAreaElement>(
+                "textarea[data-point-editor]",
+            ) ?? []),
+        ];
+        const target = fields[fields.indexOf(input) + direction];
+        if (target) focusPoint(target, direction);
+        else if (direction === 1 && canAdd) {
+            if (newInput.current) {
+                newInput.current.focus();
+                newInput.current.setSelectionRange(0, 0);
+            } else insert();
+        } else return false;
+        return true;
     };
     const submit = () => {
         if (!newDraft.current.trim() || !insertion) return;
@@ -479,6 +593,29 @@ export function OutlineEditor({
                 }}
                 onKeyDown={(event) => {
                     if (event.nativeEvent.isComposing) return;
+                    if (
+                        pointArrowDirection(
+                            {
+                                ...event,
+                                isComposing: event.nativeEvent.isComposing,
+                                selectionStart:
+                                    event.currentTarget.selectionStart,
+                                selectionEnd: event.currentTarget.selectionEnd,
+                            },
+                            { firstTop: 0, caretTop: 0, lastTop: 0 },
+                        ) === -1
+                    ) {
+                        const fields =
+                            editor.current?.querySelectorAll<HTMLTextAreaElement>(
+                                "textarea[data-point-editor]",
+                            );
+                        const last = fields?.[fields.length - 1];
+                        if (last) {
+                            event.preventDefault();
+                            focusPoint(last, -1);
+                        }
+                        return;
+                    }
                     if (event.key === "Enter") {
                         event.preventDefault();
                         void submit();
@@ -501,7 +638,25 @@ export function OutlineEditor({
                             temporary.id,
                             event.shiftKey,
                         );
-                        if (move) setInsertion({ ...insertion, ...move });
+                        if (move) {
+                            const siblings = pointSiblings(
+                                detail.points,
+                                move.parentId,
+                            );
+                            setInsertion({
+                                parentId: move.parentId,
+                                position: Math.min(
+                                    100000,
+                                    siblings[move.siblingIndex]?.position ??
+                                        Math.max(
+                                            -1,
+                                            ...siblings.map(
+                                                (point) => point.position,
+                                            ),
+                                        ) + 1,
+                                ),
+                            });
+                        }
                     }
                 }}
             />
@@ -516,7 +671,10 @@ export function OutlineEditor({
         </div>
     );
     return (
-        <div className="space-y-1 text-sm">
+        <div ref={editor} className="space-y-1 text-sm">
+            <span className="sr-only" aria-live="polite">
+                {announcement}
+            </span>
             {displayRows.map(({ point: treePoint, depth }, index) => {
                 if (treePoint.id === "draft")
                     return <div key="draft">{draftRow}</div>;
@@ -535,6 +693,8 @@ export function OutlineEditor({
                 const proposer = author?.name ?? i18n("Unknown author");
                 const indent = outlineMove(detail.points, point.id, false);
                 const outdent = outlineMove(detail.points, point.id, true);
+                const up = outlineReorder(detail.points, point.id, -1);
+                const down = outlineReorder(detail.points, point.id, 1);
                 const after =
                     rows.findIndex((row) => row.point.id === point.id) + 1;
                 const following = rows.slice(after);
@@ -560,15 +720,174 @@ export function OutlineEditor({
                     descendants.every(
                         (row) => row.point.authorUserId === userId,
                     );
+                const dragHandle = (
+                    <ActionTooltip label={i18n("Drag")}>
+                        <button
+                            type="button"
+                            draggable={!subtreePending}
+                            aria-label={i18n("Drag point")}
+                            className="cursor-grab text-muted-foreground"
+                            onDragStart={(event) => {
+                                const row =
+                                    event.currentTarget.closest("fieldset");
+                                if (row)
+                                    event.dataTransfer.setDragImage?.(
+                                        row,
+                                        20,
+                                        20,
+                                    );
+                                event.dataTransfer.effectAllowed = "move";
+                                event.dataTransfer.setData(
+                                    "application/x-chatterbox-agenda-point",
+                                    point.id,
+                                );
+                                dragged.current = point.id;
+                                setLifted(point.id);
+                            }}
+                            onDragEnd={() => {
+                                dragged.current = null;
+                                setLifted(null);
+                                setDrop(null);
+                            }}
+                        >
+                            <span
+                                className="agenda-point-bullet"
+                                aria-hidden="true"
+                            >
+                                •
+                            </span>
+                            <GripVertical className="agenda-point-grip size-4" />
+                        </button>
+                    </ActionTooltip>
+                );
                 return (
                     <div key={point.id} id={`point-${point.id}`}>
-                        <div
-                            style={{ paddingLeft: `${depth * 20}px` }}
-                            className="group rounded-md"
+                        <fieldset
+                            aria-label={point.text}
+                            tabIndex={editable ? 0 : undefined}
+                            style={
+                                {
+                                    paddingLeft: `${depth * 20}px`,
+                                    "--agenda-insert-offset": `${(drop?.id === point.id ? drop.depth : depth) * 20}px`,
+                                } as CSSProperties
+                            }
+                            className={cn(
+                                "agenda-point-row group relative min-w-0 rounded-md border-0 p-0",
+                                lifted === point.id &&
+                                    "border border-primary shadow-lg",
+                                drop?.id === point.id &&
+                                    (drop.after
+                                        ? "agenda-insert-after"
+                                        : "agenda-insert-before"),
+                            )}
+                            onKeyDown={(event) => {
+                                if (
+                                    event.nativeEvent.isComposing ||
+                                    !editable ||
+                                    subtreePending ||
+                                    !event.altKey ||
+                                    !["ArrowUp", "ArrowDown"].includes(
+                                        event.key,
+                                    )
+                                )
+                                    return;
+                                event.preventDefault();
+                                event.stopPropagation();
+                                movePoint(
+                                    point,
+                                    event.key === "ArrowUp" ? up : down,
+                                );
+                            }}
+                            onDragOver={(event) => {
+                                const source = detail.points.find(
+                                    (point) => point.id === dragged.current,
+                                );
+                                if (!source || subtreePending || !canAdd)
+                                    return;
+                                const rect =
+                                    event.currentTarget.getBoundingClientRect();
+                                const after =
+                                    event.clientY > rect.top + rect.height / 2;
+                                const depth = Math.max(
+                                    0,
+                                    Math.round(
+                                        (event.clientX - rect.left) / 20,
+                                    ),
+                                );
+                                const move = outlineDrop(
+                                    detail.points,
+                                    source.id,
+                                    point.id,
+                                    after,
+                                    depth,
+                                );
+                                if (!move) {
+                                    setDrop(null);
+                                    return;
+                                }
+                                event.preventDefault();
+                                event.dataTransfer.dropEffect = "move";
+                                setDrop({
+                                    id: point.id,
+                                    after,
+                                    depth: move.parentId
+                                        ? (rows.find(
+                                              (row) =>
+                                                  row.point.id ===
+                                                  move.parentId,
+                                          )?.depth ?? 0) + 1
+                                        : 0,
+                                });
+                            }}
+                            onDragLeave={(event) => {
+                                if (
+                                    !(event.relatedTarget instanceof Node) ||
+                                    !event.currentTarget.contains(
+                                        event.relatedTarget,
+                                    )
+                                )
+                                    setDrop(null);
+                            }}
+                            onDrop={(event) => {
+                                const source = detail.points.find(
+                                    (point) => point.id === dragged.current,
+                                );
+                                if (!source || !canAdd || subtreePending)
+                                    return;
+                                const rect =
+                                    event.currentTarget.getBoundingClientRect();
+                                const move = outlineDrop(
+                                    detail.points,
+                                    source.id,
+                                    point.id,
+                                    event.clientY > rect.top + rect.height / 2,
+                                    Math.max(
+                                        0,
+                                        Math.round(
+                                            (event.clientX - rect.left) / 20,
+                                        ),
+                                    ),
+                                );
+                                if (move) {
+                                    event.preventDefault();
+                                    movePoint(source, move);
+                                }
+                                dragged.current = null;
+                                setLifted(null);
+                                setDrop(null);
+                            }}
                         >
                             <div className="flex items-start gap-2">
-                                <span className="flex h-[34px] shrink-0 items-center">
-                                    {live || readOnly ? (
+                                <span className="flex h-[34px] shrink-0 items-start">
+                                    {editable && (
+                                        <span className="mr-1">
+                                            {dragHandle}
+                                        </span>
+                                    )}
+                                    {!editable && !live && !readOnly && (
+                                        <span aria-hidden="true">•</span>
+                                    )}
+                                    {(live || readOnly) && (
                                         <input
                                             type="checkbox"
                                             aria-label={i18n(
@@ -589,10 +908,8 @@ export function OutlineEditor({
                                                         event.target.checked,
                                                 })
                                             }
-                                            className="size-4 shrink-0 accent-primary"
+                                            className="mt-1 size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
                                         />
-                                    ) : (
-                                        <span aria-hidden="true">•</span>
                                     )}
                                 </span>
                                 <PointField
@@ -603,11 +920,15 @@ export function OutlineEditor({
                                     pending={subtreePending}
                                     onSave={(edit) => {
                                         const move =
-                                            edit.outdent === undefined
-                                                ? null
-                                                : edit.outdent
-                                                  ? outdent
-                                                  : indent;
+                                            edit.move !== undefined
+                                                ? edit.move === -1
+                                                    ? up
+                                                    : down
+                                                : edit.outdent === undefined
+                                                  ? null
+                                                  : edit.outdent
+                                                    ? outdent
+                                                    : indent;
                                         const patch = {
                                             ...(edit.text !== undefined
                                                 ? { text: edit.text }
@@ -615,11 +936,16 @@ export function OutlineEditor({
                                             ...(move ?? {}),
                                         };
                                         if (!Object.keys(patch).length) return;
-                                        return patchPoint(
+                                        return (
+                                            edit.move !== undefined
+                                                ? movePoint
+                                                : patchPoint
+                                        )(
                                             { ...point, version: edit.version },
                                             patch,
                                         );
                                     }}
+                                    onNavigate={navigatePoint}
                                     onEnter={() => insert(point)}
                                     onRelease={() => exit.current?.focus()}
                                     onEmpty={() => {
@@ -645,7 +971,26 @@ export function OutlineEditor({
                                 />
                                 {showProposers && !point.parentId && (
                                     <span
-                                        title={proposer}
+                                        title={i18n(
+                                            "Changed by {name} at {time}",
+                                            {
+                                                name:
+                                                    detail.authors.find(
+                                                        (author) =>
+                                                            author.id ===
+                                                            (point.updatedByUserId ??
+                                                                point.authorUserId),
+                                                    )?.name ??
+                                                    i18n("Unknown author"),
+                                                time: format.dateTime(
+                                                    new Date(point.updatedAt),
+                                                    {
+                                                        hour: "2-digit",
+                                                        minute: "2-digit",
+                                                    },
+                                                ),
+                                            },
+                                        )}
                                         className="mt-[5px] h-6 min-w-0 max-w-1/4 truncate rounded-full bg-muted px-2 text-[10px] leading-6 text-muted-foreground"
                                     >
                                         {proposer}
@@ -666,53 +1011,107 @@ export function OutlineEditor({
                                     </time>
                                 )}
                                 {editable && (
-                                    <div className="flex h-[34px] shrink-0 items-center gap-0.5">
-                                        <Button
-                                            variant="ghost"
-                                            size="icon-sm"
-                                            aria-label={i18n("Indent point")}
-                                            disabled={!indent || subtreePending}
-                                            onClick={() => {
-                                                if (indent)
-                                                    void patchPoint(
-                                                        point,
-                                                        indent,
-                                                    );
-                                            }}
+                                    <div className="agenda-actions flex h-[34px] shrink-0 items-center gap-0.5">
+                                        <ActionTooltip
+                                            label={i18n("Move point up")}
                                         >
-                                            <IndentIncrease className="size-3.5" />
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon-sm"
-                                            aria-label={i18n("Outdent point")}
-                                            disabled={
-                                                !outdent || subtreePending
-                                            }
-                                            onClick={() => {
-                                                if (outdent)
-                                                    void patchPoint(
-                                                        point,
-                                                        outdent,
-                                                    );
-                                            }}
-                                        >
-                                            <IndentDecrease className="size-3.5" />
-                                        </Button>
-                                        {canRemove && (
                                             <Button
                                                 variant="ghost"
                                                 size="icon-sm"
                                                 aria-label={i18n(
-                                                    "Remove point",
+                                                    "Move point up",
                                                 )}
-                                                disabled={subtreePending}
+                                                disabled={!up || subtreePending}
                                                 onClick={() =>
-                                                    void removePoint(point)
+                                                    movePoint(point, up)
                                                 }
                                             >
-                                                <Trash2 className="size-3.5" />
+                                                <ArrowUp className="size-3.5" />
                                             </Button>
+                                        </ActionTooltip>
+                                        <ActionTooltip
+                                            label={i18n("Move point down")}
+                                        >
+                                            <Button
+                                                variant="ghost"
+                                                size="icon-sm"
+                                                aria-label={i18n(
+                                                    "Move point down",
+                                                )}
+                                                disabled={
+                                                    !down || subtreePending
+                                                }
+                                                onClick={() =>
+                                                    movePoint(point, down)
+                                                }
+                                            >
+                                                <ArrowDown className="size-3.5" />
+                                            </Button>
+                                        </ActionTooltip>
+                                        <ActionTooltip
+                                            label={i18n("Indent point")}
+                                        >
+                                            <Button
+                                                variant="ghost"
+                                                size="icon-sm"
+                                                aria-label={i18n(
+                                                    "Indent point",
+                                                )}
+                                                disabled={
+                                                    !indent || subtreePending
+                                                }
+                                                onClick={() => {
+                                                    if (indent)
+                                                        void patchPoint(
+                                                            point,
+                                                            indent,
+                                                        );
+                                                }}
+                                            >
+                                                <IndentIncrease className="size-3.5" />
+                                            </Button>
+                                        </ActionTooltip>
+                                        <ActionTooltip
+                                            label={i18n("Outdent point")}
+                                        >
+                                            <Button
+                                                variant="ghost"
+                                                size="icon-sm"
+                                                aria-label={i18n(
+                                                    "Outdent point",
+                                                )}
+                                                disabled={
+                                                    !outdent || subtreePending
+                                                }
+                                                onClick={() => {
+                                                    if (outdent)
+                                                        void patchPoint(
+                                                            point,
+                                                            outdent,
+                                                        );
+                                                }}
+                                            >
+                                                <IndentDecrease className="size-3.5" />
+                                            </Button>
+                                        </ActionTooltip>
+                                        {canRemove && (
+                                            <ActionTooltip
+                                                label={i18n("Remove point")}
+                                            >
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon-sm"
+                                                    aria-label={i18n(
+                                                        "Remove point",
+                                                    )}
+                                                    disabled={subtreePending}
+                                                    onClick={() =>
+                                                        void removePoint(point)
+                                                    }
+                                                >
+                                                    <Trash2 className="size-3.5" />
+                                                </Button>
+                                            </ActionTooltip>
                                         )}
                                     </div>
                                 )}
@@ -722,17 +1121,6 @@ export function OutlineEditor({
                                     {i18n("Added during the meeting")}
                                 </span>
                             )}
-                            <AgendaAttribution
-                                name={
-                                    detail.authors.find(
-                                        (author) =>
-                                            author.id ===
-                                            (point.updatedByUserId ??
-                                                point.authorUserId),
-                                    )?.name
-                                }
-                                at={point.updatedAt}
-                            />
                             {(live || point.note) && (
                                 <PointNote
                                     bindings={bindings.current}
@@ -747,7 +1135,7 @@ export function OutlineEditor({
                                     }
                                 />
                             )}
-                        </div>
+                        </fieldset>
                     </div>
                 );
             })}
@@ -808,12 +1196,8 @@ export function OutlineEditor({
                     <p
                         ref={exit}
                         tabIndex={-1}
-                        className="pt-2 text-xs text-muted-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    >
-                        {i18n(
-                            "Enter: new point · Tab: indent · Shift+Tab: outdent · Escape, then Tab: leave editor · up to 3 levels",
-                        )}
-                    </p>
+                        className="sr-only focus:outline-none"
+                    ></p>
                 </>
             )}
         </div>

@@ -1,15 +1,12 @@
 "use client";
 
 import {
-    ChevronDown,
     History,
     ListX,
-    Loader2,
     MessageSquareText,
     PencilLine,
     Play,
     Square,
-    UserPlus,
     WandSparkles,
     X,
 } from "lucide-react";
@@ -27,22 +24,24 @@ import {
     useState,
 } from "react";
 import { ItemHeader } from "@/components/items/item-header";
+import { ProvenanceLine } from "@/components/pipeline/provenance-line";
 import {
-    PersonShareDialog,
-    ReceivedItemBanner,
-    usePersonSharing,
-} from "@/components/sharing/person-sharing";
+    WorkflowWidget,
+    WorkflowWidgetLine,
+    type WorkflowWidgetProps,
+} from "@/components/pipeline/workflow-widget";
+import { ReceivedItemBanner } from "@/components/sharing/person-sharing";
 import { announceTasksChanged } from "@/components/tasks/task-api";
 import { TaskRow } from "@/components/tasks/task-row";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { EditorActions } from "@/components/ui/editor-actions";
-import { HeadingCount } from "@/components/ui/heading-count";
 import { InlineEditorTrigger } from "@/components/ui/inline-editor-trigger";
-import { SearchCombobox } from "@/components/ui/search-combobox";
 import { Textarea } from "@/components/ui/textarea";
 import { ActionTooltip } from "@/components/ui/tooltip";
+import { hasAgendaContributors } from "@/lib/meetings/attribution";
 import { inviteeNames } from "@/lib/meetings/invitee-names";
+import { moveAgendaPoint } from "@/lib/meetings/point-order";
 import { groupAgendaTasks } from "@/lib/meetings/task-groups";
 import type { TaskChange, TaskView } from "@/lib/tasks/tasks";
 import { cn } from "@/lib/utils";
@@ -51,12 +50,16 @@ import type { Recording } from "@/types/recording";
 import { AgendaAttribution } from "./agenda-attribution";
 import { AgendaCalendarExport, AgendaExport } from "./agenda-export";
 import { AgendaFolderTags } from "./agenda-folder-tags";
+import { AgendaShortcuts } from "./agenda-shortcuts";
+import { AgendaTaskGroups } from "./agenda-task-groups";
+import { AgendaTaskSource } from "./agenda-task-source";
 import { AttachRecordingDialog } from "./attach-recording-dialog";
 import { MeetingSettings } from "./meeting-settings";
 import { OlderTasksDialog } from "./older-tasks-dialog";
 import { OutlineEditor, type PointPatch } from "./outline-editor";
 import type { MeetingDetail, MeetingPoint, MeetingTask } from "./types";
 import { useAgenda } from "./use-agenda";
+import { useAgendaCollapse } from "./use-agenda-collapse";
 import { useAgendaText } from "./use-agenda-text";
 
 export type AgendaVariant = "meeting" | "live" | "recording";
@@ -110,11 +113,10 @@ export function AgendaBody({
         userId,
     });
     const { detail, mutate } = agenda;
-    const [collapsed, setCollapsed] = useState(variant === "recording");
+    const [tasksCollapsed, toggleTasks] = useAgendaCollapse(id, "tasks");
+    const [pointsCollapsed, togglePoints] = useAgendaCollapse(id, "points");
     const [olderOpen, setOlderOpen] = useState(false);
     const [attachOpen, setAttachOpen] = useState(false);
-    const [shareOpen, setShareOpen] = useState(false);
-    const personSharing = usePersonSharing();
     const [now, setNow] = useState(Date.now());
     const suggestionsReasonId = useId();
     const sourceRecordings = useMemo(() => {
@@ -172,6 +174,7 @@ export function AgendaBody({
             </Card>
         );
     const canEdit = detail.permissions.edit && !readOnly;
+    const showAttribution = hasAgendaContributors(detail);
     const suggestionsErrorCode =
         "errorCode" in detail.aiSuggestions
             ? detail.aiSuggestions.errorCode
@@ -203,6 +206,7 @@ export function AgendaBody({
     const groups = groupAgendaTasks(
         detail.tasks.filter((task) => !task.removedAt),
         detail.invitees,
+        detail.taskGroupOrder,
     );
     const emptyInvitees = inviteeNames([
         ...groups
@@ -248,7 +252,17 @@ export function AgendaBody({
             { ...patch, version: point.version },
             (value) => ({
                 ...value,
-                points: value.points.map((entry) =>
+                points: (patch.siblingIndex !== undefined
+                    ? (moveAgendaPoint(
+                          value.points,
+                          point.id,
+                          patch.parentId !== undefined
+                              ? patch.parentId
+                              : point.parentId,
+                          patch.siblingIndex,
+                      ) ?? value.points)
+                    : value.points
+                ).map((entry) =>
                     entry.id === point.id
                         ? {
                               ...entry,
@@ -262,7 +276,16 @@ export function AgendaBody({
                                   : {}),
                               version: entry.version + 1,
                           }
-                        : entry,
+                        : patch.siblingIndex !== undefined &&
+                            entry.position !==
+                                value.points.find(
+                                    (shown) => shown.id === entry.id,
+                                )?.position
+                          ? { ...entry, version: entry.version + 1 }
+                          : patch.position !== undefined &&
+                              entry.position >= patch.position
+                            ? { ...entry, position: entry.position + 1 }
+                            : entry,
                 ),
             }),
         );
@@ -331,208 +354,152 @@ export function AgendaBody({
                   }
                 : { liveEndedAt: new Date().toISOString() }),
         })).then(() => onChanged?.());
+    const taskCount = i18n("{count, plural, one {# task} other {# tasks}}", {
+        count: tasks.length,
+    });
+    const doneCount = i18n("{count, number} done", {
+        count: tasks.filter((task) => task.status === "done").length,
+    });
+    const pointCount =
+        live || readOnly
+            ? i18n("{discussed, number} of {total, number} discussed", {
+                  discussed,
+                  total: topLevelPoints.length,
+              })
+            : i18n("{count, plural, one {# point} other {# points}}", {
+                  count: topLevelPoints.length,
+              });
     const taskCard = (
-        <Card className={cn(live && "order-2 sm:order-1")}>
-            <CardHeader>
-                <div className="flex flex-wrap items-center gap-2">
-                    <CardTitle>{i18n("1 · Task review")}</CardTitle>
-                    <HeadingCount>
-                        {i18n(
-                            "{count, plural, one {# task} other {# tasks}} · {done, number} done",
-                            {
-                                count: tasks.length,
-                                done: tasks.filter(
-                                    (task) => task.status === "done",
-                                ).length,
-                            },
-                        )}
-                    </HeadingCount>
-                    {changedCount > 0 && (
-                        <HeadingCount>
-                            {i18n(
-                                "{count, number} changed during the meeting",
-                                { count: changedCount },
-                            )}
-                        </HeadingCount>
-                    )}
-                </div>
-                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    {detail.noTaskSource ? (
-                        <span>{i18n("No tasks from other meetings")}</span>
-                    ) : detail.taskSource ? (
-                        <Link
-                            className="underline"
-                            href={`/dashboard?recording=${encodeURIComponent(detail.taskSource.id)}`}
-                        >
-                            {i18n("From the previous meeting: {title}", {
-                                title: detail.taskSource.title,
-                            })}
-                        </Link>
-                    ) : (
-                        <span>{i18n("No previous meeting with tasks")}</span>
-                    )}
-                    {detail.permissions.manage && !readOnly && (
-                        <div className="flex items-center gap-2">
-                            {i18n("Task source")}
-                            <SearchCombobox
-                                aria-label={i18n("Task source")}
-                                value={
-                                    detail.noTaskSource
-                                        ? ":none"
-                                        : (detail.taskSourceItemId ?? "")
-                                }
-                                placeholder={detail.taskSource?.title}
-                                disabled={busy}
-                                options={[
-                                    {
-                                        value: "",
-                                        label: i18n("Automatic"),
-                                        alwaysVisible: true,
-                                    },
-                                    {
-                                        value: ":none",
-                                        label: i18n("No source"),
-                                        alwaysVisible: true,
-                                    },
-                                    ...sourceRecordings.map((recording) => ({
-                                        value: recording.id,
-                                        label: recording.filename,
-                                        description: format.dateTime(
-                                            new Date(recording.startTime),
-                                            {
-                                                dateStyle: "medium",
-                                                timeStyle: "short",
-                                            },
+        <div className={cn(live && "order-2 sm:order-1")}>
+            <AgendaSection
+                recording={variant === "recording"}
+                id={`agenda-${id}-tasks`}
+                frame="inline"
+                tone="quiet"
+                title={i18n("1 · Task review")}
+                collapsed={tasksCollapsed}
+                onCollapse={toggleTasks}
+                collapseLabel={i18n("Collapse task review")}
+                expandLabel={i18n("Expand task review")}
+                inlineLine={
+                    tasksCollapsed ? (
+                        <WorkflowWidgetLine
+                            title={i18n("1 · Task review")}
+                            facts={`${taskCount} · ${doneCount} · ${detail.noTaskSource ? i18n("No tasks from other meetings") : detail.taskSource ? i18n("from {meeting}", { meeting: detail.taskSource.title }) : i18n("No previous meeting with tasks")}`}
+                            onExpand={toggleTasks}
+                            expandLabel={i18n("Expand task review")}
+                        />
+                    ) : undefined
+                }
+                headerAction={
+                    canEdit &&
+                    !live && (
+                        <OlderTasksDialog
+                            detail={detail}
+                            open={olderOpen}
+                            onOpenChange={setOlderOpen}
+                            mutate={mutate}
+                        />
+                    )
+                }
+                footer={{
+                    actions: null,
+                    status: (
+                        <ProvenanceLine
+                            items={[
+                                {
+                                    key: "source",
+                                    content: (
+                                        <AgendaTaskSource
+                                            detail={detail}
+                                            recordings={sourceRecordings}
+                                            canManage={
+                                                detail.permissions.manage &&
+                                                !readOnly
+                                            }
+                                            busy={busy}
+                                            mutate={mutate}
+                                        />
+                                    ),
+                                },
+                                { key: "count", content: taskCount },
+                                { key: "done", content: doneCount },
+                                {
+                                    key: "changed",
+                                    content:
+                                        (live || changedCount > 0) &&
+                                        i18n(
+                                            "{count, number} changed during the meeting",
+                                            { count: changedCount },
                                         ),
-                                    })),
-                                ]}
-                                onValueChange={(sourceId) => {
-                                    const noTaskSource = sourceId === ":none";
-                                    const taskSourceItemId = noTaskSource
-                                        ? null
-                                        : sourceId || null;
-                                    void mutate(
-                                        "",
-                                        "PATCH",
-                                        {
-                                            taskSourceItemId,
-                                            noTaskSource,
-                                            previous: {
-                                                noTaskSource:
-                                                    detail.noTaskSource,
-                                                taskSourceItemId:
-                                                    detail.taskSourceItemId,
-                                            },
-                                        },
-                                        (value) => ({
-                                            ...value,
-                                            taskSourceItemId,
-                                            noTaskSource,
-                                            taskSource: null,
-                                            snapshotSourceItemId: null,
-                                            tasks: value.tasks.filter(
-                                                (task) =>
-                                                    task.agendaOrigin ===
-                                                    "older",
-                                            ),
-                                        }),
-                                    );
-                                }}
-                            />
-                        </div>
+                                },
+                            ]}
+                        />
+                    ),
+                }}
+                bodyClassName="space-y-4"
+            >
+                <AgendaTaskGroups
+                    detail={detail}
+                    canEdit={canEdit}
+                    mutate={mutate}
+                    renderTask={(task, controls) => (
+                        <AgendaTaskRow
+                            key={task.id}
+                            rowProps={controls.rowProps}
+                            leading={controls.leading}
+                            orderActions={controls.actions}
+                            showAttribution={showAttribution}
+                            task={task}
+                            agendaId={detail.id}
+                            collaborative={detail.textProtocol === 1}
+                            attribution={
+                                detail.authors.find(
+                                    (author) =>
+                                        author.id ===
+                                        taskAttribution(task).userId,
+                                )?.name
+                            }
+                            recording={task.recording}
+                            evidence={task.evidence}
+                            readOnly={readOnly || (live && !canEdit)}
+                            pending={taskPending(task.id)}
+                            canEdit={canEdit}
+                            live={live}
+                            changed={taskChanged(task)}
+                            onRemove={() => removeTask(task, true)}
+                            onNote={(note) =>
+                                mutate(
+                                    `/tasks/${encodeURIComponent(task.id)}`,
+                                    "PATCH",
+                                    { note },
+                                    (value) => ({
+                                        ...value,
+                                        tasks: value.tasks.map((entry) =>
+                                            entry.id === task.id
+                                                ? {
+                                                      ...entry,
+                                                      agendaNote: note,
+                                                  }
+                                                : entry,
+                                        ),
+                                    }),
+                                )
+                            }
+                            currentItemId={detail.taskSource?.id}
+                            organizationOnly={detail.folders.some(
+                                (folder) =>
+                                    folders.find(
+                                        (entry) => entry.id === folder.id,
+                                    )?.scope === "org",
+                            )}
+                            showAssignee={false}
+                            onChange={(change, optimistic) =>
+                                changeTask(task, change, optimistic)
+                            }
+                        />
                     )}
-                </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-                {groups
-                    .filter((group) => group.tasks.length)
-                    .map((group) => (
-                        <section
-                            key={group.name ?? "unassigned"}
-                            className="space-y-2"
-                        >
-                            <h3 className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                                <span
-                                    className="flex size-6 items-center justify-center rounded-full bg-muted text-[10px]"
-                                    aria-hidden="true"
-                                >
-                                    {group.name
-                                        ?.split(" ")
-                                        .map((word) => word[0])
-                                        .slice(0, 2)
-                                        .join("") ?? "?"}
-                                </span>
-                                {group.name ?? i18n("No assignee")}
-                                {!group.invited && group.name && (
-                                    <span className="rounded border px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
-                                        {i18n("Not invited")}
-                                    </span>
-                                )}
-                            </h3>
-                            <ul className="divide-y rounded-lg border">
-                                {group.tasks.map((task) => (
-                                    <AgendaTaskRow
-                                        key={task.id}
-                                        task={task}
-                                        agendaId={detail.id}
-                                        collaborative={
-                                            detail.textProtocol === 1
-                                        }
-                                        attribution={
-                                            detail.authors.find(
-                                                (author) =>
-                                                    author.id ===
-                                                    taskAttribution(task)
-                                                        .userId,
-                                            )?.name
-                                        }
-                                        recording={task.recording}
-                                        evidence={task.evidence}
-                                        readOnly={
-                                            readOnly || (live && !canEdit)
-                                        }
-                                        pending={taskPending(task.id)}
-                                        canEdit={canEdit}
-                                        live={live}
-                                        changed={taskChanged(task)}
-                                        onRemove={() => removeTask(task, true)}
-                                        onNote={(note) =>
-                                            mutate(
-                                                `/tasks/${encodeURIComponent(task.id)}`,
-                                                "PATCH",
-                                                { note },
-                                                (value) => ({
-                                                    ...value,
-                                                    tasks: value.tasks.map(
-                                                        (entry) =>
-                                                            entry.id === task.id
-                                                                ? {
-                                                                      ...entry,
-                                                                      agendaNote:
-                                                                          note,
-                                                                  }
-                                                                : entry,
-                                                    ),
-                                                }),
-                                            )
-                                        }
-                                        currentItemId={detail.taskSource?.id}
-                                        organizationOnly={detail.folders.some(
-                                            (folder) =>
-                                                folders.find(
-                                                    (entry) =>
-                                                        entry.id === folder.id,
-                                                )?.scope === "org",
-                                        )}
-                                        showAssignee={false}
-                                        onChange={(change, optimistic) =>
-                                            changeTask(task, change, optimistic)
-                                        }
-                                    />
-                                ))}
-                            </ul>
-                        </section>
-                    ))}
+                />
                 {emptyInvitees && (
                     <p className="text-xs text-muted-foreground">
                         {i18n("Invitees without tasks: {names}", {
@@ -564,69 +531,101 @@ export function AgendaBody({
                 )}
                 {!tasks.length && (
                     <p className="text-sm text-muted-foreground">
-                        {i18n("No tasks in this agenda")}
+                        {canEdit && !live
+                            ? i18n(
+                                  "No tasks. Add older tasks with the icon in the header.",
+                              )
+                            : i18n("No tasks in this agenda")}
                     </p>
                 )}
-                {canEdit && !live && (
-                    <OlderTasksDialog
-                        detail={detail}
-                        open={olderOpen}
-                        onOpenChange={setOlderOpen}
-                        mutate={mutate}
-                    />
-                )}
-            </CardContent>
-        </Card>
+            </AgendaSection>
+        </div>
     );
     const pointsCard = (
-        <Card className={cn(live && "order-1 sm:order-2")}>
-            <CardHeader>
-                <div className="flex flex-wrap items-center gap-2">
-                    <CardTitle>{i18n("2 · Discussion points")}</CardTitle>
-                    <HeadingCount>
-                        {live || readOnly
-                            ? i18n(
-                                  "{discussed, number} of {total, number} discussed",
-                                  { discussed, total: topLevelPoints.length },
-                              )
-                            : i18n(
-                                  "{count, plural, one {# point} other {# points}}",
-                                  { count: topLevelPoints.length },
-                              )}
-                    </HeadingCount>
-                    {canEdit && !live && (
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={
-                                busy ||
-                                suggesting ||
-                                !detail.aiSuggestions.available
-                            }
-                            aria-describedby={
-                                suggestionsReason
-                                    ? suggestionsReasonId
-                                    : undefined
-                            }
-                            onClick={suggest}
-                            className="ml-auto"
-                        >
-                            <WandSparkles
-                                className="size-4"
-                                aria-hidden="true"
-                            />
-                            {i18n("Suggest points")}
-                        </Button>
-                    )}
-                </div>
-                {canEdit && suggesting && (
-                    <output className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
-                        {job.state === "queued"
-                            ? i18n("Suggestions queued…")
-                            : i18n("Suggesting points…")}
-                    </output>
-                )}
+        <div className={cn(live && "order-1 sm:order-2")}>
+            <AgendaSection
+                recording={variant === "recording"}
+                divider
+                id={`agenda-${id}-points`}
+                frame="inline"
+                tone="quiet"
+                title={i18n("2 · Discussion points")}
+                collapsed={pointsCollapsed}
+                onCollapse={togglePoints}
+                collapseLabel={i18n("Collapse discussion points")}
+                expandLabel={i18n("Expand discussion points")}
+                inlineLine={
+                    pointsCollapsed ? (
+                        <WorkflowWidgetLine
+                            title={i18n("2 · Discussion points")}
+                            facts={pointCount}
+                            onExpand={togglePoints}
+                            expandLabel={i18n("Expand discussion points")}
+                        />
+                    ) : undefined
+                }
+                headerAction={
+                    <div className="flex items-center gap-1">
+                        {canEdit && !live && (
+                            <ActionTooltip label={i18n("Suggest points")}>
+                                <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    aria-label={i18n("Suggest points")}
+                                    disabled={
+                                        busy ||
+                                        suggesting ||
+                                        !detail.aiSuggestions.available
+                                    }
+                                    aria-describedby={
+                                        suggestionsReason
+                                            ? suggestionsReasonId
+                                            : undefined
+                                    }
+                                    onClick={suggest}
+                                >
+                                    <WandSparkles
+                                        className="size-4"
+                                        aria-hidden="true"
+                                    />
+                                </Button>
+                            </ActionTooltip>
+                        )}
+                        {canEdit && <AgendaShortcuts />}
+                    </div>
+                }
+                footer={{
+                    actions: null,
+                    status: (
+                        <ProvenanceLine
+                            items={[
+                                { key: "count", content: pointCount },
+                                {
+                                    key: "save",
+                                    content: !readOnly && (
+                                        <output>
+                                            {busy
+                                                ? i18n("Saving…")
+                                                : i18n("Saved")}
+                                        </output>
+                                    ),
+                                },
+                                {
+                                    key: "job",
+                                    content: canEdit && suggesting && (
+                                        <output>
+                                            {job.state === "queued"
+                                                ? i18n("Suggestions queued…")
+                                                : i18n("Suggesting points…")}
+                                        </output>
+                                    ),
+                                },
+                            ]}
+                        />
+                    ),
+                }}
+                bodyClassName="space-y-3"
+            >
                 {canEdit && job?.state === "failed" && (
                     <div
                         role="alert"
@@ -663,9 +662,8 @@ export function AgendaBody({
                         {suggestionsReason}
                     </p>
                 )}
-            </CardHeader>
-            <CardContent>
                 <OutlineEditor
+                    showProposers={showAttribution}
                     detail={detail}
                     userId={userId}
                     readOnly={readOnly}
@@ -746,17 +744,8 @@ export function AgendaBody({
                         );
                     }}
                 />
-                {!readOnly && (
-                    <output className="mt-3 block text-xs text-muted-foreground">
-                        {busy
-                            ? i18n("Saving…")
-                            : i18n(
-                                  "Saved · Colleagues’ changes load automatically",
-                              )}
-                    </output>
-                )}
-            </CardContent>
-        </Card>
+            </AgendaSection>
+        </div>
     );
     const suggestions = detail.suggestions.filter(
         (suggestion) => suggestion.state === "open",
@@ -798,7 +787,7 @@ export function AgendaBody({
     );
     return (
         <div className="space-y-4" data-agenda-variant={variant}>
-            {variant !== "recording" ? (
+            {variant !== "recording" && (
                 <div className="space-y-3">
                     <ItemHeader
                         itemId={detail.meetingItemId ?? detail.id}
@@ -979,59 +968,7 @@ export function AgendaBody({
                         </div>
                     )}
                 </div>
-            ) : (
-                <button
-                    type="button"
-                    className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md text-left"
-                    aria-expanded={!collapsed}
-                    onClick={() => setCollapsed((value) => !value)}
-                >
-                    <span className="whitespace-nowrap font-medium">
-                        {i18n("Agenda")}
-                    </span>
-                    <span className="min-w-0 text-right text-xs tabular-nums text-muted-foreground [overflow-wrap:anywhere]">
-                        {i18n(
-                            "{discussed, number} of {total, plural, one {# point discussed} other {# points discussed}} · {tasks, plural, one {# task} other {# tasks}}",
-                            {
-                                discussed,
-                                total: topLevelPoints.length,
-                                tasks: tasks.length,
-                            },
-                        )}
-                    </span>
-                    <ChevronDown
-                        className={cn(
-                            "size-4 shrink-0",
-                            !collapsed && "rotate-180",
-                        )}
-                    />
-                </button>
             )}
-            {variant === "recording" &&
-                readOnly &&
-                personSharing &&
-                detail.userId === userId &&
-                detail.meetingItemId && (
-                    <>
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setShareOpen(true)}
-                        >
-                            <UserPlus className="size-4 text-person-share" />
-                            {i18n("Manage agenda sharing")}
-                        </Button>
-                        <PersonShareDialog
-                            itemId={detail.meetingItemId}
-                            title={detail.agendaTitle ?? detail.title}
-                            kind="meeting"
-                            open={shareOpen}
-                            onOpenChange={setShareOpen}
-                            allowInvite={false}
-                            absorbed
-                        />
-                    </>
-                )}
             {detail.attachedRecording?.visible === false && (
                 <output className="block rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
                     {i18n(
@@ -1078,204 +1015,179 @@ export function AgendaBody({
                     {agenda.error}
                 </p>
             )}
-            {!collapsed && (
-                <>
-                    <div className="flex flex-col gap-4">
-                        {taskCard}
-                        {pointsCard}
-                    </div>
-                    {canEdit &&
-                        !live &&
-                        (["carry_over", "ai"] as const).map((kind) => {
-                            const offered = suggestions.filter(
-                                (suggestion) => suggestion.kind === kind,
-                            );
-                            return (
-                                offered.length > 0 && (
-                                    <section
-                                        key={kind}
-                                        className="space-y-3 rounded-lg border bg-muted/20 p-4"
+            <div className="flex flex-col gap-4">
+                {taskCard}
+                {pointsCard}
+            </div>
+            {canEdit &&
+                !live &&
+                (["carry_over", "ai"] as const).map((kind) => {
+                    const offered = suggestions.filter(
+                        (suggestion) => suggestion.kind === kind,
+                    );
+                    return (
+                        offered.length > 0 && (
+                            <section
+                                key={kind}
+                                className="space-y-3 rounded-lg border bg-muted/20 p-4"
+                            >
+                                <h3 className="text-sm font-medium">
+                                    {kind === "carry_over"
+                                        ? i18n("Not covered last time")
+                                        : i18n(
+                                              "Suggestions from activity since the last meeting",
+                                          )}
+                                </h3>
+                                {kind === "ai" && (
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        disabled={busy}
+                                        onClick={() => {
+                                            void mutate(
+                                                "/suggestions",
+                                                "PATCH",
+                                                {
+                                                    state: "dismissed",
+                                                    kind: "ai",
+                                                },
+                                                (value) => ({
+                                                    ...value,
+                                                    suggestions:
+                                                        value.suggestions.map(
+                                                            (entry) =>
+                                                                entry.kind ===
+                                                                    "ai" &&
+                                                                entry.state ===
+                                                                    "open"
+                                                                    ? {
+                                                                          ...entry,
+                                                                          state: "dismissed",
+                                                                      }
+                                                                    : entry,
+                                                        ),
+                                                }),
+                                            );
+                                        }}
                                     >
-                                        <h3 className="text-sm font-medium">
-                                            {kind === "carry_over"
-                                                ? i18n("Not covered last time")
-                                                : i18n(
-                                                      "Suggestions from activity since the last meeting",
-                                                  )}
-                                        </h3>
-                                        {kind === "ai" && (
-                                            <Button
-                                                size="sm"
-                                                variant="ghost"
-                                                disabled={busy}
-                                                onClick={() => {
-                                                    void mutate(
-                                                        "/suggestions",
-                                                        "PATCH",
-                                                        {
-                                                            state: "dismissed",
-                                                            kind: "ai",
-                                                        },
-                                                        (value) => ({
-                                                            ...value,
-                                                            suggestions:
-                                                                value.suggestions.map(
-                                                                    (entry) =>
-                                                                        entry.kind ===
-                                                                            "ai" &&
-                                                                        entry.state ===
-                                                                            "open"
-                                                                            ? {
-                                                                                  ...entry,
-                                                                                  state: "dismissed",
-                                                                              }
-                                                                            : entry,
-                                                                ),
-                                                        }),
-                                                    );
-                                                }}
-                                            >
-                                                {i18n("Dismiss all")}
-                                            </Button>
-                                        )}
-                                        {offered.map((suggestion) => (
-                                            <div
-                                                key={suggestion.id}
-                                                className="flex flex-wrap items-start gap-2 rounded-md border bg-card p-3 text-sm"
-                                            >
-                                                <div className="min-w-0 flex-1">
-                                                    <p>{suggestion.text}</p>
-                                                    {suggestion.parentPointId && (
-                                                        <p className="text-xs text-muted-foreground">
-                                                            {i18n(
-                                                                "Under: {point}",
-                                                                {
-                                                                    point:
-                                                                        detail.points.find(
-                                                                            (
-                                                                                point,
-                                                                            ) =>
-                                                                                point.id ===
-                                                                                suggestion.parentPointId,
-                                                                        )
-                                                                            ?.text ??
-                                                                        "",
-                                                                },
-                                                            )}
-                                                        </p>
-                                                    )}
-                                                    <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                                                        {suggestion.sources?.itemIds?.map(
-                                                            (itemId) => (
-                                                                <Link
-                                                                    className="underline"
-                                                                    key={itemId}
-                                                                    href={`/dashboard?recording=${encodeURIComponent(itemId)}`}
-                                                                >
-                                                                    {recordings.find(
-                                                                        (
-                                                                            recording,
-                                                                        ) =>
-                                                                            recording.id ===
-                                                                            itemId,
-                                                                    )
-                                                                        ?.filename ??
-                                                                        i18n(
-                                                                            "Source item",
-                                                                        )}
-                                                                </Link>
-                                                            ),
-                                                        )}
-                                                        {suggestion.sources?.taskIds?.map(
-                                                            (taskId) => {
-                                                                const text =
-                                                                    detail.suggestionTasks?.find(
-                                                                        (
-                                                                            task,
-                                                                        ) =>
-                                                                            task.id ===
-                                                                            taskId,
-                                                                    )?.text ??
-                                                                    detail.tasks.find(
-                                                                        (
-                                                                            task,
-                                                                        ) =>
-                                                                            task.id ===
-                                                                            taskId,
-                                                                    )?.text;
-                                                                return (
-                                                                    <Link
-                                                                        className="text-tasks underline"
-                                                                        key={
-                                                                            taskId
-                                                                        }
-                                                                        href="/tasks"
-                                                                        title={
-                                                                            text
-                                                                        }
-                                                                    >
-                                                                        {text
-                                                                            ? text.length >
-                                                                              40
-                                                                                ? `${text.slice(0, 40)}…`
-                                                                                : text
-                                                                            : i18n(
-                                                                                  "Source task",
-                                                                              )}
-                                                                    </Link>
-                                                                );
-                                                            },
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                {(
-                                                    [
-                                                        "added",
-                                                        "dismissed",
-                                                    ] as const
-                                                ).map((state) => (
-                                                    <Button
-                                                        key={state}
-                                                        size="sm"
-                                                        variant="ghost"
-                                                        disabled={busy}
-                                                        onClick={() =>
-                                                            void mutate(
-                                                                `/suggestions/${encodeURIComponent(suggestion.id)}`,
-                                                                "PATCH",
-                                                                { state },
-                                                                (value) => ({
-                                                                    ...value,
-                                                                    suggestions:
-                                                                        value.suggestions.map(
-                                                                            (
-                                                                                entry,
-                                                                            ) =>
-                                                                                entry.id ===
-                                                                                suggestion.id
-                                                                                    ? {
-                                                                                          ...entry,
-                                                                                          state,
-                                                                                      }
-                                                                                    : entry,
-                                                                        ),
-                                                                }),
-                                                            )
-                                                        }
-                                                    >
-                                                        {state === "added"
-                                                            ? i18n("Add")
-                                                            : i18n("Dismiss")}
-                                                    </Button>
-                                                ))}
+                                        {i18n("Dismiss all")}
+                                    </Button>
+                                )}
+                                {offered.map((suggestion) => (
+                                    <div
+                                        key={suggestion.id}
+                                        className="flex flex-wrap items-start gap-2 rounded-md border bg-card p-3 text-sm"
+                                    >
+                                        <div className="min-w-0 flex-1">
+                                            <p>{suggestion.text}</p>
+                                            {suggestion.parentPointId && (
+                                                <p className="text-xs text-muted-foreground">
+                                                    {i18n("Under: {point}", {
+                                                        point:
+                                                            detail.points.find(
+                                                                (point) =>
+                                                                    point.id ===
+                                                                    suggestion.parentPointId,
+                                                            )?.text ?? "",
+                                                    })}
+                                                </p>
+                                            )}
+                                            <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                                                {suggestion.sources?.itemIds?.map(
+                                                    (itemId) => (
+                                                        <Link
+                                                            className="underline"
+                                                            key={itemId}
+                                                            href={`/dashboard?recording=${encodeURIComponent(itemId)}`}
+                                                        >
+                                                            {recordings.find(
+                                                                (recording) =>
+                                                                    recording.id ===
+                                                                    itemId,
+                                                            )?.filename ??
+                                                                i18n(
+                                                                    "Source item",
+                                                                )}
+                                                        </Link>
+                                                    ),
+                                                )}
+                                                {suggestion.sources?.taskIds?.map(
+                                                    (taskId) => {
+                                                        const text =
+                                                            detail.suggestionTasks?.find(
+                                                                (task) =>
+                                                                    task.id ===
+                                                                    taskId,
+                                                            )?.text ??
+                                                            detail.tasks.find(
+                                                                (task) =>
+                                                                    task.id ===
+                                                                    taskId,
+                                                            )?.text;
+                                                        return (
+                                                            <Link
+                                                                className="text-tasks underline"
+                                                                key={taskId}
+                                                                href="/tasks"
+                                                                title={text}
+                                                            >
+                                                                {text
+                                                                    ? text.length >
+                                                                      40
+                                                                        ? `${text.slice(0, 40)}…`
+                                                                        : text
+                                                                    : i18n(
+                                                                          "Source task",
+                                                                      )}
+                                                            </Link>
+                                                        );
+                                                    },
+                                                )}
                                             </div>
-                                        ))}
-                                    </section>
-                                )
-                            );
-                        })}
-                </>
-            )}
+                                        </div>
+                                        {(["added", "dismissed"] as const).map(
+                                            (state) => (
+                                                <Button
+                                                    key={state}
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    disabled={busy}
+                                                    onClick={() =>
+                                                        void mutate(
+                                                            `/suggestions/${encodeURIComponent(suggestion.id)}`,
+                                                            "PATCH",
+                                                            { state },
+                                                            (value) => ({
+                                                                ...value,
+                                                                suggestions:
+                                                                    value.suggestions.map(
+                                                                        (
+                                                                            entry,
+                                                                        ) =>
+                                                                            entry.id ===
+                                                                            suggestion.id
+                                                                                ? {
+                                                                                      ...entry,
+                                                                                      state,
+                                                                                  }
+                                                                                : entry,
+                                                                    ),
+                                                            }),
+                                                        )
+                                                    }
+                                                >
+                                                    {state === "added"
+                                                        ? i18n("Add")
+                                                        : i18n("Dismiss")}
+                                                </Button>
+                                            ),
+                                        )}
+                                    </div>
+                                ))}
+                            </section>
+                        )
+                    );
+                })}
             {attachOpen && (
                 <AttachRecordingDialog
                     detail={detail}
@@ -1311,6 +1223,8 @@ function AgendaTaskRow({
     agendaId,
     collaborative,
     attribution,
+    showAttribution,
+    orderActions,
     ...rowProps
 }: Omit<ComponentProps<typeof TaskRow>, "task"> & {
     task: MeetingTask;
@@ -1323,6 +1237,8 @@ function AgendaTaskRow({
     agendaId: string;
     collaborative: boolean;
     attribution?: string | null;
+    showAttribution: boolean;
+    orderActions?: ReactNode;
 }) {
     const i18n = useExtracted();
     const [noteOpen, setNoteOpen] = useState(false);
@@ -1343,6 +1259,7 @@ function AgendaTaskRow({
             {...rowProps}
             task={task}
             pending={pending}
+            readOnlyCheckbox
             notesReadOnly={live}
             badges={
                 <>
@@ -1358,10 +1275,12 @@ function AgendaTaskRow({
                             {i18n("Changed during the meeting")}
                         </span>
                     )}
-                    <AgendaAttribution
-                        name={attribution}
-                        at={taskAttribution(task).at}
-                    />
+                    {showAttribution && (
+                        <AgendaAttribution
+                            name={attribution}
+                            at={taskAttribution(task).at}
+                        />
+                    )}
                 </>
             }
             extraNotes={
@@ -1395,6 +1314,7 @@ function AgendaTaskRow({
             }
             actions={
                 <>
+                    {orderActions}
                     {canEdit && (live || task.agendaNote) && (
                         <ActionTooltip label={i18n("Meeting note")}>
                             <InlineEditorTrigger
@@ -1492,5 +1412,22 @@ function AgendaTaskNote({
                 }}
             />
         </div>
+    );
+}
+
+function AgendaSection({
+    recording,
+    divider = false,
+    ...props
+}: WorkflowWidgetProps & { recording: boolean; divider?: boolean }) {
+    if (!recording) return <WorkflowWidget {...props} />;
+    return (
+        <section className={cn("space-y-3", divider && "border-t pt-4")}>
+            <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold">{props.title}</h3>
+                {props.headerAction}
+            </div>
+            {props.children}
+        </section>
     );
 }

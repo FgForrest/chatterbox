@@ -264,6 +264,7 @@ export async function restoreMeetings(
                         : null,
                     taskSourceItemId: source?.id,
                     noTaskSource: meeting.noTaskSource,
+                    taskGroupOrder: encryptJsonField(meeting.taskGroupOrder),
                     snapshotSourceItemId: snapshot?.id,
                     outcomeUnplanned: encryptJsonField(
                         meeting.outcomeUnplanned,
