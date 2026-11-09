@@ -65,26 +65,6 @@ function errorMessage(body: unknown, fallback: string): string {
     return fallback;
 }
 
-function dialogTitle(
-    mode: ProviderFormMode,
-    i18n: (message: string) => string,
-): string {
-    if (mode === "add") return i18n("Add AI Provider");
-    if (mode === "duplicate") return i18n("Duplicate AI Provider");
-    return i18n("Edit AI Provider");
-}
-
-function submitLabel(
-    mode: ProviderFormMode,
-    saving: boolean,
-    i18n: (message: string) => string,
-): string {
-    if (saving) return i18n("Saving…");
-    if (mode === "add") return i18n("Add Provider");
-    if (mode === "duplicate") return i18n("Add Copy");
-    return i18n("Update Provider");
-}
-
 function addDefaultFlag(
     body: Record<string, unknown>,
     key:
@@ -329,11 +309,24 @@ export function ProviderFormDialog({
 
     if (!open) return null;
 
+    function dialogTitle(): string {
+        if (mode === "add") return i18n("Add AI Provider");
+        if (mode === "duplicate") return i18n("Duplicate AI Provider");
+        return i18n("Edit AI Provider");
+    }
+
+    function submitLabel(): string {
+        if (saving) return i18n("Saving…");
+        if (mode === "add") return i18n("Add Provider");
+        if (mode === "duplicate") return i18n("Add Copy");
+        return i18n("Update Provider");
+    }
+
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-h-[90dvh] max-w-md overflow-y-auto">
                 <DialogHeader>
-                    <DialogTitle>{dialogTitle(mode, i18n)}</DialogTitle>
+                    <DialogTitle>{dialogTitle()}</DialogTitle>
                     {scope === "organization" && (
                         <DialogDescription>
                             {i18n(
@@ -684,7 +677,7 @@ export function ProviderFormDialog({
                             className="flex-1"
                             disabled={saving}
                         >
-                            {submitLabel(mode, saving, i18n)}
+                            {submitLabel()}
                         </MetalButton>
                     </div>
                 </form>

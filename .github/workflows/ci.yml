@@ -50,6 +50,9 @@ jobs:
       - name: Check the ADR index and records
         run: node scripts/generate-adr-index.mts --check
 
+      - name: Check message catalog drift
+        run: pnpm i18n:check
+
   typecheck:
     name: Type Check
     runs-on: ubuntu-latest
