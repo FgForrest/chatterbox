@@ -4,6 +4,8 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { unstable_extractMessages } from "next-intl/extractor";
+import ts from "typescript";
+import { auditTranslatorEscapes } from "./lib/translator-audit.mts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 process.chdir(root);
@@ -34,6 +36,58 @@ async function readCatalog(path: string): Promise<Record<string, string>> {
 if (!values.check) {
     await extract(messagesPath);
 } else {
+    const auditStart = performance.now();
+    const configPath = join(root, "tsconfig.json");
+    const config = ts.readConfigFile(configPath, ts.sys.readFile);
+    if (config.error) {
+        throw new Error(
+            ts.flattenDiagnosticMessageText(config.error.messageText, "\n"),
+        );
+    }
+    const parsed = ts.parseJsonConfigFileContent(
+        {
+            ...config.config,
+            exclude: [
+                ...(config.config.exclude ?? []),
+                "src/tests/**",
+                "**/__tests__/**",
+                "**/*.test.*",
+                "**/*.spec.*",
+            ],
+        },
+        ts.sys,
+        root,
+    );
+    if (parsed.errors.length > 0) {
+        throw new Error(
+            parsed.errors
+                .map((error) =>
+                    ts.flattenDiagnosticMessageText(error.messageText, "\n"),
+                )
+                .join("\n"),
+        );
+    }
+    const program = ts.createProgram(parsed.fileNames, {
+        ...parsed.options,
+        noResolve: true,
+        types: [],
+        lib: [],
+    });
+    const escapes = auditTranslatorEscapes(program);
+    console.log(
+        `Translator escape audit: ${escapes.length} escaped references (${((performance.now() - auditStart) / 1000).toFixed(2)}s).`,
+    );
+    for (const reference of escapes) {
+        console.error(
+            `${relative(root, reference.file)}:${reference.line}: ${reference.snippet}`,
+        );
+    }
+    if (escapes.length > 0) {
+        console.error(
+            "Keep translator calls in their owning function; pass translated strings to helpers.",
+        );
+        process.exitCode = 1;
+    }
     const temporaryPath = await mkdtemp(join(tmpdir(), "chatterbox-messages-"));
     try {
         await extract(temporaryPath);
