@@ -43,7 +43,7 @@ const other = "Dana Nováková";
 
 function Harness() {
     const [open, setOpen] = useState(true);
-    const agenda = useAgenda("agenda", server, true, false);
+    const agenda = useAgenda("agenda", server, { pollEnabled: false });
     return (
         <>
             <button type="button" onClick={() => setOpen(true)}>

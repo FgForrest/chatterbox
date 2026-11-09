@@ -4,14 +4,18 @@ import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { subscribeEvents } from "@/lib/events/client";
+import { hasColleagueAgendaChange } from "./agenda-changes";
 import { meetingRequest, meetingUrl, takePrewarmedAgenda } from "./api";
 import type { MeetingDetail } from "./types";
 
 export function useAgenda(
     id: string,
     initial?: MeetingDetail,
-    active = true,
-    pollEnabled = true,
+    {
+        active = true,
+        pollEnabled = true,
+        userId,
+    }: { active?: boolean; pollEnabled?: boolean; userId?: string } = {},
 ) {
     const i18n = useExtracted();
     const [detail, setDetail] = useState<MeetingDetail | null>(initial ?? null);
@@ -67,7 +71,7 @@ export function useAgenda(
                 if (
                     poll &&
                     current.current &&
-                    next.version !== current.current.version
+                    hasColleagueAgendaChange(current.current, next, userId)
                 )
                     setColleagueChange(true);
                 base.current = next;
@@ -95,7 +99,7 @@ export function useAgenda(
                 }
             }
         },
-        [id, loadError],
+        [id, loadError, userId],
     );
     useEffect(() => {
         mounted.current = true;
