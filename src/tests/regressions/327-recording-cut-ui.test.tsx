@@ -30,7 +30,7 @@ import type { Recording } from "@/types/recording";
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
 vi.mock("@/components/summary/summary-widget", () => ({
-    SummaryWidget: () => null,
+    SummaryWidget: () => <div data-testid="summary" />,
 }));
 vi.mock("@/components/learn/learn-review", () => ({ LearnReview: () => null }));
 vi.mock("@/components/dashboard/transcribe-in-browser-button", () => ({
@@ -538,10 +538,7 @@ describe("shared recording cut mode", () => {
         ) as HTMLButtonElement;
         expect(button.disabled).toBe(true);
     });
-    it.each([
-        false,
-        true,
-    ])("keeps the panel directly above the transcript card (agenda=%s)", async (agenda) => {
+    it("keeps the panel directly above the transcript card", async () => {
         render(
             <RecordingCutProvider
                 recording={recording}
@@ -557,7 +554,6 @@ describe("shared recording cut mode", () => {
                     ]}
                     isTranscribing={false}
                     onTranscribe={vi.fn()}
-                    agenda={agenda ? <div>Agenda</div> : undefined}
                 />
             </RecordingCutProvider>,
         );
@@ -574,9 +570,11 @@ describe("shared recording cut mode", () => {
         expect(card?.previousElementSibling?.previousElementSibling).toBe(
             panel,
         );
-        expect(panel.parentElement?.className).toBe(
-            agenda ? "order-4 flex flex-col gap-3" : "flex flex-col gap-3",
-        );
+        expect(panel.parentElement?.className).toBe("flex flex-col gap-3");
+        expect(
+            panel.compareDocumentPosition(screen.getByTestId("summary")) &
+                Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy();
     });
     it("offers gap actions at a topic inside a turn without adding controls to the text", () => {
         const longTurn = {

@@ -49,6 +49,7 @@ beforeEach(() => {
         },
     );
     Element.prototype.scrollIntoView = vi.fn();
+    window.localStorage.clear();
     server = detail();
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
@@ -192,8 +193,6 @@ describe.each([
             />,
         );
         await act(async () => {});
-        if (variant === "recording")
-            fireEvent.click(screen.getByRole("button", { name: /Agenda/ }));
         return view;
     }
     it("counts only top-level points and their own discussed state", async () => {
@@ -209,31 +208,50 @@ describe.each([
                 point("Third", { position: 2 }),
             ],
         });
-        expect(
-            screen.getByText("2 · Discussion points").parentElement
-                ?.textContent,
-        ).toContain(variant === "meeting" ? "3 points" : "1 of 3 discussed");
+        if (variant === "recording") {
+            const section = screen
+                .getByRole("heading", { name: "2 · Discussion points" })
+                .closest("section");
+            expect(section?.querySelector("footer")).toBeNull();
+            expect(section?.querySelector("[data-workflow-widget]")).toBeNull();
+            expect(screen.getByLabelText("Discussed: First")).toHaveProperty(
+                "checked",
+                true,
+            );
+            expect(screen.getByLabelText("Discussed: Second")).toHaveProperty(
+                "checked",
+                false,
+            );
+        } else {
+            const widget = screen
+                .getByRole("heading", { name: "2 · Discussion points" })
+                .closest("[data-workflow-widget]");
+            expect(widget?.querySelector("header")?.textContent).toBe(
+                "2 · Discussion points",
+            );
+            expect(widget?.querySelector("footer")?.textContent).toContain(
+                variant === "meeting" ? "3 points" : "1 of 3 discussed",
+            );
+        }
         if (variant === "live")
             expect(
                 screen.getByText("1 of 3 points discussed · 0 tasks changed"),
             ).toBeTruthy();
-        if (variant === "recording") {
-            const summary = screen.getByRole("button", { name: /Agenda/ });
-            fireEvent.click(summary);
-            expect(summary.getAttribute("aria-expanded")).toBe("false");
-            expect(summary.textContent).toContain(
-                "1 of 3 points discussed · 3 tasks",
-            );
-        }
     });
     it("groups invitees first, other assignees next and unassigned last; shows taskless invitees", async () => {
         await mount();
         const names = screen
             .getAllByRole("heading", { level: 3 })
+            .filter((element) => !element.textContent?.match(/^[12] ·/))
             .map((element) => element.textContent);
         expect(names[0]).toContain("Jitka Dvořáková");
         expect(names[1]).toContain("Alex Example");
-        expect(names[1]).toContain("Not invited");
+        expect(
+            screen
+                .getAllByRole("heading", { level: 3 })
+                .filter((element) => !element.textContent?.match(/^[12] ·/))[1]
+                .parentElement?.textContent,
+        ).toContain("Not invited");
         expect(names[2]).toContain("No assignee");
         expect(
             screen.getByText("Invitees without tasks: Dana Nováková"),
@@ -424,11 +442,9 @@ it("keeps live parent and child checkboxes independent of the top-level counters
         await act(async () =>
             fireEvent.click(screen.getByLabelText(`Discussed: ${name}`)),
         );
-        await waitFor(() =>
-            expect(
-                screen.getByText(`${discussed} of 3 discussed`),
-            ).toBeTruthy(),
-        );
+        expect(
+            screen.getByText(`${discussed} of 3 discussed`).closest("footer"),
+        ).toBeTruthy();
         expect(
             screen.getByText(
                 `${discussed} of 3 points discussed · 0 tasks changed`,
@@ -563,7 +579,7 @@ it("offers one task source per recording across personal and Organization views"
             recordings={[recording, { ...recording, view: "org" }]}
         />,
     );
-    fireEvent.click(screen.getByRole("combobox", { name: "Task source" }));
+    fireEvent.click(screen.getByRole("button", { name: "Change task source" }));
     expect(
         screen.getAllByRole("option", { name: /Previous meeting/ }),
     ).toHaveLength(1);
@@ -575,11 +591,7 @@ it.each([
     [5, 0, "5 úkolů · 0 hotových"],
 ])("uses Czech count forms for %s tasks and %s done", (count, done, expected) => {
     expect(
-        translatedSourceMessage(
-            "cs-CZ",
-            "{count, plural, one {# task} other {# tasks}} · {done, number} done",
-            { count, done },
-        ),
+        `${translatedSourceMessage("cs-CZ", "{count, plural, one {# task} other {# tasks}}", { count })} · ${translatedSourceMessage("cs-CZ", "{count, number} done", { count: done })}`,
     ).toBe(expected);
 });
 
@@ -643,11 +655,7 @@ it.each([
     [2, 1, "2 tasks · 1 done"],
 ])("uses English task plurals for %s", (count, done, expected) => {
     expect(
-        translatedSourceMessage(
-            "en",
-            "{count, plural, one {# task} other {# tasks}} · {done, number} done",
-            { count, done },
-        ),
+        `${translatedSourceMessage("en", "{count, plural, one {# task} other {# tasks}}", { count })} · ${translatedSourceMessage("en", "{count, number} done", { count: done })}`,
     ).toBe(expected);
 });
 it("keeps a hidden absorbed agenda read-only when its recording id is redacted", async () => {
@@ -736,6 +744,9 @@ it("does not complete tasks in live mode without agenda editing permission", () 
         tasks: [task("Follow up", null)],
     });
     render(<AgendaBody id="agenda" initial={server} userId="viewer" />);
-    expect(screen.queryByRole("checkbox", { name: "Done" })).toBeNull();
-    expect(screen.getByRole("img", { name: "Open" })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Done" })).toHaveProperty(
+        "disabled",
+        true,
+    );
+    expect(screen.queryByRole("img", { name: "Open" })).toBeNull();
 });

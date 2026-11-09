@@ -659,6 +659,7 @@ describe.skipIf(!url)("person shares (PostgreSQL)", () => {
             | "own_folder"
             | "own_archive"
             | "manage"
+            | "manage_or_group_order"
             | "edit_own_point"
             | "edit"
             | "own_recording"
@@ -668,7 +669,7 @@ describe.skipIf(!url)("person shares (PostgreSQL)", () => {
         > = {
             "route.ts:POST": "own_folder",
             "restore/route.ts:POST": "own_archive",
-            "[id]/route.ts:PATCH": "manage",
+            "[id]/route.ts:PATCH": "manage_or_group_order",
             "[id]/route.ts:DELETE": "manage",
             "[id]/attach/route.ts:POST": "own_recording",
             "[id]/recording-shares/route.ts:POST": "own_recording",
@@ -681,6 +682,7 @@ describe.skipIf(!url)("person shares (PostgreSQL)", () => {
             "[id]/suggestions/route.ts:PATCH": "edit",
             "[id]/suggestions/[sid]/route.ts:PATCH": "edit",
             "[id]/tasks/route.ts:POST": "visible_task",
+            "[id]/tasks/route.ts:PATCH": "edit",
             "[id]/tasks/[taskId]/route.ts:PATCH": "visible_task",
             "[id]/tasks/[taskId]/route.ts:DELETE": "visible_task",
             "[id]/text/route.ts:POST": "agenda_text_field",

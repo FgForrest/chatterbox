@@ -343,6 +343,8 @@ export function SearchCombobox({
     "aria-label": label,
     placeholder,
     disabled,
+    open,
+    onOpenChange,
 }: {
     options: ComboboxOption[];
     value: string;
@@ -350,12 +352,16 @@ export function SearchCombobox({
     "aria-label": string;
     placeholder?: string;
     disabled?: boolean;
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
 }) {
     const i18n = useExtracted();
     const selected = options.find((option) => option.value === value);
     const [active, setActive] = useState("");
     return (
         <Combobox
+            open={open}
+            onOpenChange={onOpenChange}
             aria-label={label}
             valueLabel={selected?.label ?? placeholder ?? label}
             disabled={disabled}

@@ -9,7 +9,7 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { MeetingDetail } from "@/components/meetings/types";
 import { useAgenda } from "@/components/meetings/use-agenda";
-import { detail, point } from "./ui-fixtures";
+import { detail, point, task } from "./ui-fixtures";
 
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
 vi.mock("next-intl", () => ({ useExtracted: () => (text: string) => text }));
@@ -19,16 +19,17 @@ const fetchMock = vi.fn();
 function Harness({
     active = true,
     poll = true,
+    initial = detail({ cursor: "1:standalone:idle" }),
 }: {
     active?: boolean;
     poll?: boolean;
+    initial?: MeetingDetail;
 }) {
-    const state = useAgenda(
-        "agenda",
-        detail({ cursor: "1:standalone:idle" }),
+    const state = useAgenda("agenda", initial, {
         active,
-        poll,
-    );
+        pollEnabled: poll,
+        userId: "owner",
+    });
     return (
         <>
             <output data-testid="content">
@@ -90,7 +91,16 @@ it("polls every 15 seconds with the version cursor, applies remote changes and h
         expect.any(Object),
     );
     expect(screen.getByText("Quiet")).toBeTruthy();
-    server = detail({ version: 2, points: [point("Remote change")] });
+    server = detail({
+        version: 2,
+        points: [
+            point("First point", {
+                text: "Remote change",
+                version: 1,
+                updatedByUserId: "colleague",
+            }),
+        ],
+    });
     await act(async () => vi.advanceTimersByTimeAsync(15000));
     expect(screen.getByTestId("content").textContent).toBe("Remote change v2");
     expect(screen.getByText("Changed")).toBeTruthy();
@@ -196,4 +206,91 @@ it("does not poll the recording variant even when expanded or returning to the t
     await act(async () => vi.advanceTimersByTimeAsync(60000));
     fireEvent(document, new Event("visibilitychange"));
     expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it.each(
+    (["interval", "stream", "visibility"] as const).flatMap((trigger) =>
+        [
+            {
+                name: "the viewer's own point edit",
+                update: {
+                    points: [
+                        point("First point", {
+                            text: "Own edit",
+                            version: 1,
+                            updatedByUserId: "owner",
+                        }),
+                    ],
+                },
+                notice: "Quiet",
+            },
+            {
+                name: "a system point edit without an editor",
+                update: {
+                    points: [
+                        point("First point", {
+                            text: "System edit",
+                            version: 1,
+                            updatedByUserId: null,
+                        }),
+                    ],
+                },
+                notice: "Quiet",
+            },
+            {
+                name: "a colleague's task status change",
+                update: {
+                    tasks: [
+                        task("Task", null, {
+                            status: "done" as const,
+                            statusChangedByUserId: "colleague",
+                        }),
+                    ],
+                },
+                notice: "Changed",
+            },
+            {
+                name: "a colleague's new point",
+                update: {
+                    points: [
+                        point("First point"),
+                        point("New point", { authorUserId: "colleague" }),
+                    ],
+                },
+                notice: "Changed",
+            },
+        ].map((scenario) => ({ trigger, ...scenario })),
+    ),
+)("$trigger reload: $name shows $notice", async ({
+    trigger,
+    update,
+    notice,
+}) => {
+    let message = () => {};
+    if (trigger === "stream") {
+        class Source {
+            set onmessage(listener: () => void) {
+                message = listener;
+            }
+            addEventListener() {}
+            close() {}
+        }
+        vi.stubGlobal("EventSource", Source);
+    }
+    const initial = detail({
+        cursor: "1:standalone:idle",
+        tasks: [task("Task", null)],
+    });
+    render(<Harness initial={initial} />);
+    server = detail({ ...initial, version: 2, ...update });
+    await act(async () => {
+        if (trigger === "stream") message();
+        else if (trigger === "visibility")
+            fireEvent(document, new Event("visibilitychange"));
+        else await vi.advanceTimersByTimeAsync(15000);
+    });
+    expect(screen.getByTestId("content").textContent).toBe(
+        `${server.points.map((entry) => entry.text).join("/")} v2`,
+    );
+    expect(screen.getByText(notice)).toBeTruthy();
 });

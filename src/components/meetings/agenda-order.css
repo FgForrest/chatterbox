@@ -1,0 +1,63 @@
+.agenda-insert-before::before,
+.agenda-insert-after::after {
+    content: "";
+    position: absolute;
+    z-index: 1;
+    left: var(--agenda-insert-offset, 0);
+    right: 0;
+    height: 8px;
+    background:
+        radial-gradient(
+            circle at 4px 4px,
+            var(--primary) 0 3px,
+            transparent 4px
+        ),
+        linear-gradient(var(--primary), var(--primary)) 4px 50% /
+        calc(100% - 4px) 2px no-repeat;
+    pointer-events: none;
+}
+.agenda-insert-before::before {
+    top: -4px;
+}
+.agenda-insert-after::after {
+    bottom: -4px;
+}
+.agenda-point-grip {
+    display: none;
+}
+@media (hover: none) {
+    .agenda-point-grip {
+        display: block;
+    }
+    .agenda-point-bullet {
+        display: none;
+    }
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .agenda-actions,
+    .agenda-handle {
+        opacity: 0;
+        transition: opacity 120ms ease;
+    }
+    .agenda-order-row:hover > .agenda-actions,
+    .agenda-order-row:focus-within > .agenda-actions,
+    .agenda-order-row:hover > .agenda-handle,
+    .agenda-order-row:focus-within > .agenda-handle,
+    .task-row:hover > .agenda-handle,
+    .task-row:focus-within > .agenda-handle {
+        opacity: 1;
+    }
+    .agenda-point-row:hover .agenda-point-grip,
+    .agenda-point-row:focus-within .agenda-point-grip {
+        display: block;
+    }
+    .agenda-point-row:hover .agenda-point-bullet,
+    .agenda-point-row:focus-within .agenda-point-bullet {
+        display: none;
+    }
+    .agenda-point-row:hover .agenda-actions,
+    .agenda-point-row:focus-within .agenda-actions {
+        opacity: 1;
+    }
+}
