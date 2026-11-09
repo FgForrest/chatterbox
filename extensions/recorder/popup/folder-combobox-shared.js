@@ -37,6 +37,7 @@
             const settings = {
                 folderId: remembered?.id ?? null,
                 folderLabel: remembered?.label ?? null,
+                folderScope: remembered?.scope ?? null,
             };
             saving = saving.catch(() => {}).then(() =>
                 (refresh ? saveOnRefresh : save)(settings),
@@ -141,8 +142,10 @@
         function pick(option) {
             remembered = option.id ? option : null;
             selectionVersion += 1;
-            void persist().then(() => onPick?.()).catch(() => {});
+            const saved = persist().then(() => onPick?.());
+            void saved.catch(() => {});
             close();
+            return saved;
         }
 
         async function pump() {
@@ -245,6 +248,7 @@
                     ? {
                           id: settings.folderId,
                           label: settings.folderLabel || t("savedFolder"),
+                          scope: settings.folderScope ?? null,
                       }
                     : null;
                 close();
@@ -256,6 +260,7 @@
                     void pump();
                 }
             },
+            clear: () => readOnly ? Promise.resolve() : pick({ id: null }),
             saved: () => saving,
             close() {
                 if (open) close();
@@ -332,6 +337,7 @@
                 );
                 combobox.reset(settings, options);
             },
+            clear: combobox.clear,
             saved: combobox.saved,
             close: combobox.close,
         };
@@ -377,6 +383,7 @@
                     state.sessionId,
                     state.folderId,
                     state.folderLabel,
+                    state.folderScope,
                     state.recordingFolderOverride,
                 ]);
                 if (signature === next) return;
@@ -385,6 +392,7 @@
                     readOnly: state.recordingFolderOverride !== true,
                 });
             },
+            clear: () => field?.clear(),
             saved: () => field?.saved().catch(() => {}) ?? Promise.resolve(),
             close: () => field?.close(),
         };

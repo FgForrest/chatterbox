@@ -48,6 +48,7 @@ import { t } from "./i18n.js";
  * @property {string|null} autoModeAcknowledgedAt
  * @property {string|null} dataUseAcknowledgedAt
  * @property {string|null} folderId
+ * @property {"personal"|"org"|null} folderScope
  * @property {string|null} folderLabel
  */
 
@@ -75,6 +76,7 @@ export async function getSettings() {
         dataUseAcknowledgedAt: raw[STORAGE_KEYS.dataUseAcknowledgedAt] ?? null,
         folderId: raw[STORAGE_KEYS.folderId] ?? null,
         folderLabel: raw[STORAGE_KEYS.folderLabel] ?? null,
+        folderScope: ["personal", "org"].includes(raw[STORAGE_KEYS.folderScope]) ? raw[STORAGE_KEYS.folderScope] : null,
     };
 }
 

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { PICKER_WINDOW_SIZE } from "../../../extensions/recorder/lib/constants.js";
 import { pickerWindowBounds } from "../../../extensions/recorder/lib/picker-window.js";
@@ -34,4 +35,19 @@ describe("recorder window for Chrome's sharing dialog", () => {
             expect(pickerWindowBounds(anchor)).toEqual(PICKER_WINDOW_SIZE);
         }
     });
+});
+
+it("loads the shared bundle and enables fitted growth only after Chrome's source choice", () => {
+    const source = readFileSync("extensions/recorder/picker/picker.js", "utf8");
+    expect(source).toContain('from "../generated/folders.js"');
+    expect(
+        source.indexOf('document.body.classList.add("recorder-picker")'),
+    ).toBeGreaterThan(source.indexOf("async function fitToRecorder()"));
+    expect(
+        source.indexOf(
+            "await fitToRecorder();",
+            source.indexOf("const chosen = await chooseDesktopMedia()"),
+        ),
+    ).toBeGreaterThan(source.indexOf("if (!chosen)"));
+    expect(PICKER_WINDOW_SIZE).toEqual({ width: 800, height: 680 });
 });

@@ -313,7 +313,7 @@ export function agendaCompletion(settings, state) {
 export function agendaFolder(agenda) {
     const folder = agenda?.folders?.[0];
     return folder
-        ? { folderId: folder.id, folderLabel: agenda.folderPath || folder.name }
+        ? { folderId: folder.id, folderLabel: agenda.folderPath || folder.name, folderScope: folder.scope ?? null }
         : {};
 }
 

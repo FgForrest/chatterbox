@@ -145,6 +145,8 @@
   "accessUnverifiable": {"message": "Server teď nemůže ověřit váš přístup; nahrávka zůstává uložená a nahrávání se samo obnoví."},
   "finalizeFailed": {"message": "Nahrávání nelze dokončit. Šifrované části zůstávají v prohlížeči pro obnovení."},
   "folder": {"message": "Cílová složka v Klepně"},
+  "folderAdd": {"message": "Přidat do složky"},
+  "folderRemove": {"message": "Odstranit ze $1"},
   "folderSearchHint": {"message": "Pro hledání složek napište alespoň 2 znaky."},
   "foldersLoading": {"message": "Načítání složek…"},
   "noFoldersFound": {"message": "Žádné složky nenalezeny"},

@@ -225,6 +225,7 @@ const IDLE_STATE = Object.freeze({
     agendaUnavailable: false,
     folderId: null,
     folderLabel: null,
+    folderScope: null,
     recordingFolderOverride: false,
     tabId: null,
     autoStarted: false,
@@ -266,7 +267,7 @@ async function writeState(patch) {
     await updateRecordingBadge(next);
     if (["state", "tabId", "stopped"].some((key) => key in patch)) void updateNextMeetingBadge().catch(() => {});
     const bannerFields = [
-        "state", "tabId", "startedAt", "stopped", "folderId", "folderLabel",
+        "state", "tabId", "startedAt", "stopped", "folderId", "folderLabel", "folderScope",
         "recordingFolderOverride", "error", "agendaId",
     ];
     if (Object.keys(patch).some((key) => bannerFields.includes(key))) {
@@ -487,6 +488,7 @@ async function startRecordingLocked({
     bannerAgendaId,
     folderId,
     folderLabel,
+    folderScope,
 }, microphoneChecked) {
     const current = await getState();
     if (current.state !== STATE.idle && current.state !== STATE.error) {
@@ -526,7 +528,7 @@ async function startRecordingLocked({
         error: null,
         micWarning: null,
         meetingBannerErrorDismissed: false,
-        popupFolder: fromPopup && folderId !== undefined ? { folderId, folderLabel: folderLabel ?? null } : null,
+        popupFolder: fromPopup && folderId !== undefined ? { folderId, folderLabel: folderLabel ?? null, folderScope: folderScope ?? null } : null,
         withoutMicrophone,
     });
 
@@ -590,7 +592,8 @@ async function startCapturedRecording({
     };
     let session;
     let folderId = "folderId" in selectedFolder ? selectedFolder.folderId : settings.folderId ?? null;
-    let folderLabel = selectedFolder.folderLabel ?? settings.folderLabel ?? null;
+    let folderLabel = "folderId" in selectedFolder ? selectedFolder.folderLabel ?? null : settings.folderLabel ?? null;
+    let folderScope = "folderId" in selectedFolder ? selectedFolder.folderScope ?? null : settings.folderScope ?? null;
     try {
         try {
             session = await createSession(auth, sessionBody);
@@ -602,7 +605,8 @@ async function startCapturedRecording({
             ) {
                 folderId = null;
                 folderLabel = null;
-                if (!selectedFolder.folderId) await saveSettings({ folderId, folderLabel });
+                folderScope = null;
+                if (!selectedFolder.folderId) await saveSettings({ folderId, folderLabel, folderScope });
                 const fallbackBody = { ...sessionBody };
                 delete fallbackBody.folderId;
                 session = await createSession(auth, fallbackBody);
@@ -650,6 +654,8 @@ async function startCapturedRecording({
             agendaUnavailable: false,
             folderId,
             folderLabel,
+            folderScope,
+            startFolderScope: folderScope,
             startFolderId: folderId,
             startFolderLabel: folderLabel,
             recordingFolderOverride: settings.serverDefaults?.recordingFolderOverride === true,
@@ -842,6 +848,7 @@ function updateRecordingFolder(message, sender) {
             folderId: message.folderId,
             folderLabel: message.folderId && typeof message.folderLabel === "string"
                 ? message.folderLabel : null,
+            folderScope: message.folderId && ["personal", "org"].includes(message.folderScope) ? message.folderScope : null,
         };
         await applyRecordingFolder(state, folder, message.remember !== false);
         return { ok: true };
@@ -996,6 +1003,7 @@ async function finalize(truncatedAtChunk = null) {
                 await applyRecordingFolder(state, {
                     folderId: state.startFolderId ?? null,
                     folderLabel: state.startFolderLabel ?? null,
+                    folderScope: state.startFolderScope ?? null,
                 }, !state.agendaExplicit || !state.agendaId);
             } else {
                 throw error;
@@ -1211,7 +1219,7 @@ async function handleAgendaMessageNow(message, sender) {
             await setSessionAgenda({ serverUrl: settings.serverUrl, apiKey: await readToken() }, state.sessionId, agenda?.id ?? null);
         }
         const patch = { agendaId: agenda?.id ?? null, agendaTitle: agenda?.title ?? null, agendaOwn: agenda?.own === true, agendaExplicit: true,
-            folderId: settings.folderId, folderLabel: settings.folderLabel,
+            folderId: settings.folderId, folderLabel: settings.folderLabel, folderScope: settings.folderScope,
             ...agendaFolder(agenda) };
         await updateLocalMeta(state.bufferId ?? state.sessionId, patch);
         await setState(patch);
@@ -1431,6 +1439,7 @@ async function syncMeetingBannerNow(tabId, cachedOnly = false) {
             stopped: state.stopped,
             folderId: state.folderId,
             folderLabel: state.folderLabel,
+            folderScope: state.folderScope ?? null,
             recordingFolderOverride: state.recordingFolderOverride === true && settings.serverDefaults?.recordingFolderOverride === true,
             error: state.error,
             agendas: supportsAgendas(settings) && settings.agendaBanner
@@ -2509,6 +2518,8 @@ function recordingFolderState(meta) {
         agendaUnavailable: meta?.agendaUnavailable === true,
         folderId: meta?.folderId ?? null,
         folderLabel: meta?.folderLabel ?? null,
+        folderScope: meta?.folderScope ?? null,
+        startFolderScope: meta?.startFolderScope ?? null,
         startFolderId: meta?.startFolderId ?? null,
         startFolderLabel: meta?.startFolderLabel ?? null,
         recordingFolderOverride: meta?.recordingFolderOverride === true,
