@@ -14,7 +14,13 @@ const dependencyHooks = new Set([
     "useCallback",
     "useImperativeHandle",
 ]);
-const testFile = /(?:^|\/)(?:tests|__tests__)\/|\.(?:test|spec)\.[cm]?[jt]sx?$/;
+const testDirectory = /(?:^|\/)(?:tests|__tests__)\//;
+const testSuffix = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
+
+function isTestFile(fileName: string): boolean {
+    const path = fileName.replaceAll("\\", "/");
+    return testDirectory.test(path) || testSuffix.test(path);
+}
 
 /** A translator reference that the message extractor cannot follow. */
 export interface TranslatorEscape {
@@ -53,7 +59,7 @@ export function auditTranslatorEscapes(
         if (
             source.isDeclarationFile ||
             program.isSourceFileFromExternalLibrary(source) ||
-            testFile.test(source.fileName.replaceAll("\\", "/"))
+            isTestFile(source.fileName)
         ) {
             continue;
         }
