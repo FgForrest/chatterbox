@@ -1,8 +1,8 @@
 import {
+    agendaChoices,
     agendaPanelKey,
     agendaRequest,
     canChooseRecordingAgenda,
-    matchAgendas,
     supportsAgendas,
 } from "../lib/agendas.js";
 import { bindAgendaTextInput } from "../generated/text.js";
@@ -433,15 +433,17 @@ async function choices() {
     el("choices").hidden = false;
     el("open-app").hidden = true;
     el("choice-list").replaceChildren();
-    const rows = await matchAgendas();
+    const now = Date.now();
+    const rows = await agendaChoices(now, context.agendaIds ?? []);
     if (version !== generation) return;
-    const ids = new Set(context.agendaIds ?? []);
-    for (const agenda of rows.filter((row) => !ids.size || ids.has(row.id))) {
+    for (const agenda of rows) {
         const choice = button(
             "agendaShow",
             () => void select(agenda.id).catch(showError),
         );
         choice.textContent = agenda.title;
+        if (agenda.start)
+            choice.append(" · ", text("span", formatMeetingTime(agenda.start, agenda.end, now), "hint"));
         el("choice-list").append(choice);
     }
     if (!rows.length)

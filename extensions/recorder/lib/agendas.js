@@ -81,6 +81,42 @@ export async function matchAgendas(tabUrl, now = Date.now(), init = {}) {
     return currentAgendas(Array.isArray(body.data) ? body.data : [], now);
 }
 
+/** Offer nearby manual choices alongside every current automatic time match. */
+export async function agendaChoices(now = Date.now(), agendaIds = []) {
+    if (!supportsAgendas(await getSettings())) return [];
+    const query = new URLSearchParams({
+        from: new Date(now - 86400000).toISOString(),
+        to: new Date(now + 86400000).toISOString(),
+    });
+    const [matched, listed] = await Promise.allSettled([
+        matchAgendas(undefined, now),
+        agendaRequest(`?${query}`),
+    ]);
+    if (matched.status === "rejected" && listed.status === "rejected")
+        throw matched.reason;
+    const rows = new Map();
+    for (const row of [
+        ...(matched.status === "fulfilled" ? matched.value : []),
+        ...(listed.status === "fulfilled" && Array.isArray(listed.value.data)
+            ? listed.value.data.filter((row) => row.timeSet)
+            : []),
+    ]) rows.set(row.id, row);
+    const ids = new Set(agendaIds);
+    return [...rows.values()]
+        .filter((agenda) => !ids.size || ids.has(agenda.id))
+        .map((agenda) => {
+            const start = Date.parse(agenda.start);
+            const end = agenda.end ? Date.parse(agenda.end) : start + 2 * 3600000;
+            return { agenda, start, distance: Math.max(0, start - now, now - end) };
+        })
+        .filter((row) => Number.isFinite(row.distance))
+        .sort((a, b) => a.distance - b.distance ||
+            Number(b.agenda.own === true) - Number(a.agenda.own === true) ||
+            a.start - b.start || a.agenda.id.localeCompare(b.agenda.id))
+        .slice(0, 10)
+        .map((row) => row.agenda);
+}
+
 /** Clear cached agenda content, pending choices and reminder alarms. */
 export async function clearAgendas() {
     const stored = await chrome.storage.session.get(null);
