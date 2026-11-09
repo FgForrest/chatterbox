@@ -9,6 +9,14 @@ vi.mock("../../../extensions/recorder/lib/fit-window.js", () => ({
     fitWindowToContent,
 }));
 
+vi.mock("../../../extensions/recorder/generated/folders.js", () => ({
+    createRecordingFolder: () => ({
+        render: vi.fn(),
+        saved: async () => {},
+        close: vi.fn(),
+    }),
+}));
+
 beforeEach(() => {
     vi.resetModules();
     fitWindowToContent.mockReset();
@@ -62,6 +70,7 @@ function setupPicker(chooseDesktopMedia) {
         href: "chrome-extension://test/picker/picker.html?requestId=request-1",
     });
     vi.stubGlobal("document", {
+        body: { classList: { add: vi.fn() } },
         documentElement: { lang: "" },
         title: "",
         getElementById: node,
@@ -172,6 +181,7 @@ describe("desktop recorder extension window", () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
         expect(windows.update).not.toHaveBeenCalled();
         expect(fitWindowToContent).not.toHaveBeenCalled();
+        expect(document.body.classList.add).not.toHaveBeenCalled();
 
         choose("desktop-stream", { canRequestAudioTrack: true });
         await vi.waitFor(() =>
@@ -183,6 +193,9 @@ describe("desktop recorder extension window", () => {
             width: 430,
         });
         expect(fitWindowToContent).toHaveBeenCalledOnce();
+        expect(document.body.classList.add).toHaveBeenCalledWith(
+            "recorder-picker",
+        );
     });
 
     it("reports capture API failure without creating a server session", async () => {

@@ -19,8 +19,8 @@
     const root = host.attachShadow({ mode: "closed" });
     const style = document.createElement("style");
     style.textContent = `
-        :host { color-scheme:light dark; --background:#faf9f5; --foreground:#243348; --surface:#fff; --muted:#f1eee8; --muted-foreground:#626b73; --border:#dad9d4; --primary:#c63b50; --primary-foreground:#fff; --error:#b42332; --meeting:#23766e; }
-        @media(prefers-color-scheme:dark) { :host { --background:#3b3a38; --foreground:#d4d0c9; --surface:#444340; --muted:#302f2d; --muted-foreground:#c3bdb3; --border:#62605b; --primary:#f35f6d; --primary-foreground:#14263c; --error:#ff8b94; --meeting:#7bd4c8; } }
+        :host { color-scheme:light dark; --background:#faf9f5; --foreground:#243348; --surface:#fff; --muted:#f1eee8; --muted-foreground:#626b73; --border:#dad9d4; --primary:#c63b50; --primary-foreground:#fff; --error:#b42332; --meeting:#23766e; --organization:#356cac; }
+        @media(prefers-color-scheme:dark) { :host { --background:#3b3a38; --foreground:#d4d0c9; --surface:#444340; --muted:#302f2d; --muted-foreground:#c3bdb3; --border:#62605b; --primary:#f35f6d; --primary-foreground:#14263c; --error:#ff8b94; --meeting:#7bd4c8; --organization:#8ebaf1; } }
         * { box-sizing:border-box; }
         [hidden] { display:none!important; }
         .surface { pointer-events:auto; position:relative; max-width:600px; width:100%; background:var(--surface); color:var(--foreground); border:1px solid var(--border); border-radius:12px; box-shadow:0 12px 32px -12px rgb(20 30 45 / .35),0 2px 6px rgb(20 30 45 / .12); font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; text-align:left; overflow-wrap:anywhere; }
@@ -46,9 +46,25 @@
         @media(prefers-reduced-motion:reduce) { .dot { animation:none; } }
         .dot-button { display:grid; place-items:center; width:28px; height:28px; padding:0; border:0; }
         .elapsed { font-variant-numeric:tabular-nums; font-weight:650; }
-        .dot-button,.label,.elapsed,.stop { flex:none; white-space:nowrap; }
+        .dot-button,.label,.elapsed,#pill-agenda,.stop { flex:none; white-space:nowrap; }
         .pill > .error:empty { display:none; }
-        .folder-button { flex:0 1 180px; min-width:0; color:var(--muted-foreground); max-width:180px; border:0; padding:6px 0; direction:rtl; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .folder-target { display:inline-flex; flex:0 1 auto; min-width:0; max-width:180px; height:28px; align-items:center; border:1px solid var(--border); border-radius:calc(infinity * 1px); overflow:hidden; font-size:12px; line-height:16px; }
+        .folder-chip { min-width:69px; --folder-color:var(--primary); border-color:color-mix(in oklab,var(--folder-color) 20%,transparent); background:color-mix(in oklab,var(--folder-color) 5%,transparent); }
+        .folder-chip.organization { --folder-color:var(--organization); }
+        .folder-target button { display:inline-flex; align-items:center; height:100%; border:0; border-radius:0; background:transparent; font-size:inherit; line-height:inherit; padding:0; }
+        .folder-target .folder-button { gap:6px; padding:0 10px; min-width:0; color:var(--foreground); }
+        .folder-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .folder-target svg { width:14px; height:14px; flex:none; }
+        .folder-chip .folder-button svg { color:var(--folder-color); }
+        .folder-chip .folder-button:hover:not(:disabled) { background:color-mix(in oklab,var(--folder-color) 10%,transparent); }
+        .folder-target .folder-remove { flex:none; padding:0 6px; color:var(--muted-foreground); border-left:1px solid color-mix(in oklab,var(--folder-color) 15%,transparent); }
+        .folder-target .folder-remove:hover { background:color-mix(in oklab,var(--error) 10%,transparent); color:var(--error); }
+        .folder-add { border-style:dashed; }
+        .folder-add .folder-button { gap:4px; color:var(--muted-foreground); }
+        .folder-add .folder-button:hover { color:var(--foreground); }
+        .folder-target button:disabled { cursor:default; opacity:1; }
+        .folder-readonly { flex-wrap:wrap; }
+        .folder-fixed { flex:0 0 100%; order:1; max-width:100%; padding:0 8px 4px; text-align:center; font-size:11px; }
         .stop { background:var(--primary); border-color:var(--primary); color:var(--primary-foreground); font-weight:600; }
         .field { position:absolute; top:calc(100% + 8px); right:0; width:min(360px,calc(100vw - 32px)); background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px; box-shadow:0 8px 24px rgb(20 30 45 / .2); display:grid; gap:6px; }
         .field label,.hint { font-size:12px; }
@@ -66,7 +82,7 @@
         .folder-status:empty { display:none; }
         .agenda-line { display:flex; flex-wrap:wrap; align-items:center; gap:8px; border-top:1px solid var(--border); padding-top:8px; color:var(--meeting); }
         .confirmation { padding:10px 16px; width:fit-content; }
-        @media(max-width:440px) { .prompt { grid-template-columns:minmax(0,1fr) 26px; gap:8px; padding:12px; } .logo { display:none; } .folder-button { max-width:130px; } .label { font-size:12px; } }
+        @media(max-width:440px) { .prompt { grid-template-columns:minmax(0,1fr) 26px; gap:8px; padding:12px; } .logo { display:none; } .pill { flex-wrap:wrap; } .folder-target { max-width:130px; } .label { font-size:12px; } }
     `;
     const surface = document.createElement("section");
     surface.setAttribute("role", "dialog");
@@ -122,6 +138,48 @@
 
     function button(id, className, children = [], attributes = {}) {
         return node("button", { id, class: className, type: "button", ...attributes }, children);
+    }
+
+    function folderIcon(kind) {
+        const paths = {
+            folder: ["M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"],
+            users: ["M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2", "M16 3.128a4 4 0 0 1 0 7.744", "M22 21v-2a4 4 0 0 0-3-3.87"],
+            plus: ["M12 10v6", "M9 13h6", "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"],
+            x: ["M18 6 6 18", "m6 6 12 12"],
+        };
+        const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        for (const [key, value] of Object.entries({ viewBox: "0 0 24 24", width: "14", height: "14", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true", class: `lucide lucide-${kind === "plus" ? "folder-plus" : kind}` })) icon.setAttribute(key, value);
+        for (const d of paths[kind]) {
+            const path = document.createElementNS(icon.namespaceURI, "path");
+            path.setAttribute("d", d);
+            icon.append(path);
+        }
+        if (kind === "users") {
+            const circle = document.createElementNS(icon.namespaceURI, "circle");
+            for (const [key, value] of Object.entries({ cx: "9", cy: "7", r: "4" })) circle.setAttribute(key, value);
+            icon.append(circle);
+        }
+        return icon;
+    }
+
+    function renderFolderTarget(state) {
+        const selected = Boolean(state.folderId);
+        const path = state.folderLabel || t("savedFolder");
+        const name = path.split(/ › | \/ /).at(-1);
+        const readOnly = state.recordingFolderOverride !== true;
+        const organization = state.folderScope === "org";
+        surface.classList.toggle("folder-readonly", readOnly);
+        el("folder-target").className = `folder-target ${selected ? `folder-chip${organization ? " organization" : ""}` : "folder-add"}`;
+        const icon = folderIcon(selected ? organization ? "users" : "folder" : "plus");
+        if (selected) icon.classList.add(organization ? "text-organization" : "text-primary");
+        el("folder-toggle").replaceChildren(icon, node("span", { class: "folder-name" }, [selected ? name : t("folderAdd")]));
+        el("folder-toggle").title = selected ? path : t("folderAdd");
+        el("folder-toggle").disabled = readOnly;
+        el("folder-remove").hidden = readOnly || !selected;
+        el("folder-remove").setAttribute("aria-label", t("folderRemove", name));
+        el("folder-fixed").textContent = t("folderFixedAtStart");
+        el("folder-fixed").hidden = !readOnly;
+        if (readOnly) folderOpen = false;
     }
 
     function logo() {
@@ -239,7 +297,11 @@
                 node("span", { id: "pill-details", style: "display:contents" }, [
                     node("span", { id: "recording-label", class: "label" }),
                     node("span", { id: "elapsed", class: "elapsed" }),
-                    button("folder-toggle", "folder-button", [], { "aria-controls": "pill-folder", "aria-expanded": "false" }),
+                    node("span", { id: "folder-target", class: "folder-target" }, [
+                        button("folder-toggle", "folder-button", [], { "aria-controls": "pill-folder", "aria-expanded": "false", "aria-haspopup": "listbox" }),
+                        button("folder-remove", "folder-remove", [folderIcon("x")]),
+                    ]),
+                    node("span", { id: "folder-fixed", class: "hint folder-fixed", hidden: "" }),
                     button("pill-agenda", "", [t("agendaTitle")], { hidden: "" }),
                     button("stop", "stop"),
                 ]),
@@ -265,7 +327,19 @@
                 collapsed = !collapsed;
                 updateCollapsed();
             });
+            el("folder-remove").addEventListener("click", async () => {
+                if (currentState.recordingFolderOverride !== true) return;
+                folderOpen = false;
+                updateCollapsed();
+                el("folder-toggle").focus();
+                try {
+                    await recordingFolder.clear();
+                } catch (error) {
+                    showError(error);
+                }
+            });
             el("folder-toggle").addEventListener("click", () => {
+                if (currentState.recordingFolderOverride !== true) return;
                 folderOpen = !folderOpen;
                 updateCollapsed();
                 if (folderOpen) el("meeting-folder-picker").focus();
@@ -292,9 +366,7 @@
             });
         }
         el("pill-agenda").hidden = !state.agendas?.length;
-        text("folder-toggle", `${state.folderLabel || t("fileLater")}\u200E`);
-        el("folder-toggle").title =
-            `${t("folder")}: ${state.folderLabel || t("fileLater")}`;
+        renderFolderTarget(state);
         recordingFolder.render(state);
         updateCollapsed();
         const tick = () => {

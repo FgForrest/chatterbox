@@ -167,9 +167,7 @@ describe("in-meeting banner", () => {
         expect(el("elapsed").textContent).toBe("04:12");
         await vi.advanceTimersByTimeAsync(1000);
         expect(el("elapsed").textContent).toBe("04:13");
-        expect(el("folder-toggle").textContent).toBe(
-            `${state.folderLabel}\u200E`,
-        );
+        expect(el("folder-toggle").textContent).toBe("Planning");
         el("dot-toggle").click();
         expect(el("pill-details").hidden).toBe(true);
         expect(el("dot-toggle").getAttribute("aria-expanded")).toBe("false");
@@ -197,6 +195,7 @@ describe("in-meeting banner", () => {
             sessionId: state.sessionId,
             folderId: "new",
             folderLabel: "Private / Aurora",
+            folderScope: null,
         });
         render("recording", {
             state: {
@@ -205,7 +204,7 @@ describe("in-meeting banner", () => {
                 folderLabel: "Private / Aurora",
             },
         });
-        expect(el("folder-toggle").textContent).toBe("Private / Aurora\u200E");
+        expect(el("folder-toggle").textContent).toBe("Aurora");
         expect(el("pill-folder").hidden).toBe(true);
         expect(el("folder-toggle").getAttribute("aria-expanded")).toBe("false");
         expect(root.activeElement).toBe(el("folder-toggle"));
@@ -593,9 +592,131 @@ describe("Chrome-check banner fixes", () => {
     it.each([
         "Private / Aurora / Weekly planning",
         "مشروعات / أورورا / اجتماعات",
-    ])("retains the full folder path and LRM for truncation: %s", (folderLabel) => {
+    ])("shows the last segment and retains the full folder title: %s", (folderLabel) => {
         render("recording", { state: { ...state, folderLabel } });
-        expect(el("folder-toggle").textContent).toBe(`${folderLabel}\u200E`);
+        expect(el("folder-toggle").textContent).toBe(
+            folderLabel.split(/ › | \/ /).at(-1),
+        );
         expect(el("folder-toggle").title).toContain(folderLabel);
+    });
+});
+
+describe("in-page folder chip", () => {
+    it.each([
+        true,
+        false,
+    ])("keeps focus on the reused toggle after remove (accepted=%s)", async (accepted) => {
+        render("recording", { state });
+        await vi.advanceTimersByTimeAsync(0);
+        let finish;
+        send.mockImplementation(async (message) =>
+            message.type === "set-recording-folder"
+                ? new Promise((resolve) => {
+                      finish = resolve;
+                  })
+                : { ok: true },
+        );
+        el("folder-remove").focus();
+        expect(root.activeElement).toBe(el("folder-remove"));
+        el("folder-remove").click();
+        expect(root.activeElement).toBe(el("folder-toggle"));
+        await vi.advanceTimersByTimeAsync(0);
+        if (accepted)
+            render("recording", {
+                state: { ...state, folderId: null, folderLabel: null },
+            });
+        finish(
+            accepted ? { ok: true } : { ok: false, error: "Unfile refused" },
+        );
+        await vi.advanceTimersByTimeAsync(0);
+        expect(root.activeElement).toBe(el("folder-toggle"));
+        expect(el("folder-toggle").textContent).toBe(
+            accepted ? "Add to folder" : "Planning",
+        );
+        if (!accepted)
+            expect(el("action-error").textContent).toBe("Unfile refused");
+    });
+    it.each([
+        "en",
+        "cs",
+    ])("renders organization and private chips, unfiles and opens the empty action in %s", async (locale) => {
+        messages = locale === "cs" ? czechMessages : englishMessages;
+        render("recording", {
+            state: {
+                ...state,
+                folderLabel: "Organization › Planning",
+                folderScope: "org",
+            },
+        });
+        expect(el("folder-toggle").textContent).toBe("Planning");
+        expect(el("folder-toggle").title).toBe("Organization › Planning");
+        expect(
+            el("folder-toggle").querySelector(
+                ".lucide-users.text-organization",
+            ),
+        ).toBeTruthy();
+        expect(el("folder-target").classList.contains("organization")).toBe(
+            true,
+        );
+        expect(el("folder-remove").getAttribute("aria-label")).toBe(
+            locale === "cs" ? "Odstranit ze Planning" : "Remove from Planning",
+        );
+        await vi.advanceTimersByTimeAsync(0);
+        send.mockClear();
+        el("folder-remove").click();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(send).toHaveBeenCalledWith({
+            type: "set-recording-folder",
+            sessionId: state.sessionId,
+            folderId: null,
+            folderLabel: null,
+            folderScope: null,
+        });
+        render("recording", {
+            state: {
+                ...state,
+                folderId: null,
+                folderLabel: null,
+                folderScope: null,
+            },
+        });
+        expect(el("folder-toggle").textContent).toBe(
+            locale === "cs" ? "Přidat do složky" : "Add to folder",
+        );
+        expect(
+            el("folder-toggle").querySelector(".lucide-folder-plus"),
+        ).toBeTruthy();
+        expect(el("folder-target").classList.contains("folder-chip")).toBe(
+            false,
+        );
+        expect(el("folder-remove").hidden).toBe(true);
+        el("folder-toggle").click();
+        expect(el("pill-folder").hidden).toBe(false);
+        render("recording", { state });
+        expect(
+            el("folder-toggle").querySelector(".lucide-folder.text-primary"),
+        ).toBeTruthy();
+    });
+    it("reports an unfile failure on the visible bar and retains the chip", async () => {
+        render("recording", { state });
+        await vi.advanceTimersByTimeAsync(0);
+        send.mockResolvedValue({ ok: false, error: "Unfile refused" });
+        el("folder-remove").click();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(el("folder-toggle").textContent).toBe("Planning");
+        expect(el("action-error").textContent).toBe("Unfile refused");
+    });
+    it("makes the old-server chip inert without a remove action and retains the hint", () => {
+        render("recording", {
+            state: { ...state, recordingFolderOverride: false },
+        });
+        expect(el("folder-remove").hidden).toBe(true);
+        expect(el("folder-toggle").disabled).toBe(true);
+        el("folder-toggle").click();
+        expect(el("pill-folder").hidden).toBe(true);
+        expect(el("folder-fixed").hidden).toBe(false);
+        expect(el("folder-fixed").textContent).toBe(
+            englishMessages.folderFixedAtStart.message,
+        );
     });
 });

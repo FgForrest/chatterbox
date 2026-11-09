@@ -216,7 +216,14 @@ describe("matching and folders", () => {
         expect(agendaFolder(meeting)).toEqual({
             folderId: "folder-one",
             folderLabel: "Clients / Acme",
+            folderScope: null,
         });
+        expect(
+            agendaFolder({
+                ...meeting,
+                folders: [{ ...meeting.folders[0], scope: "org" }],
+            }),
+        ).toMatchObject({ folderScope: "org" });
         expect(agendaFolder({ folders: [] })).toEqual({});
     });
 });

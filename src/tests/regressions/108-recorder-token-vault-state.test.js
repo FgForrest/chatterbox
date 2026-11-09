@@ -294,6 +294,7 @@ describe("recorder token-vault failures", () => {
         expect(harness.saveSettings).toHaveBeenCalledWith({
             folderId: null,
             folderLabel: null,
+            folderScope: null,
         });
     });
 
@@ -1508,6 +1509,7 @@ describe("recorder 0.6.0 tab and folder targets", () => {
             ...defaultSettings,
             folderId: "start",
             folderLabel: "Private / Start",
+            folderScope: "personal",
             serverDefaults: {
                 encryptedRecordingProtocol: 1,
                 recordingFolderOverride: true,
@@ -1628,6 +1630,8 @@ describe("recorder 0.6.0 tab and folder targets", () => {
         }
         expect(harness.localMetas.get("target-session")).toMatchObject({
             folderId: "start",
+            folderScope: "personal",
+            startFolderScope: "personal",
             recordingFolderOverride: true,
         });
         expect(
@@ -1636,28 +1640,66 @@ describe("recorder 0.6.0 tab and folder targets", () => {
                     type: "set-recording-folder",
                     sessionId: "target-session",
                     folderId: "changed",
-                    folderLabel: "Private / Changed",
+                    folderLabel: "Organization / Changed",
+                    folderScope: "org",
                 },
                 sender,
             ),
         ).toEqual({ ok: true });
         expect(harness.sessionValues.recordingState).toMatchObject({
             folderId: "changed",
+            folderScope: "org",
+            startFolderScope: "personal",
             startFolderId: "start",
         });
         expect(harness.localMetas.get("target-session")).toMatchObject({
             folderId: "changed",
+            folderScope: "org",
+            startFolderScope: "personal",
             startFolderId: "start",
         });
         expect(harness.saveSettings).toHaveBeenLastCalledWith({
             folderId: "changed",
-            folderLabel: "Private / Changed",
+            folderLabel: "Organization / Changed",
+            folderScope: "org",
         });
         await finish();
         expect(harness.completeSession).toHaveBeenCalledWith(
             expect.anything(),
             "target-session",
             expect.objectContaining({ folderId: "changed" }),
+        );
+    });
+
+    it.each([
+        undefined,
+        "unknown",
+    ])("degrades an unknown folder scope %s and never sends scope to the server", async (folderScope) => {
+        enableFolders();
+        await start({
+            folderId: "org-start",
+            folderLabel: "Organization / Start",
+            folderScope: "org",
+        });
+        expect(harness.sessionValues.recordingState).toMatchObject({
+            folderScope: "org",
+            startFolderScope: "org",
+        });
+        expect(harness.createSession.mock.calls[0][1]).not.toHaveProperty(
+            "folderScope",
+        );
+        await message({
+            type: "set-recording-folder",
+            sessionId: "target-session",
+            folderId: "unknown",
+            folderLabel: "Calls",
+            folderScope,
+        });
+        expect(harness.sessionValues.recordingState.folderScope).toBeNull();
+        expect(harness.localMetas.get("target-session").folderScope).toBeNull();
+        await finish();
+        expect(harness.completeSession.mock.calls[0][2]).not.toHaveProperty(
+            "folderScope",
         );
     });
 
@@ -1669,7 +1711,10 @@ describe("recorder 0.6.0 tab and folder targets", () => {
             sessionId: "target-session",
             folderId: null,
             folderLabel: null,
+            folderScope: null,
         });
+        expect(harness.sessionValues.recordingState.folderScope).toBeNull();
+        expect(harness.localMetas.get("target-session").folderScope).toBeNull();
         await finish();
         expect(harness.completeSession.mock.calls[0][2].folderId).toBeNull();
     });
@@ -1714,8 +1759,14 @@ describe("recorder 0.6.0 tab and folder targets", () => {
         expect(harness.completeSession.mock.calls[1][2]).not.toHaveProperty(
             "folderId",
         );
-        expect(harness.localMetas.get("target-session").folderId).toBe("start");
-        expect(harness.sessionValues.recordingState.folderId).toBe("start");
+        expect(harness.localMetas.get("target-session")).toMatchObject({
+            folderId: "start",
+            folderScope: "personal",
+        });
+        expect(harness.sessionValues.recordingState).toMatchObject({
+            folderId: "start",
+            folderScope: "personal",
+        });
     });
 
     it("does not retry unrelated completion failures", async () => {
@@ -1757,7 +1808,8 @@ describe("recorder 0.6.0 tab and folder targets", () => {
         harness.localMetas.set("buffer-1", {
             serverUrl: "https://example.com",
             folderId: "changed",
-            folderLabel: "Private / Changed",
+            folderLabel: "Organization / Changed",
+            folderScope: "org",
             startFolderId: "start",
             recordingFolderOverride: true,
             serverSessionId: "old-session",
@@ -1784,7 +1836,11 @@ describe("recorder 0.6.0 tab and folder targets", () => {
                 expect.objectContaining({ folderId: "changed" }),
             ),
         );
-        expect(harness.localMetas.get("buffer-1").folderId).toBe("changed");
+        expect(harness.sessionValues.recordingState.folderScope).toBe("org");
+        expect(harness.localMetas.get("buffer-1")).toMatchObject({
+            folderId: "changed",
+            folderScope: "org",
+        });
         await vi.waitFor(() =>
             expect(harness.sessionValues.recordingState.jobId).toBe(
                 "recovered-job",

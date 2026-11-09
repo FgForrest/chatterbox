@@ -56,5 +56,6 @@ it("renders additive shared-folder marks while keeping options from released ser
     expect(save).toHaveBeenCalledWith({
         folderId: "shared",
         folderLabel: "Private / My Acme",
+        folderScope: "personal",
     });
 });

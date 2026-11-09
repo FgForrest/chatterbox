@@ -1,5 +1,7 @@
-import React, { createElement, useState } from "react";
+import { FolderPlus } from "lucide-react";
+import React, { createElement, useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { ItemFolderChipBody } from "../../../src/components/items/item-folder-chip-body";
 import { FolderCombobox } from "../../../src/components/recordings/folder-combobox";
 
 /** Mount the application's folder chooser with extension-owned storage and labels. */
@@ -13,6 +15,7 @@ export function createFolderField({
     onPick,
     variant = "field",
 }) {
+    container.setAttribute("data-recorder-folder", "");
     const root = createRoot(container);
     let current = {};
     let options = {};
@@ -52,7 +55,50 @@ export function createFolderField({
     }
     function Field() {
         const [error, setError] = useState("");
+        const selectRef = useRef(null);
+        const focusAfterRemove = useRef(false);
         const selected = current.folderId ?? "";
+        useLayoutEffect(() => {
+            if (!focusAfterRemove.current) return;
+            focusAfterRemove.current = false;
+            container.querySelector(".recorder-folder-target button")?.focus();
+        });
+        const fullPath = current.folderLabel || t("savedFolder");
+        const name = fullPath.split(/ › | \/ /).at(-1);
+        const setOpen = (value) => {
+            open = value && !options.readOnly;
+            paint();
+        };
+        const choose = (id, removed = false) => {
+            const folder = entries.find(
+                (entry) => entry.folder.id === id,
+            )?.folder;
+            const previous = current;
+            focusAfterRemove.current = removed;
+            revision++;
+            current = {
+                folderId: id || null,
+                folderLabel: folder?.fullPath ?? folder?.name ?? null,
+                folderScope: folder?.scope ?? null,
+            };
+            paint();
+            const choice = current;
+            pending = pending
+                .catch(() => {})
+                .then(() => save(choice))
+                .then(() => {
+                    setError("");
+                    onPick?.();
+                })
+                .catch((error) => {
+                    current = previous;
+                    focusAfterRemove.current = removed;
+                    setError(error?.message || t("folderChangeFailed"));
+                    paint();
+                    throw error;
+                });
+            return pending;
+        };
         const visible =
             entries.some((entry) => entry.folder.id === selected) || !selected
                 ? entries
@@ -62,7 +108,7 @@ export function createFolderField({
                           folder: {
                               id: selected,
                               name: current.folderLabel || t("savedFolder"),
-                              scope: "personal",
+                              scope: current.folderScope ?? "personal",
                               parentId: "remembered",
                               kind: "custom",
                           },
@@ -73,51 +119,58 @@ export function createFolderField({
                   ];
         return (
             <>
-                <label id={`${prefix}-label`}>{t("folder")}</label>
-                <FolderCombobox
-                    entries={visible}
-                    value={selected}
-                    open={open}
-                    onOpenChange={(value) => {
-                        open = value;
-                        paint();
-                    }}
-                    environment={environment()}
-                    variant={variant}
-                    aria-label={t("folder")}
-                    disabled={options.readOnly}
-                    emptyChoiceLabel={t("fileLater")}
-                    onValueChange={(id) => {
-                        const folder = entries.find(
-                            (entry) => entry.folder.id === id,
-                        )?.folder;
-                        const previous = current;
-                        revision++;
-                        current = {
-                            folderId: id || null,
-                            folderLabel:
-                                folder?.fullPath ?? folder?.name ?? null,
-                        };
-                        paint();
-                        const choice = current;
-                        pending = pending
-                            .catch(() => {})
-                            .then(() => save(choice))
-                            .then(() => {
-                                setError("");
-                                onPick?.();
-                            })
-                            .catch((error) => {
-                                current = previous;
-                                setError(
-                                    error?.message || t("folderChangeFailed"),
-                                );
-                                paint();
-                                throw error;
-                            });
-                        return pending;
-                    }}
-                />
+                {variant === "field" && (
+                    <label id={`${prefix}-label`}>{t("folder")}</label>
+                )}
+                <div className="recorder-folder-target">
+                    {selected && (
+                        <ItemFolderChipBody
+                            name={name}
+                            title={fullPath}
+                            organization={current.folderScope === "org"}
+                            removeLabel={t("folderRemove", name)}
+                            selectRef={selectRef}
+                            selectDisabled={options.readOnly === true}
+                            aria-label={
+                                variant === "field" ? t("folder") : undefined
+                            }
+                            aria-expanded={open && !options.readOnly}
+                            aria-haspopup="listbox"
+                            onSelect={() => setOpen(!open)}
+                            onRemove={
+                                options.readOnly
+                                    ? undefined
+                                    : () => {
+                                          setOpen(false);
+                                          void choose("", true).catch(() => {});
+                                      }
+                            }
+                        />
+                    )}
+
+                    <FolderCombobox
+                        entries={visible}
+                        value={selected}
+                        open={open}
+                        onOpenChange={setOpen}
+                        anchorRef={selected ? selectRef : undefined}
+                        actionTrigger={
+                            <>
+                                <FolderPlus className="size-3.5" />
+                                {t("folderAdd")}
+                            </>
+                        }
+                        className="h-7 rounded-full border-dashed px-2.5 text-xs text-muted-foreground"
+                        environment={environment()}
+                        variant="pill"
+                        aria-label={
+                            variant === "field" ? t("folder") : t("folderAdd")
+                        }
+                        disabled={options.readOnly}
+                        emptyChoiceLabel={t("fileLater")}
+                        onValueChange={choose}
+                    />
+                </div>
                 <span className="hint">
                     {options.readOnly ? t("folderFixedAtStart") : ""}
                 </span>
@@ -142,6 +195,8 @@ export function createFolderField({
                     folder: {
                         ...folder,
                         fullPath: folder.path,
+                        name: parts.at(-1),
+                        scope: folder.scope ?? "personal",
                         parentId: folder.parentId ?? "recorder",
                         kind: folder.kind ?? "custom",
                     },
@@ -158,18 +213,32 @@ export function createFolderField({
                     current = {
                         folderId: selected.folder.id,
                         folderLabel: selected.folder.fullPath,
+                        folderScope: selected.folder.scope,
                     };
+                    const refreshed = current;
                     pending = pending
                         .catch(() => {})
-                        .then(() => saveOnRefresh(current));
+                        .then(() => saveOnRefresh(refreshed));
                 } else {
                     const lookup = await request({ id: current.folderId });
                     if (version !== revision) return;
-                    if (lookup?.status === 404) {
-                        current = { folderId: null, folderLabel: null };
+                    const found =
+                        lookup?.ok &&
+                        lookup.folders?.find(
+                            (folder) => folder.id === current.folderId,
+                        );
+                    if (found || lookup?.status === 404) {
+                        current = {
+                            folderId: found ? found.id : null,
+                            folderLabel: found
+                                ? (found.path ?? found.label ?? found.name)
+                                : null,
+                            folderScope: found?.scope ?? null,
+                        };
+                        const refreshed = current;
                         pending = pending
                             .catch(() => {})
-                            .then(() => saveOnRefresh(current));
+                            .then(() => saveOnRefresh(refreshed));
                     }
                 }
             }
@@ -194,9 +263,11 @@ export function createFolderField({
                 nextOptions.clear ||
                 current.folderId !== value.folderId ||
                 current.folderLabel !== value.folderLabel ||
+                current.folderScope !== value.folderScope ||
                 options.readOnly !== nextOptions.readOnly;
             current = value;
             options = nextOptions;
+            if (options.readOnly) open = false;
             if (!changed && entries.length) return;
             revision++;
             paint();
@@ -249,12 +320,13 @@ export function createRecordingFolder({ container, prefix, request, send, t }) {
         render(state) {
             current = state;
             container.hidden = state.state !== "recording" || state.stopped;
-            if (!container.hidden)
+            if (container.hidden) field.close();
+            else
                 field.reset(state, {
                     readOnly: state.recordingFolderOverride !== true,
                 });
         },
-        saved: field.saved,
+        saved: () => field.saved().catch(() => {}),
         close: field.close,
         destroy: field.destroy,
     };

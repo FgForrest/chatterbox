@@ -236,6 +236,7 @@ describe("manual recorder start", () => {
         expect(storageSet).toHaveBeenCalledWith({
             folderId: "folder-1",
             folderLabel: "Private / Calls",
+            folderScope: null,
         });
         expect(close).toHaveBeenCalledOnce();
     });
