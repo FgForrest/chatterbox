@@ -70,6 +70,14 @@ The privacy policy, store listing, permission explanations, and in-extension con
 - The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
 
+## What changed in 0.9.3
+
+- The popup grows to its full height while the folder list is open, so the list is no longer squeezed into the
+  space left below the field. The list also stays inside the popup instead of being clipped at its edge.
+- A folder list left open closes when the popup or agenda panel switches views, for example when the recording
+  stops, instead of staying over the next view.
+- No permission, data-use or server-contract change against 0.9.2.
+
 ## What changed in 0.9.2
 
 - Clearing an agenda point's title no longer sends an empty text; leaving the field restores the saved title.

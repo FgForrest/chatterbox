@@ -20,4 +20,4 @@
     --color-person-share: var(--person-share);
 }
 [data-combobox-popup] { font-family: inherit; border-color: var(--border); }
-[data-combobox-popup] *, [role="combobox"] { box-sizing: border-box; }
+[data-combobox-popup], [data-combobox-popup] *, [role="combobox"] { box-sizing: border-box; }

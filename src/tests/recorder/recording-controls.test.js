@@ -3,16 +3,23 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mountRecordingControls } from "../../../extensions/recorder/lib/recording-controls.js";
 
-const h = vi.hoisted(() => ({ wait: Promise.resolve(), reset: vi.fn() }));
+const h = vi.hoisted(() => ({
+    wait: Promise.resolve(),
+    reset: vi.fn(),
+    closeIdle: vi.fn(),
+    closeRecording: vi.fn(),
+}));
 vi.mock("../../../extensions/recorder/generated/folders.js", () => ({
     createFolderField: () => ({
         reset: h.reset,
         saved: () => h.wait,
+        close: h.closeIdle,
         destroy: vi.fn(),
     }),
     createRecordingFolder: () => ({
         render: vi.fn(),
         saved: () => h.wait,
+        close: h.closeRecording,
         destroy: vi.fn(),
     }),
 }));
@@ -25,6 +32,8 @@ beforeEach(() => {
     vi.useFakeTimers();
     h.wait = Promise.resolve();
     h.reset.mockClear();
+    h.closeIdle.mockClear();
+    h.closeRecording.mockClear();
     document.documentElement.innerHTML = readFileSync(
         "extensions/recorder/popup/popup.html",
         "utf8",
@@ -177,5 +186,35 @@ describe.each([
         expect(el("completion-agenda-notice").textContent).toBe(
             "agendaUnavailable",
         );
+    });
+    it("closes the folder chooser of a view the state hides", async () => {
+        await mount();
+        expect(el("view-idle").hidden).toBe(false);
+        expect(h.closeIdle).not.toHaveBeenCalled();
+        listener({
+            type: "state",
+            state: {
+                state: "recording",
+                sessionId: "one",
+                startedAt: new Date().toISOString(),
+                uploaded: [],
+            },
+        });
+        await settle();
+        expect(h.closeIdle).toHaveBeenCalled();
+        h.closeRecording.mockClear();
+        listener({
+            type: "state",
+            state: {
+                state: "recording",
+                sessionId: "one",
+                stopped: true,
+                chunkCount: 2,
+                uploaded: [0],
+            },
+        });
+        await settle();
+        expect(el("view-finalizing").hidden).toBe(false);
+        expect(h.closeRecording).toHaveBeenCalled();
     });
 });

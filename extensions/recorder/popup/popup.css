@@ -43,6 +43,11 @@ body {
     color: var(--foreground);
 }
 
+/* Chrome sizes the popup to the page (600 px at most), not to the fixed folder list. */
+body.action-popup:has([data-combobox-popup]) {
+    min-height: calc(600px - 12px - 16px);
+}
+
 header {
     display: flex;
     align-items: center;

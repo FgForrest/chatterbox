@@ -257,6 +257,9 @@
                 }
             },
             saved: () => saving,
+            close() {
+                if (open) close();
+            },
         };
     }
 
@@ -330,6 +333,7 @@
                 combobox.reset(settings, options);
             },
             saved: combobox.saved,
+            close: combobox.close,
         };
     }
 
@@ -382,6 +386,7 @@
                 });
             },
             saved: () => field?.saved().catch(() => {}) ?? Promise.resolve(),
+            close: () => field?.close(),
         };
     }
 
