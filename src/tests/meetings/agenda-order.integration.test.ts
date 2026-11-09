@@ -631,6 +631,28 @@ describe.skipIf(!url)("agenda ordering (PostgreSQL)", () => {
             ],
         });
     });
+    it("archives only the group keys of exported tasks", async () => {
+        await addAgendaTasks("owner", "agenda", ["one"]);
+        await database.db
+            .update(recordingTasks)
+            .set({ assigneeHint: encryptText("Martin Král") })
+            .where(eq(recordingTasks.id, "one"));
+        await database.db
+            .update(meetingAgendas)
+            .set({
+                taskGroupOrder: encryptJsonField([
+                    "eva horáková",
+                    "martin král",
+                    groupKey,
+                ]),
+            })
+            .where(eq(meetingAgendas.id, "agenda"));
+        const [archive] = await collectArchivedMeetings({
+            kind: "personal",
+            userId: "owner",
+        });
+        expect(archive.taskGroupOrder).toEqual(["martin král", groupKey]);
+    });
     it("returns shared order in web, MCP and recorder groups without exposing the new recorder field", async () => {
         await addAgendaTasks("owner", "agenda", ["one"]);
         await database.db

@@ -279,7 +279,7 @@ export function AgendaBody({
                         : patch.siblingIndex !== undefined &&
                             entry.position !==
                                 value.points.find(
-                                    (point) => point.id === entry.id,
+                                    (shown) => shown.id === entry.id,
                                 )?.position
                           ? { ...entry, version: entry.version + 1 }
                           : patch.position !== undefined &&

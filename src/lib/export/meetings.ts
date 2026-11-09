@@ -6,6 +6,7 @@ import {
     agendaTasks,
     chatterItems,
     meetingAgendas,
+    people,
     recordingFolderAssignments,
     recordingFolders,
     recordingTasks,
@@ -16,6 +17,7 @@ import {
     archivedItemCondition,
 } from "@/lib/export/archive-scope";
 import { taskGroupOrderInput } from "@/lib/meetings/model";
+import { projectAgendaTaskGroupOrder } from "@/lib/meetings/task-groups";
 import { archivedTaskCondition } from "@/lib/tasks/archive";
 
 const id = z.string().min(1).max(255);
@@ -136,11 +138,19 @@ export async function collectArchivedMeetings(
                 )
                 .orderBy(asc(agendaPoints.position), asc(agendaPoints.id)),
             db
-                .select({ task: agendaTasks })
+                .select({
+                    task: agendaTasks,
+                    assigneeName: people.displayName,
+                    assigneeHint: recordingTasks.assigneeHint,
+                })
                 .from(agendaTasks)
                 .innerJoin(
                     recordingTasks,
                     eq(recordingTasks.id, agendaTasks.taskId),
+                )
+                .leftJoin(
+                    people,
+                    eq(people.id, recordingTasks.assigneePersonId),
                 )
                 .innerJoin(
                     chatterItems,
@@ -211,8 +221,14 @@ export async function collectArchivedMeetings(
         } = agenda;
         result.push({
             ...archivedAgenda,
-            taskGroupOrder:
+            taskGroupOrder: projectAgendaTaskGroupOrder(
                 decryptJsonField<string[]>(agenda.taskGroupOrder) ?? [],
+                tasks.map(({ assigneeName, assigneeHint }) => ({
+                    name:
+                        (assigneeName ? decryptText(assigneeName) : null) ??
+                        (assigneeHint ? decryptText(assigneeHint) : null),
+                })),
+            ),
             recordingItemId: includesRecording ? agenda.recordingItemId : null,
             outcomeSummaryId: includesRecording
                 ? agenda.outcomeSummaryId
