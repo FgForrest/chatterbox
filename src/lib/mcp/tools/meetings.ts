@@ -152,23 +152,37 @@ async function meetingCall<T>(run: () => Promise<T>): Promise<T> {
     }
 }
 
-async function detailFor(caller: McpCaller, meetingId: string) {
-    return projectDetail(caller, await getMeeting(actorId(caller), meetingId));
+async function detailFor(
+    caller: McpCaller,
+    meetingId: string,
+    visibility?: ReturnType<typeof agendaEditVisibility>,
+) {
+    return projectDetail(
+        caller,
+        await getMeeting(actorId(caller), meetingId),
+        visibility,
+    );
 }
 
 async function projectDetail(
     caller: McpCaller,
     detail: Awaited<ReturnType<typeof getMeeting>>,
+    visibility?: ReturnType<typeof agendaEditVisibility>,
 ) {
     if (detail.unchanged) return detail;
     const mailAllowed = mayReadMail(caller);
     const mail = mailAllowed
         ? null
-        : await agendaMailDerivedContent(
-              actorId(caller),
-              caller.orgUserId,
-              detail.id,
-          );
+        : visibility
+          ? await visibility.mailContent(
+                detail.points.map((point) => point.id),
+                detail.suggestions.map((suggestion) => suggestion.id),
+            )
+          : await agendaMailDerivedContent(
+                actorId(caller),
+                caller.orgUserId,
+                detail.id,
+            );
     const tasks = caller.roles.has("tasks:read")
         ? detail.tasks.filter(
               (task) =>
@@ -467,15 +481,49 @@ const operation = z
         "One agenda edit selected by action. Operations run sequentially, not atomically.",
     );
 
+function agendaEditVisibility(
+    caller: McpCaller & { kind: "user" },
+    meetingId: string,
+) {
+    let viewer: Awaited<ReturnType<typeof taskViewerById>> | undefined;
+    let mail: Awaited<ReturnType<typeof agendaMailDerivedContent>> | undefined;
+    return {
+        async taskViewer() {
+            viewer ??= await taskViewerById(caller.userId);
+            return viewer;
+        },
+        async mailContent(
+            pointIds: string[] = [],
+            suggestionIds: string[] = [],
+        ) {
+            const cached = mail;
+            if (
+                !cached ||
+                pointIds.some((id) => !cached.allPointIds.has(id)) ||
+                suggestionIds.some((id) => !cached.allSuggestionIds.has(id))
+            ) {
+                mail = await agendaMailDerivedContent(
+                    caller.userId,
+                    caller.orgUserId,
+                    meetingId,
+                );
+                return mail;
+            }
+            return cached;
+        },
+    };
+}
+
 async function requireVisibleOperation(
     caller: McpCaller & { kind: "user" },
     meetingId: string,
     op: z.infer<typeof operation>,
+    visibility: ReturnType<typeof agendaEditVisibility>,
 ) {
     if (mayReadMail(caller)) return;
     if ("taskId" in op) {
         const task = await getVisibleTask(
-            { ...(await taskViewerById(caller.userId)), includeReceived: true },
+            { ...(await visibility.taskViewer()), includeReceived: true },
             op.taskId,
         );
         if (
@@ -488,10 +536,12 @@ async function requireVisibleOperation(
     }
     if (!(op.action === "add_point" || "pointId" in op || "suggestionId" in op))
         return;
-    const mail = await agendaMailDerivedContent(
-        caller.userId,
-        caller.orgUserId,
-        meetingId,
+    let mail = await visibility.mailContent(
+        [
+            ...("pointId" in op ? [op.pointId] : []),
+            ...("parentId" in op && op.parentId ? [op.parentId] : []),
+        ],
+        "suggestionId" in op ? [op.suggestionId] : [],
     );
     if (
         ("suggestionId" in op && mail.suggestionIds.has(op.suggestionId)) ||
@@ -511,6 +561,10 @@ async function requireVisibleOperation(
     ) {
         const detail = await getMeeting(caller.userId, meetingId);
         if (detail.unchanged) return;
+        mail = await visibility.mailContent(
+            detail.points.map((point) => point.id),
+            detail.suggestions.map((suggestion) => suggestion.id),
+        );
         const affected = new Set<string>();
         if (op.action === "add_suggestion") {
             const parentId = detail.suggestions.find(
@@ -709,11 +763,17 @@ const edit = defineTool({
                 "denied",
             );
         const userId = caller.userId;
+        const visibility = agendaEditVisibility(caller, input.meetingId);
         let completed = 0;
         try {
             await meetingCall(async () => {
                 for (const op of input.operations) {
-                    await requireVisibleOperation(caller, input.meetingId, op);
+                    await requireVisibleOperation(
+                        caller,
+                        input.meetingId,
+                        op,
+                        visibility,
+                    );
                     switch (op.action) {
                         case "add_point":
                             await addPoint(userId, input.meetingId, op);
@@ -752,6 +812,7 @@ const edit = defineTool({
                                 const visible = await projectDetail(
                                     caller,
                                     full,
+                                    visibility,
                                 );
                                 if (!full.unchanged && !visible.unchanged)
                                     taskIds = mergeVisibleOrder(
@@ -824,6 +885,7 @@ const edit = defineTool({
                                 const detail = await detailFor(
                                     caller,
                                     input.meetingId,
+                                    visibility,
                                 );
                                 if (!detail.unchanged)
                                     for (const suggestion of detail.suggestions)
@@ -865,7 +927,7 @@ const edit = defineTool({
             throw error;
         }
         return meetingCall(async () => ({
-            meeting: await detailFor(caller, input.meetingId),
+            meeting: await detailFor(caller, input.meetingId, visibility),
             completed,
         }));
     },

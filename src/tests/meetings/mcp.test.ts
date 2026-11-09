@@ -22,9 +22,10 @@ const service = vi.hoisted(() => ({
     dismiss: vi.fn(),
     enqueue: vi.fn(),
     visibleTask: vi.fn(),
+    taskViewer: vi.fn(),
 }));
 vi.mock("@/lib/tasks/access", () => ({
-    taskViewerById: async (userId: string) => ({ userId }),
+    taskViewerById: service.taskViewer,
 }));
 vi.mock("@/lib/tasks/tasks", () => ({ getVisibleTask: service.visibleTask }));
 vi.mock("@/lib/meetings/access", () => ({ requireMeetingAccess: vi.fn() }));
@@ -79,10 +80,13 @@ async function run(
 }
 beforeEach(() => {
     vi.clearAllMocks();
+    service.taskViewer.mockResolvedValue({ userId: "owner" });
     service.visibleTask.mockResolvedValue({ id: "task" });
     service.mail.mockResolvedValue({
         suggestionIds: new Set(),
         pointIds: new Set(),
+        allSuggestionIds: new Set(),
+        allPointIds: new Set(),
     });
     service.list.mockResolvedValue([{ id: "agenda", folders: [] }]);
     service.get.mockResolvedValue({
@@ -170,6 +174,175 @@ describe("meeting MCP tools", () => {
             outcome: "denied",
             details: { completed: 0 },
         });
+    });
+    it("resolves the viewer and mail snapshot once for 100 operations without mail:read", async () => {
+        service.mail.mockResolvedValue({
+            suggestionIds: new Set(),
+            pointIds: new Set(),
+            allSuggestionIds: new Set(),
+            allPointIds: new Set(["point"]),
+        });
+        const operations = Array.from({ length: 100 }, (_, index) =>
+            index % 2 === 0
+                ? {
+                      action: "set_task_note",
+                      taskId: "task",
+                      note: `Note ${index}`,
+                  }
+                : {
+                      action: "update_point",
+                      pointId: "point",
+                      version: (index + 1) / 2,
+                      note: `Note ${index}`,
+                  },
+        );
+        expect(
+            await run("edit_agenda", { meetingId: "agenda", operations }),
+        ).toMatchObject({ completed: 100 });
+        expect(service.taskViewer).toHaveBeenCalledExactlyOnceWith("owner");
+        expect(service.visibleTask).toHaveBeenCalledTimes(50);
+        expect(service.visibleTask).toHaveBeenCalledWith(
+            { userId: "owner", includeReceived: true },
+            "task",
+        );
+        expect(service.changeTask).toHaveBeenCalledTimes(50);
+        expect(service.change).toHaveBeenCalledTimes(50);
+        expect(service.mail).toHaveBeenCalledExactlyOnceWith(
+            "owner",
+            "org",
+            "agenda",
+        );
+
+        await run("edit_agenda", { meetingId: "agenda", operations });
+        expect(service.taskViewer).toHaveBeenCalledTimes(2);
+        expect(service.mail).toHaveBeenCalledTimes(2);
+    });
+    it.each([
+        {
+            action: "update_point",
+            pointId: "new-point",
+            version: 1,
+            note: "Changed",
+        },
+        { action: "add_point", parentId: "new-point", text: "Child" },
+        { action: "dismiss_suggestion", suggestionId: "new-suggestion" },
+        { action: "add_suggestion", suggestionId: "new-suggestion" },
+    ])("refreshes once and refuses concurrent mail-derived content in %j", async (operation) => {
+        service.mail
+            .mockResolvedValueOnce({
+                suggestionIds: new Set(),
+                pointIds: new Set(),
+                allSuggestionIds: new Set(),
+                allPointIds: new Set(["point"]),
+            })
+            .mockResolvedValue({
+                suggestionIds: new Set(["new-suggestion"]),
+                pointIds: new Set(["new-point"]),
+                allSuggestionIds: new Set(["new-suggestion"]),
+                allPointIds: new Set(["point", "new-point"]),
+            });
+        await expect(
+            run("edit_agenda", {
+                meetingId: "agenda",
+                operations: [
+                    {
+                        action: "update_point",
+                        pointId: "point",
+                        version: 1,
+                        note: "Changed",
+                    },
+                    operation,
+                ],
+            }),
+        ).rejects.toMatchObject({
+            message: "Agenda content not found",
+            outcome: "not_found",
+            details: { completed: 1 },
+        });
+        expect(service.mail).toHaveBeenCalledTimes(2);
+        expect(service.change).toHaveBeenCalledTimes(1);
+        expect(service.add).not.toHaveBeenCalled();
+        expect(service.decide).not.toHaveBeenCalled();
+        expect(service.taskViewer).not.toHaveBeenCalled();
+    });
+    it("reuses the refreshed snapshot for concurrently added audio content", async () => {
+        service.mail
+            .mockResolvedValueOnce({
+                suggestionIds: new Set(),
+                pointIds: new Set(),
+                allSuggestionIds: new Set(),
+                allPointIds: new Set(["point"]),
+            })
+            .mockResolvedValue({
+                suggestionIds: new Set(),
+                pointIds: new Set(),
+                allSuggestionIds: new Set(["new-suggestion"]),
+                allPointIds: new Set(["point"]),
+            });
+        expect(
+            await run("edit_agenda", {
+                meetingId: "agenda",
+                operations: [
+                    {
+                        action: "update_point",
+                        pointId: "point",
+                        version: 1,
+                        note: "Changed",
+                    },
+                    {
+                        action: "dismiss_suggestion",
+                        suggestionId: "new-suggestion",
+                    },
+                    {
+                        action: "dismiss_suggestion",
+                        suggestionId: "new-suggestion",
+                    },
+                ],
+            }),
+        ).toMatchObject({ completed: 3 });
+        expect(service.mail).toHaveBeenCalledTimes(2);
+        expect(service.decide).toHaveBeenCalledTimes(2);
+    });
+    it("refreshes the response snapshot to conceal concurrently added mail content", async () => {
+        service.mail
+            .mockResolvedValueOnce({
+                suggestionIds: new Set(),
+                pointIds: new Set(),
+                allSuggestionIds: new Set(),
+                allPointIds: new Set(["point"]),
+            })
+            .mockResolvedValue({
+                suggestionIds: new Set(["new-suggestion"]),
+                pointIds: new Set(["new-point"]),
+                allSuggestionIds: new Set(["new-suggestion"]),
+                allPointIds: new Set(["point", "new-point"]),
+            });
+        service.get.mockResolvedValue({
+            unchanged: false,
+            id: "agenda",
+            points: [{ id: "new-point", parentId: null, text: "Mail topic" }],
+            suggestions: [{ id: "new-suggestion", text: "Mail topic" }],
+            tasks: [],
+            invitees: [],
+            taskGroupOrder: [],
+        });
+        expect(
+            await run("edit_agenda", {
+                meetingId: "agenda",
+                operations: [
+                    {
+                        action: "update_point",
+                        pointId: "point",
+                        version: 1,
+                        note: "Changed",
+                    },
+                ],
+            }),
+        ).toMatchObject({
+            completed: 1,
+            meeting: { points: [], suggestions: [] },
+        });
+        expect(service.mail).toHaveBeenCalledTimes(2);
     });
     it("does not disclose mail-origin tasks without mail:read", async () => {
         service.get.mockResolvedValue({
