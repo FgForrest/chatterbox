@@ -70,6 +70,30 @@ The privacy policy, store listing, permission explanations, and in-extension con
 - The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
 
+## What changed in 0.9.4
+
+- Target folders use the web application's folder chip in the popup, agenda panel, recorder window and in-page
+  recording bar. The chip shows the folder name with its full path as a tooltip. Organization folders use the blue
+  Organization icon; private folders use the red folder icon. A folder remembered by an earlier version shows the
+  private look until the folder list refreshes.
+- Clicking the chip opens the existing chooser. Remove sets File later; an unfiled target shows Add to folder.
+  Older servers keep the start folder read-only with the existing explanation.
+- The recorder window grows while its folder list is open and shrinks after it closes. Chrome's source picker
+  keeps its initial 800 × 680 size.
+- Stop in the popup, agenda panel and recorder window works after the server refused a folder change during the
+  recording (since 0.9.0 it did nothing until the next successful change).
+- No permission, data-use or server-contract change against 0.9.3. Folder scope is remembered locally alongside
+  the existing folder setting and recovery state; it is not sent to the server. The privacy policies already
+  describe recording preferences and state, so no policy update is needed.
+
+## What changed in 0.9.3
+
+- The popup grows to its full height while the folder list is open, so the list is no longer squeezed into the
+  space left below the field. The list also stays inside the popup instead of being clipped at its edge.
+- A folder list left open closes when the popup or agenda panel switches views, for example when the recording
+  stops, instead of staying over the next view.
+- No permission, data-use or server-contract change against 0.9.2.
+
 ## What changed in 0.9.2
 
 - Clearing an agenda point's title no longer sends an empty text; leaving the field restores the saved title.

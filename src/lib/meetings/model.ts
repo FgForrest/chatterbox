@@ -30,6 +30,7 @@ const meetingPrevious = z.object({
     end: instant.nullable().optional(),
     calendarEventId: id.nullable().optional(),
     taskSourceItemId: id.nullable().optional(),
+    noTaskSource: z.boolean().optional(),
 });
 export const patchMeetingInput = z
     .object({
@@ -38,21 +39,29 @@ export const patchMeetingInput = z
         end: instant.nullable().optional(),
         calendarEventId: id.nullable().optional(),
         taskSourceItemId: id.nullable().optional(),
+        noTaskSource: z.boolean().optional(),
         state: z.enum(["planned", "live", "held"]).optional(),
         version: z.number().int().nonnegative().optional(),
         previous: meetingPrevious.optional(),
     })
     .superRefine((input, ctx) => {
         if (!input.previous) return;
+        const patchesTaskSource =
+            input.taskSourceItemId !== undefined ||
+            input.noTaskSource !== undefined;
         for (const field of [
             "title",
             "start",
             "end",
             "calendarEventId",
             "taskSourceItemId",
+            "noTaskSource",
         ] as const) {
             if (
-                input[field] !== undefined &&
+                (input[field] !== undefined ||
+                    (patchesTaskSource &&
+                        (field === "taskSourceItemId" ||
+                            field === "noTaskSource"))) &&
                 input.previous[field] === undefined
             )
                 ctx.addIssue({

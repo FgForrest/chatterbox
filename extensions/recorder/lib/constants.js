@@ -62,6 +62,7 @@ export const STORAGE_KEYS = {
     folderId: "folderId",
     /** Display label for the selected folder, or null to file later. */
     folderLabel: "folderLabel",
+    folderScope: "folderScope",
 };
 
 /** The recorder window's width once Chrome's sharing dialog has closed. */

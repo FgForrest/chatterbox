@@ -19,6 +19,7 @@ export const GET = meetingRoute(async ({ userId, params, url }) => {
         outcomeUnplanned: _unplanned,
         outcomeSummaryId: _summaryId,
         taskSourceItemId: _taskSourceId,
+        noTaskSource: _noTaskSource,
         snapshotSourceItemId: _snapshotSourceId,
         taskSource: _taskSource,
         redirectTo: _redirect,

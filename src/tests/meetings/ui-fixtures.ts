@@ -98,6 +98,7 @@ export function detail(overrides: Partial<MeetingDetail> = {}): MeetingDetail {
         liveEndedAt: null,
         absorbedAt: null,
         taskSourceItemId: null,
+        noTaskSource: false,
         snapshotSourceItemId: null,
         outcomeUnplanned: [],
         outcomeSummaryId: null,

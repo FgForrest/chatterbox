@@ -4,11 +4,15 @@
 @source "../../../src/components/recordings/folder-search-list.tsx";
 @source "../../../src/components/sharing/shared-folder-icon.tsx";
 @source "../../../src/components/ui/search-combobox.tsx";
+@source "../../../src/components/items/item-folder-chip.tsx";
+@source "../../../src/components/items/item-folder-chip-body.tsx";
+@source "../../../src/components/recordings/folder-picker.tsx";
 @custom-variant dark (@media (prefers-color-scheme: dark));
 @theme inline {
     --color-background: var(--background);
     --color-foreground: var(--foreground);
     --color-muted-foreground: var(--muted-foreground);
+    --color-destructive: var(--error);
     --color-primary: var(--primary);
     --color-popover: var(--surface);
     --color-popover-foreground: var(--foreground);
@@ -20,4 +24,21 @@
     --color-person-share: var(--person-share);
 }
 [data-combobox-popup] { font-family: inherit; border-color: var(--border); }
-[data-combobox-popup] *, [role="combobox"] { box-sizing: border-box; }
+[data-combobox-popup], [data-combobox-popup] *, [role="combobox"] { box-sizing: border-box; }
+
+@layer base {
+    [data-recorder-folder] button {
+        border: 0 solid;
+        border-color: var(--border);
+        border-radius: 0;
+        background: transparent;
+        padding: 0;
+        font: inherit;
+        color: inherit;
+        cursor: pointer;
+    }
+}
+.recorder-folder-target { display: flex; min-width: 0; align-items: center; }
+.recorder-folder-target > span { max-width: 100%; box-sizing: border-box; }
+.recorder-folder-target > span > button:first-child { min-width: 0; }
+.recorder-folder-target > span > button > svg { flex-shrink: 0; }

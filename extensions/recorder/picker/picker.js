@@ -3,7 +3,7 @@ import { RECORDER_WINDOW_WIDTH, STATE } from "../lib/constants.js";
 import { fitWindowToContent } from "../lib/fit-window.js";
 import { localizeDocument, t } from "../lib/i18n.js";
 
-import { createRecordingFolder } from "../popup/folder-combobox.js";
+import { createRecordingFolder } from "../generated/folders.js";
 
 localizeDocument();
 
@@ -203,6 +203,7 @@ function chooseDesktopMedia() {
 }
 
 async function fitToRecorder() {
+    document.body.classList.add("recorder-picker");
     const current = await chrome.windows.getCurrent().catch(() => null);
     if (current?.state === "normal") {
         await chrome.windows

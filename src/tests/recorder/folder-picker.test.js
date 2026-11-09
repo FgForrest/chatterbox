@@ -183,6 +183,7 @@ describe("recorder folder combobox", () => {
         expect(ui.save).toHaveBeenCalledWith({
             folderId: saved.id,
             folderLabel: "Private / Renamed",
+            folderScope: null,
         });
         ui.input.blur();
         expect(ui.input.value).toBe(shown("Private / Renamed"));
@@ -200,6 +201,7 @@ describe("recorder folder combobox", () => {
         expect(ui.save).toHaveBeenCalledWith({
             folderId: null,
             folderLabel: null,
+            folderScope: null,
         });
     });
     it("keeps the remembered folder after a temporary lookup failure", async () => {
@@ -303,6 +305,7 @@ describe("recorder folder combobox", () => {
         expect(ui.save).toHaveBeenLastCalledWith({
             folderId: "picked",
             folderLabel: label,
+            folderScope: null,
         });
         expect(ui.input.value).toBe(shown(label));
         expect(ui.input.getAttribute("aria-expanded")).toBe("false");
@@ -320,6 +323,7 @@ describe("recorder folder combobox", () => {
         expect(ui.save).toHaveBeenLastCalledWith({
             folderId: null,
             folderLabel: null,
+            folderScope: null,
         });
         expect(ui.input.value).toBe(shown("fileLater"));
     });
@@ -339,6 +343,7 @@ describe("recorder folder combobox", () => {
         expect(ui.save).toHaveBeenCalledExactlyOnceWith({
             folderId: null,
             folderLabel: null,
+            folderScope: null,
         });
         expect(ui.input.value).toBe(shown("fileLater"));
     });
@@ -435,6 +440,7 @@ describe("recording folder field", () => {
             sessionId: "recording-1",
             folderId: null,
             folderLabel: null,
+            folderScope: null,
         });
         ui.field.render({ ...ui.state, stopped: true });
         expect(ui.container.hidden).toBe(true);

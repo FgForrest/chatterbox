@@ -174,7 +174,9 @@ async function snapshotTasks(
     retainNotes = false,
 ) {
     let sourceId = agenda.taskSourceItemId;
-    if (sourceId) {
+    if (agenda.noTaskSource) {
+        sourceId = null;
+    } else if (sourceId) {
         const [source] = await tx
             .select({ id: chatterItems.id })
             .from(chatterItems)
@@ -238,7 +240,9 @@ async function snapshotTasks(
             eq(agendaTasks.agendaId, agenda.id),
             eq(agendaTasks.userId, agenda.userId),
             eq(agendaTasks.origin, "last_meeting"),
-            retainNotes ? isNull(agendaTasks.note) : undefined,
+            retainNotes && !agenda.noTaskSource
+                ? isNull(agendaTasks.note)
+                : undefined,
             tasks.length
                 ? notInArray(
                       agendaTasks.taskId,
@@ -386,7 +390,7 @@ export async function refreshMeetingFolderContext(
         const folderIds = folders.map((folder) => folder.id);
         if (!folderIds.length && !access.agenda.snapshotSourceItemId)
             return false;
-        if (!access.agenda.taskSourceItemId)
+        if (!access.agenda.taskSourceItemId && !access.agenda.noTaskSource)
             await snapshotTasks(
                 tx,
                 access.agenda,
@@ -992,6 +996,10 @@ export async function getMeeting(
         recordingItemId: access.recordingVisible
             ? agenda.recordingItemId
             : null,
+        noTaskSource:
+            agenda.recordingItemId && !access.recordingVisible
+                ? false
+                : agenda.noTaskSource,
         taskSourceItemId:
             agenda.recordingItemId && !access.recordingVisible
                 ? null
@@ -1105,6 +1113,8 @@ export async function patchMeeting(
     raw: z.input<typeof patchMeetingInput>,
 ) {
     const input = patchMeetingInput.parse(raw);
+    if (input.noTaskSource && input.taskSourceItemId)
+        invalid("No task source cannot be combined with a recording");
     const event = input.calendarEventId
         ? await getCalendarEvent(userId, input.calendarEventId)
         : null;
@@ -1120,6 +1130,7 @@ export async function patchMeeting(
             end: agenda.plannedEnd?.toISOString() ?? null,
             calendarEventId: agenda.calendarEventId,
             taskSourceItemId: agenda.taskSourceItemId,
+            noTaskSource: agenda.noTaskSource,
         };
         const metadataFields = [
             "title",
@@ -1127,15 +1138,23 @@ export async function patchMeeting(
             "end",
             "calendarEventId",
             "taskSourceItemId",
+            "noTaskSource",
         ] as const;
+        const patchesTaskSource =
+            input.taskSourceItemId !== undefined ||
+            input.noTaskSource !== undefined;
         const fields = metadataFields.filter(
-            (field) => input[field] !== undefined,
+            (field) =>
+                input[field] !== undefined ||
+                (patchesTaskSource &&
+                    (field === "taskSourceItemId" || field === "noTaskSource")),
         );
         if (fields.length === 0 && input.state === agenda.state) return false;
         const conflict = input.previous
             ? fields.some((field) => {
                   const previous = input.previous?.[field];
-                  return (field === "start" || field === "end") && previous
+                  return (field === "start" || field === "end") &&
+                      typeof previous === "string"
                       ? new Date(previous).toISOString() !== current[field]
                       : previous !== current[field];
               })
@@ -1182,6 +1201,16 @@ export async function patchMeeting(
               : agenda.plannedEnd;
         if (end && (!start || end <= start))
             invalid("Meeting end must follow its start");
+        const noTaskSource =
+            input.noTaskSource ??
+            (input.taskSourceItemId !== undefined
+                ? false
+                : agenda.noTaskSource);
+        const taskSourceItemId = noTaskSource
+            ? null
+            : input.taskSourceItemId !== undefined
+              ? input.taskSourceItemId
+              : agenda.taskSourceItemId;
         const [updated] = await tx
             .update(meetingAgendas)
             .set({
@@ -1198,9 +1227,8 @@ export async function patchMeeting(
                           calendarRefreshedAt: event ? new Date() : null,
                       }
                     : {}),
-                ...(input.taskSourceItemId !== undefined
-                    ? { taskSourceItemId: input.taskSourceItemId }
-                    : {}),
+                taskSourceItemId,
+                noTaskSource,
                 ...(input.state
                     ? {
                           state: input.state,
@@ -1243,8 +1271,8 @@ export async function patchMeeting(
                     ),
                 );
         if (
-            (input.taskSourceItemId !== undefined &&
-                input.taskSourceItemId !== agenda.taskSourceItemId) ||
+            updated.taskSourceItemId !== agenda.taskSourceItemId ||
+            updated.noTaskSource !== agenda.noTaskSource ||
             (input.calendarEventId !== undefined &&
                 input.calendarEventId !== agenda.calendarEventId)
         ) {

@@ -45,3 +45,7 @@ body {
 #picker-completed {
     text-align: center;
 }
+
+body.recorder-picker:has([data-combobox-popup]) {
+    min-height: calc(600px - 40px);
+}

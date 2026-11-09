@@ -353,7 +353,9 @@ export function AgendaBody({
                     )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    {detail.taskSource ? (
+                    {detail.noTaskSource ? (
+                        <span>{i18n("No tasks from other meetings")}</span>
+                    ) : detail.taskSource ? (
                         <Link
                             className="underline"
                             href={`/dashboard?recording=${encodeURIComponent(detail.taskSource.id)}`}
@@ -370,13 +372,22 @@ export function AgendaBody({
                             {i18n("Task source")}
                             <SearchCombobox
                                 aria-label={i18n("Task source")}
-                                value={detail.taskSourceItemId ?? ""}
+                                value={
+                                    detail.noTaskSource
+                                        ? ":none"
+                                        : (detail.taskSourceItemId ?? "")
+                                }
                                 placeholder={detail.taskSource?.title}
                                 disabled={busy}
                                 options={[
                                     {
                                         value: "",
                                         label: i18n("Automatic"),
+                                        alwaysVisible: true,
+                                    },
+                                    {
+                                        value: ":none",
+                                        label: i18n("No source"),
                                         alwaysVisible: true,
                                     },
                                     ...sourceRecordings.map((recording) => ({
@@ -392,13 +403,19 @@ export function AgendaBody({
                                     })),
                                 ]}
                                 onValueChange={(sourceId) => {
-                                    const taskSourceItemId = sourceId || null;
+                                    const noTaskSource = sourceId === ":none";
+                                    const taskSourceItemId = noTaskSource
+                                        ? null
+                                        : sourceId || null;
                                     void mutate(
                                         "",
                                         "PATCH",
                                         {
                                             taskSourceItemId,
+                                            noTaskSource,
                                             previous: {
+                                                noTaskSource:
+                                                    detail.noTaskSource,
                                                 taskSourceItemId:
                                                     detail.taskSourceItemId,
                                             },
@@ -406,7 +423,14 @@ export function AgendaBody({
                                         (value) => ({
                                             ...value,
                                             taskSourceItemId,
-                                            tasks: [],
+                                            noTaskSource,
+                                            taskSource: null,
+                                            snapshotSourceItemId: null,
+                                            tasks: value.tasks.filter(
+                                                (task) =>
+                                                    task.agendaOrigin ===
+                                                    "older",
+                                            ),
                                         }),
                                     );
                                 }}

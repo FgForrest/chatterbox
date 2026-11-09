@@ -43,6 +43,11 @@ body {
     color: var(--foreground);
 }
 
+/* Chrome sizes the popup to the page (600 px at most), not to the fixed folder list. */
+body.action-popup:has([data-combobox-popup]) {
+    min-height: calc(600px - 12px - 16px);
+}
+
 header {
     display: flex;
     align-items: center;
@@ -83,7 +88,7 @@ p {
     color: var(--error);
 }
 
-button {
+button:where(:not([data-recorder-folder] button)) {
     font: inherit;
     font-size: 13px;
     padding: 7px 12px;
@@ -94,7 +99,7 @@ button {
     cursor: pointer;
 }
 
-button:hover:not(:disabled) {
+button:where(:not([data-recorder-folder] button)):hover:not(:disabled) {
     border-color: var(--primary);
 }
 
@@ -121,7 +126,7 @@ select:focus-visible {
     color: inherit;
 }
 
-button:disabled {
+button:where(:not([data-recorder-folder] button)):disabled {
     cursor: wait;
     opacity: 0.65;
 }

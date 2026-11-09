@@ -3,16 +3,28 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mountRecordingControls } from "../../../extensions/recorder/lib/recording-controls.js";
 
-const h = vi.hoisted(() => ({ wait: Promise.resolve(), reset: vi.fn() }));
+const h = vi.hoisted(() => ({
+    wait: Promise.resolve(),
+    reset: vi.fn(),
+    fieldOptions: null,
+    recordingRender: vi.fn(),
+    closeIdle: vi.fn(),
+    closeRecording: vi.fn(),
+}));
 vi.mock("../../../extensions/recorder/generated/folders.js", () => ({
-    createFolderField: () => ({
-        reset: h.reset,
-        saved: () => h.wait,
-        destroy: vi.fn(),
-    }),
+    createFolderField: (options) => {
+        h.fieldOptions = options;
+        return {
+            reset: h.reset,
+            saved: () => h.wait,
+            close: h.closeIdle,
+            destroy: vi.fn(),
+        };
+    },
     createRecordingFolder: () => ({
-        render: vi.fn(),
+        render: h.recordingRender,
         saved: () => h.wait,
+        close: h.closeRecording,
         destroy: vi.fn(),
     }),
 }));
@@ -25,6 +37,8 @@ beforeEach(() => {
     vi.useFakeTimers();
     h.wait = Promise.resolve();
     h.reset.mockClear();
+    h.closeIdle.mockClear();
+    h.closeRecording.mockClear();
     document.documentElement.innerHTML = readFileSync(
         "extensions/recorder/popup/popup.html",
         "utf8",
@@ -118,6 +132,38 @@ describe.each([
         });
         expect(close).toHaveBeenCalledTimes(variant === "popup" ? 1 : 0);
     });
+    it("passes saved folder scope to the idle chip, start payload and recording chip", async () => {
+        Object.assign(local, {
+            folderId: "work",
+            folderLabel: "Organization / Planning",
+            folderScope: "org",
+        });
+        await mount();
+        expect(h.reset).toHaveBeenCalledWith(
+            expect.objectContaining({ folderScope: "org" }),
+        );
+        const choice = {
+            folderId: "calls",
+            folderLabel: "Private / Calls",
+            folderScope: "personal",
+        };
+        await h.fieldOptions.save(choice);
+        el("start").click();
+        await settle();
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+            type: "start-recording",
+            payload: expect.objectContaining(choice),
+        });
+        const state = {
+            state: "recording",
+            sessionId: "one",
+            uploaded: [],
+            ...choice,
+        };
+        listener({ type: "state", state });
+        await settle();
+        expect(h.recordingRender).toHaveBeenCalledWith(state);
+    });
     it("keeps the sharing-dialog action available and renders finalization, errors and recovery", async () => {
         await mount();
         el("start-desktop").click();
@@ -177,5 +223,35 @@ describe.each([
         expect(el("completion-agenda-notice").textContent).toBe(
             "agendaUnavailable",
         );
+    });
+    it("closes the folder chooser of a view the state hides", async () => {
+        await mount();
+        expect(el("view-idle").hidden).toBe(false);
+        expect(h.closeIdle).not.toHaveBeenCalled();
+        listener({
+            type: "state",
+            state: {
+                state: "recording",
+                sessionId: "one",
+                startedAt: new Date().toISOString(),
+                uploaded: [],
+            },
+        });
+        await settle();
+        expect(h.closeIdle).toHaveBeenCalled();
+        h.closeRecording.mockClear();
+        listener({
+            type: "state",
+            state: {
+                state: "recording",
+                sessionId: "one",
+                stopped: true,
+                chunkCount: 2,
+                uploaded: [0],
+            },
+        });
+        await settle();
+        expect(el("view-finalizing").hidden).toBe(false);
+        expect(h.closeRecording).toHaveBeenCalled();
     });
 });
