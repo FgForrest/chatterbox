@@ -21,6 +21,7 @@ export function createFolderField({
     let pending = Promise.resolve();
     let revision = 0;
     let refreshError = "";
+    let open = false;
     const environment = () => ({
         labels: {
             folder: t("folder"),
@@ -76,6 +77,11 @@ export function createFolderField({
                 <FolderCombobox
                     entries={visible}
                     value={selected}
+                    open={open}
+                    onOpenChange={(value) => {
+                        open = value;
+                        paint();
+                    }}
                     environment={environment()}
                     variant={variant}
                     aria-label={t("folder")}
@@ -198,6 +204,11 @@ export function createFolderField({
                 void refresh(revision);
         },
         saved: () => pending,
+        close: () => {
+            if (!open) return;
+            open = false;
+            paint();
+        },
         destroy: () => {
             revision++;
             root.unmount();
@@ -244,6 +255,7 @@ export function createRecordingFolder({ container, prefix, request, send, t }) {
                 });
         },
         saved: field.saved,
+        close: field.close,
         destroy: field.destroy,
     };
 }

@@ -323,7 +323,7 @@ describe("popup agenda card", () => {
         const manifest = JSON.parse(
             readFileSync("extensions/recorder/manifest.json", "utf8"),
         );
-        expect(manifest.version).toBe("0.9.2");
+        expect(manifest.version).toBe("0.9.3");
         expect(manifest.permissions).toEqual([
             "offscreen",
             "storage",

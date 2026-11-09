@@ -57,6 +57,7 @@ afterEach(async () => {
         for (const field of fields) field.destroy();
     });
     document.body.replaceChildren();
+    document.body.removeAttribute("class");
     vi.unstubAllGlobals();
 });
 function mount() {
@@ -129,6 +130,48 @@ describe.each([
         expect(container.textContent).toContain("Planning");
         expect(container.textContent).toContain("Refused");
     });
+});
+
+it("grows the action popup only while its folder list is open", async () => {
+    const popup = new DOMParser().parseFromString(
+        readFileSync("extensions/recorder/popup/popup.html", "utf8"),
+        "text/html",
+    ).body;
+    document.body.className = popup.className;
+    document.body.append(
+        ...Array.from(popup.childNodes, (node) =>
+            document.importNode(node, true),
+        ),
+    );
+    const growRule = readFileSync(
+        "extensions/recorder/popup/popup.css",
+        "utf8",
+    ).match(/^([^{}\n]*:has\(\[data-combobox-popup\]\)) \{\s*min-height/m);
+    expect(growRule).toBeTruthy();
+    document.getElementById("view-idle").hidden = false;
+    const field = createFolderField({
+        container: document.getElementById("folder-row"),
+        request: async () => ({ ok: true, folders }),
+        save: vi.fn(async () => {}),
+        t,
+    });
+    fields.push(field);
+    await act(async () => field.reset({ folderId: null }));
+    expect(document.body.matches(growRule[1])).toBe(false);
+    await act(async () => fireEvent.click(screen.getByRole("combobox")));
+    expect(document.body.matches(growRule[1])).toBe(true);
+    await act(async () =>
+        fireEvent.keyDown(document.activeElement, { key: "Escape" }),
+    );
+    expect(document.querySelector("[data-combobox-popup]")).toBeNull();
+    expect(document.body.matches(growRule[1])).toBe(false);
+    await act(async () => fireEvent.click(screen.getByRole("combobox")));
+    expect(document.body.matches(growRule[1])).toBe(true);
+    await act(async () => field.close());
+    expect(document.querySelector("[data-combobox-popup]")).toBeNull();
+    expect(document.body.matches(growRule[1])).toBe(false);
+    await act(async () => fireEvent.click(screen.getByRole("combobox")));
+    expect(document.querySelector("[data-combobox-popup]")).toBeTruthy();
 });
 
 it("makes the recording folder read-only on a released server", async () => {

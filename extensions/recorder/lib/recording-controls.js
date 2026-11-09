@@ -91,6 +91,8 @@ export async function mountRecordingControls(
         for (const [key, node] of Object.entries(views)) {
             node.hidden = key !== name;
         }
+        if (name !== "idle") folderCombobox.close();
+        if (name !== "recording") recordingFolder.close();
     }
 
     function sendMessage(message) {
