@@ -16,6 +16,12 @@ vi.mock("@/db/queries/agenda-mail-sources", () => ({
     }),
 }));
 vi.mock("@/lib/mcp/scope", () => ({ mayReadMail: () => false }));
+vi.mock("@/lib/meetings/dismiss-suggestions", () => ({
+    dismissSuggestions: vi.fn(),
+}));
+vi.mock("@/lib/meetings/suggestions-job", () => ({
+    enqueueAgendaSuggestions: vi.fn(),
+}));
 
 import { MEETING_TOOLS } from "@/lib/mcp/tools/meetings";
 

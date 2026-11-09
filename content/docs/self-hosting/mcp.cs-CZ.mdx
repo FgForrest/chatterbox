@@ -12,7 +12,7 @@ se volající dostane. V režimu `AUTHZ_MODE=idp` se čtou z položky `scope`
 odděleného mezerami. Režim `AUTHZ_MODE=local` zachovává původní klientské
 role Keycloaku (`resource_access[MCP_AUDIENCE].roles`).
 
-Server čte obsah a spravuje úkoly podle stejných oprávnění jako aplikace.
+Server čte obsah a spravuje úkoly i programy schůzek podle stejných oprávnění jako aplikace.
 
 <span id="what-it-exposes" />
 
@@ -26,9 +26,9 @@ nástroje. Volání známého nástroje bez potřebného oprávnění vrátí
 | ------------------ | ------------------------------------------------------------------------------------------------- |
 | `knowledge:read`   | `list_types`, `list_knowledge`, `find_knowledge`, `get_entity`, `get_facts`, `list_mishearings`    |
 | `transcripts:read` | `get_transcript`, `search_transcripts`                                                             |
-| `summaries:read`   | `get_summary`, `search_summaries`                                                                  |
-| `tasks:read`       | `list_tasks`, `search_tasks`                                                                       |
-| `tasks:write`      | `create_task`, `update_task`, `follow_task`, `merge_tasks`                                                            |
+| `summaries:read`   | `get_summary`, `search_summaries`, `list_meetings`, `get_meeting`                                                                  |
+| `tasks:read`       | `list_tasks`, `search_tasks`, `list_meetings`, `get_meeting`                                                                       |
+| `tasks:write`      | `create_task`, `update_task`, `follow_task`, `merge_tasks`, `prepare_meeting`, `edit_agenda`, `update_agenda`, `suggest_agenda_points`                                                            |
 | `mail:read`        | `list_mail`, `get_mail`, `search_mail`                                                             |
 
 `list_folders`, `list_recordings` a `list_attended_recordings` jsou dostupné spolu s některou z
@@ -72,6 +72,55 @@ vybírají řádky (viz [Co volající vidí](#what-callers-see)). Výjimkou je
 nahrávek s účastí volajícího, včetně těch, které nemůže číst.
 
 Pole `language` nástroje `get_transcript` zůstává jazykem rozpoznaným poskytovatelem. `confirmed_language` je uživatelem potvrzený jazyk nahrávky jako kód ISO 639-1, nebo `null` při volbě Automaticky; `detected_language` opakuje původní odhad poskytovatele. Také `list_recordings` obsahuje `confirmed_language`. Tato pole nemění text přepisu.
+
+<span id="meeting-agendas" />
+
+## Programy schůzek
+
+Klepna používá stejné služby a oprávnění jako webový editor programu.
+Čtení vyžaduje `summaries:read` nebo `tasks:read`, zápis `tasks:write`.
+Servisní účty mohou číst viditelné programy Organizace, ale nesmějí zapisovat.
+Přehled úkolů vyžaduje `tasks:read`; úkoly, body a návrhy odvozené z pošty
+vyžadují `mail:read`.
+
+| Nástroj | Vstup a chování |
+| --- | --- |
+| `list_meetings` | Volitelné `folderId`. Vypíše nadcházející programy a proběhlé schůzky bez nahrávky. |
+| `get_meeting` | `meetingId`. Vrátí viditelné body a jejich `version`, `version` programu, oprávnění, úkoly (včetně odebraných a `agendaNote`), `taskGroups[].key`, `taskGroupOrder` a návrhy s `id` a `kind` (`ai` nebo `carry_over`). `aiSuggestions.job` uvádí stav generování návrhů. |
+| `prepare_meeting` | `folderId`, volitelné `title`, `start`, `end`, `calendarEventId`. Vytvoří program nebo použije existující viditelný program události Kalendáře. |
+| `edit_agenda` | `meetingId`, `operations` (1 až 100 postupných změn). Body: `add_point`, `update_point`, `remove_point`. Úkoly: `add_task`, `remove_task`, `restore_task` s `taskId`; `set_task_note` s `taskId` a `note` (null vymaže); `reorder_tasks` s `groupKey` a všemi aktuálními ID úkolů dané skupiny v seřazeném poli `taskIds`. Návrhy: `add_suggestion` nebo `dismiss_suggestion` se `suggestionId`; `dismiss_suggestions` s `kind: ai\|carry_over`. |
+| `update_agenda` | `meetingId`, volitelné `title`, `start`, `end`, `calendarEventId`, `state: planned\|live\|held`, `taskSourceItemId`, `noTaskSource`, `taskGroupOrder`, `version`, `previous`. Nejprve program přečtěte. Časy jsou ISO datumy s časovým pásmem (null vymaže); původní časy čtěte z `plannedStart`/`plannedEnd`. Null `calendarEventId` odpojí událost; null `taskSourceItemId` vybere automatický zdroj. `noTaskSource: true` znamená Bez zdroje. |
+| `suggest_agenda_points` | `meetingId`, volitelné `locale: en\|cs-CZ`. Zařadí stejnou AI úlohu jako webový editor, aktivní úlohu použije znovu. Vrátí `jobId` a program se stavem úlohy. Výsledky načítejte přes `get_meeting`, pak návrhy přijměte nebo zamítněte. |
+
+`parentId` vytvoří podbod nebo změní zanoření bodu; null jej přesune na nejvyšší
+úroveň, povoleny jsou nejvýše tři úrovně. `discussed: true` označí bod jako
+vyřešený/projednaný; false jej znovu otevře. `remove_point` odstraní i podbody.
+S `mergeUp: true` použije sloučení nahoru jako webový editor: podbody zachová
+a přesune je pod rodiče odstraněného bodu. Případný text nejprve spojte s předchozím
+bodem přes `update_point`; samotný příznak texty nespojuje.
+Při aktualizaci použijte buď uloženou `position`, nebo `siblingIndex` počítaný od
+nuly, nikdy obojí; pro přesuny upřednostněte `siblingIndex`. Každá změna bodu zvýší
+jeho `version`, i v jedné dávce. Další změna téhož bodu potřebuje novou verzi.
+Chyba dávky uvádí `completed`; předchozí změny zůstávají provedené. Zařazení úkolu
+a poznámka v programu nemění skutečný stav ani poznámku úkolu. K tomu slouží `update_task`.
+
+Změny údajů porovnávají `version`, pokud ji pošlete bez `previous`. S `previous`
+místo toho pošlete původní hodnotu každého měněného údaje; změna zdroje úkolů
+vyžaduje původní `taskSourceItemId` i `noTaskSource`. `taskGroupOrder` vždy
+vyžaduje `previous.taskGroupOrder` přesně z `get_meeting` a všechny viditelné
+skupiny včetně prázdných skupin pozvaných. Samotná změna stavu neporovnává
+`version` ani `previous`, stejně jako webový editor. Po konfliktu program znovu
+načtěte. Spolueditoři mohou řadit skupiny a úkoly, přidávat body a měnit text
+vlastních bodů; změna údajů programu vyžaduje autora nebo kurátora Organizace.
+Program převzatý do nahrávky odmítá všechny zápisy.
+
+Generování AI používá nastaveného poskytovatele shrnutí a jeho pravidla účtování
+a kvót. Může být zpoplatněno, přijímá nejvýše 100 zdrojových shrnutí a 200 úkolů
+v rámci 160 000 znaků zadání a navrhne nejvýše osm bodů bez automatického přidání.
+Jazyk výstupu profilu a jazyk zdrojů mají přednost před jazykem rozhraní;
+vynechané `locale` použije uložený jazyk volajícího, poté angličtinu.
+Mazání programů, osobní sdílení, připojení nahrávky a export do Kalendáře tyto
+nástroje neposkytují.
 
 <span id="turning-it-on" />
 
