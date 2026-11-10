@@ -50,6 +50,7 @@ import {
 } from "@/components/ui/popover";
 import { ActionTooltip } from "@/components/ui/tooltip";
 import { useDashboardRefresh } from "@/hooks/use-dashboard-refresh";
+import { useFolderRefusal } from "@/hooks/use-folder-refusal";
 import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
 import { subscribeEvents } from "@/lib/events/client";
 import type { listMyFolderInvitations } from "@/lib/sharing/folder-shares";
@@ -150,6 +151,11 @@ export function PersonShareDialog({
 }) {
     const i18n = useExtracted();
     const refreshSharing = usePersonSharingRefresh();
+    const folderRefusal = useFolderRefusal();
+    const [hasSubfolders, setHasSubfolders] = useState<boolean | null>(
+        kind === "folder" ? null : false,
+    );
+    const canInvite = allowInvite && hasSubfolders === false;
     const endpoint =
         kind === "folder"
             ? `/api/folders/${encodeURIComponent(itemId)}/shares`
@@ -184,9 +190,11 @@ export function PersonShareDialog({
             );
         const data = (await response.json()) as {
             shares: Share[];
+            hasSubfolders?: boolean;
             folderAudience?: FolderAudience;
             agendaTasks?: typeof taskDisclosure;
         };
+        setHasSubfolders(data.hasSubfolders ?? false);
         setTaskDisclosure(data.agendaTasks ?? null);
         setShares(data.shares);
         setFolderAudience(data.folderAudience ?? []);
@@ -203,7 +211,7 @@ export function PersonShareDialog({
         });
     }, [open, load]);
     useEffect(() => {
-        if (!open || query.trim().length < 2) {
+        if (!open || !canInvite || query.trim().length < 2) {
             setPeople([]);
             return;
         }
@@ -233,7 +241,7 @@ export function PersonShareDialog({
             clearTimeout(timer);
             abort.abort();
         };
-    }, [query, open, i18n]);
+    }, [query, open, i18n, canInvite]);
     const act = async (action: () => Promise<void>) => {
         if (busy) return;
         setBusy(true);
@@ -243,6 +251,14 @@ export function PersonShareDialog({
             await load();
             refreshSharing();
         } catch (error) {
+            if (
+                error instanceof Error &&
+                "code" in error &&
+                error.code === "FOLDER_HAS_SUBFOLDERS"
+            ) {
+                setHasSubfolders(true);
+                return;
+            }
             setError(
                 error instanceof Error
                     ? error.message
@@ -253,18 +269,24 @@ export function PersonShareDialog({
         }
     };
     const invite = async (receiverId: string) => {
+        if (!canInvite) return;
         const response = await fetch(endpoint, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ receiverIds: [receiverId] }),
         });
-        if (!response.ok)
+        if (!response.ok) {
+            const error = await parseApiError(response);
+            if (error.code === "FOLDER_HAS_SUBFOLDERS")
+                throw Object.assign(new Error(error.error), {
+                    code: error.code,
+                });
+            const refusal = folderRefusal(error);
+            if (refusal) toast.error(refusal);
             throw new Error(
-                await getApiErrorMessage(
-                    response,
-                    i18n("Could not update sharing"),
-                ),
+                refusal ?? (error.error || i18n("Could not update sharing")),
             );
+        }
         setQuery("");
     };
     const content = (
@@ -359,16 +381,24 @@ export function PersonShareDialog({
                     )}
                 </output>
             )}
+            {kind === "folder" && hasSubfolders && (
+                <p role="alert" className="text-sm text-muted-foreground">
+                    {i18n(
+                        "Move this folder's subfolders elsewhere first. A shared folder has no subfolders.",
+                    )}
+                </p>
+            )}
             {allowInvite && (
                 <Input
                     type="search"
+                    disabled={busy || !canInvite}
                     aria-label={i18n("Colleague's name or email")}
                     placeholder={i18n("Colleague's name or email")}
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
                 />
             )}
-            {(allowInvite ? people : [])
+            {(canInvite ? people : [])
                 .filter(
                     (person) =>
                         folderAudience.some(
@@ -515,7 +545,7 @@ export function PersonShareDialog({
                                         ? i18n("Declined")
                                         : i18n("Removed")}
                             </span>
-                            {((allowInvite &&
+                            {((canInvite &&
                                 !folderAudience.some(
                                     (member) =>
                                         member.receiverUserId ===

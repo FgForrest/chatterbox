@@ -33,6 +33,8 @@ Přijaté položky se nezahrnují do vašich záloh ani exportů složek. Archiv
 
 V nabídce soukromé složky zvolte **Sdílet složku…**, případně otevřete **Nastavení složky** a část pro sdílení. Pozvěte kolegy a spravujte čekající, přijaté, odmítnuté a odebrané pozvánky stejně jako u jednotlivých položek. Vaše sdílená složka má švestkovou ikonu složky s odchozí šipkou.
 
+Složka sdílená s lidmi nemá podsložky: před pozváním přesuňte všechny podsložky jinam a dokud některá pozvánka čeká nebo je přijatá, nelze do ní podsložky vytvářet ani přesouvat. Dřívější podsložky zůstávají na místě s označením **nesdíleno** a přístup nedědí.
+
 Sdílení je živé a zahrnuje jen nahrávky a e-maily přímo ve složce. Podsložky přístup nikdy nedědí. Přidáním položky ji ihned zpřístupníte přijatým příjemcům; odebráním nebo přesunem jinam tento přístup skončí. Položka sdílená jednotlivě i přes složku se v Nedávných, seznamech, hledání i MCP objeví jednou.
 
 Pozvánku ke složce přijmete volbou **Přijmout a připojit…**. Dialog **Připojit sdílenou složku** nabízí **Název u vás**, předvyplněný názvem složky vlastníka, a **Umístit do**, omezené na váš soukromý strom včetně jeho kořene. Ikona s příchozí šipkou a nápověda uvádějí vlastníka i původní název. Přejmenování originálu váš zvolený název nezmění; jiné názvy složek vlastníka neuvidíte.

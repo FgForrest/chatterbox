@@ -25,6 +25,7 @@ import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { useDashboardRefresh } from "@/hooks/use-dashboard-refresh";
 import { useFolderLabel } from "@/hooks/use-folder-label";
+import { useFolderRefusal } from "@/hooks/use-folder-refusal";
 import { parseApiError } from "@/lib/api-errors";
 import { matchFolders } from "@/lib/folders/navigation";
 import type { RecordingFolder } from "@/types/folder";
@@ -47,10 +48,13 @@ export async function changeFolderShareRequest(
     );
     if (!response.ok) {
         const error = await parseApiError(response);
-        throw new Error(
-            error.code === "UNKNOWN_ERROR"
-                ? fallbackMessage
-                : error.error || fallbackMessage,
+        throw Object.assign(
+            new Error(
+                error.code === "UNKNOWN_ERROR"
+                    ? fallbackMessage
+                    : error.error || fallbackMessage,
+            ),
+            { code: error.code },
         );
     }
 }
@@ -80,6 +84,7 @@ export function ReceivedFolderDialog({
     onSaved?: () => void;
 }) {
     const i18n = useExtracted();
+    const folderRefusal = useFolderRefusal();
     const label = useFolderLabel();
     const refresh = useDashboardRefresh();
     const nameId = useId();
@@ -93,6 +98,7 @@ export function ReceivedFolderDialog({
                     (folder) =>
                         folder.scope === "personal" &&
                         !folder.receivedFolder &&
+                        !folder.sharedWithPeople &&
                         folder.kind !== "public",
                 ),
                 "",
@@ -101,7 +107,13 @@ export function ReceivedFolderDialog({
         [folders, label],
     );
     const save = async () => {
-        if (saving) return;
+        if (
+            saving ||
+            (action !== "rename" &&
+                parentId !== null &&
+                !entries.some((entry) => entry.folder.id === parentId))
+        )
+            return;
         setSaving(true);
         try {
             await changeFolderShareRequest(
@@ -115,10 +127,17 @@ export function ReceivedFolderDialog({
             onOpenChange(false);
             refresh();
         } catch (error) {
+            const refusal =
+                error instanceof Error &&
+                "code" in error &&
+                typeof error.code === "string"
+                    ? folderRefusal({ code: error.code, error: error.message })
+                    : null;
             toast.error(
-                error instanceof Error
-                    ? error.message
-                    : i18n("Could not update sharing"),
+                refusal ??
+                    (error instanceof Error
+                        ? error.message
+                        : i18n("Could not update sharing")),
             );
         } finally {
             setSaving(false);

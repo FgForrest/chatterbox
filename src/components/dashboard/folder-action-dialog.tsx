@@ -53,6 +53,7 @@ export function FolderActionDialog({
     const entries = matchFolders(folders, "", label).filter(
         (entry) =>
             !entry.folder.receivedFolder &&
+            !entry.folder.sharedWithPeople &&
             entry.folder.scope === folder.scope &&
             !subtree.has(entry.folder.id),
     );

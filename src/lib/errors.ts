@@ -74,6 +74,10 @@ export enum ErrorCode {
      * `ShareGateProblem`s. Served as 409.
      */
     SHARE_REQUIREMENTS_UNMET = "SHARE_REQUIREMENTS_UNMET",
+    /** A pending or accepted person-shared folder cannot gain children (409). */
+    SHARED_FOLDER_HAS_NO_SUBFOLDERS = "SHARED_FOLDER_HAS_NO_SUBFOLDERS",
+    /** Move existing subfolders elsewhere before inviting people (409). */
+    FOLDER_HAS_SUBFOLDERS = "FOLDER_HAS_SUBFOLDERS",
     /**
      * The recording is shared with the Organization, and while it is only
      * the organization account changes it; its owner withdraws it first.

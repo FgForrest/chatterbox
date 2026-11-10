@@ -10,6 +10,7 @@ import {
     waitFor,
     within,
 } from "@testing-library/react";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialogProvider } from "@/components/confirm-dialog";
 import { CommandPalette } from "@/components/dashboard/command-palette";
@@ -157,7 +158,8 @@ const invitation = {
     version: 0,
     invitedAt: new Date(),
 };
-let requests: ReturnType<typeof vi.fn>;
+type FetchRequest = (path: string, init?: RequestInit) => Promise<Response>;
+let requests: ReturnType<typeof vi.fn<FetchRequest>>;
 beforeEach(() => {
     vi.clearAllMocks();
     requests = vi.fn(async (path: string, init?: RequestInit) => {
@@ -213,6 +215,197 @@ function tree(enabled = true, items = [recording]) {
     return { ...result, assign, move, select };
 }
 describe("folder person sharing UI", () => {
+    it.each([
+        false,
+        true,
+    ])("forbids subfolders in person-shared folders with curator=%s", (canCurate) => {
+        expect(canCreateSubfolder(outgoing, canCurate, canCurate)).toBe(false);
+        expect(canCreateSubfolder(privateFolder, canCurate, canCurate)).toBe(
+            true,
+        );
+        expect(
+            canCreateSubfolder({ ...privateFolder, scope: "org" }, canCurate),
+        ).toBe(true);
+        expect(canCreateSubfolder(org, canCurate)).toBe(canCurate);
+    });
+    describe.each([
+        "dialog",
+        "inline settings",
+        "nested audience",
+    ] as const)("folder sharing refusal in %s", (variant) => {
+        async function renderVariant() {
+            if (variant === "inline settings") {
+                const view = render(
+                    <ConfirmDialogProvider>
+                        <PersonSharingProvider value>
+                            <FolderSettingsPanel
+                                folder={outgoing}
+                                folders={folders}
+                                count={1}
+                                open
+                                onOpenChange={vi.fn()}
+                                onRename={vi.fn()}
+                                onDelete={vi.fn()}
+                                exportProviders={{
+                                    filesystem: false,
+                                    googleDrive: false,
+                                    mail: false,
+                                }}
+                            />
+                        </PersonSharingProvider>
+                    </ConfirmDialogProvider>,
+                );
+                return within(view.baseElement);
+            }
+            if (variant === "nested audience") {
+                const fetchFolder = requests.getMockImplementation();
+                if (!fetchFolder)
+                    throw new Error("Missing folder fetch fixture");
+                requests.mockImplementation(
+                    (path: string, init?: RequestInit) => {
+                        if (path === "/api/items/audio/shares")
+                            return Promise.resolve(
+                                Response.json({
+                                    shares: [],
+                                    folderAudience: [
+                                        {
+                                            folderId: "outgoing",
+                                            folderName: "Research",
+                                            canManage: true,
+                                            receiverUserId: "receiver",
+                                            name: "Lena Fischer",
+                                            email: "lena@example.com",
+                                            state: "accepted",
+                                        },
+                                    ],
+                                }),
+                            );
+                        return fetchFolder(path, init);
+                    },
+                );
+                render(
+                    <PersonShareDialog
+                        itemId="audio"
+                        kind="audio"
+                        title="Interview"
+                        open
+                        onOpenChange={vi.fn()}
+                    />,
+                );
+                fireEvent.click(
+                    await screen.findByRole("button", {
+                        name: "Manage folder sharing",
+                    }),
+                );
+            } else {
+                render(
+                    <PersonShareDialog
+                        itemId="outgoing"
+                        kind="folder"
+                        title="Research"
+                        open
+                        onOpenChange={vi.fn()}
+                    />,
+                );
+            }
+            return within(
+                await screen.findByRole("dialog", { name: "Share folder" }),
+            );
+        }
+        it("blocks invitations and reinvitations before choosing people when the folder has children", async () => {
+            requests.mockResolvedValue(
+                Response.json({
+                    shares: [{ ...share, state: "removed" }],
+                    hasSubfolders: true,
+                }),
+            );
+            const view = await renderVariant();
+            expect(
+                await view.findByText(
+                    "Move this folder's subfolders elsewhere first. A shared folder has no subfolders.",
+                ),
+            ).toBeTruthy();
+            expect(
+                view.getByRole("searchbox", {
+                    name: "Colleague's name or email",
+                }),
+            ).toHaveProperty("disabled", true);
+            expect(
+                view.queryByRole("button", { name: "Invite again" }),
+            ).toBeNull();
+            expect(requests.mock.calls.every(([, init]) => !init?.method)).toBe(
+                true,
+            );
+        });
+        it("keeps existing share removal available when a legacy folder has children", async () => {
+            requests.mockResolvedValue(
+                Response.json({ shares: [share], hasSubfolders: true }),
+            );
+            const view = await renderVariant();
+            fireEvent.click(
+                await view.findByRole("button", { name: "Remove" }),
+            );
+            await waitFor(() =>
+                expect(requests).toHaveBeenCalledWith(
+                    "/api/folder-shares/share",
+                    expect.objectContaining({ method: "PATCH" }),
+                ),
+            );
+        });
+        it("localizes a server refusal if children appear after the sharing dialog loads", async () => {
+            requests.mockImplementation(
+                async (path: string, init?: RequestInit) => {
+                    if (init?.method === "POST")
+                        return Response.json(
+                            {
+                                code: "FOLDER_HAS_SUBFOLDERS",
+                                error: "Server text",
+                            },
+                            { status: 409 },
+                        );
+                    if (path.includes("/people"))
+                        return Response.json({
+                            people: [
+                                {
+                                    id: "new-person",
+                                    name: "Jitka Dvořáková",
+                                    email: "jitka@example.com",
+                                },
+                            ],
+                        });
+                    return Response.json({ shares: [], hasSubfolders: false });
+                },
+            );
+            const view = await renderVariant();
+            const search = view.getByRole("searchbox", {
+                name: "Colleague's name or email",
+            });
+            await waitFor(() =>
+                expect(search).toHaveProperty("disabled", false),
+            );
+            fireEvent.change(search, { target: { value: "Jitka" } });
+            fireEvent.click(await view.findByRole("button", { name: "Add" }));
+            await waitFor(() => {
+                expect(
+                    screen.getAllByText(
+                        "Move this folder's subfolders elsewhere first. A shared folder has no subfolders.",
+                    ),
+                ).toHaveLength(1);
+                expect(search).toHaveProperty("disabled", true);
+            });
+            expect(toast.error).not.toHaveBeenCalled();
+            expect(screen.getAllByRole("alert")).toHaveLength(1);
+            expect(
+                screen
+                    .getAllByRole("alert")
+                    .every(
+                        (alert) => !alert.textContent?.includes("Server text"),
+                    ),
+            ).toBe(true);
+            expect(search).toHaveProperty("disabled", true);
+        });
+    });
+
     it.each([
         { receivedFolderIds: [], throughFolder: false },
         { receivedFolderIds: [attached.id], throughFolder: true },
@@ -294,7 +487,14 @@ describe("folder person sharing UI", () => {
             screen.getByRole("button", { name: "Folder actions for Research" }),
             { button: 0, ctrlKey: false },
         );
-        expect(screen.getByText("New subfolder")).toBeTruthy();
+        expect(
+            screen
+                .getByRole("menuitem", { name: /New subfolder/ })
+                .getAttribute("data-disabled"),
+        ).not.toBeNull();
+        expect(
+            screen.getByText("A shared folder has no subfolders."),
+        ).toBeTruthy();
         expect(screen.getByText("Folder settings")).toBeTruthy();
         fireEvent.click(screen.getByText("Share folder…"));
         expect(
@@ -457,6 +657,9 @@ describe("folder person sharing UI", () => {
         expect(
             screen.queryByRole("option", { name: /Local research/ }),
         ).toBeNull();
+        expect(
+            screen.queryByRole("option", { name: /^Research Private$/ }),
+        ).toBeNull();
         fireEvent.click(
             screen.getByRole("option", { name: "Projects Private" }),
         );
@@ -573,6 +776,36 @@ describe("folder person sharing UI", () => {
                         parentId: action === "move" ? null : "mine",
                     }),
                 }),
+            ),
+        );
+    });
+    it("localizes a received-folder destination refusal after the parent list becomes stale", async () => {
+        requests.mockResolvedValue(
+            Response.json(
+                {
+                    code: "SHARED_FOLDER_HAS_NO_SUBFOLDERS",
+                    error: "Server text",
+                },
+                { status: 409 },
+            ),
+        );
+        render(
+            <ReceivedFolderDialog
+                shareId="share"
+                version={1}
+                name={attached.name}
+                ownerName="Jitka Dvořáková"
+                parentId="mine"
+                action="move"
+                folders={folders}
+                open
+                onOpenChange={vi.fn()}
+            />,
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Save" }));
+        await waitFor(() =>
+            expect(toast.error).toHaveBeenCalledWith(
+                "A shared folder has no subfolders.",
             ),
         );
     });
