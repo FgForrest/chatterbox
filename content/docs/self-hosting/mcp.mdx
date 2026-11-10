@@ -12,7 +12,7 @@ caller may use. In `AUTHZ_MODE=idp`, these come from the space-separated
 `scope` claim. In `AUTHZ_MODE=local`, the legacy Keycloak client-role
 contract (`resource_access[MCP_AUDIENCE].roles`) is retained.
 
-The server reads content and manages tasks through the same permissions as the app.
+The server reads content and manages tasks and meeting agendas through the same permissions as the app.
 
 ## What it exposes
 
@@ -24,9 +24,9 @@ permissions allow; calling a known tool without its permission returns
 | ------------------ | -------------------------------------------------------------------------------------------------- |
 | `knowledge:read`   | `list_types`, `list_knowledge`, `find_knowledge`, `get_entity`, `get_facts`, `list_mishearings`    |
 | `transcripts:read` | `get_transcript`, `search_transcripts`                                                             |
-| `summaries:read`   | `get_summary`, `search_summaries`                                                                  |
-| `tasks:read`       | `list_tasks`, `search_tasks`                                                                       |
-| `tasks:write`      | `create_task`, `update_task`, `follow_task`, `merge_tasks`                                                           |
+| `summaries:read`   | `get_summary`, `search_summaries`, `list_meetings`, `get_meeting`                                                                  |
+| `tasks:read`       | `list_tasks`, `search_tasks`, `list_meetings`, `get_meeting`                                                                       |
+| `tasks:write`      | `create_task`, `update_task`, `follow_task`, `merge_tasks`, `prepare_meeting`, `edit_agenda`, `update_agenda`, `suggest_agenda_points`                                                           |
 | `mail:read`        | `list_mail`, `get_mail`, `search_mail`                                                             |
 
 `list_folders`, `list_recordings` and `list_attended_recordings` come with any of `transcripts:read`,
@@ -70,6 +70,52 @@ choose the rows (see [What callers see](#what-callers-see)). The exception is
 of attended recordings, including ones the caller cannot read.
 
 `get_transcript.language` remains the provider’s detected language. `confirmed_language` is the recording’s user-confirmed ISO 639-1 code, or `null` in Automatic mode; `detected_language` repeats the original provider detection. `list_recordings` also includes `confirmed_language`. These fields do not change the transcript text.
+
+## Meeting agendas
+
+Chatterbox exposes the same agenda services and permissions as its web editor.
+Read with `summaries:read` or `tasks:read`; write with `tasks:write`. Service
+accounts can read visible Organization agendas but cannot write. Task review
+requires `tasks:read`; mail-derived tasks, points and suggestions require `mail:read`.
+
+| Tool | Input and behavior |
+| --- | --- |
+| `list_meetings` | Optional `folderId`. Lists upcoming agendas and held meetings without recordings. |
+| `get_meeting` | `meetingId`. Returns visible points and their `version`, the meeting `version`, permissions, tasks (including removed membership and `agendaNote`), `taskGroups[].key`, `taskGroupOrder`, and suggestions with `id` and `kind` (`ai` or `carry_over`). `aiSuggestions.job` reports suggestion generation state. |
+| `prepare_meeting` | `folderId`, optional `title`, `start`, `end`, `calendarEventId`. Creates an agenda or reuses the visible agenda for the Calendar event. |
+| `edit_agenda` | `meetingId`, `operations` (1–100 sequential edits). Points: `add_point`, `update_point`, `remove_point`. Tasks: `add_task`, `remove_task`, `restore_task` with `taskId`; `set_task_note` with `taskId` and `note` (null clears); `reorder_tasks` with `groupKey` and every current `taskId` in that group's ordered `taskIds`. Suggestions: `add_suggestion` or `dismiss_suggestion` with `suggestionId`; `dismiss_suggestions` with `kind: ai\|carry_over`. |
+| `update_agenda` | `meetingId`, optional `title`, `start`, `end`, `calendarEventId`, `state: planned\|live\|held`, `taskSourceItemId`, `noTaskSource`, `taskGroupOrder`, `version`, `previous`. Read the agenda first. Times are ISO datetimes with timezone (null clears); read old times from `plannedStart`/`plannedEnd`. Null `calendarEventId` unlinks; null `taskSourceItemId` selects the automatic source. `noTaskSource: true` selects No source. |
+| `suggest_agenda_points` | `meetingId`, optional `locale: en\|cs-CZ`. Enqueues the web editor's AI job, reusing an active job. Returns `jobId` and the agenda with job state. Poll `get_meeting`, then accept or dismiss suggestions. |
+
+A point's `parentId` creates a sub-point or indents/outdents it; null puts it at
+top level, with at most three levels. `discussed: true` marks it resolved/discussed;
+false reopens it. `remove_point` removes its sub-points too. With `mergeUp: true`,
+it performs the web editor's merge-up removal: sub-points are preserved and
+promoted to the removed point's parent. Combine any text into the preceding point
+with `update_point` first; the flag does not concatenate text. Use either stored `position` or
+zero-based `siblingIndex` on update, never both; prefer `siblingIndex` for moves.
+Every point update raises its `version`, including within a batch. A later edit
+of the same point needs the new version. Failed batches report `completed`;
+earlier operations remain applied. Agenda task membership and notes never change
+real task status or the real task's note. Use `update_task` for those.
+
+Metadata changes compare `version` when supplied without `previous`. With
+`previous`, supply the old value of every changed metadata field instead; task
+source changes require both old `taskSourceItemId` and `noTaskSource`.
+`taskGroupOrder` always requires `previous.taskGroupOrder` exactly as returned by
+`get_meeting` and must contain every visible group, including empty invitee groups.
+State alone does not compare `version` or `previous`, just as in the web editor.
+Read again after a conflict. Co-editors may reorder groups and tasks, add points
+and change their own point text; changing agenda fields requires the author or
+an Organization curator. Absorbed agendas refuse all writes.
+
+AI generation uses the configured summary provider and its billing and quota
+rules. It may incur provider costs, accepts at most 100 source summaries and 200
+tasks within 160,000 prompt characters, and proposes up to eight points without
+adding them automatically. The profile's output language and source language
+take precedence over the UI locale; omitted `locale` falls back to the caller's
+saved locale, then English. Deleting agendas, changing person shares, attaching
+recordings and Calendar export are not exposed by these tools.
 
 ## Turning it on
 

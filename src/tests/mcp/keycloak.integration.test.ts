@@ -146,7 +146,13 @@ const TASK_TOOLS = [
     "merge_tasks",
 ];
 const MEETING_READ_TOOLS = ["list_meetings", "get_meeting"];
-const MEETING_TOOLS = [...MEETING_READ_TOOLS, "prepare_meeting", "edit_agenda"];
+const MEETING_TOOLS = [
+    ...MEETING_READ_TOOLS,
+    "prepare_meeting",
+    "edit_agenda",
+    "update_agenda",
+    "suggest_agenda_points",
+];
 const ALICE_TOOLS = [
     ...KNOWLEDGE_TOOLS,
     ...RECORDING_TOOLS,
@@ -413,6 +419,20 @@ describeWithKeycloak("MCP with Keycloak", () => {
                     ],
                 },
                 error: "Service accounts cannot edit agendas",
+            },
+            {
+                name: "update_agenda",
+                arguments: {
+                    meetingId: "private-agenda",
+                    title: "Changed",
+                    version: 0,
+                },
+                error: "Service accounts cannot update agendas",
+            },
+            {
+                name: "suggest_agenda_points",
+                arguments: { meetingId: "private-agenda", locale: "cs-CZ" },
+                error: "Service accounts cannot generate agenda suggestions",
             },
         ];
         for (const { name, arguments: args, error } of refused) {
