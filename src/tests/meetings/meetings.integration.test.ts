@@ -1398,7 +1398,7 @@ suite("meeting planning server (PostgreSQL)", () => {
             context,
         );
         expect(publishedLink.headers.get("location")).toBe(
-            "https://example.com/dashboard?recording=rec&view=org",
+            "/dashboard?recording=rec&view=org",
         );
     });
     it.each([

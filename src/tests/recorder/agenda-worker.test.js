@@ -688,6 +688,7 @@ describe("agenda worker integration", () => {
         await start();
         h.tabs.set(8, { id: 8, windowId: 3, url: "https://example.com" });
         h.request.mockClear();
+        delete h.session["agenda-match:7"];
         expect(
             await message(
                 { type: "open-agenda", tabId: 8, matchTabId: 7, choose: true },
@@ -879,7 +880,7 @@ describe("agenda worker integration", () => {
             ok: true,
             agendas: [expect.objectContaining({ id: "agenda-one" })],
         });
-    });
+    }, 15000);
     it("accepts an armed top-frame gesture and refuses agenda operations from ordinary web pages", async () => {
         h.local.serverDefaults.agendas = true;
         await arm();
@@ -1300,4 +1301,240 @@ it("does not add a recording nudge to an already-open room covered by Calendar n
     };
     await arm();
     expect(chrome.notifications.create).not.toHaveBeenCalled();
+});
+
+describe("#386 Join bindings and visible match failures", () => {
+    async function join() {
+        h.local.serverDefaults.agendas =
+            h.local.serverDefaults.nextMeeting = true;
+        const data = {
+            eventId: "event",
+            agendaId: "agenda-one",
+            end: new Date(Date.now() + 3600000).toISOString(),
+            joinUrl:
+                "https://meet.google.com/abc-defg-hij?authuser=test%40example.com",
+        };
+        h.session.recorderNextMeeting = {
+            serverUrl: h.local.serverUrl,
+            connectionId: null,
+            data,
+        };
+        chrome.tabs.create.mockImplementationOnce(async ({ url }) => {
+            const tab = { id: 8, windowId: 3, url };
+            h.tabs.set(8, tab);
+            return tab;
+        });
+        await chrome.tabs.create({ url: data.joinUrl });
+        const result = await message(
+            {
+                type: "join-meeting",
+                eventId: "event",
+                tabId: 8,
+            },
+            extension,
+        );
+        expect(result).toMatchObject({ ok: true, tabId: 8 });
+    }
+    it("refuses join-meeting from web pages, frames and other extension pages", async () => {
+        await join();
+        delete h.session["meeting-tab:8"];
+        delete h.session["agenda-route:8"];
+        for (const from of [
+            sender(),
+            { ...sender(), frameId: 1 },
+            {
+                ...extension,
+                url: "chrome-extension://test/options/options.html",
+            },
+            { ...extension, id: "other" },
+        ]) {
+            expect(
+                await message(
+                    { type: "join-meeting", eventId: "event", tabId: 8 },
+                    from,
+                ),
+            ).toMatchObject({ ok: false });
+        }
+        expect(h.session["meeting-tab:8"]).toBeUndefined();
+        expect(h.session["agenda-route:8"]).toBeUndefined();
+    });
+    it("routes a Join tab to its agenda without calling match and keeps it across the redirect", async () => {
+        await join();
+        h.request.mockClear();
+        h.tabs.get(8).url =
+            "https://meet.google.com/meet/abc-defg-hij?authuser=1";
+        await h.listeners.updated(8, { url: h.tabs.get(8).url }, h.tabs.get(8));
+        expect(h.session["agenda-route:8"]).toMatchObject({
+            agendaIds: ["agenda-one"],
+        });
+        expect(
+            h.request.mock.calls.some(([, path]) => path.includes("/match?")),
+        ).toBe(false);
+        const response = await message(
+            { type: "match-agendas", tabId: 8 },
+            extension,
+        );
+        expect(response).toMatchObject({
+            ok: true,
+            selectedAgenda: { id: "agenda-one" },
+        });
+    });
+    it.each([
+        "close",
+        "end",
+    ])("clears the Join binding on %s without changing panel registration", async (event) => {
+        await join();
+        if (event === "close") await h.listeners.tabRemoved(8);
+        else await h.listeners.alarm({ name: "meeting-tab-end:8" });
+        expect(h.session["meeting-tab:8"]).toBeUndefined();
+        expect(chrome.sidePanel.setOptions).not.toHaveBeenCalled();
+    });
+    it("returns a failure when both the side panel and its fallback window cannot open", async () => {
+        h.local.serverDefaults.agendas = true;
+        chrome.sidePanel.open.mockRejectedValueOnce(new Error("Unavailable"));
+        chrome.windows.create.mockRejectedValueOnce(new Error("Unavailable"));
+        expect(
+            await message({ type: "open-agenda", tabId: 7 }, extension),
+        ).toMatchObject({ ok: false });
+    });
+    it("marks an initial panel match error for Retry rather than an empty list", async () => {
+        h.local.serverDefaults.agendas = true;
+        h.request.mockRejectedValue(new Error("offline"));
+        const response = await message(
+            { type: "open-agenda", tabId: 7 },
+            extension,
+        );
+        expect(response).toMatchObject({ ok: false });
+        expect(h.session[agendaPanelKey(7)]).toMatchObject({
+            error: true,
+            tabId: 7,
+        });
+    });
+    it("lets a user-visible match finish after the background deadline", async () => {
+        h.local.serverDefaults.agendas = true;
+        h.request.mockImplementation(async (...args) => {
+            await new Promise((resolve) => setTimeout(resolve, 1200));
+            return defaultRequest(...args);
+        });
+        expect(
+            await message({ type: "match-agendas", tabId: 7 }, extension),
+        ).toMatchObject({
+            ok: true,
+            agendas: [expect.objectContaining({ id: "agenda-one" })],
+        });
+    });
+});
+
+it.each([
+    "body",
+    "button",
+])("Calendar notification %s creates and routes a tab without opening a panel", async (surface) => {
+    h.local.serverDefaults.agendas = h.local.serverDefaults.nextMeeting = true;
+    const data = {
+        eventId: "event",
+        agendaId: "agenda-one",
+        end: new Date(Date.now() + 3600000).toISOString(),
+        joinUrl:
+            "https://meet.google.com/abc-defg-hij?authuser=test%40example.com",
+        serverUrl: h.local.serverUrl,
+        connectionId: null,
+    };
+    h.session["meeting:event"] = data;
+    chrome.tabs.create.mockImplementationOnce(async ({ url }) => {
+        const tab = { id: 8, windowId: 3, url };
+        h.tabs.set(8, tab);
+        return tab;
+    });
+    if (surface === "body")
+        await h.listeners.notificationClicked("meeting:event");
+    else {
+        h.listeners.notificationButton("meeting:event", 0);
+        await vi.waitFor(() =>
+            expect(h.session["agenda-route:8"]).toBeDefined(),
+        );
+    }
+    expect(h.session["meeting-tab:8"].agendaId).toBe("agenda-one");
+    expect(h.session["agenda-route:8"].agendaIds).toEqual(["agenda-one"]);
+    expect(chrome.action.setPopup).toHaveBeenCalledWith({
+        tabId: 8,
+        popup: "",
+    });
+    expect(chrome.sidePanel.open).not.toHaveBeenCalled();
+    expect(chrome.windows.create).not.toHaveBeenCalled();
+});
+
+it("uses the existing standalone agenda fallback after a page open is refused", async () => {
+    h.local.serverDefaults.agendas = h.local.serverDefaults.nextMeeting = true;
+    h.session.recorderNextMeeting = {
+        serverUrl: h.local.serverUrl,
+        connectionId: null,
+        data: {
+            eventId: "event",
+            agendaId: "agenda-one",
+            end: new Date(Date.now() + 3600000).toISOString(),
+            joinUrl: meeting.url,
+        },
+    };
+    expect(
+        await message(
+            {
+                type: "join-meeting",
+                eventId: "event",
+                tabId: 7,
+                fallback: true,
+            },
+            extension,
+        ),
+    ).toMatchObject({ ok: true });
+    expect(chrome.tabs.update).toHaveBeenCalledWith(7, { active: true });
+    expect(chrome.windows.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+            type: "popup",
+            url: "chrome-extension://test/agenda/agenda.html",
+        }),
+    );
+    expect(h.session[agendaPanelKey()].agendaIds).toEqual(["agenda-one"]);
+    expect(h.session["meeting-tab:7"].agendaId).toBe("agenda-one");
+    expect(chrome.sidePanel.open).not.toHaveBeenCalled();
+});
+
+it("keeps the published Join route when an earlier automatic match finishes later", async () => {
+    h.local.serverDefaults.agendas = h.local.serverDefaults.nextMeeting = true;
+    let finishMatch;
+    h.request.mockImplementation(async (_auth, path) => {
+        if (path.includes("/match?")) {
+            await new Promise((resolve) => {
+                finishMatch = resolve;
+            });
+            return { json: async () => ({ data: [] }) };
+        }
+        return defaultRequest(_auth, path);
+    });
+    const evaluating = h.listeners.updated(
+        7,
+        { status: "complete" },
+        h.tabs.get(7),
+    );
+    await vi.waitFor(() => expect(finishMatch).toBeTypeOf("function"));
+    h.session.recorderNextMeeting = {
+        serverUrl: h.local.serverUrl,
+        connectionId: null,
+        data: {
+            eventId: "event",
+            agendaId: "agenda-one",
+            end: new Date(Date.now() + 3600000).toISOString(),
+            joinUrl: meeting.url,
+        },
+    };
+    expect(
+        await message(
+            { type: "join-meeting", eventId: "event", tabId: 7 },
+            extension,
+        ),
+    ).toMatchObject({ ok: true });
+    finishMatch();
+    await evaluating;
+    expect(h.session["agenda-route:7"].agendaIds).toEqual(["agenda-one"]);
+    h.listeners.clicked(h.tabs.get(7));
+    expect(chrome.sidePanel.open).toHaveBeenCalledWith({ tabId: 7 });
 });

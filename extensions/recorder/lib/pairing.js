@@ -239,7 +239,7 @@ export async function refreshServerConfig() {
                 typeof defaults.notice_text === "string"
                     ? defaults.notice_text
                     : "",
-            noticeTextIsDefault: defaults.notice_text_is_default === true,
+            noticeTextIsDefault: typeof defaults.notice_text_is_default === "boolean" ? defaults.notice_text_is_default : undefined,
             lockDefaults: defaults.lock_defaults === true,
             fetchedAt: new Date().toISOString(),
         },

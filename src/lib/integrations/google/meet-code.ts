@@ -18,7 +18,9 @@ function codeFromUrl(value: unknown): string | null {
         ) {
             return null;
         }
-        const match = /^\/([a-z]{3}-[a-z]{4}-[a-z]{3})\/?$/i.exec(url.pathname);
+        const match = /^\/(?:meet\/)?([a-z]{3}-[a-z]{4}-[a-z]{3})\/?$/i.exec(
+            url.pathname,
+        );
         return match?.[1]?.toLowerCase() ?? null;
     } catch {
         return null;

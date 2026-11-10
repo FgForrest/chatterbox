@@ -61,7 +61,15 @@ beforeEach(() => {
             session: area(session),
             onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
         },
-        tabs: { query: vi.fn(async () => tabs), create: vi.fn() },
+        tabs: {
+            query: vi.fn(async () => tabs),
+            create: vi.fn(async () => ({ id: 8 })),
+            update: vi.fn(async () => {}),
+        },
+        sidePanel: {
+            setOptions: vi.fn(async () => {}),
+            open: vi.fn(async () => {}),
+        },
         action: {
             setBadgeText: vi.fn(async () => {}),
             setBadgeBackgroundColor: vi.fn(async () => {}),
@@ -225,7 +233,18 @@ describe("Calendar notifications and badges", () => {
         const card = createNextMeetingCard(container, () => tabs[0]);
         await card.render();
         container.querySelector("button").click();
-        expect(chrome.tabs.create).toHaveBeenCalledWith({ url: event.joinUrl });
+        await vi.waitFor(() =>
+            expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+                type: "join-meeting",
+                eventId: event.eventId,
+                tabId: 8,
+                fallback: false,
+            }),
+        );
+        expect(chrome.tabs.create).toHaveBeenCalledExactlyOnceWith({
+            url: event.joinUrl,
+            active: true,
+        });
         expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
             expect.objectContaining({ type: "start-recording" }),
         );
@@ -255,5 +274,28 @@ it.each([
     expect(chrome.notifications.create.mock.calls[0][1].message).toContain(
         expected,
     );
+    card.destroy();
+});
+
+it.each([
+    "recording",
+    "finalizing",
+    "completed",
+    "error",
+])("#386 hides Next meeting while recording or uploading (%s)", async (state) => {
+    await refreshNextMeeting();
+    const container = document.createElement("section");
+    let current = { state: "idle" };
+    const card = createNextMeetingCard(container, () => tabs[0], {
+        state: () => current,
+    });
+    await card.render();
+    expect(container.hidden).toBe(false);
+    current = { state };
+    await card.render();
+    expect(container.hidden).toBe(true);
+    current = { state: "idle" };
+    await card.render();
+    expect(container.hidden).toBe(false);
     card.destroy();
 });

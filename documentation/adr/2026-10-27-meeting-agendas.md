@@ -1,14 +1,14 @@
 ---
 title: Meeting agendas are co-edited plans absorbed by recordings, with safe attachment and manual Calendar export
 date: 2026-10-27
-updated: 2026-11-08 17:00
+updated: 2026-11-10 18:05
 status: superseded
 kind: feature
 issues: []
 prs: [293]
 areas: [src/lib/meetings, src/db/queries/meetings.ts, src/db/queries/folder-participants.ts, src/db/schema.ts, src/app/api/meetings, src/app/api/v1/recorder, src/lib/mcp/tools/meetings.ts, src/lib/export/meetings.ts, src/lib/integrations/google]
 supersedes: []
-superseded-by: [2026-10-28-agendas-use-all-folder-placements, 2026-11-08-meeting-agendas-shared-with-people, 2026-11-08-recorder-live-agendas]
+superseded-by: [2026-10-28-agendas-use-all-folder-placements, 2026-11-08-meeting-agendas-shared-with-people, 2026-11-08-recorder-live-agendas, 2026-11-10-recorder-meeting-companion]
 relates: [2026-10-27-shared-folders-are-two-way, 2026-10-12-calendar-meet-speaker-candidates, 2026-10-22-calendar-speaker-guesses-in-automatic-runs, 2026-10-07-tasks-from-summaries, 2026-10-22-meeting-recorder-banner, 2026-10-07-backup-scope]
 ---
 
@@ -26,6 +26,13 @@ context, permissions, attachment, Calendar export, recorder APIs and MCP. It is 
 **Superseded in part:** [Recorder live agendas](2026-11-08-recorder-live-agendas.md) permits a scoped
 Meet join link to the caller's own recorder and adds PostgreSQL live invalidations and CRDT text
 with encrypted materialization. Other clients still receive no Meet code. All remaining rules hold.
+
+**Superseded in part:** [Recorder meeting companion](2026-11-10-recorder-meeting-companion.md)
+keeps preparation, point title editing and task dropping in the web app. The recorder panel becomes
+one live checklist with notes behind a link and one agenda chooser. Join binds the new tab to its
+agenda before automatic matching and opens that tab's panel from the extension page; popup Join
+keeps the new tab inactive until its panel is open. Calendar notification Join binds the tab only.
+The collaboration, attachment, permissions and remaining rules still hold.
 
 ## Why
 

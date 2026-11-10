@@ -1,5 +1,6 @@
 import { t } from "./i18n.js";
 import { detectMeetingPlatform } from "./platforms.js";
+import { meetCode } from "./meet-code.js";
 
 /** Stable meeting identity without join-state paths, queries or passwords. */
 export function meetingTarget(urlString) {
@@ -11,7 +12,7 @@ export function meetingTarget(urlString) {
     }
     const platform = detectMeetingPlatform(urlString);
     let meetingId = null;
-    if (platform?.id === "google-meet") meetingId = url.pathname.split("/")[1];
+    if (platform?.id === "google-meet") meetingId = meetCode(url);
     else if (platform?.id === "zoom")
         meetingId = url.pathname.match(/^\/wc\/(\d+)/)?.[1];
     else if (platform?.id === "teams") {
