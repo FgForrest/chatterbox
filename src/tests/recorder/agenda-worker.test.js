@@ -1335,6 +1335,26 @@ describe("#386 Join bindings and visible match failures", () => {
         );
         expect(result).toMatchObject({ ok: true, tabId: 8 });
     }
+    it("refuses join-meeting from web pages, frames and other extension pages", async () => {
+        await join();
+        delete h.session["meeting-tab:8"];
+        delete h.session["agenda-route:8"];
+        for (const from of [
+            sender(),
+            { ...sender(), frameId: 1 },
+            { ...extension, url: "chrome-extension://test/options/options.html" },
+            { ...extension, id: "other" },
+        ]) {
+            expect(
+                await message(
+                    { type: "join-meeting", eventId: "event", tabId: 8 },
+                    from,
+                ),
+            ).toMatchObject({ ok: false });
+        }
+        expect(h.session["meeting-tab:8"]).toBeUndefined();
+        expect(h.session["agenda-route:8"]).toBeUndefined();
+    });
     it("routes a Join tab to its agenda without calling match and keeps it across the redirect", async () => {
         await join();
         h.request.mockClear();
