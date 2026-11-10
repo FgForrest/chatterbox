@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as bundle from "../../../extensions/recorder/bundle/folders.jsx";
 import { STATE } from "../../../extensions/recorder/lib/constants.js";
 import { mountRecordingControls } from "../../../extensions/recorder/lib/recording-controls.js";
+import { isWaitingForUpload } from "../../../extensions/recorder/lib/upload-state.js";
 
 vi.mock("../../../extensions/recorder/generated/folders.js", () => ({
     createFolderField: (...args) => bundle.createFolderField(...args),
@@ -139,6 +140,7 @@ it("sends stop-recording from the picker after the real bundled folder save is r
         "openSystemAudio",
         "RECORDER_WINDOW_WIDTH",
         "STATE",
+        "isWaitingForUpload",
         "fitWindowToContent",
         "localizeDocument",
         "t",
@@ -149,6 +151,7 @@ it("sends stop-recording from the picker after the real bundled folder save is r
         vi.fn(),
         430,
         STATE,
+        isWaitingForUpload,
         vi.fn(),
         vi.fn(),
         t,

@@ -70,6 +70,18 @@ The privacy policy, store listing, permission explanations, and in-extension con
 - The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
 
+## What changed in 0.9.7
+
+- Stopped recordings finish uploading even when Stop arrives as the last upload finishes. The worker,
+  popup, recorder window and browser startup recover a stalled completion automatically.
+- Server requests time out instead of holding an upload forever. Chunk uploads retry with backoff;
+  completion failures keep the encrypted buffer and offer Retry upload.
+- Each pending encrypted recording in Options now offers Retry upload beside Discard, with English
+  and Czech explanations when another capture is active, access is refused or the recording key expired.
+- Includes the Czech Drop/Zahodit and Dropped/Zahozeno wording from 0.9.6, which was never uploaded.
+- No permission, data-use or server-contract change against 0.9.5. Existing released server endpoints
+  handle recovery; the privacy policies need no further change.
+
 ## What changed in 0.9.6
 
 - Czech only: the agenda's task action Drop reads Zahodit and a dropped task Zahozeno, as in the web
