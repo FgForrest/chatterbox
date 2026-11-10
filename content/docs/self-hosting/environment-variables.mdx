@@ -169,10 +169,24 @@ Self-host with single sign-on only. Off unless `AUTHZ_MODE=idp`. See
 | `KEYCLOAK_GROUP_USE_ID`           | —          | Id of the group that grants `use`. The three group ids are set together and each must differ. With them, administrators manage access in **Settings → Access**. |
 | `KEYCLOAK_GROUP_CURATE_ID`        | —          | Id of the group that grants `org.curate`. |
 | `KEYCLOAK_GROUP_ACCESS_MANAGE_ID` | —          | Id of the group that grants `access.manage`. |
-| `KEYCLOAK_VERIFIER_CLIENT_ID`     | —          | Read-only service client (`realm-management/view-users`) that re-verifies the access of API key and MCP holders. Set with its secret; must not be the web client or an MCP client. |
+| `KEYCLOAK_VERIFIER_CLIENT_ID`     | —          | Read-only service client (`realm-management/view-users`, `view-clients`) that re-verifies the access of API key and MCP holders. Set with its secret; must not be the web client or an MCP client. Keycloak 26.8.2+ also requires the `kc-admin-api` default client scope. |
 | `KEYCLOAK_VERIFIER_CLIENT_SECRET` | —          | Its secret. |
 | `AUTHZ_VERIFICATION_MAX_AGE`      | `1800`     | Seconds a verified access is used before the provider is asked again (at most 3600). |
 | `AUTHZ_ADMIN_MAX_AUTH_AGE`        | `28800`    | Seconds since the administrator last signed in at the provider within which they may change access. |
+
+On Keycloak 26.8.2+, assign the built-in `kc-admin-api` client scope as
+**Default** to both the verifier client (`KEYCLOAK_VERIFIER_CLIENT_ID`) and
+the web client (`OIDC_CLIENT_ID`) used for access management. It supplies the
+Admin API audience and scope; realm-management roles alone are insufficient.
+See [provider permissions](./sso#what-the-provider-must-allow).
+
+If MCP refuses every token or the recorder returns **503 `ACCESS_UNVERIFIABLE`**
+after a Keycloak upgrade, check for **Admin API returned 401** in the server log
+and assign that default scope to both clients. Wait for the verifier's cached
+token to expire. Chatterbox automatically renews expiring web tokens when refresh
+credentials are valid, and Keycloak recomputes default scopes on renewal.
+Administrators can sign in again to restore access management immediately
+rather than wait for renewal.
 
 ## Learn (knowledge from recordings)
 

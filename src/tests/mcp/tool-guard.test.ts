@@ -16,6 +16,8 @@ const WRITE_TOOLS = new Set([
     "merge_tasks",
     "prepare_meeting",
     "edit_agenda",
+    "update_agenda",
+    "suggest_agenda_points",
 ]);
 
 const everything: McpCaller = {
@@ -70,7 +72,8 @@ describe("the MCP tool registry", () => {
         expect(tool.annotations.destructiveHint).toBe(
             name === "merge_tasks" ||
                 name === "update_task" ||
-                name === "edit_agenda",
+                name === "edit_agenda" ||
+                name === "update_agenda",
         );
     });
 

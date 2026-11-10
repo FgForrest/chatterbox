@@ -234,6 +234,23 @@ a group-role mapping request can otherwise return an empty result or HTTP 403.
 It grants realm-wide client read access, not permission to modify clients.
 Runtime credentials do not need `manage-clients` or `realm-admin`.
 
+On **Keycloak 26.8.2+**, also assign the built-in `kc-admin-api` client scope
+as **Default** to the verifier client (`KEYCLOAK_VERIFIER_CLIENT_ID`) and to
+the web client (`OIDC_CLIENT_ID`) used for access management. In each client's
+**Client scopes**, add `kc-admin-api` with assignment type **Default**.
+This adds the Admin API audience and scope to their tokens; the roles above
+alone are insufficient. The upgrade assigns this scope automatically only to
+`admin-cli` and `security-admin-console`. See the
+[Keycloak upgrading guide](https://www.keycloak.org/docs/latest/upgrading/index.html).
+
+If MCP refuses every token or the recorder returns **503 `ACCESS_UNVERIFIABLE`**
+after a Keycloak upgrade, check the server log for **Admin API returned 401**.
+Assign `kc-admin-api` as a default scope to both clients as described above.
+New tokens are required: the verifier obtains one when its cached token expires;
+Chatterbox automatically renews expiring web tokens when refresh credentials are
+valid, and Keycloak recomputes default scopes on renewal. Administrators can sign
+in again to restore access management immediately rather than wait for renewal.
+
 ### Sessions
 
 - A sign-in is refused before any account is created unless the provider

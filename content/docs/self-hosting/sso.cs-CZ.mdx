@@ -164,6 +164,8 @@ V lokálním příkladu je `Users` výchozí skupinou nových účtů. Ve vlastn
 tuto volbu nastavte podle své politiky. Aplikace automaticky nepřidává dosavadní
 uživatele ani neobnovuje odebrané členství.
 
+<span id="what-the-provider-must-allow" />
+
 ### Co musí poskytovatel povolit
 
 Administrátoři mění přístup **vlastním** přihlášením, nikdy sdíleným
@@ -185,6 +187,24 @@ MCP klienti nedostávají žádné role `realm-management`.
 na role skupiny jinak může vrátit prázdný výsledek nebo HTTP 403.
 Umožňuje čtení klientů v celém realmu, nikoli jejich úpravy.
 Běhové přihlašovací údaje nepotřebují `manage-clients` ani `realm-admin`.
+
+V **Keycloaku 26.8.2+** navíc přiřaďte vestavěný klientský rozsah `kc-admin-api`
+jako **Default** ověřovacímu klientovi (`KEYCLOAK_VERIFIER_CLIENT_ID`) i webovému
+klientovi (`OIDC_CLIENT_ID`) používanému pro správu přístupů. U každého klienta
+v **Client scopes** přidejte `kc-admin-api` s typem přiřazení **Default**.
+Tím tokeny získají příjemce (audience) Admin API a potřebný rozsah; samotné role
+výše nestačí. Aktualizace tento rozsah automaticky přiřadí pouze klientům
+`admin-cli` a `security-admin-console`. Viz
+[průvodce aktualizací Keycloaku](https://www.keycloak.org/docs/latest/upgrading/index.html).
+
+Pokud po aktualizaci Keycloaku MCP odmítá každý token nebo záznamník vrací
+**503 `ACCESS_UNVERIFIABLE`**, hledejte v logu serveru **Admin API returned 401**.
+Přiřaďte `kc-admin-api` jako výchozí rozsah oběma klientům podle postupu výše.
+Jsou potřeba nové tokeny: ověřovatel si nový vyžádá po vypršení tokenu v mezipaměti;
+Klepna webové tokeny před vypršením automaticky obnovuje, pokud má platný
+obnovovací token. Keycloak při obnově znovu vyhodnotí výchozí rozsahy.
+Správci se mohou znovu přihlásit, aby správa přístupů fungovala ihned,
+bez čekání na automatickou obnovu.
 
 ### Relace
 

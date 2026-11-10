@@ -16,15 +16,16 @@ Every screenshot shows the same invented team: **Alex Morgan**, a product lead a
 3. [Recordings](recordings.md): the recording list, the player, uploads, folders, erasing, and what the AI cost.
 4. [Transcripts](transcripts.md): speakers, topics, playing a sentence, corrected words, copying and downloading.
 5. [Summaries and tasks](summaries-and-tasks.md): summaries, profiles, multi-pass, and tasks across recordings and mail.
-6. [The Almanac](almanac.md): the people and things Chatterbox knows, their nicknames and facts.
-7. [Learn](learn.md): let Chatterbox propose speaker names, corrections and facts, and review them.
-8. [The Organization](organization.md): sharing recordings with your colleagues.
-9. [Sharing with people](sharing-with-people.md): inviting individual colleagues to a private recording, email or folder.
-10. [Mail](mail.md): sending mail into Chatterbox and filing it for processing.
-11. [Exports, backups and retention](exports-backups-retention.md): folder exports to disk or Google Drive, backups, and deleting old data automatically.
-12. [Settings](settings.md): profiles, AI providers and prices, language and other account defaults.
-13. [Chatterbox in Claude](claude.md): asking Claude or Claude Code about your recordings, mail, people and tasks.
-14. [For administrators](administrators.md): what to switch on for each feature on a self-hosted instance.
+6. [Meetings and agendas](meetings.md): preparing an agenda, reviewing tasks, discussion points and running the meeting.
+7. [The Almanac](almanac.md): the people and things Chatterbox knows, their nicknames and facts.
+8. [Learn](learn.md): let Chatterbox propose speaker names, corrections and facts, and review them.
+9. [The Organization](organization.md): sharing recordings with your colleagues.
+10. [Sharing with people](sharing-with-people.md): inviting individual colleagues to a private recording, email or folder.
+11. [Mail](mail.md): sending mail into Chatterbox and filing it for processing.
+12. [Exports, backups and retention](exports-backups-retention.md): folder exports to disk or Google Drive, backups, and deleting old data automatically.
+13. [Settings](settings.md): profiles, AI providers and prices, language and other account defaults.
+14. [Chatterbox in Claude](claude.md): asking Claude or Claude Code about your recordings, mail, people and tasks.
+15. [For administrators](administrators.md): what to switch on for each feature on a self-hosted instance.
 
 Recording meetings held in the browser has a guide of its own: [Meeting Recorder](../guides/meeting-recorder.mdx).
 

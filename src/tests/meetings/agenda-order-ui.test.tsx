@@ -179,49 +179,42 @@ it.each([
         edit: true,
         attached: false,
         checkboxes: false,
-        shortcuts: true,
     },
     {
         variant: "live",
         edit: true,
         attached: false,
         checkboxes: true,
-        shortcuts: true,
     },
     {
         variant: "recording",
         edit: true,
         attached: true,
         checkboxes: true,
-        shortcuts: false,
     },
     {
         variant: "meeting",
         edit: true,
         attached: true,
         checkboxes: true,
-        shortcuts: false,
     },
     {
         variant: "meeting",
         edit: false,
         attached: false,
         checkboxes: false,
-        shortcuts: false,
     },
     {
         variant: "live",
         edit: false,
         attached: false,
         checkboxes: true,
-        shortcuts: false,
     },
-] as const)("shows discussed checkboxes and shortcuts only in their applicable context: $variant, edit=$edit, attached=$attached", ({
+] as const)("shows discussed checkboxes only in their applicable context and the points help everywhere: $variant, edit=$edit, attached=$attached", ({
     variant,
     edit,
     attached,
     checkboxes,
-    shortcuts,
 }) => {
     server = {
         ...server,
@@ -245,7 +238,12 @@ it.each([
     ).toHaveLength(checkboxes ? 2 : 0);
     expect(
         screen.queryAllByRole("button", { name: "Keyboard shortcuts" }),
-    ).toHaveLength(shortcuts ? 1 : 0);
+    ).toHaveLength(0);
+    expect(
+        screen.getAllByRole("button", {
+            name: "Help: discussion points and keyboard shortcuts",
+        }),
+    ).toHaveLength(1);
     if (checkboxes) {
         const checked = screen.getByRole("checkbox", {
             name: "Discussed: Discussed point",

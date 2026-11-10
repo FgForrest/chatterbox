@@ -45,13 +45,13 @@ import type {
 
 async function copyAddress(
     address: string,
-    i18n: ReturnType<typeof useExtracted>,
+    messages: { success: string; error: string },
 ): Promise<void> {
     try {
         await navigator.clipboard.writeText(address);
-        toast.success(i18n("Address copied"));
+        toast.success(messages.success);
     } catch {
-        toast.error(i18n("Could not copy the address"));
+        toast.error(messages.error);
     }
 }
 
@@ -65,6 +65,10 @@ function AddressLine({
     actions?: React.ReactNode;
 }) {
     const i18n = useExtracted();
+    const copyMessages = {
+        success: i18n("Address copied"),
+        error: i18n("Could not copy the address"),
+    };
     return (
         <div className="flex items-center justify-between gap-3 py-1.5">
             <div className="min-w-0">
@@ -80,7 +84,7 @@ function AddressLine({
                     variant="ghost"
                     size="icon-sm"
                     aria-label={i18n("Copy {address}", { address })}
-                    onClick={() => void copyAddress(address, i18n)}
+                    onClick={() => void copyAddress(address, copyMessages)}
                 >
                     <Copy className="size-4" />
                 </Button>
@@ -97,6 +101,10 @@ function AddressLine({
  */
 export function MailSection() {
     const i18n = useExtracted();
+    const copyMessages = {
+        success: i18n("Address copied"),
+        error: i18n("Could not copy the address"),
+    };
     const locale = useLocale();
     const formatDateTime = useDateTimeFormatter();
     const confirm = useConfirm();
@@ -185,7 +193,7 @@ export function MailSection() {
             setCreating(false);
             setLabel("");
             toast.success(i18n("Secret address created"));
-            void copyAddress(address.address, i18n);
+            void copyAddress(address.address, copyMessages);
             await load();
         } finally {
             setSaving(false);
@@ -232,7 +240,7 @@ export function MailSection() {
                 const { address: replaced } = (await response.json()) as {
                     address: MailAddressView;
                 };
-                void copyAddress(replaced.address, i18n);
+                void copyAddress(replaced.address, copyMessages);
                 await load();
             },
             errorMessage: i18n("Could not replace the address"),

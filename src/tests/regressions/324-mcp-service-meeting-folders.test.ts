@@ -3,6 +3,9 @@ import type { McpCaller } from "@/lib/mcp/caller";
 
 vi.mock("@/lib/posthog-server", () => ({ captureServerException: vi.fn() }));
 vi.mock("@/lib/mcp/audit", () => ({ recordMcpAccess: vi.fn() }));
+vi.mock("@/lib/meetings/access", () => ({ requireMeetingAccess: vi.fn() }));
+vi.mock("@/lib/tasks/access", () => ({ taskViewerById: vi.fn() }));
+vi.mock("@/lib/tasks/tasks", () => ({ getVisibleTask: vi.fn() }));
 
 const service = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn() }));
 vi.mock("@/lib/meetings/service", () => ({
@@ -16,6 +19,12 @@ vi.mock("@/db/queries/agenda-mail-sources", () => ({
     }),
 }));
 vi.mock("@/lib/mcp/scope", () => ({ mayReadMail: () => false }));
+vi.mock("@/lib/meetings/dismiss-suggestions", () => ({
+    dismissSuggestions: vi.fn(),
+}));
+vi.mock("@/lib/meetings/suggestions-job", () => ({
+    enqueueAgendaSuggestions: vi.fn(),
+}));
 
 import { MEETING_TOOLS } from "@/lib/mcp/tools/meetings";
 

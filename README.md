@@ -41,7 +41,7 @@ This repository builds on Riffado with features for people who work with their r
 
 **More ways in**
 
-- **Meeting Recorder for Chrome.** A browser extension (Chrome, Edge, Brave, Vivaldi) records Google Meet, Teams, Zoom and other web meetings: your microphone plus the meeting tab. It offers to record when a meeting starts, uploads as it records so a dropped connection loses seconds, and files the recording into the folder you pick, which you can change mid-meeting. Published in the Chrome Web Store and set up from **Settings → Meeting Recorder** in three steps.
+- **Meeting Recorder for Chrome.** A browser extension (Chrome, Edge, Brave, Vivaldi) records Google Meet, Teams, Zoom and other web meetings: your microphone plus the meeting tab. It offers to record when a meeting starts, uploads as it records so a dropped connection loses seconds, and files the recording into the folder you pick, which you can change mid-meeting. When the meeting has an agenda, it opens beside the meeting in a side panel, where you tick off points and tasks while you record. Published in the Chrome Web Store and set up from **Settings → Meeting Recorder** in three steps.
 - **Mail.** Every user gets an address, and every folder one that files straight into it. Forward a mail or put the address in Cc: it is summarized, searched, mined for tasks and facts like a recording, and can be shared. Senders are verified by their DKIM signature; secret addresses accept automatic forwarding from Gmail filters.
 - **Video uploads.** Upload a meeting video; Chatterbox keeps the audio. For browser meetings on Linux, the `meetrec` command-line recorder captures both sides into one file.
 
@@ -58,6 +58,7 @@ This repository builds on Riffado with features for people who work with their r
 - **Topics.** Long recordings split into titled chapters, with a chapter bar to jump between them. Lectures and monologues read in paragraphs.
 - **Play from the transcript.** Click a sentence to hear it. The transcript follows the player, and scrolling the transcript moves the player.
 - **Confirmed language.** Confirm a recording's language once; summaries, titles, topics and Learn follow it.
+- **Cut a recording.** Trim the small talk at the start or the end, to the sentence. Before Learn runs, AI can propose which off-topic talk to cut, and nothing goes until you confirm it.
 - **More transcription services.** ElevenLabs Scribe and Speechmatics join the OpenAI-compatible providers, with speaker labels, and are told the names of your people, projects and meeting attendees so they spell them right.
 
 **Summaries and tasks**
@@ -66,6 +67,11 @@ This repository builds on Riffado with features for people who work with their r
 - **Multi-pass summaries** that run the prompt several times and merge the results, with live progress and a badge saying how many passes made it.
 - **Tasks across recordings and mail.** A summary proposes who agreed to do what and by when. A task collects every later mention in its folders, with the quote and the audio behind it, and a new mention can update its deadline, close it or hand it over once you review it.
 - **The Tasks page.** Tasks assigned to you under **Mine**, the ones you follow under **Followed**, private tasks of your own, one note per task, and merging duplicates.
+
+**Meetings with an agenda**
+
+- **Prepare the meeting.** An agenda for a Calendar event or a folder: the open and finished tasks from the last meeting, grouped by who owns them, and discussion points in an outline that colleagues edit with you as it happens. AI can suggest points from what happened in the folder since the last meeting, and points not covered last time come back as suggestions.
+- **Run it.** Start the meeting to tick points off and close tasks while a timer runs. The meeting's recording takes the agenda along, and its summary says which points were covered. The organizer can write the agenda into the Calendar event.
 
 **Knowledge that grows**
 
@@ -79,7 +85,7 @@ This repository builds on Riffado with features for people who work with their r
 - **Sharing with people.** Share a private recording, mail or folder with individual colleagues, who accept it and file it in their own tree, without publishing it to the Organization.
 - **Organization AI providers and profiles.** Shared keys every member can use without setup, with usage and estimated cost per member and an hourly limit per member.
 - **Single sign-on** with any OpenID Connect provider, registration that can stay closed, and optionally access from Keycloak groups: who may use the app, who curates the Organization and who manages access, switched from **Settings → Access**.
-- **Ask Claude about your recordings and mail.** An MCP server lets Claude (claude.ai, Desktop, Cowork), Claude Code and your own services search transcripts, summaries, mail, the Almanac and tasks, and manage tasks. People sign in through your Keycloak, and their roles there decide what each one can reach.
+- **Ask Claude about your recordings and mail.** An MCP server lets Claude (claude.ai, Desktop, Cowork), Claude Code and your own services search transcripts, summaries, mail, the Almanac, tasks and meeting agendas, and manage tasks. Through Claude, people can also prepare and edit their agendas. People sign in through your Keycloak, and their roles there decide what each one can reach.
 
 **Your data, your way**
 
@@ -91,6 +97,7 @@ This repository builds on Riffado with features for people who work with their r
 **Knowing what AI costs**
 
 - **Estimated AI spend** on every recording, by step and by model, from published prices or the price you enter for each provider.
+- **Statistics.** Recorded time, processing, AI costs and storage, for you and for the whole team.
 - **One provider per job**: choose who transcribes, summarizes, detects topics and runs Learn. Duplicate a provider to use a second model on the same key.
 - **Claude Code and Codex** as providers, so a Claude or ChatGPT subscription can pay for summaries and Learn instead of an API key.
 
@@ -142,6 +149,7 @@ If you signed up to Plaud with **Continue with Google** or **Continue with Apple
 The **[user guide](content/docs/user-guide/index.md)** in this repository covers every screen, including the extended features. Pages specific to this repository:
 
 - [The Almanac and Learn](content/docs/guides/almanac.mdx)
+- [Meetings and agendas](content/docs/user-guide/meetings.md)
 - [The Organization](content/docs/self-hosting/organization.mdx); for users: [The Organization](content/docs/user-guide/organization.md) and [Sharing with people](content/docs/user-guide/sharing-with-people.md)
 - [Single sign-on](content/docs/self-hosting/sso.mdx)
 - [Inbound mail](content/docs/self-hosting/mail.mdx); for users: [Mail](content/docs/user-guide/mail.md)

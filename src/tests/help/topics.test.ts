@@ -18,6 +18,10 @@ const at = (pathname: string, search = "", hash = "") =>
 describe("topicForLocation", () => {
     it("opens the chapter about the screen", () => {
         expect(at("/dashboard")).toBe("recordings");
+        expect(at("/dashboard", "?meeting=m1")).toBe("meetings");
+        expect(at("/dashboard", "?meeting=m1&recording=r1&folder=f1")).toBe(
+            "meetings",
+        );
         expect(at("/dashboard", "?recording=r1")).toBe("transcripts");
         expect(at("/dashboard", "?folder=f1")).toBe("recordings.folders");
         expect(at("/recordings/r1")).toBe("transcripts");

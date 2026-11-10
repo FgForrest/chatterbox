@@ -18,8 +18,9 @@ export function useAgendaText(
     onValue: (value: string) => void,
 ) {
     const i18n = useExtracted();
-    const callbacks = useRef({ onValue, i18n });
-    callbacks.current = { onValue, i18n };
+    const saveError = i18n("Could not save the agenda");
+    const callbacks = useRef({ onValue, saveError });
+    callbacks.current = { onValue, saveError };
     const binding = useRef<ReturnType<typeof bindAgendaTextInput> | null>(null);
     useEffect(() => {
         if (!enabled || !input.current) return;
@@ -49,10 +50,7 @@ export function useAgendaText(
                             detail: agendaId,
                         }),
                     ),
-                onError: () =>
-                    toast.error(
-                        callbacks.current.i18n("Could not save the agenda"),
-                    ),
+                onError: () => toast.error(callbacks.current.saveError),
             },
         );
         binding.current = current;

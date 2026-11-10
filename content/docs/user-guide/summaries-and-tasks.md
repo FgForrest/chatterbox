@@ -153,4 +153,4 @@ Skipped reviews and their changed markers are in `tasks/reviews.json`, one entry
 
 Each own task carries `folderId`. After restoring the private folders from `organization/folders.json`, add `folders: [{id, restoredId}]` to the import request to map each archived folder ID to its restored private folder ID. References without a mapping become null, including folders omitted from the archive. Organization and other users' target folders are refused. Organization archives are unchanged.
 
-Next: [The Almanac](almanac.md)
+Next: [Meetings and agendas](meetings.md)

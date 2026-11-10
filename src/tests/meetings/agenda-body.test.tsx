@@ -698,8 +698,17 @@ it("shows agenda badges and the labelled meeting note outside hover tools, with 
         const button = screen.getByRole("button", { name: label });
         expect(button.textContent).toBe("");
         expect(button.querySelector("svg")).toBeTruthy();
-        expect(button.closest(".task-row-hover-actions")).toBeTruthy();
     }
+    expect(
+        screen
+            .getByRole("button", { name: "Meeting note" })
+            .closest(".task-row-hover-actions"),
+    ).toBeTruthy();
+    const remove = screen.getByRole("button", {
+        name: "Remove Follow up from agenda",
+    });
+    expect(remove.closest(".task-row-actions")).toBeNull();
+    expect(remove.closest("li")?.lastElementChild?.contains(remove)).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Meeting note" }));
     const editor = screen.getByRole("textbox", {
         name: "Meeting note for Follow up",

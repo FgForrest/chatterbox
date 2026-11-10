@@ -45,20 +45,6 @@ function errorMessage(body: unknown, fallback: string): string {
     return fallback;
 }
 
-function providerRoles(
-    provider: ProviderCardItem,
-    i18n: (message: string) => string,
-): string[] {
-    const roles: string[] = [];
-    if (provider.isDefaultTranscription) roles.push(i18n("Transcription"));
-    if (provider.isDefaultEnhancement) roles.push(i18n("Summaries"));
-    if (provider.isDefaultLearn) roles.push(i18n("Learn"));
-    if (provider.isDefaultTopics) roles.push(i18n("Topics"));
-    if (provider.isDefaultTitle) roles.push(i18n("Titles"));
-    if (provider.isDefaultTrim) roles.push(i18n("Trim proposal"));
-    return roles;
-}
-
 function providerEndpoint(scope: ProviderScope, id: string): string {
     const collection =
         scope === "personal"
@@ -205,6 +191,17 @@ export function ProvidersSection({
         return body.memberDefaultCount;
     };
 
+    const providerRoles = (provider: ProviderCardItem): string[] => {
+        const roles: string[] = [];
+        if (provider.isDefaultTranscription) roles.push(i18n("Transcription"));
+        if (provider.isDefaultEnhancement) roles.push(i18n("Summaries"));
+        if (provider.isDefaultLearn) roles.push(i18n("Learn"));
+        if (provider.isDefaultTopics) roles.push(i18n("Topics"));
+        if (provider.isDefaultTitle) roles.push(i18n("Titles"));
+        if (provider.isDefaultTrim) roles.push(i18n("Trim proposal"));
+        return roles;
+    };
+
     const toggleDisabled = async (
         scope: ProviderScope,
         provider: ProviderCardItem,
@@ -223,7 +220,7 @@ export function ProvidersSection({
         let description = i18n(
             "Profiles that use it stop with an error until it is enabled again.",
         );
-        const roles = providerRoles(provider, i18n);
+        const roles = providerRoles(provider);
         const names = new Intl.ListFormat(locale, {
             style: "long",
             type: "conjunction",

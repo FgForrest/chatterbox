@@ -4,7 +4,7 @@ The screenshots in [`content/docs/user-guide/images`](../../../content/docs/user
 
 | File | What it is |
 | --- | --- |
-| [`src/lib/demo/user-guide/fixtures.ts`](../../../src/lib/demo/user-guide/fixtures.ts) | The demo data: users, Almanac people and things, AI providers, folders, mail, processing profiles and states, and recordings with their transcripts, topics, summaries, cross-item tasks, Learn proposals and AI costs. Edit this to change what the screenshots show. |
+| [`src/lib/demo/user-guide/fixtures.ts`](../../../src/lib/demo/user-guide/fixtures.ts) | The demo data: users, Almanac people and things, AI providers, folders, mail, a meeting agenda, processing profiles and states, and recordings with their transcripts, topics, summaries, cross-item tasks, Learn proposals and AI costs. Edit this to change what the screenshots show. |
 | [`src/lib/demo/user-guide/seed.ts`](../../../src/lib/demo/user-guide/seed.ts) | Writes the fixtures into the database through the app's own helpers, so encryption, lookup hashes and sharing work as in real use. It lives under `src/` so `./node_modules/.bin/tsc --noEmit` keeps it in step with the schema. |
 | [`docker-compose.demo.yml`](docker-compose.demo.yml) | Overrides `docker-compose.e2e.yml`: its own ports, the organization account, folder exports and a placeholder Google configuration. |
 | [`seed.sh`](seed.sh) | Replaces the stack's data with the demo data and gives every recording audio. |
@@ -33,7 +33,9 @@ docs/user-guide/demo/capture.sh
 docs/user-guide/demo/capture.sh transcript settings
 ```
 
-The sections are `onboarding dashboard recording filing workflow transcript learn summary task_review tasks folders organization almanac profiles settings help palette summary_corrections learn_finish routed_inbox`. The focused sections capture the folder row and profile menu, inline Categorize card, workflow strip, Learn review window, inline Task review and earlier-task chooser, processing-profile list and editor, folder defaults, and the routed-proposals inbox.
+The sections are `onboarding dashboard recording filing workflow transcript learn summary task_review tasks folders organization almanac profiles settings help palette meetings summary_corrections learn_finish routed_inbox`. The focused sections capture the folder row and profile menu, inline Categorize card, workflow strip, Learn review window, inline Task review and earlier-task chooser, processing-profile list and editor, folder defaults, and the routed-proposals inbox.
+
+`meetings` opens the **Weekly sync** agenda from the list and captures the agenda and its discussion points as `meeting-agenda` and `meeting-points`. It then starts the meeting and marks one point discussed for `meeting-live`. This changes the data: seed again before retaking `meetings`. It runs before the other sections that mutate data.
 
 `summary_corrections` opens the editor on **Call with Lena about pilot scope**, expands the Rotterdam key point with the later Antwerp timing, saves it, then opens its stored remarks. It runs after the read-only sections because saving adds the Hand-edited marker; seed again before retaking its initial state. The pilot-call fixture already includes an encrypted stored remark and the applied count for a completed correction, so no provider call is made. Its numbered speaker links project the confirmed names into the editor. The editor, saved provenance chips and remarks dialog are captured as `summary-edit`, `summary-edited` and `summary-remarks`.
 
@@ -56,7 +58,7 @@ Inside a sandbox whose Docker daemon runs elsewhere, publish on that host and po
 
 ## How the capture works
 
-`capture.sh` drives the browser at 1440×900 (1440×1200 for Settings). Each section opens a page, clicks to the state it needs, and saves one of three kinds of image:
+`capture.sh` drives the browser at 1440×900 (1440×1200 for Settings and 1440×1500 for the full agenda crop). Each section opens a page, clicks to the state it needs, and saves one of three kinds of image:
 
 - `page NAME`: the whole window.
 - `shot TARGET NAME`: one element, such as a dialog.
@@ -66,4 +68,4 @@ Targets are either CSS selectors (`css:[role=dialog]`) or elements found by thei
 
 ## Changing the demo data
 
-Edit `fixtures.ts`, run `./node_modules/.bin/tsc --noEmit`, then seed and capture again. `seed.sh` stops the demo app while replacing the database, clears the isolated queue produced while filing fixtures, starts the app again, and writes the generated audio. The seed creates the same initial Recordings and Mail profiles as the application migration, freezes those revisions onto filed items, and builds task mentions and proposals through the task helpers. Keep everything invented: no real people, companies or recordings. Dates are relative to the day you seed, so "today" and "overdue" stay true.
+Edit `fixtures.ts`, run `./node_modules/.bin/tsc --noEmit`, then seed and capture again. `seed.sh` stops the demo app while replacing the database, clears the isolated queue produced while filing fixtures, starts the app again, and writes the generated audio. The seed creates the same initial Recordings and Mail profiles as the application migration, freezes those revisions onto filed items, and builds task mentions and proposals through the task helpers. The agenda uses `prepareMeeting`, `patchMeeting` and `addPoint`, and the seed answers its Google Calendar lookup with an invented event. Keep everything invented: no real people, companies or recordings. Dates are relative to the day you seed, so "today" and "overdue" stay true.

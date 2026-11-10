@@ -207,6 +207,11 @@ export async function provisionTestRealm(
         groupIds[capability as Capability] = match.id;
     }
     const secrets: Record<string, string> = {};
+    const adminApiScope = (
+        await http.get<{ id: string; name: string }[]>(
+            adminPath`/client-scopes`,
+        )
+    ).find((scope) => scope.name === "kc-admin-api");
     for (const clientId of [
         "chatterbox",
         "chatterbox-verifier",
@@ -217,6 +222,14 @@ export async function provisionTestRealm(
             clientId,
         });
         if (!client) throw new Error(`client ${clientId} missing`);
+        if (
+            adminApiScope &&
+            (clientId === "chatterbox" || clientId === "chatterbox-verifier")
+        ) {
+            await http.put(
+                adminPath`/clients/${client.id}/default-client-scopes/${adminApiScope.id}`,
+            );
+        }
         const wanted = options.secrets?.[clientId];
         if (wanted) {
             const current = await http.get<Record<string, unknown>>(

@@ -1,10 +1,20 @@
-/** Format meeting dates in the extension's UI language with a single date per day. */
-export function formatMeetingTime(start, end) {
+import { t } from "./i18n.js";
+
+/** Format meeting dates, optionally using relative days around the supplied time. */
+export function formatMeetingTime(start, end, now) {
     const locale = chrome.i18n.getUILanguage?.() || "en";
     const first = new Date(start);
     const last = end ? new Date(end) : null;
-    const date = (value) =>
-        value.toLocaleDateString(locale, { day: "numeric", month: "numeric" });
+    const date = (value) => {
+        if (now !== undefined) {
+            for (const [offset, key] of [[0, "agendaToday"], [-1, "agendaYesterday"], [1, "agendaTomorrow"]]) {
+                const day = new Date(now);
+                day.setDate(day.getDate() + offset);
+                if (value.toDateString() === day.toDateString()) return t(key);
+            }
+        }
+        return value.toLocaleDateString(locale, { day: "numeric", month: "numeric" });
+    };
     const time = (value) =>
         value.toLocaleTimeString(locale, {
             hour: "2-digit",
