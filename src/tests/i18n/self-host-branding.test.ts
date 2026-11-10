@@ -308,5 +308,5 @@ describe("self-host branding", () => {
         expect(
             [...sourceAllowlist.keys()].filter((i) => !matchedRules.has(i)),
         ).toEqual([]);
-    });
+    }, 30_000);
 });

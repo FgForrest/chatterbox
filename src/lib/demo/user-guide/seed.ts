@@ -47,6 +47,7 @@ import {
     createFolder,
     ensureRootFolders,
 } from "@/lib/folders/folders";
+import type { CalendarEventCandidate } from "@/lib/integrations/google/calendar-events";
 import { addAlias } from "@/lib/knowledge/aliases";
 import { createEntity } from "@/lib/knowledge/entities";
 import { confirmManualFact, type FactObject } from "@/lib/knowledge/facts";
@@ -56,6 +57,7 @@ import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
 import { peopleByAddress } from "@/lib/mail/known-quotes";
 import { MAIL_PARSER_VERSION, segmentMail } from "@/lib/mail/segment";
+import { addPoint, patchMeeting, prepareMeeting } from "@/lib/meetings/service";
 import { ensureOrgAccount } from "@/lib/org/account";
 import type {
     ContentRevisionInput,
@@ -87,6 +89,7 @@ import {
 import {
     DEMO_FACTS,
     DEMO_MAIL,
+    DEMO_MEETING,
     DEMO_ORG_FOLDERS,
     DEMO_PEOPLE,
     DEMO_PRIVATE_FOLDERS,
@@ -118,6 +121,8 @@ export interface DemoSeedResult {
     users: Record<DemoUserKey, string>;
     orgUserId: string;
     recordings: Record<string, string>;
+    /** The demo agenda. */
+    meeting: string;
     audio: DemoAudioFile[];
 }
 
@@ -249,6 +254,11 @@ export async function seedUserGuideDemo(
     recordingIds[DEMO_MAIL.key] = mail.itemId;
 
     await seedTaskGraph(scopes, recordingIds, now);
+    const meeting = await seedMeeting(
+        scopes[DEMO_MEETING.owner],
+        privateFolders.get(userIds[DEMO_MEETING.owner]),
+        recordingIds,
+    );
     await seedProcessingStates(scopes, recordingIds, profiles, now);
     await db.delete(asyncJobs);
 
@@ -256,12 +266,71 @@ export async function seedUserGuideDemo(
         await bumpScopeInTx(tx, [alex, userIds.priya, orgUserId]);
     });
 
-    return { users: userIds, orgUserId, recordings: recordingIds, audio };
+    return {
+        users: userIds,
+        orgUserId,
+        recordings: recordingIds,
+        meeting,
+        audio,
+    };
 }
 
 interface DemoProfileRef {
     id: string;
     revisionId: string;
+}
+
+/**
+ * The invented Calendar event behind the demo agenda, on the day of `now`.
+ * The demo has no Google account, so the seed answers Calendar lookups with it.
+ */
+export function demoCalendarEvent(now: Date): CalendarEventCandidate {
+    const fixture = DEMO_MEETING;
+    const start = new Date(now);
+    start.setHours(fixture.hour, 0, 0, 0);
+    const end = new Date(start.getTime() + fixture.durationMinutes * 60_000);
+    return {
+        id: fixture.calendarEventId,
+        title: fixture.title,
+        start: start.toISOString(),
+        end: end.toISOString(),
+        attendees: fixture.invitees.map((key) => {
+            const person = DEMO_PEOPLE.find((person) => person.key === key);
+            if (!person?.email)
+                throw new Error(`No demo invitee email: ${key}`);
+            return { name: person.name, email: person.email };
+        }),
+    };
+}
+
+async function seedMeeting(
+    scope: Scope,
+    folders: Map<string, string> | undefined,
+    recordingIds: Record<string, string>,
+): Promise<string> {
+    const fixture = DEMO_MEETING;
+    const prepared = await prepareMeeting(scope.userId, {
+        folderId: folderAt(folders, fixture.folder),
+        calendarEventId: fixture.calendarEventId,
+    });
+    const sourceId = recordingIds[fixture.taskSource];
+    if (!sourceId) throw new Error(`No demo task source ${fixture.taskSource}`);
+    await patchMeeting(scope.userId, prepared.id, {
+        taskSourceItemId: sourceId,
+        version: prepared.meeting.version,
+    });
+    for (const point of fixture.points) {
+        const parent = await addPoint(scope.userId, prepared.id, {
+            text: point.text,
+        });
+        for (const text of point.children ?? []) {
+            await addPoint(scope.userId, prepared.id, {
+                text,
+                parentId: parent.id,
+            });
+        }
+    }
+    return prepared.id;
 }
 
 interface DemoProfiles {

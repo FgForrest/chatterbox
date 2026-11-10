@@ -1,9 +1,9 @@
 ---
 title: Chatterbox in Claude
-description: Ask Claude or Claude Code about your recordings, people and tasks.
+description: Ask Claude or Claude Code about your recordings, people, tasks and meeting agendas.
 ---
 
-When your administrator has set it up, Claude can look things up in Chatterbox for you. It can search your transcripts and mail, read a summary, tell you who someone in the Almanac is, or list your open tasks. You ask in your own words, and Claude picks the lookups.
+When your administrator has set it up, Claude can look things up in Chatterbox for you. It can search your transcripts and mail, read a summary, tell you who someone in the Almanac is, list your open tasks, or prepare the agenda for your next meeting. You ask in your own words, and Claude picks the lookups.
 
 It works in Claude on the web (claude.ai), the Claude desktop and mobile apps, Cowork, and Claude Code.
 
@@ -15,10 +15,15 @@ Claude sees what you see in Chatterbox and never more:
 - **Mail**: the mail in your pile and mail shared with you, where your instance receives mail. Mail is written by people outside, so Claude is told to treat it as information, not instructions.
 - **The Almanac**: your people and things, and the Organization's.
 - **Tasks**: those you see on the Tasks page: tasks on your items, tasks assigned to you, tasks you follow and your own tasks.
+- **Meeting agendas**: the [agendas](meetings.md) you see in Chatterbox, upcoming ones and meetings held without a recording, with their task review and discussion points. Claude reads them with access to summaries or tasks; the task review needs tasks. Tasks, points and suggestions that come from mail need mail access.
 
 Your administrator decides which areas are open to you: the Almanac, transcripts, summaries, mail, tasks, and changing tasks. Claude is offered only the lookups for your areas, so it may say it cannot reach something you see in the app.
 
-With the right to change tasks, Claude can manage tasks where the Tasks page would let you: create own tasks, edit, complete, reopen, drop, reassign, follow and merge. It can also write or clear the task’s one note (up to 2,000 characters) when you may complete that task. A new note replaces the whole previous note; to add to it, ask Claude to read it first. Completion and a note can be saved together. Mail-task notes require mail access to read or change. Everything else is read only. Chatterbox records each lookup (what was looked up and which recordings or records it touched), never what you asked or what Claude answered.
+With the right to change tasks, Claude can manage tasks where the Tasks page would let you: create own tasks, edit, complete, reopen, drop, reassign, follow and merge. It can also write or clear the task’s one note (up to 2,000 characters) when you may complete that task. A new note replaces the whole previous note; to add to it, ask Claude to read it first. Completion and a note can be saved together. Mail-task notes require mail access to read or change.
+
+The same right lets Claude work on agendas as the agenda page would let you: prepare an agenda for a folder or a Calendar event, add, edit, indent, reorder, tick off and remove discussion points, add or remove tasks in the task review and reorder them, write a meeting note on a task, change the title, time, task source or state, and ask for suggested points, which it can then add or dismiss. Suggesting points runs your summary provider, like **Suggest points** on the agenda page. Agenda notes stay with the agenda; to complete a task or change its own note, Claude changes the task itself. Deleting an agenda, sharing it, attaching a recording and writing it into Calendar stay in the app. An agenda that went with its recording is read only.
+
+Everything else is read only. Chatterbox records each lookup (what was looked up and which recordings or records it touched), never what you asked or what Claude answered.
 
 ## Before you connect
 
@@ -65,6 +70,8 @@ Ask the way you would ask a colleague who has read everything:
 - "Which of my tasks are overdue?"
 - "Find the mail where Bluefin Logistics confirmed the delivery dates."
 - "Mark the task about Dispatch API access as done and note that it shipped in release X."
+- "Prepare the agenda for tomorrow's weekly sync: open tasks from the last one, and a point about the Harbor usability sessions."
+- "What is still not discussed on today's agenda? Tick off the Pathfinder release point."
 
 Names work wherever Claude would otherwise need an ID: people, things and recordings are found by their names, nicknames and titles. When a name could mean several people, Claude gets the candidates and should ask you which one.
 
@@ -88,6 +95,7 @@ To stop, choose **Disconnect** (or **Remove**) in **Customize → Connectors**. 
 | Claude says it cannot use the connector right after you sign in | Sign in to Chatterbox once in your browser, then connect again. If it still fails, ask your administrator: Chatterbox's log says why it refused. |
 | Claude cannot reach transcripts, summaries, mail or tasks | That area is not open to you. Ask your administrator. |
 | A lookup answers "Unknown tool" | What you may see has changed. Refresh the connector or connect again. |
+| Claude does not know the agenda tools | Your connector still has the list from before they were added. Refresh the connector in **Customize → Connectors**, or disconnect and connect again. |
 | Claude Code cannot connect | Connect from the office network or the VPN. |
 
 Next: [For administrators](administrators.md)

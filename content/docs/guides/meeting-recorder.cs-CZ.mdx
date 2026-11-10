@@ -172,6 +172,54 @@ Po zastavení se dokončí odesílání a server nahrávku sestaví a uloží.
 Po potvrzení uložení rozšíření otevře přehled Klepny s vybranou novou nahrávkou.
 Přehratelnou kopii můžete stáhnout z její stránky.
 
+<span id="agendas" />
+
+## Agendy
+
+Když v Klepně připravíte ke schůzce agendu (viz
+[Schůzky a agendy](../user-guide/meetings.md)), rozšíření ji ukáže vedle
+schůzky. Potřebuje k tomu verzi 0.9.0 nebo novější a server s podporou agend;
+u staršího serveru rozšíření oznámí, že se agendy objeví po jeho aktualizaci.
+
+- **Rozpoznání.** Karta Google Meet se spáruje s agendou své události
+  v Kalendáři podle kódu místnosti, ostatní platformy podle času. Rozšíření
+  posílá jen kód místnosti a čas, nikdy obsah stránky ani adresu karty. Nabízí
+  agendy, které právě probíhají nebo začínají do patnácti minut; při více
+  shodách nabídne výběr.
+- **Boční panel.** Na kartě s odpovídající agendou otevře ikona na liště agendu
+  v bočním panelu prohlížeče spolu s ovládáním nahrávání; druhým kliknutím
+  panel zavřete. Nahrávání spustíte tlačítkem souhlasu v panelu a klávesová
+  zkratka nahrávání dál spouští i zastavuje. Pokud prohlížeč boční panel
+  odmítne, agenda se otevře v samostatném okně. Se zapnutou výzvou ve schůzce
+  přidá volba **Nabízet agendu v liště ve schůzce** do lišty **Zobrazit
+  agendu**.
+- **Příprava a Živá schůzka.** Panel ukazuje kontrolu úkolů a body
+  k projednání stejně jako Klepna a zůstává k dispozici i během nahrávání.
+  Během schůzky zaškrtáváte body jako **Probráno**, úkoly označujete **Hotovo**
+  nebo je rušíte a přidáváte poznámky. Tyto změny platí pro skutečnou agendu
+  i úkoly a změny kolegů se zobrazují průběžně. **Otevřít v Klepně** otevře
+  celou agendu.
+- **Kterou agendu nahrávka ponese.** Panel ukazuje **Nahrávka ponese tuto
+  agendu**. **Odpojit** agendu od nahrávky odpojí, **Přepnout sem** nahrávku
+  přesune k jiné agendě. **Žádná agenda** agendu nepřipojí; server, který
+  tuto volbu ignoruje, ji přesto může připojit automaticky. Kolegové
+  se stejnou otevřenou agendou vidí, kdo nahrává, a mohou zvolit **Nahrávat
+  také…**.
+- **Jiná agenda…** nabízí agendy, které lze připojit, i když se nic
+  nespárovalo. Od verze 0.9.5 nabízí i agendy bez nahrávky naplánované do
+  24 hodin před nebo po aktuálním čase, takže i schůzka, jejíž začátek jste
+  propásli, dostane svou agendu. Ukáže nejvýše deset agend, nejdřív ty,
+  jejichž plánovaný začátek až konec leží nejblíž aktuálnímu času, při shodě
+  Vaše vlastní, každou s jejím plánovaným časem.
+
+S propojeným Google Kalendářem ukazuje podporovaný server ve vyskakovacím okně
+i v panelu také kartu **Nejbližší schůzka**: další událost Google Meet z Vašeho
+hlavního kalendáře, která právě probíhá nebo začíná do dvanácti hodin,
+s tlačítkem **Připojit se v Meet**. Připojení nikdy nespouští nahrávání. Volba
+**Připomínat schůzky** na stránce **Možnosti** pošle ke každé schůzce nejvýše
+jedno oznámení, 0, 1, 2, 5 nebo 10 minut před začátkem, a žádné, když je
+místnost schůzky už otevřená.
+
 ## Mikrofon
 
 Rozšíření používá výchozí vstup systému, pokud nevyberete jiné zařízení v

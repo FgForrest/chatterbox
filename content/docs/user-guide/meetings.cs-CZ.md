@@ -7,6 +7,8 @@ description: Příprava agendy, kontrola úkolů z minulé schůzky, body k proj
 
 Agenda má dvě části: **1 · Kontrola úkolů** a **2 · Body k projednání**. Kolegové, kteří mohou agendu upravovat, na ní pracují současně s Vámi a jejich změny se načítají samy.
 
+![Agenda s kontrolou úkolů a body k projednání](images/meeting-agenda.png)
+
 <span id="task-review" />
 
 ## Kontrola úkolů
@@ -26,6 +28,8 @@ Zaškrtnutím úkolu ho označíte jako hotový všude, kde se objevuje. Během 
 ## Body k projednání
 
 Body tvoří osnovu až o třech úrovních. Napište text do pole **Přidat bod…** na konci seznamu a klávesou **Enter** přidáte další bod.
+
+![Body k projednání s pod-bodem](images/meeting-points.png)
 
 **Navrhnout body**, ikona hůlky v záhlaví sekce, navrhne body podle dění ve složkách agendy od minulé schůzky. Použije poskytovatele shrnutí z Vašeho výchozího profilu zpracování. Návrhy se objeví pod agendou v části **Návrhy z dění ve složce od minulé schůzky**, každý s volbami **Přidat** a **Zamítnout**. Body, které minule zůstaly otevřené, najdete v části **Neprobráno minule**.
 
@@ -47,6 +51,10 @@ Body tvoří osnovu až o třech úrovních. Napište text do pole **Přidat bod
 ## Během schůzky
 
 **Zahájit schůzku** v záhlaví přepne agendu do režimu schůzky: běží čas, u každého bodu je zaškrtávací pole pro označení jako probraný a ukazuje se počet probraných bodů a změněných úkolů. **Ukončit schůzku** ji ukončí.
+
+![Režim schůzky s časem a jedním probraným bodem](images/meeting-live.png)
+
+U schůzky v prohlížeči ukazuje [rozšíření pro nahrávání schůzek](../guides/meeting-recorder.mdx#agendas) stejnou agendu v bočním panelu vedle schůzky, takže body odškrtáváte, zatímco nahráváte.
 
 Když dorazí nahrávka schůzky, nebo když ji připojíte volbou **Připojit nahrávku…**, agenda přejde k nahrávce a je u ní jen pro čtení. Agenda, která skončila bez nahrávky, zůstává jako **Agenda bez nahrávky**: probrané body a poznámky zůstávají a změny úkolů už platí.
 
