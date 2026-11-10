@@ -42,9 +42,10 @@ describe.skipIf(!adminUrl)("migrated test database template", () => {
                 where datname = ${templateName}
             `;
             expect(template.datallowconn).toBe(false);
+            // Autovacuum workers enter a template despite allow_connections false; only client sessions count.
             const connections = await admin`
                 select pid from pg_stat_activity
-                where datname = ${templateName}
+                where datname = ${templateName} and backend_type = 'client backend'
             `;
             expect(connections).toHaveLength(0);
         } finally {
