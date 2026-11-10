@@ -481,7 +481,7 @@ async function renderPendingBuffers() {
         retry.disabled = busy;
         check.disabled = busy;
         const message = pendingBufferMessages.get(id);
-        setStatus(status, busy ? t("retryBufferRunning") : message?.text ?? "", !message?.error);
+        setStatus(status, busy ? t("retryBufferRunning") : message?.text ?? "", busy || !message?.error);
         const button = document.createElement("button");
         button.type = "button";
         button.textContent = t("discard");

@@ -188,6 +188,82 @@ describe("pending recording retry controls", () => {
         expect(discard.disabled).toBe(false);
     });
 
+    it("keeps a second retry neutral when re-rendered after a failed attempt", async () => {
+        const h = options();
+        h.sendMessage.mockResolvedValueOnce({
+            ok: false,
+            error: h.t("requestTimedOut"),
+        });
+        await h.render();
+        await h.row().retry.events.click();
+        expect(h.row().status.className).toBe("status err");
+        let finish;
+        h.sendMessage.mockImplementationOnce(
+            () =>
+                new Promise((resolve) => {
+                    finish = resolve;
+                }),
+        );
+        const pending = h.row().retry.events.click();
+        expect(h.row().status.textContent).toBe(h.t("retryBufferRunning"));
+        expect(h.row().status.className).toBe("status ok");
+        await h.render();
+        const { retry, check, discard, status } = h.row();
+        expect(retry.disabled).toBe(true);
+        expect(check.disabled).toBe(true);
+        expect(discard.disabled).toBe(true);
+        expect(status.textContent).toBe(h.t("retryBufferRunning"));
+        const runningClass = status.className;
+        finish({ ok: true });
+        await pending;
+        expect(runningClass).toBe("status ok");
+        expect(h.row().status.textContent).toBe(h.t("retryBufferResumed"));
+        expect(h.row().status.className).toBe("status ok");
+    });
+
+    it("discards a checked buffer and removes its row after re-rendering", async () => {
+        const h = options();
+        h.sendMessage.mockImplementationOnce(async () => {
+            h.remove();
+            return { ok: true };
+        });
+        await h.render();
+        const { check, discard } = h.row();
+        expect(discard.disabled).toBe(true);
+        check.checked = true;
+        check.events.change();
+        expect(discard.disabled).toBe(false);
+        await discard.events.click();
+        expect(h.sendMessage).toHaveBeenCalledExactlyOnceWith({
+            type: "discard-buffer",
+            bufferId: "buffer-one",
+        });
+        expect(h.el("pending-buffer-list").children).toEqual([]);
+        expect(h.el("pending-buffers").hidden).toBe(true);
+        expect(h.el("manual-recovery-label").hidden).toBe(true);
+    });
+
+    it("keeps the row and shows the connection status error when discard fails", async () => {
+        const h = options();
+        const error = h.t("somethingWrong");
+        h.sendMessage.mockResolvedValueOnce({ ok: false, error });
+        await h.render();
+        const item = h.el("pending-buffer-list").children[0];
+        const { check, discard } = h.row();
+        check.checked = true;
+        check.events.change();
+        expect(discard.disabled).toBe(false);
+        await discard.events.click();
+        expect(h.sendMessage).toHaveBeenCalledExactlyOnceWith({
+            type: "discard-buffer",
+            bufferId: "buffer-one",
+        });
+        expect(h.el("pending-buffer-list").children).toEqual([item]);
+        expect(h.el("pending-buffers").hidden).toBe(false);
+        expect(h.el("connection-status").textContent).toBe(error);
+        expect(h.el("connection-status").className).toBe("status err");
+    });
+
     it("refreshes the list when completion removes the buffer", async () => {
         const h = options();
         h.sendMessage.mockImplementationOnce(async () => {
