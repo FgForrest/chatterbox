@@ -10,7 +10,7 @@ export function canPumpUploads(state) {
         state.sessionId &&
             !state.blocked &&
             (state.state === STATE.recording ||
-                state.state === STATE.finalizing ||
+                (state.state === STATE.finalizing && !state.jobId) ||
                 (state.state === STATE.error && state.stopped)),
     );
 }

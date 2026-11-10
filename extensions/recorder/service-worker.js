@@ -2166,6 +2166,18 @@ async function resumeRecording(message, sender) {
 
 // ---- Internal messaging (popup, options, offscreen, content script) --------
 
+function isExtensionPage(url, path) {
+    try {
+        const actual = new URL(url);
+        const expected = new URL(chrome.runtime.getURL(path));
+        // Compare protocol and host because extension URL origins can serialize as "null".
+        return actual.protocol === expected.protocol && actual.host === expected.host &&
+            actual.pathname === expected.pathname;
+    } catch {
+        return false;
+    }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || message.target === "offscreen") return false;
     if (message.type === "open-agenda") {
@@ -2327,7 +2339,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case "retry-buffer":
         case "discard-buffer":
-            if (sender.id !== chrome.runtime.id || sender.url?.split("?")[0] !== chrome.runtime.getURL("options/options.html") ||
+            if (sender.id !== chrome.runtime.id || !isExtensionPage(sender.url, "options/options.html") ||
                 typeof message.bufferId !== "string" || !/^[\w-]+$/.test(message.bufferId)) {
                 sendResponse({ ok: false, error: t("unrecognizedSender") });
                 return false;
@@ -2468,7 +2480,11 @@ async function handleRecordingStopped(message) {
     await pumpUploads();
 }
 
-async function savePlayablePrefix(chunkCount) {
+function savePlayablePrefix(chunkCount) {
+    return transitionBuffer(() => savePlayablePrefixOnce(chunkCount));
+}
+
+async function savePlayablePrefixOnce(chunkCount) {
     const state = await getState();
     if (
         !state.stopped ||

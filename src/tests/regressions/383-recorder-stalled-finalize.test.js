@@ -383,6 +383,92 @@ describe("#383 stalled completion", () => {
 });
 
 describe("#383 recovery and buffer ownership", () => {
+    it("keeps alarm and pump requests out of a playable-prefix transition", async () => {
+        const unblocked = deferred();
+        const completion = deferred();
+        const h = worker(
+            stopped({
+                state: "error",
+                blocked: true,
+                chunkCount: 3,
+                recoverablePrefix: 2,
+            }),
+            { completeSession: vi.fn(() => completion.promise) },
+        );
+        await drain();
+        const write = h.chrome.storage.session.set.getMockImplementation();
+        h.chrome.storage.session.set.mockImplementation(async (patch) => {
+            await write(patch);
+            if (
+                patch.recordingState?.state === "error" &&
+                !patch.recordingState.blocked
+            )
+                await unblocked.promise;
+        });
+        const save = h.message({ type: "save-prefix", chunkCount: 2 });
+        await drain();
+        expect(h.values.recordingState.blocked).toBe(false);
+        const alarm = h.listeners.alarm({ name: ALARMS.uploadRetry });
+        const pump = h.ctx.pumpUploads();
+        await drain();
+        expect(h.deps.listChunkIndices).not.toHaveBeenCalled();
+        expect(h.deps.completeSession).not.toHaveBeenCalled();
+        unblocked.resolve();
+        await drain();
+        expect(h.values.recordingState).toMatchObject({
+            state: "finalizing",
+            blocked: false,
+            recoverablePrefix: 2,
+        });
+        await h.listeners.alarm({ name: ALARMS.uploadRetry });
+        await h.ctx.pumpUploads();
+        expect(h.deps.listChunkIndices).not.toHaveBeenCalled();
+        completion.resolve({ job_id: "job-one" });
+        expect(await save).toEqual({ ok: true });
+        await Promise.all([alarm, pump]);
+        expect(h.deps.completeSession).toHaveBeenCalledExactlyOnceWith(
+            expect.anything(),
+            "session-one",
+            expect.objectContaining({ chunkCount: 3, truncatedAtChunk: 2 }),
+        );
+        expect(h.deps.listChunkIndices).not.toHaveBeenCalled();
+        expect(h.values.recordingState).toMatchObject({
+            state: "finalizing",
+            jobId: "job-one",
+            blocked: false,
+            recoverablePrefix: 2,
+        });
+        for (const [patch] of h.chrome.storage.session.set.mock.calls) {
+            expect(patch.recordingState).toMatchObject({
+                blocked: false,
+                recoverablePrefix: 2,
+            });
+        }
+    });
+
+    it.each([
+        0,
+        1,
+        3,
+        2.5,
+        "2",
+    ])("rejects an unverified playable-prefix count %s", async (chunkCount) => {
+        const initial = stopped({
+            state: "error",
+            blocked: true,
+            chunkCount: 3,
+            recoverablePrefix: 2,
+        });
+        const h = worker(initial);
+        await drain();
+        expect(await h.message({ type: "save-prefix", chunkCount })).toEqual({
+            ok: false,
+            error: "No verified playable prefix is available",
+        });
+        expect(h.values.recordingState).toEqual(initial);
+        expect(h.deps.completeSession).not.toHaveBeenCalled();
+    });
+
     it.each([
         "recording",
         "finalizing",
@@ -999,21 +1085,60 @@ describe("#383 retry-buffer", () => {
         expect(h.deps.getSession).not.toHaveBeenCalled();
     });
 
-    it.each([
-        { id: "unknown", url: optionsSender.url },
-        { id: "test", url: "https://unknown.example/" },
-        { id: "test", url: "chrome-extension://test/popup/popup.html" },
-        {},
-    ])("refuses unknown senders before reading the buffer: %j", async (sender) => {
-        const h = worker();
-        await drain();
-        expect(
-            await h.message(
-                { type: "retry-buffer", bufferId: "buffer-one" },
-                sender,
-            ),
-        ).toEqual({ ok: false, error: "unrecognizedSender" });
-        expect(h.deps.readLocalMeta).not.toHaveBeenCalled();
+    describe.each([
+        "retry-buffer",
+        "discard-buffer",
+    ])("%s sender validation", (type) => {
+        it.each([
+            "",
+            "#meeting-prompt",
+            "?x=1#y",
+        ])("accepts the options page with suffix %s", async (suffix) => {
+            const h = worker();
+            await drain();
+            h.deps.getSession.mockResolvedValue({
+                status: type === "retry-buffer" ? "completing" : "open",
+            });
+            expect(
+                await h.message(
+                    { type, bufferId: "buffer-one" },
+                    {
+                        ...optionsSender,
+                        url: optionsSender.url + suffix,
+                    },
+                ),
+            ).toEqual({ ok: true });
+            expect(h.deps.readLocalMeta).toHaveBeenCalledWith("buffer-one");
+            if (type === "discard-buffer")
+                expect(
+                    h.deps.deleteLocalSession,
+                ).toHaveBeenCalledExactlyOnceWith("buffer-one");
+        });
+
+        it.each([
+            { id: "unknown", url: optionsSender.url },
+            { id: "test", url: "https://unknown.example/" },
+            { id: "test", url: "chrome-extension://test/popup/popup.html" },
+            {
+                id: "test",
+                url: "chrome-extension://other/options/options.html#meeting-prompt",
+            },
+            { id: "test", url: "https://test/options/options.html?x=1#y" },
+            {
+                id: "test",
+                url: "chrome-extension://test/options/options.html/extra",
+            },
+            { id: "test", url: "not a URL" },
+            {},
+        ])("refuses unknown senders before reading the buffer: %j", async (sender) => {
+            const h = worker();
+            await drain();
+            expect(
+                await h.message({ type, bufferId: "buffer-one" }, sender),
+            ).toEqual({ ok: false, error: "unrecognizedSender" });
+            expect(h.deps.readLocalMeta).not.toHaveBeenCalled();
+            expect(h.deps.deleteLocalSession).not.toHaveBeenCalled();
+        });
     });
 
     it("queues retries and discard, and refuses a capture until transitions finish", async () => {
