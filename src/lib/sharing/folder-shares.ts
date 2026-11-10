@@ -5,6 +5,7 @@ import {
     activeShareRecipientCondition,
     activeShareRecipientExistsCondition,
 } from "@/db/queries/item-shares";
+import { lockPrivateFolderTree } from "@/db/queries/private-folder-tree";
 import {
     chatterItems,
     folderShares,
@@ -17,6 +18,10 @@ import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { notifyPersonShareChanged } from "@/lib/events/personal";
+import {
+    assertPersonSharedFolderAllowsChildren,
+    folderHasSubfolders,
+} from "@/lib/folders/person-shared-leaf";
 import { nudge } from "@/lib/jobs/nudge";
 import { secretAddressMasker } from "@/lib/mail/redact";
 import { sendPersonShareInvitation } from "@/lib/notifications/person-share";
@@ -111,7 +116,14 @@ export async function inviteToFolder(
         );
     const invited: string[] = [];
     await db.transaction(async (tx) => {
+        await lockPrivateFolderTree(tx, userId);
         await ownedFolder(tx, userId, folderId);
+        if (await folderHasSubfolders(tx, userId, folderId))
+            throw new AppError(
+                ErrorCode.FOLDER_HAS_SUBFOLDERS,
+                "Move this folder's subfolders elsewhere first. A shared folder has no subfolders.",
+                409,
+            );
         const receivers = await tx
             .select({ id: users.id })
             .from(users)
@@ -244,6 +256,11 @@ async function attachmentParent(
         )
         .for("share");
     if (!parent) throw missing();
+    await assertPersonSharedFolderAllowsChildren(tx, {
+        scope: "personal",
+        ownerId: userId,
+        folder: parent,
+    });
     return parent.id;
 }
 
@@ -263,6 +280,8 @@ export async function changeFolderShare(
     // Two receivers placing folders shared by each other lock the same rows in opposite order.
     const changed = await retryOnDeadlock(() =>
         db.transaction(async (tx) => {
+            if (input.action === "accept" || input.action === "move")
+                await lockPrivateFolderTree(tx, userId);
             const condition = and(
                 eq(folderShares.id, shareId),
                 or(

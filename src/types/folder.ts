@@ -13,6 +13,7 @@ export interface RecordingFolder {
     /** Optimistic-lock version; sent back on rename and move. */
     version: number;
     sharedWithPeople?: boolean;
+    insideSharedFolder?: boolean;
     receivedFolder?: {
         sourceFolderId?: string;
         shareId: string;

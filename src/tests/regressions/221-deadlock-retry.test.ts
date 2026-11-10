@@ -45,4 +45,48 @@ describe("#221 deadlock retries", () => {
         await expect(retryOnDeadlock(run)).rejects.toBe(last);
         expect(run).toHaveBeenCalledTimes(2);
     });
+    it.each([
+        false,
+        true,
+    ])("retries serialization failures only when enabled (wrapped: %s)", async (wrapped) => {
+        const error = Object.assign(new Error("serialization failure"), {
+            code: "40001",
+        });
+        const failure = wrapped
+            ? new Error("Failed query", { cause: error })
+            : error;
+        const run = vi
+            .fn()
+            .mockRejectedValueOnce(failure)
+            .mockRejectedValueOnce(failure)
+            .mockResolvedValueOnce("committed");
+        await expect(
+            retryOnDeadlock(run, { retrySerialization: true }),
+        ).resolves.toBe("committed");
+        expect(run).toHaveBeenCalledTimes(3);
+    });
+    it("bounds serialization retries and preserves the last error", async () => {
+        const error = Object.assign(new Error("serialization failure"), {
+            code: "40001",
+        });
+        const run = vi.fn().mockRejectedValue(error);
+        await expect(
+            retryOnDeadlock(run, { retrySerialization: true }),
+        ).rejects.toBe(error);
+        expect(run).toHaveBeenCalledTimes(3);
+    });
+    it("does not retry a refusal after retrying a serialization failure", async () => {
+        const error = Object.assign(new Error("serialization failure"), {
+            code: "40001",
+        });
+        const refusal = new Error("refused");
+        const run = vi
+            .fn()
+            .mockRejectedValueOnce(error)
+            .mockRejectedValueOnce(refusal);
+        await expect(
+            retryOnDeadlock(run, { retrySerialization: true }),
+        ).rejects.toBe(refusal);
+        expect(run).toHaveBeenCalledTimes(2);
+    });
 });

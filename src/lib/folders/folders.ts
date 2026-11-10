@@ -19,12 +19,13 @@ import {
     users,
 } from "@/db/schema";
 import { holderAccess } from "@/lib/authz/access-state";
-import { retryOnDeadlock } from "@/lib/deadlock-retry";
+import { isSerializationFailure, retryOnDeadlock } from "@/lib/deadlock-retry";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { notifyPersonShareChanged } from "@/lib/events/personal";
 import { enqueueExportPlansForUser } from "@/lib/folder-exports/jobs";
+import { assertPersonSharedFolderAllowsChildren } from "@/lib/folders/person-shared-leaf";
 import { isIdpAuthorization } from "@/lib/identity/factory";
 import { nudge } from "@/lib/jobs/nudge";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
@@ -708,9 +709,17 @@ export async function listFolderOrganization(
             ...personal.folders.map((folder) => ({
                 ...folder,
                 ...(outgoing.has(folder.id) ? { sharedWithPeople: true } : {}),
+                ...(folder.parentId && outgoing.has(folder.parentId)
+                    ? { insideSharedFolder: true }
+                    : {}),
             })),
             ...org.folders,
-            ...received.folders,
+            ...received.folders.map((folder) => ({
+                ...folder,
+                ...(folder.parentId && outgoing.has(folder.parentId)
+                    ? { insideSharedFolder: true }
+                    : {}),
+            })),
         ],
         assignments: [
             ...personal.assignments,
@@ -818,40 +827,46 @@ export async function createFolder(input: {
         assertOrganizationTreeManager([parent], input.canCurate === true);
     }
 
-    const siblings = await db
-        .select({ sortOrder: recordingFolders.sortOrder })
-        .from(recordingFolders)
-        .where(
-            and(
-                eq(recordingFolders.userId, parent.ownerId),
-                eq(recordingFolders.parentId, parent.folder.id),
-            ),
-        );
-    const sortOrder =
-        siblings.reduce(
-            (highest, sibling) => Math.max(highest, sibling.sortOrder),
-            -FOLDER_ORDER_STEP,
-        ) + FOLDER_ORDER_STEP;
+    const created = await db.transaction(async (tx) => {
+        if (parent.scope === "personal")
+            await lockPrivateFolderTree(tx, input.userId);
+        await assertPersonSharedFolderAllowsChildren(tx, parent);
+        const siblings = await tx
+            .select({ sortOrder: recordingFolders.sortOrder })
+            .from(recordingFolders)
+            .where(
+                and(
+                    eq(recordingFolders.userId, parent.ownerId),
+                    eq(recordingFolders.parentId, parent.folder.id),
+                ),
+            );
+        const sortOrder =
+            siblings.reduce(
+                (highest, sibling) => Math.max(highest, sibling.sortOrder),
+                -FOLDER_ORDER_STEP,
+            ) + FOLDER_ORDER_STEP;
 
-    const [created] = await db
-        .insert(recordingFolders)
-        .values({
-            userId: parent.ownerId,
-            parentId: parent.folder.id,
-            name: encryptText(name),
-            nameHash: lookupHash(name),
-            kind: "custom",
-            sortOrder,
-            createdByUserId: input.userId,
-        })
-        .returning(folderColumns);
-    if (!created) {
-        throw new AppError(
-            ErrorCode.INTERNAL_ERROR,
-            "Folder could not be created",
-            500,
-        );
-    }
+        const [created] = await tx
+            .insert(recordingFolders)
+            .values({
+                userId: parent.ownerId,
+                parentId: parent.folder.id,
+                name: encryptText(name),
+                nameHash: lookupHash(name),
+                kind: "custom",
+                sortOrder,
+                createdByUserId: input.userId,
+            })
+            .returning(folderColumns);
+        if (!created) {
+            throw new AppError(
+                ErrorCode.INTERNAL_ERROR,
+                "Folder could not be created",
+                500,
+            );
+        }
+        return created;
+    });
     if (parent.scope === "org") await orgTreeChanged();
     try {
         await ensureFolderAddress(created.id, input.userId);
@@ -925,183 +940,209 @@ export async function moveFolder(input: {
     version?: number;
 }): Promise<RecordingFolder> {
     const orgUserId = await getOrgUserId();
-    const moved = await db.transaction(
-        async (tx) => {
-            if (orgUserId) await lockOrgTree(tx);
-            await lockPrivateFolderTree(tx, input.userId);
-            const target = await resolveFolder(
-                tx,
-                input.userId,
-                input.folderId,
-                orgUserId,
-            );
-            if (!target || target.folder.kind !== "custom") {
-                throw folderNotFound();
-            }
-            assertWritable(target);
-            const destination = await resolveFolder(
-                tx,
-                input.userId,
-                input.parentId,
-                orgUserId,
-            );
-            if (!destination) throw folderNotFound();
-            assertWritable(destination);
-            assertOrganizationTreeManager(
-                [target, destination],
-                input.canCurate === true,
-            );
-            if (
-                input.version !== undefined &&
-                input.version !== target.folder.version
-            ) {
-                throw staleFolder();
-            }
-            if (target.ownerId !== destination.ownerId) throw folderNotFound();
-            const folders = await listTreeFolders(tx, target.ownerId);
-            const folder = folders.find((item) => item.id === input.folderId);
-            const parent = folders.find((item) => item.id === input.parentId);
-            if (!folder || !parent) throw folderNotFound();
-            if (folder.id === parent.id) {
-                throw new AppError(
-                    ErrorCode.INVALID_INPUT,
-                    "A folder cannot contain itself",
-                    400,
-                );
-            }
-
-            const byId = new Map(folders.map((item) => [item.id, item]));
-            let ancestor: FolderRow | undefined = parent;
-            while (ancestor) {
-                if (ancestor.id === folder.id) {
-                    throw new AppError(
-                        ErrorCode.INVALID_INPUT,
-                        "A folder cannot be moved inside one of its subfolders",
-                        400,
+    const moved = await retryOnDeadlock(
+        () =>
+            db.transaction(
+                async (tx) => {
+                    if (orgUserId) await lockOrgTree(tx);
+                    await lockPrivateFolderTree(tx, input.userId);
+                    const target = await resolveFolder(
+                        tx,
+                        input.userId,
+                        input.folderId,
+                        orgUserId,
                     );
-                }
-                ancestor = ancestor.parentId
-                    ? byId.get(ancestor.parentId)
-                    : undefined;
-            }
-
-            let destinationRoot = parent;
-            while (destinationRoot.parentId) {
-                const next = byId.get(destinationRoot.parentId);
-                if (!next) break;
-                destinationRoot = next;
-            }
-            if (destinationRoot.kind !== "private") {
-                const configured = await tx
-                    .select({ id: folderExportConfigurations.id })
-                    .from(folderExportConfigurations)
-                    .where(
-                        inArray(folderExportConfigurations.folderId, [
-                            ...subtreeIds(folders, folder.id),
-                        ]),
-                    )
-                    .limit(1);
-                if (configured.length > 0) {
-                    throw new AppError(
-                        ErrorCode.INVALID_INPUT,
-                        "Remove filesystem exports before moving this folder outside Private",
-                        400,
+                    if (!target || target.folder.kind !== "custom") {
+                        throw folderNotFound();
+                    }
+                    assertWritable(target);
+                    const destination = await resolveFolder(
+                        tx,
+                        input.userId,
+                        input.parentId,
+                        orgUserId,
                     );
-                }
-                await tx
-                    .update(recordingTasks)
-                    .set({
-                        folderId: null,
-                        version: sql`${recordingTasks.version} + 1`,
-                        updatedAt: new Date(),
-                    })
-                    .where(
-                        and(
-                            eq(recordingTasks.userId, target.ownerId),
-                            eq(recordingTasks.source, "personal"),
-                            inArray(recordingTasks.folderId, [
-                                ...subtreeIds(folders, folder.id),
-                            ]),
-                        ),
+                    if (!destination) throw folderNotFound();
+                    assertWritable(destination);
+                    assertOrganizationTreeManager(
+                        [target, destination],
+                        input.canCurate === true,
                     );
-            }
-
-            const siblings = folders
-                .filter(
-                    (item) =>
-                        item.parentId === parent.id && item.id !== folder.id,
-                )
-                .sort(
-                    (left, right) =>
-                        left.sortOrder - right.sortOrder ||
-                        decryptText(left.name).localeCompare(
-                            decryptText(right.name),
-                        ),
-                );
-            let insertionIndex = siblings.length;
-            if (input.beforeId != null) {
-                insertionIndex = siblings.findIndex(
-                    (item) => item.id === input.beforeId,
-                );
-                if (insertionIndex < 0) {
-                    throw new AppError(
-                        ErrorCode.INVALID_INPUT,
-                        "The requested folder position is invalid",
-                        400,
+                    if (
+                        input.version !== undefined &&
+                        input.version !== target.folder.version
+                    ) {
+                        throw staleFolder();
+                    }
+                    if (target.ownerId !== destination.ownerId)
+                        throw folderNotFound();
+                    await assertPersonSharedFolderAllowsChildren(
+                        tx,
+                        destination,
+                        target.folder.parentId,
                     );
-                }
-            }
-            siblings.splice(insertionIndex, 0, {
-                ...folder,
-                parentId: parent.id,
-            });
-
-            for (const [index, sibling] of siblings.entries()) {
-                await tx
-                    .update(recordingFolders)
-                    .set({
-                        parentId: parent.id,
-                        sortOrder: index * FOLDER_ORDER_STEP,
-                        ...(sibling.id === folder.id
-                            ? {
-                                  updatedAt: new Date(),
-                                  version: folder.version + 1,
-                              }
-                            : {}),
-                    })
-                    .where(
-                        and(
-                            eq(recordingFolders.id, sibling.id),
-                            eq(recordingFolders.userId, target.ownerId),
-                        ),
+                    const folders = await listTreeFolders(tx, target.ownerId);
+                    const folder = folders.find(
+                        (item) => item.id === input.folderId,
                     );
-            }
+                    const parent = folders.find(
+                        (item) => item.id === input.parentId,
+                    );
+                    if (!folder || !parent) throw folderNotFound();
+                    if (folder.id === parent.id) {
+                        throw new AppError(
+                            ErrorCode.INVALID_INPUT,
+                            "A folder cannot contain itself",
+                            400,
+                        );
+                    }
 
-            const movedIndex = siblings.findIndex(
-                (sibling) => sibling.id === folder.id,
-            );
-            if (movedIndex < 0) {
-                throw new AppError(
-                    ErrorCode.INTERNAL_ERROR,
-                    "Folder position could not be saved",
-                    500,
-                );
-            }
-            return {
-                scope: target.scope,
-                folder: serializeFolder(
-                    {
+                    const byId = new Map(
+                        folders.map((item) => [item.id, item]),
+                    );
+                    let ancestor: FolderRow | undefined = parent;
+                    while (ancestor) {
+                        if (ancestor.id === folder.id) {
+                            throw new AppError(
+                                ErrorCode.INVALID_INPUT,
+                                "A folder cannot be moved inside one of its subfolders",
+                                400,
+                            );
+                        }
+                        ancestor = ancestor.parentId
+                            ? byId.get(ancestor.parentId)
+                            : undefined;
+                    }
+
+                    let destinationRoot = parent;
+                    while (destinationRoot.parentId) {
+                        const next = byId.get(destinationRoot.parentId);
+                        if (!next) break;
+                        destinationRoot = next;
+                    }
+                    if (destinationRoot.kind !== "private") {
+                        const configured = await tx
+                            .select({ id: folderExportConfigurations.id })
+                            .from(folderExportConfigurations)
+                            .where(
+                                inArray(folderExportConfigurations.folderId, [
+                                    ...subtreeIds(folders, folder.id),
+                                ]),
+                            )
+                            .limit(1);
+                        if (configured.length > 0) {
+                            throw new AppError(
+                                ErrorCode.INVALID_INPUT,
+                                "Remove filesystem exports before moving this folder outside Private",
+                                400,
+                            );
+                        }
+                        await tx
+                            .update(recordingTasks)
+                            .set({
+                                folderId: null,
+                                version: sql`${recordingTasks.version} + 1`,
+                                updatedAt: new Date(),
+                            })
+                            .where(
+                                and(
+                                    eq(recordingTasks.userId, target.ownerId),
+                                    eq(recordingTasks.source, "personal"),
+                                    inArray(recordingTasks.folderId, [
+                                        ...subtreeIds(folders, folder.id),
+                                    ]),
+                                ),
+                            );
+                    }
+
+                    const siblings = folders
+                        .filter(
+                            (item) =>
+                                item.parentId === parent.id &&
+                                item.id !== folder.id,
+                        )
+                        .sort(
+                            (left, right) =>
+                                left.sortOrder - right.sortOrder ||
+                                decryptText(left.name).localeCompare(
+                                    decryptText(right.name),
+                                ),
+                        );
+                    let insertionIndex = siblings.length;
+                    if (input.beforeId != null) {
+                        insertionIndex = siblings.findIndex(
+                            (item) => item.id === input.beforeId,
+                        );
+                        if (insertionIndex < 0) {
+                            throw new AppError(
+                                ErrorCode.INVALID_INPUT,
+                                "The requested folder position is invalid",
+                                400,
+                            );
+                        }
+                    }
+                    siblings.splice(insertionIndex, 0, {
                         ...folder,
                         parentId: parent.id,
-                        sortOrder: movedIndex * FOLDER_ORDER_STEP,
-                        version: folder.version + 1,
-                    },
-                    target.scope,
-                ),
-            };
-        },
-        { isolationLevel: "serializable" },
-    );
+                    });
+
+                    for (const [index, sibling] of siblings.entries()) {
+                        await tx
+                            .update(recordingFolders)
+                            .set({
+                                parentId: parent.id,
+                                sortOrder: index * FOLDER_ORDER_STEP,
+                                ...(sibling.id === folder.id
+                                    ? {
+                                          updatedAt: new Date(),
+                                          version: folder.version + 1,
+                                      }
+                                    : {}),
+                            })
+                            .where(
+                                and(
+                                    eq(recordingFolders.id, sibling.id),
+                                    eq(recordingFolders.userId, target.ownerId),
+                                ),
+                            );
+                    }
+
+                    const movedIndex = siblings.findIndex(
+                        (sibling) => sibling.id === folder.id,
+                    );
+                    if (movedIndex < 0) {
+                        throw new AppError(
+                            ErrorCode.INTERNAL_ERROR,
+                            "Folder position could not be saved",
+                            500,
+                        );
+                    }
+                    return {
+                        scope: target.scope,
+                        folder: serializeFolder(
+                            {
+                                ...folder,
+                                parentId: parent.id,
+                                sortOrder: movedIndex * FOLDER_ORDER_STEP,
+                                version: folder.version + 1,
+                            },
+                            target.scope,
+                        ),
+                    };
+                },
+                { isolationLevel: "serializable" },
+            ),
+        { retrySerialization: true },
+    ).catch((error: unknown) => {
+        if (isSerializationFailure(error))
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "Folder changes are busy. Try again.",
+                409,
+                { retryable: true },
+            );
+        throw error;
+    });
     if (moved.scope === "org") {
         await orgTreeChanged();
     } else {

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { db } from "@/db";
 import { apiHandler } from "@/lib/errors";
+import { folderHasSubfolders } from "@/lib/folders/person-shared-leaf";
 import { inviteToFolder, listFolderShares } from "@/lib/sharing/folder-shares";
 import { requirePersonShareSession } from "@/lib/sharing/person-share-routes";
 import { invalid, readTaskBody } from "@/lib/tasks/route-helpers";
@@ -11,6 +13,7 @@ export const GET = apiHandler<Context>(async (request, context) => {
     const { id } = await (context as Context).params;
     return NextResponse.json({
         shares: await listFolderShares(session.user.id, id),
+        hasSubfolders: await folderHasSubfolders(db, session.user.id, id),
     });
 });
 export const POST = apiHandler<Context>(async (request, context) => {

@@ -35,6 +35,12 @@ const child: RecordingFolder = {
     name: "Nested",
 };
 const other: RecordingFolder = { ...folder, id: "other", name: "Archive" };
+const shared: RecordingFolder = {
+    ...folder,
+    id: "shared",
+    name: "Acme shared",
+    sharedWithPeople: true,
+};
 const received: RecordingFolder = {
     ...folder,
     id: "received",
@@ -74,7 +80,7 @@ function dialog(
     render(
         <FolderActionDialog
             folder={target}
-            folders={[root, folder, child, other, received]}
+            folders={[root, folder, child, other, received, shared]}
             action={action}
             open
             onOpenChange={close}
@@ -152,6 +158,10 @@ describe("dedicated folder dialogs", () => {
         }
         await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
         await waitFor(() => expect(document.activeElement).toBe(launcher));
+    });
+    it("refuses creating children of an outgoing shared folder", () => {
+        dialog("create", shared);
+        expect(screen.queryByRole("dialog")).toBeNull();
     });
     it("creates a trimmed child and closes after saving", async () => {
         const { create, close } = dialog("create");

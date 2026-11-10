@@ -1,14 +1,15 @@
 "use client";
 
 import { useExtracted } from "next-intl";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { FolderCombobox } from "@/components/recordings/folder-combobox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useFolderLabel } from "@/hooks/use-folder-label";
-import { getApiErrorMessage } from "@/lib/api-errors";
+import { useFolderRefusal } from "@/hooks/use-folder-refusal";
+import { parseApiError } from "@/lib/api-errors";
 import type { RecordingFolder } from "@/types/folder";
 
 export interface NewFolderParent {
@@ -20,7 +21,7 @@ export interface NewFolderParent {
 export type CreatedFolder = RecordingFolder;
 
 export function NewFolderForm({
-    parents,
+    parents: availableParents,
     idPrefix,
     onCancel,
     onCreated,
@@ -35,6 +36,15 @@ export function NewFolderForm({
     onSavingChange?: (saving: boolean) => void;
 }) {
     const i18n = useExtracted();
+    const folderRefusal = useFolderRefusal();
+    const parents = useMemo(
+        () =>
+            availableParents.filter(
+                ({ folder }) =>
+                    !folder?.receivedFolder && !folder?.sharedWithPeople,
+            ),
+        [availableParents],
+    );
     const folderLabel = useFolderLabel();
     const [name, setName] = useState(initialName);
     const [parentId, setParentId] = useState(parents[0]?.id ?? "");
@@ -50,7 +60,12 @@ export function NewFolderForm({
 
     const createFolder = async () => {
         const trimmedName = name.trim();
-        if (creating || !trimmedName || !parentId) return;
+        if (
+            creating ||
+            !trimmedName ||
+            !parents.some((parent) => parent.id === parentId)
+        )
+            return;
         setCreating(true);
         onSavingChange?.(true);
         try {
@@ -60,11 +75,11 @@ export function NewFolderForm({
                 body: JSON.stringify({ parentId, name: trimmedName }),
             });
             if (!response.ok) {
+                const error = await parseApiError(response);
                 toast.error(
-                    await getApiErrorMessage(
-                        response,
-                        i18n("The folder could not be created."),
-                    ),
+                    folderRefusal(error) ??
+                        (error.error ||
+                            i18n("The folder could not be created.")),
                 );
                 return;
             }

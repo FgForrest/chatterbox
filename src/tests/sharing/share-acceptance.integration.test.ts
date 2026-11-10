@@ -121,7 +121,6 @@ describe.skipIf(!url)(
                 {
                     id: "nested",
                     userId: "owner",
-                    parentId: "source",
                     name: encryptText("Private child"),
                     nameHash: "nested",
                 },
@@ -190,6 +189,10 @@ describe.skipIf(!url)(
                 .update(users)
                 .set({ suspendedAt: new Date() })
                 .where(eq(users.id, "inactive"));
+            await database.db
+                .update(recordingFolders)
+                .set({ parentId: "source" })
+                .where(eq(recordingFolders.id, "nested"));
             await folderInvite("owner", "nested", "other", true);
             const audience = await listItemFolderAudience("owner", "audio");
             expect(audience).toEqual(
