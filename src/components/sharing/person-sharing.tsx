@@ -251,6 +251,14 @@ export function PersonShareDialog({
             await load();
             refreshSharing();
         } catch (error) {
+            if (
+                error instanceof Error &&
+                "code" in error &&
+                error.code === "FOLDER_HAS_SUBFOLDERS"
+            ) {
+                setHasSubfolders(true);
+                return;
+            }
             setError(
                 error instanceof Error
                     ? error.message
@@ -269,7 +277,10 @@ export function PersonShareDialog({
         });
         if (!response.ok) {
             const error = await parseApiError(response);
-            if (error.code === "FOLDER_HAS_SUBFOLDERS") setHasSubfolders(true);
+            if (error.code === "FOLDER_HAS_SUBFOLDERS")
+                throw Object.assign(new Error(error.error), {
+                    code: error.code,
+                });
             const refusal = folderRefusal(error);
             if (refusal) toast.error(refusal);
             throw new Error(

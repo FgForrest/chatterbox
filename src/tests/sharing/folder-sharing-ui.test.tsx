@@ -385,11 +385,16 @@ describe("folder person sharing UI", () => {
             );
             fireEvent.change(search, { target: { value: "Jitka" } });
             fireEvent.click(await view.findByRole("button", { name: "Add" }));
-            await waitFor(() =>
-                expect(toast.error).toHaveBeenCalledWith(
-                    "Move this folder's subfolders elsewhere first. A shared folder has no subfolders.",
-                ),
-            );
+            await waitFor(() => {
+                expect(
+                    screen.getAllByText(
+                        "Move this folder's subfolders elsewhere first. A shared folder has no subfolders.",
+                    ),
+                ).toHaveLength(1);
+                expect(search).toHaveProperty("disabled", true);
+            });
+            expect(toast.error).not.toHaveBeenCalled();
+            expect(screen.getAllByRole("alert")).toHaveLength(1);
             expect(
                 screen
                     .getAllByRole("alert")

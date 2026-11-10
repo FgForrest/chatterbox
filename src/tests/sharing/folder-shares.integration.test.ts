@@ -1118,11 +1118,6 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
             folderId: "child",
             name: "Acme renamed",
         });
-        await moveFolder({
-            userId: "owner",
-            folderId: "child",
-            parentId: "source",
-        });
         await expect(
             createFolder({
                 userId: "owner",
@@ -1143,6 +1138,74 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
             )?.insideSharedFolder,
         ).toBeUndefined();
         expect(await visibleIds()).toEqual(["audio", "mail"]);
+    });
+    it("allows reordering existing children of a shared folder", async () => {
+        await accept();
+        await database.db
+            .update(recordingFolders)
+            .set({ parentId: "source", sortOrder: 1000 })
+            .where(
+                and(
+                    eq(recordingFolders.userId, "owner"),
+                    eq(recordingFolders.id, "child"),
+                ),
+            );
+        await database.db.insert(recordingFolders).values({
+            id: "legacy-sibling",
+            userId: "owner",
+            parentId: "source",
+            name: encryptText("Acme sibling"),
+            nameHash: "legacy-sibling",
+            sortOrder: 0,
+        });
+        const children = () =>
+            database.db
+                .select({
+                    id: recordingFolders.id,
+                    sortOrder: recordingFolders.sortOrder,
+                })
+                .from(recordingFolders)
+                .where(
+                    and(
+                        eq(recordingFolders.userId, "owner"),
+                        eq(recordingFolders.parentId, "source"),
+                    ),
+                )
+                .orderBy(recordingFolders.sortOrder);
+        expect(await children()).toEqual([
+            { id: "legacy-sibling", sortOrder: 0 },
+            { id: "child", sortOrder: 1000 },
+        ]);
+        expect(
+            await moveFolder({
+                userId: "owner",
+                folderId: "child",
+                parentId: "source",
+                beforeId: "legacy-sibling",
+            }),
+        ).toMatchObject({ parentId: "source", sortOrder: 0, version: 1 });
+        const reordered = [
+            { id: "child", sortOrder: 0 },
+            { id: "legacy-sibling", sortOrder: 1000 },
+        ];
+        expect(await children()).toEqual(reordered);
+        await expect(
+            moveFolder({
+                userId: "owner",
+                folderId: "elsewhere",
+                parentId: "source",
+                beforeId: "legacy-sibling",
+            }),
+        ).rejects.toMatchObject({
+            code: ErrorCode.SHARED_FOLDER_HAS_NO_SUBFOLDERS,
+            statusCode: 409,
+        });
+        expect(await children()).toEqual(reordered);
+        expect(
+            (await listFolderOrganization("owner")).folders.find(
+                (folder) => folder.id === "elsewhere",
+            ),
+        ).toMatchObject({ parentId: "owner-root", version: 0 });
     });
     it.each([
         "create",
