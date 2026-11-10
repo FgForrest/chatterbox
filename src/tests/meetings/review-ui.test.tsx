@@ -31,14 +31,17 @@ vi.mock("sonner", () => ({ toast: { error: mocks.error } }));
 vi.mock("@/components/tasks/task-row", () => ({
     TaskRow: ({
         actions,
+        corner,
         extraNotes,
     }: {
         actions: ReactNode;
+        corner?: ReactNode;
         extraNotes?: ReactNode;
     }) => (
         <li>
             {extraNotes}
             {actions}
+            {corner}
         </li>
     ),
 }));

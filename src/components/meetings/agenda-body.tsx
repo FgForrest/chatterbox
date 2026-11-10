@@ -2,7 +2,6 @@
 
 import {
     History,
-    ListX,
     MessageSquareText,
     PencilLine,
     Play,
@@ -23,6 +22,7 @@ import {
     useRef,
     useState,
 } from "react";
+import { HelpLink } from "@/components/help/help-button";
 import { ItemHeader } from "@/components/items/item-header";
 import { ProvenanceLine } from "@/components/pipeline/provenance-line";
 import {
@@ -50,7 +50,6 @@ import type { Recording } from "@/types/recording";
 import { AgendaAttribution } from "./agenda-attribution";
 import { AgendaCalendarExport, AgendaExport } from "./agenda-export";
 import { AgendaFolderTags } from "./agenda-folder-tags";
-import { AgendaShortcuts } from "./agenda-shortcuts";
 import { AgendaTaskGroups } from "./agenda-task-groups";
 import { AgendaTaskSource } from "./agenda-task-source";
 import { AttachRecordingDialog } from "./attach-recording-dialog";
@@ -377,6 +376,12 @@ export function AgendaBody({
                 frame="inline"
                 tone="quiet"
                 title={i18n("1 · Task review")}
+                helpLink={
+                    <HelpLink
+                        topic="meetings.tasks"
+                        label={i18n("task review")}
+                    />
+                }
                 collapsed={tasksCollapsed}
                 onCollapse={toggleTasks}
                 collapseLabel={i18n("Collapse task review")}
@@ -550,6 +555,12 @@ export function AgendaBody({
                 frame="inline"
                 tone="quiet"
                 title={i18n("2 · Discussion points")}
+                helpLink={
+                    <HelpLink
+                        topic="meetings.points"
+                        label={i18n("discussion points and keyboard shortcuts")}
+                    />
+                }
                 collapsed={pointsCollapsed}
                 onCollapse={togglePoints}
                 collapseLabel={i18n("Collapse discussion points")}
@@ -565,34 +576,32 @@ export function AgendaBody({
                     ) : undefined
                 }
                 headerAction={
-                    <div className="flex items-center gap-1">
-                        {canEdit && !live && (
-                            <ActionTooltip label={i18n("Suggest points")}>
-                                <Button
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    aria-label={i18n("Suggest points")}
-                                    disabled={
-                                        busy ||
-                                        suggesting ||
-                                        !detail.aiSuggestions.available
-                                    }
-                                    aria-describedby={
-                                        suggestionsReason
-                                            ? suggestionsReasonId
-                                            : undefined
-                                    }
-                                    onClick={suggest}
-                                >
-                                    <WandSparkles
-                                        className="size-4"
-                                        aria-hidden="true"
-                                    />
-                                </Button>
-                            </ActionTooltip>
-                        )}
-                        {canEdit && <AgendaShortcuts />}
-                    </div>
+                    canEdit &&
+                    !live && (
+                        <ActionTooltip label={i18n("Suggest points")}>
+                            <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label={i18n("Suggest points")}
+                                disabled={
+                                    busy ||
+                                    suggesting ||
+                                    !detail.aiSuggestions.available
+                                }
+                                aria-describedby={
+                                    suggestionsReason
+                                        ? suggestionsReasonId
+                                        : undefined
+                                }
+                                onClick={suggest}
+                            >
+                                <WandSparkles
+                                    className="size-4"
+                                    aria-hidden="true"
+                                />
+                            </Button>
+                        </ActionTooltip>
+                    )
                 }
                 footer={{
                     actions: null,
@@ -1335,24 +1344,26 @@ function AgendaTaskRow({
                             </InlineEditorTrigger>
                         </ActionTooltip>
                     )}
-                    {canEdit && (
-                        <ActionTooltip label={i18n("Remove from agenda")}>
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-xs"
-                                disabled={pending}
-                                aria-label={i18n("Remove {task} from agenda", {
-                                    task: task.text,
-                                })}
-                                className="text-muted-foreground hover:text-foreground"
-                                onClick={onRemove}
-                            >
-                                <ListX className="size-3" aria-hidden="true" />
-                            </Button>
-                        </ActionTooltip>
-                    )}
                 </>
+            }
+            corner={
+                canEdit && (
+                    <ActionTooltip label={i18n("Remove from agenda")}>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            disabled={pending}
+                            aria-label={i18n("Remove {task} from agenda", {
+                                task: task.text,
+                            })}
+                            className="text-muted-foreground hover:text-foreground"
+                            onClick={onRemove}
+                        >
+                            <X className="size-3.5" aria-hidden="true" />
+                        </Button>
+                    </ActionTooltip>
+                )
             }
         />
     );
@@ -1424,7 +1435,10 @@ function AgendaSection({
     return (
         <section className={cn("space-y-3", divider && "border-t pt-4")}>
             <div className="flex items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold">{props.title}</h3>
+                <h3 className="flex items-center gap-2 text-sm font-semibold">
+                    {props.title}
+                    {props.helpLink}
+                </h3>
                 {props.headerAction}
             </div>
             {props.children}

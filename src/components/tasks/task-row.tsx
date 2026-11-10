@@ -71,6 +71,7 @@ export function TaskRow({
     actions,
     badges,
     leading,
+    corner,
     rowProps,
     extraNotes,
     recording,
@@ -95,6 +96,8 @@ export function TaskRow({
     actions?: ReactNode;
     badges?: ReactNode;
     leading?: ReactNode;
+    /** The row's primary action, at its top right corner beside the text. */
+    corner?: ReactNode;
     rowProps?: HTMLAttributes<HTMLLIElement>;
     extraNotes?: ReactNode;
     /** The recording it came from, on the Tasks page. */
@@ -249,26 +252,28 @@ export function TaskRow({
                 statusMark
             )}
             <div className="min-w-0 flex-1 space-y-1.5">
-                {editable ? (
-                    <TaskTextInput
-                        text={task.text}
-                        onSave={(text) => onChange({ text }, { text })}
-                        className={cn(
-                            "-mx-1 w-[calc(100%+0.5rem)]",
-                            done && "text-muted-foreground line-through",
-                        )}
-                    />
-                ) : (
-                    <p
-                        className={cn(
-                            "whitespace-pre-wrap",
-                            (done || dropped) &&
-                                "text-muted-foreground line-through",
-                        )}
-                    >
-                        {task.text}
-                    </p>
-                )}
+                <div className={cn(corner && "pr-7")}>
+                    {editable ? (
+                        <TaskTextInput
+                            text={task.text}
+                            onSave={(text) => onChange({ text }, { text })}
+                            className={cn(
+                                "-mx-1 w-[calc(100%+0.5rem)]",
+                                done && "text-muted-foreground line-through",
+                            )}
+                        />
+                    ) : (
+                        <p
+                            className={cn(
+                                "whitespace-pre-wrap",
+                                (done || dropped) &&
+                                    "text-muted-foreground line-through",
+                            )}
+                        >
+                            {task.text}
+                        </p>
+                    )}
+                </div>
                 {task.receivedOwnerName && !editable && (
                     <p className="text-xs text-muted-foreground">
                         {i18n("Only {owner} can edit this task.", {
@@ -608,6 +613,7 @@ export function TaskRow({
                     </TooltipProvider>
                 </div>
             </div>
+            {corner && <div className="absolute top-2.5 right-3">{corner}</div>}
         </li>
     );
 }

@@ -5,6 +5,7 @@ import {
     type ComponentProps,
     createContext,
     type RefObject,
+    useCallback,
     useContext,
     useLayoutEffect,
     useRef,
@@ -25,11 +26,27 @@ export function Popover(props: ComponentProps<typeof DialogPrimitive.Root>) {
     );
 }
 
-export function PopoverTrigger(
-    props: ComponentProps<typeof DialogPrimitive.Trigger>,
-) {
+export function PopoverTrigger({
+    ref,
+    ...props
+}: ComponentProps<typeof DialogPrimitive.Trigger>) {
     const anchor = useContext(AnchorContext);
-    return <DialogPrimitive.Trigger ref={anchor} {...props} />;
+    // A wrapping tooltip passes its own ref; both must see the button, or the content opens at the corner.
+    const setRef = useCallback(
+        (node: HTMLButtonElement | null) => {
+            if (anchor) anchor.current = node;
+            const cleanup = typeof ref === "function" ? ref(node) : undefined;
+            if (ref && typeof ref !== "function") ref.current = node;
+            return () => {
+                if (anchor) anchor.current = null;
+                if (typeof cleanup === "function") cleanup();
+                else if (typeof ref === "function") ref(null);
+                else if (ref) ref.current = null;
+            };
+        },
+        [anchor, ref],
+    );
+    return <DialogPrimitive.Trigger ref={setRef} {...props} />;
 }
 
 export function PopoverContent({

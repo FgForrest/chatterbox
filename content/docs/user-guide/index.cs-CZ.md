@@ -18,15 +18,16 @@ Každý obrázek ukazuje stejný smyšlený tým: **Alex Morgan**, vedoucí prod
 3. [Nahrávky](recordings.md): seznam nahrávek, přehrávač, nahrávání, složky, mazání a ceny za AI.
 4. [Přepisy](transcripts.md): mluvčí, témata, přehrávání věty, opravená slova, kopírování a stahování.
 5. [Shrnutí a úkoly](summaries-and-tasks.md): shrnutí, profily, Vícenásobné shrnování a úkoly napříč nahrávkami a poštou.
-6. [Almanach](almanac.md): osoby a věci, které Klepna zná, jejich přezdívky a fakta.
-7. [Učení](learn.md): nechte Klepna navrhnout jména mluvčích, opravy a fakta a zkontrolujte je.
-8. [Organizace](organization.md): sdílení nahrávek s kolegy.
-9. [Sdílení s lidmi](sharing-with-people.md): pozvání jednotlivých kolegů k soukromé nahrávce, e-mailu nebo složce.
-10. [Pošta](mail.md): posílání pošty do Klepny a její zařazení ke zpracování.
-11. [Exporty, zálohy a uchovávání](exports-backups-retention.md): export složek na disk nebo do Google Drive, zálohy a automatické mazání starých dat.
-12. [Nastavení](settings.md): profily, poskytovatelé AI a ceny, jazyk a další výchozí hodnoty účtu.
-13. [Klepna v Claude](claude.md): dotazy na nahrávky, poštu, lidi a úkoly z Claude nebo Claude Code.
-14. [Pro administrátory](administrators.md): co je třeba zapnout u každé funkce na instanci s vlastním hostingem.
+6. [Schůzky a agendy](meetings.md): příprava agendy, kontrola úkolů, body k projednání a průběh schůzky.
+7. [Almanach](almanac.md): osoby a věci, které Klepna zná, jejich přezdívky a fakta.
+8. [Učení](learn.md): nechte Klepna navrhnout jména mluvčích, opravy a fakta a zkontrolujte je.
+9. [Organizace](organization.md): sdílení nahrávek s kolegy.
+10. [Sdílení s lidmi](sharing-with-people.md): pozvání jednotlivých kolegů k soukromé nahrávce, e-mailu nebo složce.
+11. [Pošta](mail.md): posílání pošty do Klepny a její zařazení ke zpracování.
+12. [Exporty, zálohy a uchovávání](exports-backups-retention.md): export složek na disk nebo do Google Drive, zálohy a automatické mazání starých dat.
+13. [Nastavení](settings.md): profily, poskytovatelé AI a ceny, jazyk a další výchozí hodnoty účtu.
+14. [Klepna v Claude](claude.md): dotazy na nahrávky, poštu, lidi a úkoly z Claude nebo Claude Code.
+15. [Pro administrátory](administrators.md): co je třeba zapnout u každé funkce na instanci s vlastním hostingem.
 
 Nahrávání schůzek v prohlížeči má vlastní návod: [Nahrávání schůzek](../guides/meeting-recorder.mdx).
 
