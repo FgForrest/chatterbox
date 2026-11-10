@@ -11,10 +11,12 @@ allowBuilds:
   sharp: true
 
 overrides:
+  '@modelcontextprotocol/sdk>@hono/node-server': 2.1.6
   '@protobufjs/utf8': 1.1.1
   defu: 6.1.5
   drizzle-kit>@esbuild-kit/esm-loader: '-'
   js-yaml: 4.3.2
+  mailauth>joi: 18.3.1
   mailauth>nodemailer: 10.1.4
   mailauth>undici: 8.12.2
   mailparser>nodemailer: 10.1.4
