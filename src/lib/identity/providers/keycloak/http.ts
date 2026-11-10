@@ -3,6 +3,8 @@ import { IdentityProviderError } from "@/lib/identity/ports";
 const DEFAULT_TIMEOUT_MS = 10_000;
 const RETRY_STATUSES = new Set([429, 502, 503, 504]);
 const MAX_ATTEMPTS = 3;
+const ADMIN_API_401_HINT_INTERVAL_MS = 10 * 60 * 1000;
+let lastAdminApi401HintAt: number | null = null;
 
 /** The Admin REST API of one realm, called with a server-held token. */
 export interface KeycloakHttp {
@@ -152,6 +154,19 @@ export function createKeycloakHttp(options: KeycloakHttpOptions): KeycloakHttp {
             }
             if (response.ok) return response;
             await response.body?.cancel().catch(() => {});
+            if (response.status === 401) {
+                const now = Date.now();
+                if (
+                    lastAdminApi401HintAt === null ||
+                    now - lastAdminApi401HintAt >=
+                        ADMIN_API_401_HINT_INTERVAL_MS
+                ) {
+                    lastAdminApi401HintAt = now;
+                    console.warn(
+                        "[keycloak] Admin API returned 401: the token may lack the Admin API audience and kc-admin-api client scope required on Keycloak 26.8+. Assign kc-admin-api as a default client scope to the verifier client and the web client used for access management.",
+                    );
+                }
+            }
             lastError = errorForStatus(response.status);
             if (!RETRY_STATUSES.has(response.status)) throw lastError;
             if (attempt < MAX_ATTEMPTS) {
