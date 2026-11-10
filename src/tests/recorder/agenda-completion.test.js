@@ -51,7 +51,7 @@ function load(page, dependencies) {
 
 async function popup() {
     load("popup", {
-        createNextMeetingCard: () => ({ destroy: vi.fn() }),
+        createNextMeetingCard: () => ({ render: vi.fn(), destroy: vi.fn() }),
         createAgendaCard,
         agendaFolder,
         supportsAgendas,
@@ -63,7 +63,7 @@ async function popup() {
         microphonePermission: async () => "granted",
         originOf: (url) => new URL(url).origin,
         detectMeetingPlatform: () => null,
-        effectiveNoticeText: () => "Inform participants",
+        customNoticeText: () => "",
         effectivePlatformModes: () => ({}),
         getSettings: async () => settings,
         isPaired: async () => true,

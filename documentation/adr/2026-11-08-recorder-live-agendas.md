@@ -1,14 +1,14 @@
 ---
 title: Recorder agendas use scoped Meet join links, PostgreSQL live invalidations and encrypted CRDT text with materialized archive fields
 date: 2026-11-08
-updated: 2026-11-08 20:50
-status: accepted
+updated: 2026-11-10 18:05
+status: superseded
 kind: feature
 issues: []
 prs: [356]
 areas: [src/lib/meetings, src/db/queries/agenda-events.ts, src/db/schema.ts, src/lib/recording-sessions, src/app/api/v1/recorder, src/components/meetings, extensions/recorder]
 supersedes: [2026-10-27-meeting-agendas, 2026-10-22-meeting-recorder-banner]
-superseded-by: []
+superseded-by: [2026-11-10-recorder-meeting-companion]
 relates: []
 ---
 
@@ -18,6 +18,13 @@ Agendas gain live invalidations and character-level text merging in the web edit
 The recorder can request the caller's next primary-calendar Meet event and announce the agenda of an
 active recording. PR #356 includes the server, web editor, recorder extension 0.9.2 and additive
 migration `0157_recorder_live_agendas.sql`.
+
+**Superseded in part:** [Recorder meeting companion](2026-11-10-recorder-meeting-companion.md)
+keeps preparation, point title editing and task dropping in the web app. The recorder panel becomes
+one live checklist with notes behind a link and one agenda chooser. Join binds the new tab to its
+agenda before automatic matching and opens that tab's panel from the extension page; popup Join
+keeps the new tab inactive until its panel is open. Calendar notification Join binds the tab only.
+The collaboration, attachment, permissions and remaining rules still hold.
 
 ## Why
 

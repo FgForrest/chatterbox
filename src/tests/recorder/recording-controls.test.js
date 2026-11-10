@@ -55,6 +55,7 @@ beforeEach(() => {
     vi.stubGlobal("chrome", {
         i18n: { getMessage: (key) => key, getUILanguage: () => "en" },
         storage: {
+            session: { get: async () => ({}) },
             local: {
                 get: async () => local,
                 set: async (patch) => Object.assign(local, patch),
@@ -223,6 +224,35 @@ describe.each([
         expect(el("completion-agenda-notice").textContent).toBe(
             "agendaUnavailable",
         );
+    });
+    it.each([
+        [null, { noticeText: "Default", noticeTextIsDefault: true }, ""],
+        [
+            null,
+            { noticeText: "Operator notice", noticeTextIsDefault: false },
+            "Operator notice",
+        ],
+        [
+            "User notice",
+            { noticeText: "Default", noticeTextIsDefault: true },
+            "User notice",
+        ],
+    ])("shows only customized participant notices (%s)", async (noticeText, serverDefaults, expected) => {
+        Object.assign(local, { noticeText, serverDefaults });
+        await mount();
+        expect(el("notice-text").textContent).toBe(expected);
+        expect(el("notice-text").hidden).toBe(!expected);
+    });
+    it("hides direct tab capture away from a meeting only in the panel", async () => {
+        chrome.tabs.get.mockResolvedValue({
+            id: 7,
+            url: "https://example.com",
+        });
+        await mount();
+        expect(el("start").hidden).toBe(variant === "panel");
+        expect(el("start-desktop").hidden).toBe(false);
+        if (variant === "panel")
+            expect(document.querySelector("header").hidden).toBe(true);
     });
     it("closes the folder chooser of a view the state hides", async () => {
         await mount();

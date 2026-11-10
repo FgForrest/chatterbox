@@ -1,6 +1,6 @@
 # Zásady ochrany soukromí rozšíření Klepna – nahrávání schůzek
 
-Aktualizováno: 8. listopadu 2026
+Aktualizováno: 10. listopadu 2026
 
 Tyto zásady popisují **rozšíření prohlížeče Klepna – nahrávání schůzek**. Nenahrazují zásady ochrany soukromí serveru Klepny ani jiných služeb, které si zvolíte.
 
@@ -38,7 +38,10 @@ viditelných schůzek, složky, body, poznámky, jména pozvaných a autorů, te
 relace rozšíření. Agendy s časem na
 nejbližších 24 hodin uchovává v dočasném úložišti relace rozšíření pro připomínky.
 Agendu zobrazuje v bočním panelu Chromu nebo v malém okně rozšíření. Boční panel
-povolí jen pro danou kartu po kliknutí na otevření agendy. Připomínky
+povolí pro jednotlivou kartu po kliknutí na otevření agendy. Připojení přes Meet z vyskakovacího
+okna nebo panelu otevře agendu na nové kartě se schůzkou; ostatní karty si ponechají vlastní panely.
+Připojení z oznámení Kalendáře otevře kartu se schůzkou a přiřadí jí agendu, kterou otevřete
+kliknutím na ikonu na liště. Připomínky
 a nabídku v liště lze vypnout samostatně. Serverům bez podpory agend neposílá
 žádné požadavky na agendy a nahrávání funguje jako dosud.
 
@@ -47,7 +50,7 @@ karty a aktuální čas na propojený server. U ostatních platforem páruje pod
 Odkazy pro připojení ke schůzce přicházejí pouze prostřednictvím níže popsané funkce Kalendáře. Rozšíření nesbírá obsah
 stránek ani další zvuk. Izolovaná lišta zobrazuje údaje agendy ze serveru a posílá
 jen ovládací zprávy procesu na pozadí; klíč se stránce schůzky nezpřístupňuje.
-Zaškrtnutí bodů, poznámky, nové body a označení úkolů Hotovo nebo Zahodit ukládá
+Zaškrtnutí bodů, poznámky a zaškrtnutí či odškrtnutí dokončení úkolů ukládá
 na váš server. Změna úkolu mění skutečný úkol podle vašich stávajících oprávnění.
 ID vybrané agendy zůstává v metadatech pro obnovení odesílání do
 dokončení nebo zahození nahrávky; ID se posílá při dokončení. Při odpojení nebo novém propojení se dočasné agendy a volby smažou.
@@ -56,9 +59,9 @@ můžete vypnout v Možnostech.
 
 ## Schůzky z Kalendáře a živá spolupráce
 
-Na podporovaných serverech rozšíření získá název, čas začátku a konce, ověřený odkaz na Meet a e-mail připojeného účtu Google pro vaši nejbližší vlastní schůzku v hlavním kalendáři (pořadatel nebo pozvaný, který neodmítl). Odkaz vybere tento účet pomocí `authuser`. Údaje zůstávají v dočasném úložišti relace rozšíření a při změně propojení či souhlasu se smažou. Na pozadí se Kalendář kontroluje nejvýš každých pět minut; při otevření okna či panelu pouze po uplynutí jedné minuty od posledního načtení. Připojení otevře Meet a nikdy nespustí nahrávání. Volitelné systémové oznámení může zobrazit název schůzky. Jeho předstih a vypnutí najdete v Možnostech. Pokud už máte místnost otevřenou, oznámení nepřijde.
+Na podporovaných serverech rozšíření získá název, čas začátku a konce, ověřený odkaz na Meet a e-mail připojeného účtu Google pro vaši nejbližší vlastní schůzku v hlavním kalendáři (pořadatel nebo pozvaný, který neodmítl). Odkaz vybere tento účet pomocí `authuser`. Údaje zůstávají v dočasném úložišti relace rozšíření a při změně propojení či souhlasu se smažou. Na pozadí se Kalendář kontroluje nejvýš každých pět minut; při otevření okna či panelu pouze po uplynutí jedné minuty od posledního načtení. Připojení otevře Meet a nikdy nespustí nahrávání. Nová karta je v dočasném úložišti relace přiřazená k ID agendy, konci schůzky a ověřenému kódu místnosti s identitou aktuálního propojení. Přiřazení se odstraní při opuštění místnosti, zavření karty, konci události nebo změně propojení či souhlasu. Volitelné systémové oznámení může zobrazit název schůzky. Jeho předstih a vypnutí najdete v Možnostech. Pokud už máte místnost otevřenou, oznámení nepřijde.
 
-Po dobu otevření panelu agendy přicházejí změny přes ověřený kanál událostí. Společné textové úpravy i jména kolegů, kteří schůzku nahrávají, se vyměňují pouze s propojeným serverem podle stávajících oprávnění. Textové dokumenty jsou jen v paměti panelu, nikoli v trvalém úložišti rozšíření. Výběr agendy při spuštění nebo její úprava během nahrávání může oznámit agendu ostatním oprávněným čtenářům a připojit ji k nahrávce; můžete ji odpojit. Místně se pamatují ID nedávných složek a připomenutých výskytů schůzek, nikoli názvy z Kalendáře nebo text agendy. Rozšíření nenačítá vzdálený kód.
+Po dobu otevření panelu agendy přicházejí změny přes ověřený kanál událostí. Společné textové úpravy i jména kolegů, kteří schůzku nahrávají, se vyměňují pouze s propojeným serverem podle stávajících oprávnění. Textové dokumenty jsou jen v paměti panelu, nikoli v trvalém úložišti rozšíření. Výběr agendy při spuštění nebo její úprava během nahrávání může oznámit agendu ostatním oprávněným čtenářům a připojit ji k nahrávce; Změnit agendu nabízí i volbu Bez agendy. Místně se pamatují ID nedávných složek a připomenutých výskytů schůzek, nikoli názvy z Kalendáře nebo text agendy. Rozšíření nenačítá vzdálený kód.
 
 ## Kam se data odesílají
 

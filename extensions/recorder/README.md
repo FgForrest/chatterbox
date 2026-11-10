@@ -21,7 +21,7 @@ keyboard shortcut if assigned. On agenda tabs the icon opens the agenda and reco
 from Chrome's extensions menu. The banner itself does not start direct tab
 capture: **Share through Chrome’s dialog** keeps the existing picker path.
 
-1. In the popup, read the short participant reminder and click
+1. In the popup, click
    **Consent confirmed · Record this tab**. This records the current tab directly,
    whether or not a meeting platform is detected.
 2. To choose a different source, click **Record another screen or app**. Chrome's
@@ -129,17 +129,30 @@ meeting audio keeps recording with a persistent notification and popup warning
 explaining the failure. After deliberately recording without a microphone, you
 can dismiss permission reminders in the popup and re-enable them in Options.
 
-## Agenda panels and Calendar meetings (0.9.0)
+## Agenda panels and Calendar meetings (0.9.7)
 
 On a tab with matching agendas, the toolbar icon opens the agenda side panel; a second click closes it. Recording starts from the panel's consent button. The keyboard shortcut keeps starting/stopping recording. Popup and panel share one recording widget. A panel opened without a toolbar invocation falls back to Chrome's sharing dialog if direct tab capture is refused. The separate agenda window remains the fallback when Chrome refuses a side panel.
 
-The panel keeps a selected agenda reachable while recording, including held agendas. At 560 px it places discussion points beside task review; narrower panels stack them. Preparation and Live meeting remain available throughout capture. The first edit during recording selects an editable agenda for completion, preferring your own agenda over a colleague's. An already selected own agenda does not switch because you edit a colleague's agenda. The teal attachment line offers Unlink; another selected agenda offers Switch to this agenda. Colleagues see who is recording and can reveal Record too controls.
+The panel is a live meeting checklist in one column at every width. Prepare points, edit titles
+and drop tasks in the web app. Away from a meeting, the agenda is read-only with the target folder,
+Join in Meet when the next Calendar meeting belongs to this agenda, and Record another screen or app.
+On the meeting tab it offers direct recording and discussed/task checkboxes. Note reveals a growing,
+soft-wrapped field; Enter finishes editing and pasted newlines become spaces. Non-empty notes show
+text when unfocused; click their text to edit. HTTP(S) and www. links in points, tasks and notes open
+in a new tab, with compact labels and full URLs in tooltips. Stored content stays plain text.
+The recording strip shows elapsed time, You/Others meters,
+folder and Stop and save. After stopping, upload progress and the discussed summary are read-only.
 
-**Another agenda…** in the panel or fallback window adds relevant agendas without a recording planned within the previous or next 24 hours to the current time matches. It offers up to ten choices ordered by distance to their planned interval, with your own agendas first on ties. Each title shows its planned time. This works before and during recording with existing agenda-capable servers. If either lookup fails, choices from the other remain available. Automatic matching still offers only running agendas or ones starting within fifteen minutes.
+Change agenda in the header shows nearby choices, the selected agenda, No agenda and Back. It also
+changes a running recording's selection. Up to ten unrecorded agendas planned within the previous
+or next 24 hours are ordered by distance to their interval, with own agendas first on ties. A failed
+load shows Retry and keeps recording controls available. The first successful edit during capture
+still links an editable agenda without replacing an already selected own agenda. Colleague recording
+presence and Record as well remain available.
 
 New server capabilities independently enable live event updates, shared Yjs text editing, recording presence and the next Calendar meeting. The open panel owns its authenticated stream and text documents; disconnected streams retry with backoff and fall back to 15-second polling. Text inputs fetch the server seed before editing and retain focus/carets across remote changes. Older servers keep polling and plain point-note PATCHes.
 
-A supporting server offers your next own primary-calendar Meet event in popup and panel, with Join in Meet and the connected Google account email. Joining never records. Options controls one notification per meeting and a 0/1/2/5/10-minute lead (default 0); the old agenda reminder preference is inherited. The room already being open suppresses the notification; the card is hidden on that room's tab. The badge says only now during the event when you are outside its room; REC takes priority. Background Calendar refresh is at most every five minutes, plus a page-open refresh only after 60 seconds.
+A supporting server offers your next own primary-calendar Meet event in popup and panel, with Join in Meet and the connected Google account email. Joining never records. Its new tab is bound to the supplied agenda, end and validated room code; redirects between `/<code>` and `/meet/<code>` preserve that identity. Joining from the popup or panel opens the agenda on the new meeting tab; other tabs keep their own panels. Joining from a Calendar notification opens the meeting tab; click the toolbar icon to open its agenda. The binding ends when the meeting ends, the tab closes or it leaves the room. Options controls one notification per meeting and a 0/1/2/5/10-minute lead (default 0); the old agenda reminder preference is inherited. The room already being open suppresses the notification; the card is hidden on that room's tab. The badge says only now during the event when you are outside its room; REC takes priority. Background Calendar refresh is at most every five minutes, plus a page-open refresh only after 60 seconds.
 
 The popup and panel use the application's actual FolderCombobox, bundled locally with static light/dark Tailwind CSS and recent folder IDs in extension local storage. The in-page pill keeps its existing picker.
 
@@ -155,7 +168,7 @@ Every new request requires its advertised `/api/v1/recorder/config` capability:
 | `agendaText: 1` | Existing versioned point-note PATCHes; no collaborative text requests. |
 | `sessionAgenda` | No agenda field at session creation and no session agenda PATCH. Explicit completion choices still work. |
 
-Matching sends only a Meet room code and time to the server, never page content or a full tab URL. Other platforms match by time. Multiple matches offer a choice. The top-level discussed count excludes subpoints. Task Done/Drop changes real tasks under existing permissions, and absorbed agendas stay read-only. Open in Chatterbox leads to the full agenda.
+Matching sends only a Meet room code and time to the server, never page content or a full tab URL. Other platforms match by time. Multiple matches offer a choice. The top-level discussed count excludes subpoints. Task checkboxes set done/open under existing canClose permissions; dropped tasks and absorbed agendas stay read-only. Servers that refuse reopening retain the saved task status and show the existing error.
 
 An explicit agenda choice survives upload recovery and is sent on completion. No agenda sends an explicit null; a server that ignores it may still attach automatically. Unseen matches leave the server's safe automatic rules in control. An agenda folder applies only to this recording; the default folder changes only after a user folder pick. If the agenda becomes unavailable, completion saves the recording without it and explains that result.
 

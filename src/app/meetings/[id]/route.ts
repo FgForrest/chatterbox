@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth-server";
 import { apiHandler } from "@/lib/errors";
 import {
@@ -15,10 +14,11 @@ export const GET = apiHandler<Context>(async (request, context) => {
     const access = await requireMeetingAccess(session.user.id, id);
     const { agenda } = access;
     const redirectTo = await meetingRecordingRedirect(session.user.id, access);
-    const url = new URL(redirectTo ?? "/dashboard", request.url);
-    if (!redirectTo)
-        url.searchParams.set("meeting", agenda.meetingItemId ?? agenda.id);
-    const response = NextResponse.redirect(url, 307);
-    response.headers.set("Cache-Control", "private, no-store");
-    return response;
+    const location =
+        redirectTo ??
+        `/dashboard?${new URLSearchParams({ meeting: agenda.meetingItemId ?? agenda.id })}`;
+    return new Response(null, {
+        status: 307,
+        headers: { Location: location, "Cache-Control": "private, no-store" },
+    });
 });

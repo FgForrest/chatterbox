@@ -133,7 +133,7 @@ controls.
 
 ## Record a meeting
 
-1. Click the extension icon, read the participant reminder and choose
+1. Click the extension icon and choose
    **Consent confirmed · Record this tab**. With microphone permission already
    allowed, this records audio playing in the current tab, including tabs
    without a detected meeting.
@@ -188,30 +188,41 @@ the server is updated.
   refuses the side panel, the agenda opens in a separate window. With the
   in-meeting prompt on, **Offer agendas in the meeting banner** adds **Show
   agenda** to the banner.
-- **Preparation and Live meeting.** The panel shows the task review and the
-  discussion points as in Chatterbox and stays available while you record.
-  During the meeting, tick points as **Discussed**, mark tasks **Done** or
-  **Drop** them, and add notes. These change the real agenda and tasks, and
-  colleagues' changes appear as they happen. **Open in Chatterbox** opens the
-  full agenda.
-- **Which agenda the recording carries.** The panel says **The recording will
-  carry this agenda**. **Unlink** detaches it and **Switch to this agenda**
-  moves the recording to another one. **No agenda** skips attaching one; a
-  server that ignores this choice may still attach an agenda automatically. Colleagues with the same agenda open see who is recording and
-  can choose **Record too…**.
-- **Another agenda…** lists agendas you can attach even when nothing matched.
-  From version 0.9.5 it also offers agendas without a recording planned within
-  24 hours before or after now, so a meeting whose start you missed can still
-  get its agenda. It shows up to ten, the ones whose planned start to end lies
-  closest to now first and your own agendas first on ties, each with its
-  planned time.
+- **Meeting companion (0.9.7).** Prepare points, edit titles and drop tasks in the web app.
+  The panel stays in one column at any width. Away from a meeting it shows the agenda read-only,
+  the target folder and **Record another screen or app**. When the next Calendar meeting belongs
+  to this agenda, it also offers **Join in Meet** with the connected account.
+- **During the meeting.** Check points as **Discussed**, including independent subpoints, and
+  mark tasks done with their checkboxes. Unchecking reopens a task when the server supports it;
+  a refused change is explained and the saved status stays. Dropped tasks remain visible.
+  The progress count includes only top-level points. **Note** opens a one-line field;
+  existing notes stay visible. Changes save to the real agenda and tasks under your existing
+  permissions. Colleagues' changes appear live on supporting servers, with polling as a fallback.
+- **Recording and saving.** The recording strip shows elapsed time, **You** and **Others** levels,
+  the folder and **Stop and save**. After stopping, the panel shows segment upload progress and
+  a read-only summary of the discussed points. Upload errors retain the existing retry controls.
+  Colleagues see who is recording and can choose **Record as well**.
+- **Change agenda.** The header opens nearby agenda choices, marks the selected one and offers
+  **No agenda** and **Back**. Choosing another agenda also changes the running recording's agenda.
+  **No agenda** skips attachment; older servers may still attach automatically. Choices include
+  up to ten unrecorded agendas planned within the previous or next 24 hours, ordered by distance
+  to their planned interval, with your own agendas first on ties.
+- **Load errors.** A failed agenda request shows **Retry** while recording controls remain available.
+  A successful empty popup match says **This meeting has no agenda.** and offers **Choose agenda**.
 
-With Google Calendar connected, a supporting server also shows **Next
-meeting** in the popup and the panel: the next Google Meet event from your
-primary calendar that is running or starts within twelve hours, with **Join in
-Meet**. Joining never records. **Notify me of meetings** in **Options** sends at
-most one notification per meeting, 0, 1, 2, 5 or 10 minutes before it starts,
-and none while the meeting room is already open.
+With Google Calendar connected, a supporting server shows the next own primary-calendar Meet event
+running or starting within twelve hours. The popup hides this offer on that room and during recording
+or upload. **Join in Meet** opens the connected Google account without starting recording, and the new
+tab belongs to its agenda even if Google redirects it to `/meet/<code>`. Joining from the popup
+or panel opens that tab's agenda panel; other tabs keep their own panels. Joining from a Calendar
+notification opens the meeting tab; click the toolbar icon to open its agenda. The agenda binding
+ends when the meeting ends, the tab closes or it leaves the room. Rooms opened from Calendar,
+mail or a typed URL still match by room code.
+
+**Notify me of meetings** in **Options** sends at most one notification per meeting, 0, 1, 2, 5 or
+10 minutes before it starts, and none while the meeting room is already open. The popup and panel
+show a participant notice only when you or the server operator supplied custom text. The consent
+button and the notice in Options remain.
 
 ## Microphone
 

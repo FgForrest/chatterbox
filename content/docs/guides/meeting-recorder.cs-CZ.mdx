@@ -138,7 +138,7 @@ složku a **Zastavit**. Jeho červená tečka ovládání sbalí nebo rozbalí.
 
 ## Nahrání schůzky
 
-1. Klikněte na ikonu rozšíření, přečtěte si připomenutí pro účastníky a zvolte
+1. Klikněte na ikonu rozšíření a zvolte
    **Souhlas potvrzen · Nahrávat tuto kartu**. S již povoleným mikrofonem se
    nahraje zvuk aktuální karty, i když v ní nebyla rozpoznána schůzka.
 2. Pro jiný zdroj zvolte **Nahrávat jinou obrazovku nebo aplikaci**. V dialogu
@@ -193,32 +193,43 @@ u staršího serveru rozšíření oznámí, že se agendy objeví po jeho aktua
   odmítne, agenda se otevře v samostatném okně. Se zapnutou výzvou ve schůzce
   přidá volba **Nabízet agendu v liště ve schůzce** do lišty **Zobrazit
   agendu**.
-- **Příprava a Živá schůzka.** Panel ukazuje kontrolu úkolů a body
-  k projednání stejně jako Klepna a zůstává k dispozici i během nahrávání.
-  Během schůzky zaškrtáváte body jako **Probráno**, u úkolů volíte **Hotovo**
-  nebo **Zahodit** a přidáváte poznámky. Tyto změny platí pro skutečnou agendu
-  i úkoly a změny kolegů se zobrazují průběžně. **Otevřít v Klepně** otevře
-  celou agendu.
-- **Kterou agendu nahrávka ponese.** Panel ukazuje **Nahrávka ponese tuto
-  agendu**. **Odpojit** agendu od nahrávky odpojí, **Přepnout sem** nahrávku
-  přesune k jiné agendě. **Žádná agenda** agendu nepřipojí; server, který
-  tuto volbu ignoruje, ji přesto může připojit automaticky. Kolegové
-  se stejnou otevřenou agendou vidí, kdo nahrává, a mohou zvolit **Nahrávat
-  také…**.
-- **Jiná agenda…** nabízí agendy, které lze připojit, i když se nic
-  nespárovalo. Od verze 0.9.5 nabízí i agendy bez nahrávky naplánované do
-  24 hodin před nebo po aktuálním čase, takže i schůzka, jejíž začátek jste
-  propásli, dostane svou agendu. Ukáže nejvýše deset agend, nejdřív ty,
-  jejichž plánovaný začátek až konec leží nejblíž aktuálnímu času, při shodě
-  Vaše vlastní, každou s jejím plánovaným časem.
+- **Průvodce schůzkou (0.9.7).** Body připravíte, jejich názvy upravíte a úkoly zahodíte na webu
+  Klepny. Panel zůstává jednosloupcový při každé šířce. Mimo schůzku ukazuje agendu ke čtení,
+  cílovou složku a **Nahrávat jinou obrazovku nebo aplikaci**. Pokud nejbližší schůzka z Kalendáře
+  patří k této agendě, nabídne i **Připojit se v Meet** s připojeným účtem.
+- **Během schůzky.** Body označujete jako **Probráno**, podbody nezávisle na rodičích. Úkoly
+  dokončíte zaškrtnutím; odškrtnutím je znovu otevřete, pokud to server podporuje. Odmítnutou
+  změnu panel vysvětlí a ponechá uložený stav. Zahozené úkoly zůstávají viditelné. Počítadlo
+  probraných bodů zahrnuje jen hlavní body. **Poznámka** otevře jednořádkové pole; neprázdné
+  poznámky zůstávají viditelné. Změny se ukládají ke skutečné agendě a úkolům podle vašich
+  oprávnění. Změny kolegů přicházejí průběžně, na starších serverech pravidelným načítáním.
+- **Nahrávání a ukládání.** Lišta ukazuje uplynulý čas, ukazatele **Vy** a **Ostatní**, složku
+  a **Zastavit a uložit**. Po zastavení panel zobrazí průběh odesílání částí a přehled probraných
+  bodů ke čtení. Při chybě odesílání zůstává možnost ho opakovat. Kolegové vidí, kdo nahrává,
+  a mohou zvolit **Nahrávat také**.
+- **Změnit agendu.** Odkaz v záhlaví otevře okolní agendy, označí vybranou a nabídne
+  **Bez agendy** a **Zpět**. Výběr jiné agendy změní i agendu probíhající nahrávky.
+  **Bez agendy** přeskočí připojení; starší server ji přesto může připojit automaticky.
+  Výběr zahrnuje nejvýše deset agend bez nahrávky naplánovaných do 24 hodin před nebo po
+  aktuálním čase, nejbližší plánovanému intervalu jako první a při shodě vaše vlastní.
+- **Chyby načítání.** Neúspěšný požadavek nabídne **Zkusit znovu** a ovládání nahrávání zůstává
+  dostupné. Úspěšné hledání bez shody ve vyskakovacím okně ukáže **K této schůzce není agenda.**
+  a nabídne **Vybrat agendu**.
 
-S propojeným Google Kalendářem ukazuje podporovaný server ve vyskakovacím okně
-i v panelu také kartu **Nejbližší schůzka**: další událost Google Meet z Vašeho
-hlavního kalendáře, která právě probíhá nebo začíná do dvanácti hodin,
-s tlačítkem **Připojit se v Meet**. Připojení nikdy nespouští nahrávání. Volba
-**Připomínat schůzky** na stránce **Možnosti** pošle ke každé schůzce nejvýše
-jedno oznámení, 0, 1, 2, 5 nebo 10 minut před začátkem, a žádné, když je
-místnost schůzky už otevřená.
+S propojeným Google Kalendářem ukazuje podporovaný server nejbližší vlastní událost Meet z hlavního
+kalendáře, která právě probíhá nebo začíná do dvanácti hodin. Vyskakovací okno nabídku skryje na kartě
+téže místnosti i během nahrávání a odesílání. **Připojit se v Meet** otevře připojený účet Google,
+ale nespustí nahrávání. Nová karta patří ke své agendě i po přesměrování na `/meet/<kód>`.
+Připojení z vyskakovacího okna nebo panelu otevře panel agendy na nové kartě se schůzkou;
+ostatní karty si ponechají vlastní panely. Připojení z oznámení Kalendáře otevře kartu se schůzkou;
+agendu otevřete kliknutím na ikonu na liště. Přiřazení agendy končí koncem schůzky, zavřením karty
+nebo opuštěním místnosti. Místnosti otevřené z Kalendáře, pošty nebo zadáním adresy se dál párují
+podle kódu místnosti.
+
+Volba **Připomínat schůzky** v **Možnostech** pošle ke každé schůzce nejvýše jedno oznámení,
+0, 1, 2, 5 nebo 10 minut před začátkem, a žádné, když je místnost již otevřená. Vyskakovací okno
+a panel ukazují upozornění účastníkům pouze tehdy, když vlastní text nastavil provozovatel
+nebo vy. Tlačítko souhlasu i upozornění v Možnostech zůstávají.
 
 ## Mikrofon
 

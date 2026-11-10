@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { effectiveNoticeText } from "../../../extensions/recorder/lib/settings.js";
+import {
+    customNoticeText,
+    effectiveNoticeText,
+} from "../../../extensions/recorder/lib/settings.js";
 
 const localizedNotice =
     "Schůzky, které nahrávám v Klepně, se přepisují a shrnují.";
@@ -51,5 +54,71 @@ describe("recorder notice precedence", () => {
                 },
             }),
         ).toBe("My notice");
+    });
+});
+
+describe("#386 popup and panel participant notice", () => {
+    it.each([
+        [null, null, ""],
+        [
+            null,
+            { noticeText: "Default from server", noticeTextIsDefault: true },
+            "",
+        ],
+        [
+            null,
+            { noticeText: "Operator notice", noticeTextIsDefault: false },
+            "Operator notice",
+        ],
+        [
+            "User notice",
+            { noticeText: "Operator notice", noticeTextIsDefault: false },
+            "User notice",
+        ],
+        [
+            null,
+            {
+                noticeText:
+                    "Inform participants and obtain any required consent before recording.",
+            },
+            "",
+        ],
+        [
+            null,
+            {
+                noticeText:
+                    "Meetings I record with Chatterbox are transcribed and summarized. I will inform the other participants before recording.",
+            },
+            "",
+        ],
+        [
+            null,
+            {
+                noticeText:
+                    "Meetings I record with Riffado are transcribed and summarized. I will inform the other participants before recording.",
+            },
+            "",
+        ],
+        [
+            null,
+            { noticeText: "Legacy operator notice" },
+            "Legacy operator notice",
+        ],
+        [
+            "Inform participants and obtain any required consent before recording.",
+            null,
+            "Inform participants and obtain any required consent before recording.",
+        ],
+        [
+            null,
+            {
+                noticeText:
+                    "Inform participants and obtain any required consent before recording.",
+                noticeTextIsDefault: false,
+            },
+            "Inform participants and obtain any required consent before recording.",
+        ],
+    ])("respects explicit customization (%s, %j)", (noticeText, serverDefaults, expected) => {
+        expect(customNoticeText({ noticeText, serverDefaults })).toBe(expected);
     });
 });

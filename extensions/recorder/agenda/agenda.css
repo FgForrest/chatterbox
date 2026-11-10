@@ -2,144 +2,290 @@ body {
     box-sizing: border-box;
     width: 100%;
     min-width: 240px;
-    padding: 14px;
+    padding: 14px 16px 20px;
     font-size: 13px;
+    line-height: 1.45;
 }
-body [hidden] {
-    display: none;
+.hint {
+    font-size: 11.5px;
 }
-header {
-    position: sticky;
-    top: 0;
-    background: var(--background);
-    padding: 6px 0;
-    z-index: 1;
+.recorder-controls section {
+    margin: 0;
 }
-h2 {
+.agenda-header {
+    align-items: flex-start;
+    margin-bottom: 18px;
+}
+.agenda-header > div {
+    min-width: 0;
+}
+.agenda-header h1 {
     font-size: 18px;
+    font-weight: 650;
+    line-height: 1.25;
     overflow-wrap: anywhere;
 }
-h3 {
-    font-size: 14px;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 8px;
+.agenda-header .hint {
+    margin: 2px 0 0;
 }
-section {
-    margin: 18px 0;
+.agenda-header > button {
+    flex: none;
+    white-space: nowrap;
+    margin-top: 2px;
+}
+#agenda > section {
+    margin-top: 18px;
+}
+.section-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+}
+.section-heading h2 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+}
+.section-heading .hint {
+    text-align: end;
+}
+.agenda-progress {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--muted);
+    overflow: hidden;
+    margin-bottom: 2px;
+}
+.agenda-progress > div {
+    height: 100%;
+    background: var(--meeting);
 }
 .point,
 .task {
-    padding: 10px 0;
+    padding: 8px 0;
     border-bottom: 1px solid var(--border);
-}
-.point label {
     display: flex;
-    gap: 8px;
-    align-items: start;
+    flex-direction: column;
+    gap: 4px;
+}
+.check-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    min-height: 24px;
     overflow-wrap: anywhere;
 }
-.point input[type="checkbox"] {
+.check-row > span:last-child {
+    min-width: 0;
+}
+.check-row input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    margin: 2px 0 0;
     accent-color: var(--meeting);
     flex: none;
+    cursor: pointer;
 }
-.point.discussed label > span {
+.check-row input:disabled {
+    cursor: default;
+}
+.discussed .check-row > span:last-child,
+.task.done .check-row > span:last-child,
+.task.dropped .check-row > span:last-child {
     color: var(--muted-foreground);
     text-decoration: line-through;
 }
-.point input[type="text"],
-#point-text {
+.point-meta,
+.task-meta {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-inline-start: 26px;
+    font-size: 11.5px;
+    color: var(--muted-foreground);
+}
+.point-meta:empty {
+    display: none;
+}
+.agenda-note {
     box-sizing: border-box;
-    width: 100%;
+    margin-inline-start: 26px;
+    width: calc(100% - 26px);
     min-width: 0;
     color: inherit;
-    background: var(--surface);
+    background: var(--muted);
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 7px;
-    margin-top: 6px;
+    border-radius: 7px;
+    padding: 6px 8px;
     font: inherit;
+    font-size: 12.5px;
+    resize: none;
+    overflow: hidden;
+    line-height: 1.45;
 }
-.task p {
-    margin-bottom: 6px;
+.note-readonly {
+    margin: 0 0 0 26px;
     overflow-wrap: anywhere;
 }
-.task .row {
-    justify-content: end;
+.note-editable {
+    cursor: text;
+    min-height: 18px;
 }
-.task .row button {
-    flex: none;
-    padding: 4px 9px;
+.note-editable:focus-visible {
+    outline: 2px solid var(--meeting);
+    outline-offset: 3px;
+    border-radius: 3px;
+}
+#agenda a {
+    color: var(--meeting);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+#agenda a:hover {
+    text-decoration-thickness: 2px;
 }
 .group {
+    font-size: 12px;
     font-weight: 600;
-    margin: 14px 0 3px;
+    margin: 12px 0 2px;
 }
-#quick-add {
-    margin-top: 14px;
-}
-#quick-add .row {
-    align-items: center;
-}
-#quick-add button {
+.status-icon {
+    width: 16px;
+    height: 16px;
+    margin-top: 2px;
+    color: var(--muted-foreground);
     flex: none;
+}
+.status-icon.done {
+    color: var(--success);
+}
+.status-icon.discussed {
+    color: var(--meeting);
+}
+.point-bullet {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--meeting);
+    margin: 7px 5px 0;
+    flex: none;
+}
+#away-hint {
+    margin: 18px 0 0;
 }
 #choice-list {
     display: grid;
     gap: 8px;
-    margin-bottom: 14px;
+    margin: 14px 0 18px;
 }
-#choice-list button {
+button.agenda-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    min-height: 52px;
     text-align: start;
+    padding: 9px 12px;
+    border-radius: 9px;
     overflow-wrap: anywhere;
 }
-#modes button[aria-pressed="true"] {
+.agenda-option strong,
+.agenda-option .hint {
+    display: block;
+}
+.agenda-option.selected {
     border-color: var(--meeting);
+}
+.agenda-option .selected-label {
     color: var(--meeting);
+    flex: none;
+    font-size: 11.5px;
 }
-footer {
-    position: sticky;
-    bottom: 0;
-    display: flex;
+#none {
+    margin-bottom: 4px;
+    min-height: 44px;
+}
+.recorder-controls {
+    background: var(--surface);
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+}
+.recorder-controls #meeting-prompt-offer,
+.recorder-controls #auto-hint {
+    display: none;
+}
+.recorder-controls #view-recording {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 10px;
-    justify-content: space-between;
-    background: var(--background);
-    border-top: 1px solid var(--border);
-    padding: 12px 0;
 }
-#status:empty,
+.recorder-controls #view-recording .status,
+.recorder-controls #view-recording .meter {
+    grid-column: 1 / -1;
+    margin: 0;
+}
+.recorder-controls #recording-folder-row {
+    grid-column: 1;
+    margin: 0;
+    align-self: center;
+}
+.recorder-controls #stop {
+    grid-column: 2;
+    width: auto;
+    min-height: 36px;
+    font-weight: 600;
+    align-self: center;
+}
+.recorder-controls #upload-status {
+    display: none;
+}
+.recorder-controls .field:has(.hint:empty) .hint,
+.recorder-controls .field .error:empty {
+    display: none;
+}
+.recorder-controls #next-meeting-card {
+    margin: 0 0 12px;
+    padding: 0 0 12px;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    background: transparent;
+}
+.recorder-controls #next-meeting-card button {
+    justify-self: stretch;
+}
+button.join-meet {
+    width: 100%;
+    min-height: 40px;
+    background: var(--meeting);
+    border-color: var(--meeting);
+    color: var(--primary-foreground);
+    font-weight: 600;
+}
+.presence {
+    padding: 12px 14px;
+    margin-bottom: 18px;
+    border: 1px solid var(--meeting);
+    border-radius: 12px;
+    background: var(--surface);
+}
+.agenda-error {
+    border: 1px solid var(--error);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-top: 18px;
+}
+.agenda-error .error {
+    font-weight: 600;
+}
 #recording-state:empty {
     display: none;
 }
-
-.recorder-controls { background: var(--surface); padding: 14px; border: 1px solid var(--border); border-radius: 12px; margin: 0 0 18px; }
-.recorder-controls header { position: static; background: transparent; }
-.recorder-controls #meeting-prompt-offer { display: none; }
-.recorder-controls section { margin: 12px 0 0; }
-.recorder-controls #view-recording { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; }
-.recorder-controls #view-recording .status, .recorder-controls #recording-folder-row { grid-column: 1; }
-.recorder-controls #view-recording .meter, .recorder-controls #upload-status { display: none; }
-.recorder-controls #stop { grid-column: 2; grid-row: 1 / 3; align-self: center; width: auto; }
-.presence, .attachment.linked { padding: 12px; border: 1px solid color-mix(in srgb, var(--meeting) 45%, var(--border)); border-radius: 8px; background: color-mix(in srgb, var(--meeting) 8%, var(--surface)); }
-.attachment { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; font-size: 12px; color: var(--muted-foreground); }
-.attachment.linked { color: var(--meeting); }
-.attachment button { color: inherit; white-space: nowrap; }
-.attribution { display: block; min-height: 14px; margin-top: 4px; }
-.point input.point-title { border: 0; background: transparent; padding: 0; margin: 0; }
-.point.discussed .point-title { color: var(--muted-foreground); text-decoration: line-through; }
-.point label > input.point-title { flex: 1; }
-.task > input[type=text] { width: 100%; box-sizing: border-box; font: inherit; color: inherit; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); padding: 7px; }
-#modes { background: var(--muted); border-radius: 8px; padding: 3px; }
-#modes button { background: transparent; border-color: transparent; }
-#modes button[aria-pressed=true] { background: var(--surface); color: var(--foreground); border-color: var(--border); }
-.agenda-navigation { display: flex; justify-content: space-between; margin-top: 14px; }
-@media (min-width: 560px) { .agenda-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; } }
-
-.recorder-controls header h1 img { display: none; }
-.recorder-controls header h1 { font-size: 14px; }
-.recorder-controls #recording-folder-row .hint:empty, .recorder-controls #recording-folder-row .error:empty { display: none; }
-
-.attribution:empty { display: none; }
-.point, .task { padding: 8px 0; }
-#agenda:not(.live-agenda) .point label::before { content: ""; width: 5px; height: 5px; flex: none; margin-top: 6px; border-radius: 50%; background: var(--meeting); }
-#agenda:not(.live-agenda) .point { border-bottom: none; padding: 6px 0; }
-#recording-state:not(:empty) { display: none; }
+#recording-state {
+    margin-top: 8px;
+}

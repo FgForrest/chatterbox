@@ -1,6 +1,6 @@
 # Chatterbox Meeting Recorder privacy policy
 
-Last updated: 8 November 2026
+Last updated: 10 November 2026
 
 This policy describes the **Chatterbox Meeting Recorder browser extension**. It does not replace the privacy policy for a Chatterbox server or another service you choose to use.
 
@@ -40,7 +40,7 @@ planned times, folder names, discussion points and notes, invitee and author nam
 task texts, assignees and task notes from your paired server. This agenda content is
 stored only in extension session storage. It caches the next 24 hours of timed agendas in extension session storage for
 reminders, and displays an agenda in Chrome's side panel or a small extension window.
-The side panel is enabled for a tab only after you click to open an agenda.
+The side panel is enabled per tab after you click to open an agenda. Join in Meet from the popup or panel opens the agenda on its new meeting tab; other tabs keep their own panels. Calendar notification Join opens and binds the meeting tab; its agenda opens when you click the toolbar icon.
 The reminder and banner switches are independent. Servers without support retain the
 existing recording behavior and receive no agenda calls.
 
@@ -49,7 +49,7 @@ and the current time to your paired server. Other platforms match by time. Calen
 meeting join links are received only through the scoped Calendar feature described below. No page content or additional audio
 is collected. The isolated banner displays server-provided agenda information and sends
 only control messages to the worker; the recorder key stays outside the meeting page.
-Ticking points, adding notes or points and marking tasks Done or Dropped saves those
+Ticking points, adding notes and checking or unchecking task completion saves those
 changes to your server. Task changes affect the actual task under your existing access
 rights. A selected agenda’s ID is kept with upload recovery metadata until the recording is completed or discarded; the ID is sent on completion.
 Cached agendas and choices are cleared on disconnect or a new pairing. Reminder titles
@@ -58,9 +58,9 @@ to prevent them.
 
 ## Calendar meetings and live collaboration
 
-On supporting servers, the extension receives the title, start/end time, validated Meet join link and connected Google account email for your next own primary-calendar Meet event (organizer or invited, not declined). The link selects that account with `authuser`. This information stays in extension session storage and is cleared when pairing or consent changes. The extension checks Calendar at most every five minutes in the background, and on opening its popup or panel only when the cache is older than one minute. Join opens Meet; it never starts recording. The optional system notification may expose the meeting title. Its lead time and switch are in Options. A room already open suppresses the notification.
+On supporting servers, the extension receives the title, start/end time, validated Meet join link and connected Google account email for your next own primary-calendar Meet event (organizer or invited, not declined). The link selects that account with `authuser`. This information stays in extension session storage and is cleared when pairing or consent changes. The extension checks Calendar at most every five minutes in the background, and on opening its popup or panel only when the cache is older than one minute. Join opens Meet; it never starts recording. The new tab is bound to its agenda ID, meeting end and validated room code in session storage with the current pairing identity. The binding is removed when that tab leaves the room, closes, the event ends or pairing/consent changes. The optional system notification may expose the meeting title. Its lead time and switch are in Options. A room already open suppresses the notification.
 
-While an agenda panel is open, an authenticated event stream refreshes visible edits. Collaborative text updates and the names of colleagues recording that agenda are exchanged only with your paired server under existing access rights. Text documents live in the panel's memory, not persistent extension storage. Choosing an agenda at recording start or editing it during capture can announce that agenda to other viewers and select it for the recording; you can unlink it. Recent folder IDs and notification occurrence IDs are remembered locally; no Calendar titles or agenda text are stored there. No remote code is loaded.
+While an agenda panel is open, an authenticated event stream refreshes visible edits. Collaborative text updates and the names of colleagues recording that agenda are exchanged only with your paired server under existing access rights. Text documents live in the panel's memory, not persistent extension storage. Choosing an agenda at recording start or editing it during capture can announce that agenda to other viewers and select it for the recording; Change agenda also offers No agenda. Recent folder IDs and notification occurrence IDs are remembered locally; no Calendar titles or agenda text are stored there. No remote code is loaded.
 
 ## Where data goes
 

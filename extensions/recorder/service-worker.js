@@ -24,6 +24,7 @@ import {
     currentAgendas,
     matchAgendas,
     openAgendaPanel as openAgendaPanelNow,
+    openAgendaWindow,
     refreshAgendas,
     remindAgenda,
     scheduleAgendaReminders,
@@ -102,6 +103,10 @@ import {
 
 import { NEXT_REFRESH, NEXT_START, NEXT_END, NEXT_BADGE, NEXT_NOTICE, meetingRoom, cachedNextMeeting, clearNextMeeting, notificationMeeting, notifyNextMeeting, refreshNextMeeting, scheduleNextMeeting, updateNextMeetingBadge } from "./lib/next-meeting.js";
 
+import { clearJoinedMeeting, joinedMeeting, joinMeeting, publishJoinedMeeting, MEETING_END_PREFIX, reconcileJoinedMeetings } from "./lib/join-meeting.js";
+
+const joinedMeetingsLoaded = reconcileJoinedMeetings().catch(() => {});
+
 const agendaTabs = new Map();
 const openPanels = new Set();
 const panelChanges = new Set();
@@ -120,6 +125,12 @@ const agendaRoutesLoaded = chrome.storage.session.get(null).then((stored) => {
     panelChanges.clear();
     return stored;
 }).catch(() => false);
+
+async function publishJoinRoute(tab, route) {
+    await agendaRoutesLoaded;
+    agendaTabs.set(tab.id, route);
+    await safe(chrome.action.setPopup({ tabId: tab.id, popup: "" }));
+}
 
 function setAgendaPanelOpen(tabId, opened) {
     if (!agendaRoutesReady) panelChanges.add(tabId);
@@ -157,8 +168,13 @@ async function closeAgendaPanel(tabId) {
 
 async function routeAgendaTab(tab, settings, state, matches) {
     await agendaRoutesLoaded;
-    const rows = supportsAgendas(settings) ? matches ?? await bannerAgendas(tab) : [];
-    const id = state.tabId === tab.id && state.agendaId && state.state !== STATE.idle ? state.agendaId : rows.length === 1 ? rows[0].id : null;
+    let binding = await joinedMeeting(tab, settings);
+    let rows = supportsAgendas(settings) && !binding ? matches ?? await bannerAgendas(tab) : [];
+    if (!binding) {
+        binding = await joinedMeeting(await chrome.tabs.get(tab.id).catch(() => null), settings);
+        if (binding) rows = [];
+    }
+    const id = binding?.agendaId ?? (state.tabId === tab.id && state.agendaId && state.state !== STATE.idle ? state.agendaId : rows.length === 1 ? rows[0].id : null);
     if (id || rows.length) {
         const route = { agendaIds: id ? [id] : rows.map((row) => row.id), choose: !id, tabId: tab.id };
         agendaTabs.set(tab.id, route);
@@ -1195,9 +1211,9 @@ async function bannerAgendas(tab, { strict = false } = {}) {
     try {
         const agendas = await Promise.race([
             matchAgendas(tab.url, Date.now(), { signal: controller.signal }),
-            new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error("Agenda match timed out")); }, 1000); }),
+            new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error("Agenda match timed out")); }, strict ? 10000 : 1000); }),
         ]);
-        if (controller.signal.aborted) return [];
+        if (controller.signal.aborted) throw new Error("Agenda match timed out");
         await chrome.storage.session.set({ [key]: { target, serverUrl: settings.serverUrl, connectionId: settings.connectionId, at: Date.now(), agendas } });
         return agendas;
     } catch (error) { if (strict) throw error; return []; }
@@ -1248,12 +1264,13 @@ async function handleAgendaMessageNow(message, sender) {
     const tab = message.tabId != null ? await chrome.tabs.get(message.tabId).catch(() => null) : null;
     if (message.type === "match-agendas") {
         void refreshAgendas({ force: true }).catch(() => {});
-        const agendas = tab ? await bannerAgendas(tab, { strict: true }) : await matchAgendas();
+        const binding = await joinedMeeting(tab, settings);
+        const agendas = binding ? (binding.agendaId ? [await agendaRequest(`/${encodeURIComponent(binding.agendaId)}`)] : []) : tab ? await bannerAgendas(tab, { strict: true }) : await matchAgendas();
         const selected = (await chrome.storage.session.get(AGENDA_SELECTION_KEY))[AGENDA_SELECTION_KEY];
         const target = JSON.stringify(meetingTarget(tab?.url));
         const hasSelection = selected?.serverUrl === settings.serverUrl && selected.connectionId === settings.connectionId && selected.explicit &&
             (selected.target === target || selected.target === "null") && Date.now() - selected.at < 15 * 60000;
-        return { ok: true, agendas, ...(hasSelection ? { selectedAgenda: selected.agenda } : {}) };
+        return { ok: true, agendas, ...(binding ? { selectedAgenda: agendas[0] ?? null } : hasSelection ? { selectedAgenda: selected.agenda } : {}) };
     }
     let agenda = null;
     if (message.agendaId != null) {
@@ -1277,6 +1294,10 @@ async function handleAgendaMessageNow(message, sender) {
         const target = JSON.stringify(meetingTarget(tab?.url));
         await chrome.storage.session.set({ [AGENDA_SELECTION_KEY]: { serverUrl: settings.serverUrl, connectionId: settings.connectionId, target, at: Date.now(), agenda, explicit: true } });
     }
+    if (message.type === "select-agenda" && tab) {
+        const binding = await joinedMeeting(tab, settings);
+        if (binding) await chrome.storage.session.set({ [`meeting-tab:${tab.id}`]: { ...binding, agendaId: agenda?.id ?? null } });
+    }
     return { ok: true, agenda };
 }
 
@@ -1288,8 +1309,9 @@ async function resolvePanelAgenda(message, sender, meeting, opened) {
     const panelTabId = meeting ? sender.tab.id : message.tabId;
     const tabId = meeting ? panelTabId : message.matchTabId ?? panelTabId;
     const tab = tabId != null ? await chrome.tabs.get(tabId).catch(() => null) : null;
-    const matches = await matchAgendas(tab?.url);
-    const id = message.choose ? null : message.agendaId || (state.tabId === tabId ? state.agendaId : null) || (matches.length === 1 ? matches[0].id : null);
+    const binding = await joinedMeeting(tab, settings);
+    const matches = binding?.agendaId || message.agendaId ? [] : tab ? await bannerAgendas(tab, { strict: true }) : await matchAgendas();
+    const id = message.choose ? null : message.agendaId || binding?.agendaId || (state.tabId === tabId ? state.agendaId : null) || (matches.length === 1 ? matches[0].id : null);
     const key = await opened;
     await chrome.storage.session.set({ [key]: { agendaIds: id ? [id] : matches.map((row) => row.id), choose: !id, tabId } });
     if (panelTabId != null && key === agendaPanelKey(panelTabId) && !(await chrome.tabs.get(panelTabId).catch(() => null))) await chrome.storage.session.remove(key);
@@ -1317,8 +1339,7 @@ async function notify(title, message, options = {}) {
 
 chrome.notifications.onClicked.addListener(async (notificationId) => {
     if (notificationId.startsWith(NEXT_NOTICE)) {
-        const meeting = await notificationMeeting(notificationId);
-        if (meeting) await chrome.tabs.create({ url: meeting.joinUrl });
+        await joinMeeting(() => notificationMeeting(notificationId), publishJoinRoute).catch(() => {});
         await chrome.notifications.clear(notificationId);
         return;
     }
@@ -1349,10 +1370,14 @@ chrome.notifications.onClicked.addListener(async (notificationId) => {
 
 chrome.notifications.onButtonClicked.addListener((id, button) => {
     if (id.startsWith(NEXT_NOTICE)) {
+        if (button === 0) {
+            void joinMeeting(() => notificationMeeting(id), publishJoinRoute).then(() => chrome.notifications.clear(id)).catch(() => {});
+            return;
+        }
         void notificationMeeting(id).then(async (meeting) => {
             if (!meeting) return;
             if (button === 1 && meeting.agendaId) await openAgendaPanel({}, [meeting.agendaId]);
-            else if (button === 0) await chrome.tabs.create({ url: meeting.joinUrl });
+
             await chrome.notifications.clear(id);
         }).catch(() => {});
         return;
@@ -1466,8 +1491,10 @@ async function syncMeetingBannerNow(tabId, cachedOnly = false) {
     const settings = await getSettings();
     const enabled = tab && isPromptMeeting(tab.url) && settings.dataUseAcknowledgedAt &&
         await isPaired() && await hasMeetingPromptAccess();
+    const binding = await joinedMeeting(tab, settings);
     const agendas = enabled && supportsAgendas(settings) && settings.agendaBanner
-        ? cachedOnly ? await cachedBannerAgendas(tab, settings) : await bannerAgendas(tab) : [];
+        ? binding ? (binding.agendaId ? [{ id: binding.agendaId, title: (await cachedNextMeeting())?.data?.title ?? t("agendaTitle") }] : [])
+            : cachedOnly ? await cachedBannerAgendas(tab, settings) : await bannerAgendas(tab) : [];
     const state = await getState();
     const entry = (await getArmed())[tabId];
     const agendaRoute = tab ? await routeAgendaTab(tab, settings, state, cachedOnly ? await cachedBannerAgendas(tab, settings) : agendas) : false;
@@ -1818,7 +1845,9 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 });
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
+    const cleared = clearJoinedMeeting(tabId);
     await agendaRoutesLoaded;
+    await cleared;
     agendaTabs.delete(tabId); openPanels.delete(tabId);
     await chrome.storage.session.remove([agendaPanelKey(tabId), `agenda-match:${tabId}`, `agenda-route:${tabId}`, `agenda-open:${tabId}`]);
     void updateNextMeetingBadge().catch(() => {});
@@ -1846,7 +1875,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (changes.agendaBanner) void reevaluateAllTabs();
     if (changes.encryptedApiKey || changes.serverUrl || changes.serverDefaults || changes.dataUseAcknowledgedAt) {
         void getSettings().then(async (settings) => {
-            if (!supportsAgendas(settings)) await clearAgendas();
+            if (!supportsAgendas(settings)) {
+                await reconcileJoinedMeetings();
+                await clearAgendas();
+            }
             if (settings.serverDefaults?.nextMeeting !== true) await clearNextMeeting();
             else await refreshNextMeeting();
         }).catch(() => {});
@@ -1966,6 +1998,7 @@ chrome.commands.onCommand.addListener(async (command) => {
 // ---- Alarms: auto-stop and config refresh --------------------------------
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name.startsWith(MEETING_END_PREFIX)) { await clearJoinedMeeting(Number(alarm.name.slice(MEETING_END_PREFIX.length))); await reevaluateAllTabs(); return; }
     if (alarm.name === NEXT_REFRESH) { await refreshNextMeeting(); return; }
     if (alarm.name === NEXT_START) { await notifyNextMeeting(); await updateNextMeetingBadge(); return; }
     if (alarm.name === NEXT_BADGE) { await updateNextMeetingBadge(); return; }
@@ -2180,6 +2213,25 @@ function isExtensionPage(url, path) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || message.target === "offscreen") return false;
+    if (message.type === "join-meeting") {
+        if (sender.id !== chrome.runtime.id || ![POPUP_URL, "agenda/agenda.html"].some((path) => sender.url?.split("?")[0] === chrome.runtime.getURL(path))) {
+            sendResponse({ ok: false, error: t("unrecognizedSender") }); return false;
+        }
+        (async () => {
+            const cached = await cachedNextMeeting();
+            const meeting = cached?.data;
+            if (meeting?.eventId !== message.eventId || !Number.isInteger(message.tabId)) throw new Error(t("agendaFailed"));
+            const tab = await publishJoinedMeeting({ ...meeting, serverUrl: cached.serverUrl, connectionId: cached.connectionId }, message.tabId, publishJoinRoute);
+            if (message.fallback === true && meeting.agendaId) {
+                await chrome.tabs.update(tab.id, { active: true });
+                await openAgendaWindow({ tabId: tab.id }, [meeting.agendaId]);
+            }
+            return tab;
+        })()
+            .then((tab) => sendResponse({ ok: true, tabId: tab.id }))
+            .catch(() => sendResponse({ ok: false, error: t("agendaFailed") }));
+        return true;
+    }
     if (message.type === "open-agenda") {
         const extensionPage = sender.id === chrome.runtime.id &&
             [POPUP_URL, "agenda/agenda.html"].some((path) => sender.url?.split("?")[0] === chrome.runtime.getURL(path));
@@ -2188,7 +2240,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!extensionPage && !meeting) { sendResponse({ ok: false, error: t("unrecognizedSender") }); return false; }
         const opened = openAgendaPanel({ tabId: meeting ? sender.tab.id : message.tabId, matchTabId: meeting ? sender.tab.id : message.matchTabId, windowId: message.windowId }, []);
         Promise.all([opened, resolvePanelAgenda(message, sender, meeting, opened)]).then(() => sendResponse({ ok: true }))
-            .catch(() => sendResponse({ ok: false, error: t("agendaFailed") }));
+            .catch(async () => {
+                const key = await opened.catch(() => null);
+                if (key) {
+                    const stored = (await chrome.storage.session.get(key))[key] ?? {};
+                    await chrome.storage.session.set({ [key]: { ...stored, tabId: meeting ? sender.tab.id : message.matchTabId ?? message.tabId, error: true } });
+                }
+                sendResponse({ ok: false, error: t("agendaFailed") });
+            });
         return true;
     }
 
@@ -2744,6 +2803,7 @@ async function resumeBufferedSession(bufferId, meta, session, resetRetry = false
 }
 
 async function reconcileOnStartup() {
+    await joinedMeetingsLoaded;
     await unregisterPairingScripts();
     await reconcileMeetingPrompt().catch((error) =>
         console.warn("[recorder] meeting prompt registration:", error),

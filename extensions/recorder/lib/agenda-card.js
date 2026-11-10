@@ -1,5 +1,6 @@
 import { canChooseRecordingAgenda, supportsAgendas } from "./agendas.js";
 import { t } from "./i18n.js";
+import { renderLinkedText } from "./linkify.js";
 
 /** Bind the popup's optional agenda card without delaying recording controls. */
 export function createAgendaCard(container, { tab, onFolder }) {
@@ -20,11 +21,22 @@ export function createAgendaCard(container, { tab, onFolder }) {
     show.type = "button";
     const choose = document.createElement("button");
     choose.type = "button";
-    choose.textContent = t("agendaOther");
+    choose.textContent = t("agendaChange");
+    show.className = choose.className = "link";
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.textContent = t("agendaReload");
+    retry.hidden = true;
     const error = document.createElement("p");
     error.className = "error";
     error.setAttribute("role", "status");
-    container.append(hint, title, show, choose, error);
+    container.append(hint, title, show, choose, error, retry);
+    retry.addEventListener("click", () => {
+        retryAt = 0;
+        resetMatch();
+        void render(lastSettings, state);
+    });
+    let lastSettings;
     function open(pick = false) {
         void chrome.runtime
             .sendMessage({
@@ -32,7 +44,7 @@ export function createAgendaCard(container, { tab, onFolder }) {
                 agendaId: current?.id,
                 tabId: tab()?.id,
                 matchTabId: canChooseRecordingAgenda(state)
-                    ? state.tabId ?? tab()?.id
+                    ? (state.tabId ?? tab()?.id)
                     : tab()?.id,
                 windowId: tab()?.windowId,
                 choose: pick,
@@ -60,6 +72,7 @@ export function createAgendaCard(container, { tab, onFolder }) {
     }
     async function render(settings, next) {
         state = next;
+        lastSettings = settings;
         if (
             !supportsAgendas(settings) ||
             (state.state !== "idle" && !canChooseRecordingAgenda(state))
@@ -70,7 +83,7 @@ export function createAgendaCard(container, { tab, onFolder }) {
             return;
         }
         const recording = canChooseRecordingAgenda(state);
-        const tabId = recording ? state.tabId ?? tab()?.id : tab()?.id;
+        const tabId = recording ? (state.tabId ?? tab()?.id) : tab()?.id;
         const nextContext = `${recording ? state.sessionId : "idle"}:${tabId}`;
         if (matchContext !== nextContext) {
             matchContext = nextContext;
@@ -78,9 +91,13 @@ export function createAgendaCard(container, { tab, onFolder }) {
         }
         if (recording && state.agendaId) {
             resetMatch();
+            container.classList.remove("agenda-empty");
+            show.hidden = false;
+            retry.hidden = true;
+            error.textContent = "";
             current = { id: state.agendaId, title: state.agendaTitle };
             hint.textContent = t("agendaRecording");
-            title.textContent = current.title ?? "";
+            renderLinkedText(title, current.title);
             show.textContent = t("agendaShow");
             choose.hidden = false;
             container.hidden = false;
@@ -89,21 +106,38 @@ export function createAgendaCard(container, { tab, onFolder }) {
         if (initialized && Date.now() - matchedAt >= 60000) initialized = false;
         if (!initialized) {
             container.hidden = true;
-            if (Date.now() < retryAt) return;
+            if (Date.now() < retryAt) {
+                container.hidden = false;
+                return;
+            }
             loading ??= chrome.runtime
                 .sendMessage({ type: "match-agendas", tabId })
                 .catch(() => null);
             const response = await loading;
-            if (state !== next || matchContext !== nextContext || initialized) return;
+            if (state !== next || matchContext !== nextContext || initialized)
+                return;
             loading = undefined;
             if (!response?.ok || !Array.isArray(response.agendas)) {
-                const delay = Math.min(1000 * 2 ** Math.min(retryAttempt++, 4), 10000);
+                container.hidden = false;
+                title.textContent = "";
+                hint.textContent = "";
+                show.hidden = choose.hidden = true;
+                error.textContent = t("agendaLoadError");
+                retry.hidden = false;
+                const delay = Math.min(
+                    1000 * 2 ** Math.min(retryAttempt++, 4),
+                    10000,
+                );
                 retryAt = Date.now() + delay;
                 schedule(settings, delay);
                 return;
             }
+            error.textContent = "";
+            retry.hidden = true;
+            show.hidden = false;
             const rows = response?.agendas ?? [];
-            const hasSelection = !recording && "selectedAgenda" in (response ?? {});
+            const hasSelection =
+                !recording && "selectedAgenda" in (response ?? {});
             if (hasSelection) current = response.selectedAgenda;
             else if (rows.length === 1) current = rows[0];
             else current = null;
@@ -113,19 +147,29 @@ export function createAgendaCard(container, { tab, onFolder }) {
             retryAt = 0;
             retryAttempt = 0;
             schedule(settings, 60000);
-            container.hidden = rows.length === 0 && !current && !explicitNone && !recording;
-            title.textContent =
+            container.hidden = false;
+            container.classList.toggle(
+                "agenda-empty",
+                !current && rows.length === 0,
+            );
+            renderLinkedText(
+                title,
                 current?.title ??
-                t(
-                    explicitNone ? "agendaNone" : "agendaMultiple",
-                    String(rows.length),
-                );
+                    t(
+                        explicitNone
+                            ? "agendaNone"
+                            : rows.length
+                              ? "agendaMultiple"
+                              : "agendaNoMatch",
+                        String(rows.length),
+                    ),
+            );
             hint.textContent = current?.start
                 ? new Date(current.start).toLocaleString([], {
                       dateStyle: "short",
                       timeStyle: "short",
                   })
-                : t("agendaTitle");
+                : "";
             if (current && !recording) onFolder(current);
         }
         show.textContent = t(current ? "agendaShow" : "agendaChoose");

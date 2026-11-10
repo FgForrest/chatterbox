@@ -110,6 +110,18 @@ export function effectiveNoticeText(settings) {
     );
 }
 
+/** Popup and panel show only notices explicitly supplied by the user or operator. */
+export function customNoticeText(settings) {
+    if (settings.noticeText) return settings.noticeText;
+    const server = settings.serverDefaults;
+    if (!server?.noticeText || server.noticeTextIsDefault === true) return "";
+    if (server.noticeTextIsDefault === false) return server.noticeText;
+    const defaults = [DEFAULT_NOTICE_TEXT, ...["Chatterbox", "Riffado", "Klepna"].map(
+        (name) => `Meetings I record with ${name} are transcribed and summarized. I will inform the other participants before recording.`,
+    )];
+    return defaults.includes(server.noticeText) ? "" : server.noticeText;
+}
+
 /** @param {RecorderSettings} settings */
 export function effectiveQuietSeconds(settings) {
     return (
