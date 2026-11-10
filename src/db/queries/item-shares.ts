@@ -2,6 +2,11 @@ import { type AnyColumn, and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { folderParticipantCondition } from "@/db/queries/folder-participants";
 import { ownerItemFolderAudienceRows } from "@/db/queries/item-folder-audience";
+import {
+    notifyRestrictedAudienceInTx,
+    restrictedItemCondition,
+    restrictedItemSinceCondition,
+} from "@/db/queries/restricted-folders";
 import { activeShareRecipientCondition } from "@/db/queries/share-recipients";
 
 export {
@@ -24,9 +29,10 @@ import { isOrgScopeVisible } from "@/lib/org/config";
 export function receivedItemCondition(
     receiverUserId: string,
     itemId: AnyColumn = chatterItems.id,
+    isCurator = false,
 ) {
     if (!isOrgScopeVisible()) return sql`false`;
-    return sql`${itemId} in (
+    return sql`(${restrictedItemCondition({ userId: receiverUserId, isCurator }, itemId)} or ${itemId} in (
         select ${itemShares.itemId} from ${itemShares}
         inner join chatter_items direct_item on direct_item.id = ${itemShares.itemId}
             and direct_item.user_id = ${itemShares.userId} and direct_item.kind in ('audio', 'mail')
@@ -36,13 +42,14 @@ export function receivedItemCondition(
           and ${activeShareRecipientCondition()}
         union all
         ${receivedFolderItemIds(receiverUserId)}
-    )`;
+    ))`;
 }
 
 /** Whether the caller has an accepted invitation for this item. */
 export async function isItemReceived(
     receiverUserId: string,
     itemId: string,
+    isCurator = false,
 ): Promise<boolean> {
     if (!isOrgScopeVisible()) return false;
     const rows = await db
@@ -51,7 +58,11 @@ export async function isItemReceived(
         .where(
             and(
                 eq(chatterItems.id, itemId),
-                receivedItemCondition(receiverUserId),
+                receivedItemCondition(
+                    receiverUserId,
+                    chatterItems.id,
+                    isCurator,
+                ),
             ),
         )
         .limit(1);
@@ -67,7 +78,7 @@ export function receivedItemSinceCondition(
     if (!isOrgScopeVisible()) return sql`false`;
     return sql`(exists (select 1 from ${itemShares} where ${itemShares.itemId} = ${itemId}
         and ${itemShares.receiverUserId} = ${receiverUserId} and ${itemShares.state} = 'accepted'
-        and ${itemShares.respondedAt} > ${seen.toISOString()}::timestamp) or ${receivedThroughFolderCondition(receiverUserId, itemId, undefined, seen)})`;
+        and ${itemShares.respondedAt} > ${seen.toISOString()}::timestamp) or ${receivedThroughFolderCondition(receiverUserId, itemId, undefined, seen)} or ${restrictedItemSinceCondition(receiverUserId, seen, itemId)})`;
 }
 
 /** Live direct membership of an accepted private folder share; never its descendants. */
@@ -204,6 +215,21 @@ export async function notifyFolderReceiversInTx(
     folderId?: string,
 ): Promise<void> {
     if (!isOrgScopeVisible()) return;
+    const restricted = await tx
+        .select({ folderId: recordingFolderAssignments.folderId })
+        .from(recordingFolderAssignments)
+        .where(
+            and(
+                eq(recordingFolderAssignments.itemId, itemId),
+                eq(recordingFolderAssignments.userId, ownerUserId),
+                eq(recordingFolderAssignments.withheld, true),
+                folderId
+                    ? eq(recordingFolderAssignments.folderId, folderId)
+                    : undefined,
+            ),
+        );
+    for (const row of restricted)
+        await notifyRestrictedAudienceInTx(tx, row.folderId);
     await tx.execute(sql`with eligible_folders as (
         select ${recordingFolders.id}, ${recordingFolders.userId} from ${recordingFolderAssignments}
         inner join ${recordingFolders} on ${recordingFolders.id} = ${recordingFolderAssignments.folderId}

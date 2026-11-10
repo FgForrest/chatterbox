@@ -78,8 +78,17 @@ async function materializeLocked(
 ): Promise<boolean> {
     const target = await loadExportTarget(userId, exportId);
     if (!target) return false;
-    const { contentUserId, isOrganization: isOrg } =
-        await resolveFolderExportScope(userId, target.folderId);
+    const {
+        contentUserId,
+        isOrganization: isOrg,
+        restricted,
+    } = await resolveFolderExportScope(userId, target.folderId, {
+        cleanupRestricted: true,
+    });
+    if (restricted) {
+        await enqueueExportPlan(userId, exportId);
+        return false;
+    }
     const [state] = await db
         .select({
             id: folderExportMaterializations.id,
@@ -133,6 +142,7 @@ async function materializeLocked(
                 eq(folderExportMaterializations.id, materializationId),
                 eq(folderExportMaterializations.userId, userId),
                 eq(folderExportConfigurations.userId, userId),
+                eq(folderExportMaterializations.revocationPending, false),
                 isNull(chatterItems.deletedAt),
                 isOrg
                     ? sharedItemCondition(contentUserId, chatterItems.id)
@@ -141,21 +151,37 @@ async function materializeLocked(
         )
         .limit(1);
     if (!state || !state.expected || state.status === "exported") return false;
-    if (isOrg) {
-        const organization = await listExportFolderOrganization(contentUserId);
-        if (
-            !exportPlacementFolderIds(
-                organization.folders,
-                organization.assignments,
-                state.recordingId,
-                target.folderId,
-            ).includes(state.placementFolderId)
-        ) {
-            await markProjectionStale(userId, state.id);
+    const exportFolderId = target.folderId;
+    async function exportable() {
+        if (!isOrg) return true;
+        const [current] = await db
+            .select({ revoked: folderExportMaterializations.revocationPending })
+            .from(folderExportMaterializations)
+            .where(
+                and(
+                    eq(folderExportMaterializations.id, state.id),
+                    eq(folderExportMaterializations.userId, userId),
+                ),
+            );
+        if (!current || current.revoked) {
             await enqueueExportPlan(userId, state.exportId);
             return false;
         }
+        const organization = await listExportFolderOrganization(contentUserId);
+        if (
+            exportPlacementFolderIds(
+                organization.folders,
+                organization.assignments,
+                state.recordingId,
+                exportFolderId,
+            ).includes(state.placementFolderId)
+        )
+            return true;
+        await markProjectionStale(userId, state.id);
+        await enqueueExportPlan(userId, state.exportId);
+        return false;
     }
+    if (!(await exportable())) return false;
 
     await db
         .update(folderExportMaterializations)
@@ -198,11 +224,12 @@ async function materializeLocked(
                 return false;
             }
             const storage = await createUserStorageProvider(state.ownerUserId);
-            await provider.materialize(
-                state.logicalPath,
-                await storage.downloadStream(state.storagePath),
-                options,
-            );
+            const content = await storage.downloadStream(state.storagePath);
+            if (!(await exportable())) {
+                content.destroy();
+                return false;
+            }
+            await provider.materialize(state.logicalPath, content, options);
         } else if (state.artifactType === "mail") {
             // The owner's alone; gone once retention removed it.
             if (isOrg || !state.rawStoragePath) {
@@ -231,6 +258,7 @@ async function materializeLocked(
                 await enqueueExportPlan(userId, state.exportId);
                 return false;
             }
+            if (!(await exportable())) return false;
             await provider.materialize(state.logicalPath, content, options);
         } else {
             // The owner's rows, for the Organization's export too: a shared
@@ -287,6 +315,7 @@ async function materializeLocked(
                 await enqueueExportPlan(userId, state.exportId);
                 return false;
             }
+            if (!(await exportable())) return false;
             await provider.materialize(state.logicalPath, content, options);
         }
         await db
@@ -337,17 +366,22 @@ export async function reconcileFolderExport(
     userId: string,
     selectedFolderId: string,
 ): Promise<{ checked: number; pending: number }> {
-    const { contentUserId } = await resolveFolderExportScope(
-        userId,
-        selectedFolderId,
-    );
+    const { contentUserId, restricted, parentId } =
+        await resolveFolderExportScope(userId, selectedFolderId, {
+            cleanupRestricted: true,
+        });
     const organization = await listExportFolderOrganization(contentUserId);
     if (
+        !restricted &&
         !organization.folders.some((folder) => folder.id === selectedFolderId)
     ) {
         return { checked: 0, pending: 0 };
     }
-    const ancestors = ancestorFolderIds(organization.folders, selectedFolderId);
+    const ancestors = ancestorFolderIds(
+        organization.folders,
+        restricted ? (parentId ?? selectedFolderId) : selectedFolderId,
+    );
+    ancestors.add(selectedFolderId);
     const subtree = descendantFolderIds(organization.folders, selectedFolderId);
     const configurations = (await listExportTargets(userId)).filter((target) =>
         ancestors.has(target.folderId),
@@ -356,6 +390,7 @@ export async function reconcileFolderExport(
     for (const configuration of configurations) {
         await planFolderExport(userId, configuration.id, { verify: true });
     }
+    if (restricted) return { checked: 0, pending: 0 };
     let checked = 0;
     let pending = 0;
     for (const configuration of configurations) {

@@ -134,6 +134,14 @@ export class FakeDrive implements DriveClient {
         return item ? this.view(item) : null;
     }
 
+    async hasChildren(parentId: string): Promise<boolean> {
+        this.record("hasChildren");
+        return [...this.items.values()].some(
+            (item) =>
+                item.parents.includes(parentId) && !this.isTrashed(item.id),
+        );
+    }
+
     async listByAppProperty(property: DriveAppProperty): Promise<DriveItem[]> {
         this.record("listByAppProperty");
         return [...this.items.values()]

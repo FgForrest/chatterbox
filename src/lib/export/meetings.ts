@@ -15,6 +15,7 @@ import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import {
     type ArchiveScope,
     archivedItemCondition,
+    scopeUserId,
 } from "@/lib/export/archive-scope";
 import { taskGroupOrderInput } from "@/lib/meetings/model";
 import { projectAgendaTaskGroupOrder } from "@/lib/meetings/task-groups";
@@ -68,6 +69,15 @@ export const archivedMeetingSchema = z.object({
     createdAt: date,
     updatedAt: date,
     folderIds: z.array(id).max(100),
+    folderPlacements: z
+        .array(
+            z.object({
+                folderId: id,
+                withheld: z.boolean(),
+                releasedAt: date.nullable(),
+            }),
+        )
+        .default([]),
     points: z.array(pointArchive).max(5000),
     tasks: z
         .array(
@@ -87,8 +97,13 @@ export type ArchivedMeeting = z.infer<typeof archivedMeetingSchema>;
 export async function collectArchivedMeetings(
     scope: ArchiveScope,
 ): Promise<ArchivedMeeting[]> {
+    const ownerId = scopeUserId(scope);
     const rows = await db
-        .select({ agenda: meetingAgendas, anchorOwnerId: chatterItems.userId })
+        .select({
+            agenda: meetingAgendas,
+            anchorOwnerId: chatterItems.userId,
+            anchorIncluded: sql<boolean>`${archivedItemCondition(scope)}`,
+        })
         .from(meetingAgendas)
         .innerJoin(
             chatterItems,
@@ -98,23 +113,21 @@ export async function collectArchivedMeetings(
             ),
         )
         .where(
-            scope.kind === "personal"
-                ? or(
-                      archivedItemCondition(scope),
-                      and(
-                          eq(meetingAgendas.userId, scope.userId),
-                          isNotNull(meetingAgendas.recordingItemId),
-                          ne(chatterItems.userId, scope.userId),
-                      ),
-                  )
-                : archivedItemCondition(scope),
+            or(
+                archivedItemCondition(scope),
+                and(
+                    eq(meetingAgendas.userId, ownerId),
+                    isNotNull(meetingAgendas.recordingItemId),
+                    ne(chatterItems.userId, ownerId),
+                ),
+            ),
         );
     const result: ArchivedMeeting[] = [];
-    for (const { agenda, anchorOwnerId } of rows) {
+    for (const { agenda, anchorOwnerId, anchorIncluded } of rows) {
         const includesRecording =
             !agenda.recordingItemId ||
-            scope.kind !== "personal" ||
-            anchorOwnerId === scope.userId;
+            anchorOwnerId === ownerId ||
+            anchorIncluded;
         const [[item], points, tasks, folders, sources] = await Promise.all([
             agenda.meetingItemId
                 ? db
@@ -170,7 +183,11 @@ export async function collectArchivedMeetings(
                 .orderBy(asc(agendaTasks.position)),
             agenda.meetingItemId
                 ? db
-                      .select({ id: recordingFolderAssignments.folderId })
+                      .select({
+                          id: recordingFolderAssignments.folderId,
+                          withheld: recordingFolderAssignments.withheld,
+                          releasedAt: recordingFolderAssignments.releasedAt,
+                      })
                       .from(recordingFolderAssignments)
                       .innerJoin(
                           recordingFolders,
@@ -189,6 +206,13 @@ export async function collectArchivedMeetings(
                                   recordingFolderAssignments.userId,
                                   agenda.userId,
                               ),
+                              scope.kind === "organization" &&
+                                  agenda.userId !== scope.orgUserId
+                                  ? eq(
+                                        recordingFolderAssignments.withheld,
+                                        false,
+                                    )
+                                  : undefined,
                               eq(
                                   recordingFolders.userId,
                                   scope.kind === "personal"
@@ -245,6 +269,11 @@ export async function collectArchivedMeetings(
                 : null,
             title: item ? decryptText(item.title) : "Meeting",
             folderIds: folders.map((folder) => folder.id),
+            folderPlacements: folders.map((folder) => ({
+                folderId: folder.id,
+                withheld: folder.withheld,
+                releasedAt: folder.releasedAt?.toISOString() ?? null,
+            })),
             plannedStart: agenda.plannedStart?.toISOString() ?? null,
             plannedEnd: agenda.plannedEnd?.toISOString() ?? null,
             liveStartedAt: agenda.liveStartedAt?.toISOString() ?? null,

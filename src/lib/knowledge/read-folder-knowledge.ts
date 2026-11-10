@@ -5,6 +5,7 @@ import {
     folderKnowledgeFacts,
     folderKnowledgeRecords,
 } from "@/db/queries/folder-knowledge";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { resolveReadableFolder } from "@/lib/folders/folders";
@@ -43,12 +44,14 @@ export async function readFolderKnowledge(
     if (!target)
         throw new AppError(ErrorCode.NOT_FOUND, "Folder not found", 404);
     const { folder } = target;
-    const shared = target.scope === "org";
+    const shared = target.scope === "org" && !folder.restrictedAt;
     const scope: FolderKnowledgeScope = {
         folderId,
         ownerId: folder.userId,
         viewerId,
         shared,
+        restricted: !!folder.restrictedAt,
+        isCurator: await userCuratesOrganizationNow(viewerId),
         allOwnedItems: !shared && folder.kind === "private",
         scopes: readableScopes(
             { kind: "recording", ownerUserId: viewerId, shared },

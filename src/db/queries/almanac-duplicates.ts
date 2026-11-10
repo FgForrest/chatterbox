@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import type { DuplicateKind } from "@/lib/knowledge/duplicate-score";
+import { sharedItemCondition } from "@/lib/sharing/shared";
 
 /** Organization aliases and addresses, bounded per record before decryption. */
 export async function duplicateForms(
@@ -59,8 +60,7 @@ export async function duplicateEvidence(
             join chatter_items i on i.id = t.recording_id
             where ${kind} = 'person' and s.person_id = any(${sql.param(ids)}::text[]) and s.status = 'confirmed'
                 and s.user_id in (${scope}, t.user_id) and i.deleted_at is null
-                and exists (select 1 from recording_folder_assignments a join recording_folders f on f.id = a.folder_id
-                    where a.recording_id = i.id and f.user_id = ${scope})
+                and ${sharedItemCondition(scope, sql`i.id`)}
         ) select id, count(*)::integer as count from evidence group by id
     `);
 }
@@ -111,8 +111,7 @@ export async function duplicatePairSignals(
             where a.person_id = p.l and a.status = 'confirmed' and b.status = 'confirmed'
                 and a.user_id in (${scope}, t.user_id) and b.user_id in (${scope}, t.user_id)
                 and i.deleted_at is null
-                and exists (select 1 from recording_folder_assignments fa join recording_folders f on f.id = fa.folder_id
-                    where fa.recording_id = i.id and f.user_id = ${scope})
+                and ${sharedItemCondition(scope, sql`i.id`)}
         )
     `)
             : [];

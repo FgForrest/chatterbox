@@ -18,6 +18,8 @@ import {
     mailAddresses,
     mailDeliveryLog,
     mailMessages,
+    recordingFolders,
+    restrictedFolderMembers,
     users,
 } from "@/db/schema";
 import { encryptText } from "@/lib/encryption/fields";
@@ -129,10 +131,37 @@ async function resolveRecipient(
     const logUserId = address.namespaceUserId;
     if (address.status === "paused") return { ...none, logUserId };
     if (address.kind === "folder" && (await isOrgAccount(logUserId))) {
+        const [folder] = address.folderId
+            ? await db
+                  .select({
+                      restrictedAt: recordingFolders.restrictedAt,
+                      restrictingAt: recordingFolders.restrictingAt,
+                  })
+                  .from(recordingFolders)
+                  .where(eq(recordingFolders.id, address.folderId))
+            : [];
+        const audience =
+            (folder?.restrictedAt || folder?.restrictingAt) && address.folderId
+                ? await db
+                      .select({ userId: restrictedFolderMembers.userId })
+                      .from(restrictedFolderMembers)
+                      .where(
+                          eq(
+                              restrictedFolderMembers.folderId,
+                              address.folderId,
+                          ),
+                      )
+                : null;
         return {
             recipient,
             address,
-            target: { kind: "organization", address: recipient },
+            target: {
+                kind: "organization",
+                address: recipient,
+                ...(audience
+                    ? { audienceUserIds: audience.map((row) => row.userId) }
+                    : {}),
+            },
             logUserId: null,
         };
     }

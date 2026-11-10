@@ -680,26 +680,45 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
         });
         await locked;
 
-        const sharing = executeIntendedSharesWithOutcome(ALICE, itemId);
-        for (;;) {
-            const [waiting] = await database.sql<{ waiting: number }[]>`
+        const waiting = async () => {
+            if (!database) throw new Error("test database was not initialized");
+            const [row] = await database.sql<{ waiting: number }[]>`
                 select count(*)::int as waiting
                 from pg_locks
                 where locktype = 'advisory' and not granted
+                  and objid = (hashtext('riffado:org-tree')::bigint & 4294967295)
+                  and database = (select oid from pg_database where datname = current_database())
             `;
-            if ((waiting?.waiting ?? 0) > 0) break;
-            await new Promise((resolve) => setTimeout(resolve, 5));
+            return row?.waiting ?? 0;
+        };
+        const cancellation = cancelIntendedPlacement(
+            ALICE,
+            itemId,
+            orgFolderId,
+        );
+        let sharing:
+            | ReturnType<typeof executeIntendedSharesWithOutcome>
+            | undefined;
+        try {
+            await expect.poll(waiting).toBe(1);
+            sharing = executeIntendedSharesWithOutcome(ALICE, itemId);
+            await expect.poll(waiting).toBe(2);
+            releaseTreeLock();
+            await Promise.all([blocker, cancellation]);
+            await expect(sharing).resolves.toMatchObject({
+                shared: false,
+                remaining: false,
+            });
+            expect(await assignments(itemId)).toEqual([]);
+            expect(await intents(itemId)).toEqual([]);
+        } finally {
+            releaseTreeLock();
+            await Promise.allSettled([
+                blocker,
+                cancellation,
+                ...(sharing ? [sharing] : []),
+            ]);
         }
-        await cancelIntendedPlacement(ALICE, itemId, orgFolderId);
-        releaseTreeLock();
-        await blocker;
-
-        await expect(sharing).resolves.toMatchObject({
-            shared: false,
-            remaining: false,
-        });
-        expect(await assignments(itemId)).toEqual([]);
-        expect(await intents(itemId)).toEqual([]);
     });
 
     it("leaves intents waiting while the Organization is read-only", async () => {

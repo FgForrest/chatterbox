@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { meetingVisibility } from "@/db/queries/meetings";
+import { agendaInputItemCondition } from "@/db/queries/restricted-agenda-sources";
 import {
     ANY_TASK_ITEM,
     type TaskViewer,
@@ -27,22 +28,32 @@ export function hasVisibleAgendaSources(
 export async function loadAgendaSourceVisibility(
     viewer: TaskViewer,
     sources: readonly AgendaSources[],
+    agendaItemId?: string,
+    executor: Pick<typeof db, "select"> = db,
 ) {
     const itemIds = [...new Set(sources.flatMap((row) => row?.itemIds ?? []))];
     const taskIds = [...new Set(sources.flatMap((row) => row?.taskIds ?? []))];
     const rows =
         itemIds.length || taskIds.length
-            ? await db
+            ? await executor
                   .select({ kind: sql<string>`'item'`, id: chatterItems.id })
                   .from(chatterItems)
                   .where(
                       and(
                           inArray(chatterItems.id, itemIds),
-                          meetingVisibility(viewer.userId, viewer.orgUserId),
+                          meetingVisibility(
+                              viewer.userId,
+                              viewer.orgUserId,
+                              chatterItems,
+                              viewer.isCurator,
+                          ),
+                          agendaItemId
+                              ? agendaInputItemCondition(agendaItemId)
+                              : undefined,
                       ),
                   )
                   .unionAll(
-                      db
+                      executor
                           .select({
                               kind: sql<string>`'task'`,
                               id: recordingTasks.id,
@@ -59,6 +70,9 @@ export async function loadAgendaSourceVisibility(
                                   isNull(chatterItems.deletedAt),
                                   sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
                                   taskVisible(viewer, ANY_TASK_ITEM, true),
+                                  agendaItemId
+                                      ? agendaInputItemCondition(agendaItemId)
+                                      : undefined,
                               ),
                           ),
                   )

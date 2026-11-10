@@ -14,6 +14,8 @@ export const POST = apiHandler(async (request: Request) => {
     const body = (await request.json().catch(() => null)) as {
         name?: unknown;
         parentId?: unknown;
+        restricted?: unknown;
+        audienceUserIds?: unknown;
     } | null;
     if (typeof body?.name !== "string" || typeof body.parentId !== "string") {
         throw new AppError(
@@ -23,10 +25,24 @@ export const POST = apiHandler(async (request: Request) => {
         );
     }
 
+    if (
+        (body.restricted !== undefined &&
+            typeof body.restricted !== "boolean") ||
+        (body.audienceUserIds !== undefined &&
+            (!Array.isArray(body.audienceUserIds) ||
+                body.audienceUserIds.some((id) => typeof id !== "string")))
+    )
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            ErrorCode.INVALID_INPUT,
+            400,
+        );
     const folder = await createFolder({
         userId: session.user.id,
         name: body.name,
         parentId: body.parentId,
+        restricted: body.restricted === true,
+        audienceUserIds: body.audienceUserIds as string[] | undefined,
         canCurate: await actsForOrganization(actor),
     });
     return NextResponse.json({ folder }, { status: 201 });

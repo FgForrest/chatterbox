@@ -7,6 +7,7 @@ import {
     itemShares,
     recordingFolderAssignments,
     recordingFolders,
+    restrictedFolderMembers,
     users,
 } from "@/db/schema";
 
@@ -23,7 +24,12 @@ export async function meetingItemAudienceInTx(
     orgUserId: string | null,
 ): Promise<Audience> {
     const folders = await tx
-        .select({ id: recordingFolders.id, userId: recordingFolders.userId })
+        .select({
+            id: recordingFolders.id,
+            userId: recordingFolders.userId,
+            restrictedAt: recordingFolders.restrictedAt,
+            withheld: recordingFolderAssignments.withheld,
+        })
         .from(recordingFolderAssignments)
         .innerJoin(
             recordingFolders,
@@ -83,11 +89,31 @@ export async function meetingItemAudienceInTx(
                 ),
             ),
     ]);
+    const restricted = folders.filter(
+        (folder) => folder.withheld || folder.restrictedAt,
+    );
+    const audience = restricted.length
+        ? await tx
+              .select({ userId: restrictedFolderMembers.userId })
+              .from(restrictedFolderMembers)
+              .where(
+                  inArray(
+                      restrictedFolderMembers.folderId,
+                      restricted.map((folder) => folder.id),
+                  ),
+              )
+        : [];
     return {
-        organization: folders.some((folder) => folder.userId === orgUserId),
+        organization: folders.some(
+            (folder) =>
+                folder.userId === orgUserId &&
+                !folder.withheld &&
+                !folder.restrictedAt,
+        ),
         userIds: new Set([
             ownerUserId,
             ...folders.map((folder) => folder.userId),
+            ...audience.map((member) => member.userId),
             ...receivers.map((receiver) => receiver.userId),
             ...direct.map((receiver) => receiver.userId),
         ]),

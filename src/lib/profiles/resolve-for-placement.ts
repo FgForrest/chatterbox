@@ -1,10 +1,12 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
+import { restrictedFolderVisibleCondition } from "@/db/queries/restricted-folders";
 import {
     folderDefaultProfiles,
     itemProcessing,
     recordingFolders,
 } from "@/db/schema";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
 import { ensureProfiles } from "@/lib/profiles/seed";
 import type { ProfileChannel } from "@/lib/profiles/settings";
@@ -47,20 +49,23 @@ type ProfileReader = Pick<typeof db, "select">;
 
 async function organizationUserIdOr(
     known: string | null | undefined,
+    executor?: ProfileReader,
 ): Promise<string | null> {
-    return known !== undefined ? known : await getOrgUserId();
+    return known !== undefined ? known : await getOrgUserId(executor);
 }
 
 interface FolderContext {
     id: string;
     ownerUserId: string;
     parentId: string | null;
+    restrictedAt: Date | null;
 }
 
 async function accessibleFolder(
     folderId: string,
     allowedOwnerUserIds: readonly string[],
     executor: ProfileReader = db,
+    actorUserId?: string,
 ): Promise<FolderContext | null> {
     if (allowedOwnerUserIds.length === 0) return null;
     const [folder] = await executor
@@ -68,6 +73,7 @@ async function accessibleFolder(
             id: recordingFolders.id,
             ownerUserId: recordingFolders.userId,
             parentId: recordingFolders.parentId,
+            restrictedAt: recordingFolders.restrictedAt,
         })
         .from(recordingFolders)
         .where(
@@ -77,6 +83,25 @@ async function accessibleFolder(
             ),
         )
         .limit(1);
+    if (folder?.restrictedAt && actorUserId) {
+        const [visible] = await executor
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(
+                and(
+                    eq(recordingFolders.id, folderId),
+                    restrictedFolderVisibleCondition({
+                        userId: actorUserId,
+                        isCurator:
+                            executor === db
+                                ? await userCuratesOrganizationNow(actorUserId)
+                                : false,
+                    }),
+                ),
+            )
+            .limit(1);
+        if (!visible) return null;
+    }
     return folder ?? null;
 }
 
@@ -151,11 +176,13 @@ export async function folderDefaultProfileDetails(input: {
 }): Promise<FolderDefaultProfileDetails | null> {
     const organizationUserId = await organizationUserIdOr(
         input.organizationUserId,
+        input.executor,
     );
     const folder = await accessibleFolder(
         input.folderId,
         [input.folderOwnerUserId],
         input.executor,
+        input.actorUserId,
     );
     if (!folder) return null;
     if (folder.parentId === null) {
@@ -256,6 +283,7 @@ async function usableProfiles(
     if (seedProfiles) await ensureProfiles(ownerUserId);
     const organizationUserId = await organizationUserIdOr(
         organizationUserIdOverride,
+        executor,
     );
     if (
         organizationUserId &&
@@ -296,6 +324,7 @@ async function organizationItemProfile(input: {
 }): Promise<ProfileRecord | null> {
     const organizationUserId = await organizationUserIdOr(
         input.organizationUserId,
+        input.executor,
     );
     if (!organizationUserId) return null;
     for (const view of ["org", "private"] as const) {
@@ -337,6 +366,7 @@ async function defaultsForPlacements(input: {
 }): Promise<FolderDefaultOutcome[]> {
     const organizationUserId = await organizationUserIdOr(
         input.organizationUserId,
+        input.executor,
     );
     const allowedOwners =
         input.view === "org"
@@ -356,8 +386,9 @@ async function defaultsForPlacements(input: {
                 folderId,
                 allowedOwners,
                 input.executor,
+                input.ownerUserId,
             );
-            if (!folder) return null;
+            if (!folder || folder.restrictedAt) return null;
             const details = await folderDefaultProfileDetails({
                 folderId,
                 folderOwnerUserId: folder.ownerUserId,
@@ -429,9 +460,19 @@ export async function resolveChannelDefaultProfile(input: {
     executor?: ProfileReader;
     organizationUserId?: string | null;
 }): Promise<ProfileRecord | null> {
+    input = {
+        ...input,
+        organizationUserId: await organizationUserIdOr(
+            input.organizationUserId,
+            input.executor,
+        ),
+    };
     const profileOwnerUserId =
         input.view === "org"
-            ? await organizationUserIdOr(input.organizationUserId)
+            ? await organizationUserIdOr(
+                  input.organizationUserId,
+                  input.executor,
+              )
             : input.ownerUserId;
     if (!profileOwnerUserId) return null;
     return accountDefaultProfile({
@@ -467,6 +508,13 @@ export async function resolveProfileForPlacements(input: {
     organizationUserId?: string | null;
     ignoreItemAssignment?: boolean;
 }): Promise<PlacementProfileResolution> {
+    input = {
+        ...input,
+        organizationUserId: await organizationUserIdOr(
+            input.organizationUserId,
+            input.executor,
+        ),
+    };
     const seedProfiles = input.seedProfiles ?? true;
     if (input.view === "org" && !input.ignoreItemAssignment) {
         const itemProfile = await organizationItemProfile(input);

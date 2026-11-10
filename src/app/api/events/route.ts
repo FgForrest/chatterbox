@@ -1,6 +1,7 @@
 import { requireApiSession } from "@/lib/auth-server";
 import { apiHandler } from "@/lib/errors";
 import { subscribePersonalEvents } from "@/lib/events/personal";
+import { mayReceiveOrganizationEvent } from "@/lib/events/visibility";
 import { getOrgUserId } from "@/lib/org/config";
 import { type OrgEvent, subscribeOrgEvents } from "@/lib/org/events";
 
@@ -29,7 +30,14 @@ export const GET = apiHandler(async (request: Request) => {
             };
             const unsubscribeOrg = hasOrg
                 ? subscribeOrgEvents((event: OrgEvent) => {
-                      write(`data: ${JSON.stringify(event)}\n\n`);
+                      void mayReceiveOrganizationEvent(session.user.id, event)
+                          .then((allowed) => {
+                              if (allowed)
+                                  write(
+                                      `data: ${JSON.stringify(event.type === "tree" ? { type: "tree" } : event)}\n\n`,
+                                  );
+                          })
+                          .catch(() => {});
                   })
                 : () => {};
             const unsubscribePersonal = subscribePersonalEvents(

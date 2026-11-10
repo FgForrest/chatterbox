@@ -1,3 +1,4 @@
+import { AppError, ErrorCode } from "@/lib/errors";
 import {
     GoogleApiError,
     GoogleConnectionUnavailableError,
@@ -12,6 +13,11 @@ import { ExportPathTakenError } from "./filesystem-provider";
  * for the user: reconnecting, editing or synchronizing plans it again.
  */
 export function isExportErrorRetryable(error: unknown): boolean {
+    if (
+        error instanceof AppError &&
+        error.code === ErrorCode.EXPORT_REVOCATION_PENDING
+    )
+        return true;
     if (
         error instanceof GoogleConnectionUnavailableError ||
         error instanceof DriveTargetLostError ||

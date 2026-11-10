@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/db";
+import { recordWithheldPlacementInTx } from "@/db/queries/withheld-placement";
 import {
     chatterItems,
     mailContents,
@@ -32,7 +33,9 @@ import type { ParsedMessage } from "@/lib/mail/parse";
 import type { MessageFacts } from "@/lib/mail/policy";
 import { deleteRawMail, storeRawMail } from "@/lib/mail/raw-storage";
 import { MAIL_PARSER_VERSION, segmentMail } from "@/lib/mail/segment";
+import { getOrgUserId } from "@/lib/org/config";
 import {
+    lockArrivalOrganizationTree,
     requestArrivalInTx,
     resolveArrivalProfile,
 } from "@/lib/pipeline/arrival";
@@ -103,17 +106,27 @@ async function fileInTx(
         }
     }
     const pending = [...new Set(delivery.pendingShareFolderIds)];
-    if (pending.length > 0) {
-        await tx
-            .insert(mailPendingShares)
-            .values(
-                pending.map((folderId) => ({
-                    itemId,
-                    userId: delivery.ownerUserId,
-                    folderId,
-                })),
-            )
-            .onConflictDoNothing();
+    for (const folderId of pending) {
+        const [folder] = await tx
+            .select({
+                restrictedAt: recordingFolders.restrictedAt,
+                restrictingAt: recordingFolders.restrictingAt,
+            })
+            .from(recordingFolders)
+            .where(eq(recordingFolders.id, folderId));
+        if (!folder) continue;
+        if (folder.restrictedAt || folder.restrictingAt)
+            await recordWithheldPlacementInTx(
+                tx,
+                delivery.ownerUserId,
+                itemId,
+                folderId,
+            );
+        else
+            await tx
+                .insert(mailPendingShares)
+                .values({ userId: delivery.ownerUserId, itemId, folderId })
+                .onConflictDoNothing();
     }
 }
 
@@ -175,9 +188,26 @@ export async function storeMailForOwner(input: {
     const { delivery, parsed, receivedAt } = input;
     const owner = delivery.ownerUserId;
     const rawHash = rawMessageHash(owner, input.raw);
+    const orgUserId = await getOrgUserId();
+    const targets = [...delivery.folderIds, ...delivery.pendingShareFolderIds];
+    const [organizationFolder] =
+        orgUserId && targets.length
+            ? await db
+                  .select({ id: recordingFolders.id })
+                  .from(recordingFolders)
+                  .where(
+                      and(
+                          inArray(recordingFolders.id, targets),
+                          eq(recordingFolders.userId, orgUserId),
+                      ),
+                  )
+                  .limit(1)
+            : [];
+    const touchesOrganization = Boolean(organizationFolder);
 
     const merge = async (itemId: string) => {
         const advance = await db.transaction(async (tx) => {
+            await lockArrivalOrganizationTree(tx, touchesOrganization);
             await fileInTx(tx, delivery, itemId);
             await logAcceptedInTx(
                 tx,
@@ -240,6 +270,7 @@ export async function storeMailForOwner(input: {
     });
     try {
         const advance = await db.transaction(async (tx) => {
+            await lockArrivalOrganizationTree(tx, touchesOrganization);
             await tx.insert(chatterItems).values({
                 id: itemId,
                 userId: owner,

@@ -181,6 +181,7 @@ import {
     refreshMeetingFolderContext,
 } from "@/lib/meetings/service";
 import { requestArrivalInTx } from "@/lib/pipeline/arrival";
+import { resolveArrivalOrganizationContext } from "@/lib/pipeline/arrival-context";
 import { requestAdvance } from "@/lib/pipeline/trigger";
 import {
     createRecordingSession,
@@ -1027,10 +1028,15 @@ suite("meeting planning server (PostgreSQL)", () => {
                     eq(recordings.userId, "other"),
                 ),
             );
+        const organizationContext = await resolveArrivalOrganizationContext({
+            userId: "other",
+            fileId: "meeting-capture",
+        });
         await db.transaction((tx) =>
             requestArrivalInTx(tx, {
                 userId: "other",
                 itemId: "session-recording",
+                ...organizationContext,
             }),
         );
         expect(
@@ -1041,6 +1047,7 @@ suite("meeting planning server (PostgreSQL)", () => {
             requestArrivalInTx(tx, {
                 userId: "other",
                 itemId: "session-recording",
+                ...organizationContext,
             }),
         );
     });

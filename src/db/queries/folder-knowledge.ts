@@ -10,6 +10,8 @@ export interface FolderKnowledgeScope {
     ownerId: string;
     viewerId: string;
     shared: boolean;
+    isCurator?: boolean;
+    restricted?: boolean;
     allOwnedItems: boolean;
     scopes: string[];
     legacyRecordsByRun?: Record<string, RecordTarget[]>;
@@ -24,6 +26,7 @@ function folderItems(input: FolderKnowledgeScope) {
             where assignment.recording_id = ${input.itemId}
               and assignment.user_id = ${input.ownerId}
               and folder.user_id = any(${sql.param(input.scopes)}::text[])
+              and (not assignment.withheld or ${input.isCurator === true} or exists (select 1 from restricted_folder_members member where member.folder_id = folder.id and member.user_id = ${input.viewerId}))
         ), visible_items as (
             select item.id, item.user_id, item.title, item.occurred_at from chatter_items item
             where item.id = ${input.itemId} and item.user_id = ${input.ownerId}
@@ -42,16 +45,19 @@ function folderItems(input: FolderKnowledgeScope) {
             join recording_folder_assignments assignment on assignment.folder_id = folder.id
             join chatter_items item on item.id = assignment.recording_id and item.user_id = assignment.user_id
             where item.deleted_at is null and item.kind in ('audio', 'mail')
-              and (${input.shared} or assignment.user_id = ${input.viewerId})
+              and (${input.shared} or ${input.restricted === true} or assignment.user_id = ${input.viewerId})
+              and (not assignment.withheld or ${input.isCurator === true} or exists (select 1 from restricted_folder_members member where member.folder_id = folder.id and member.user_id = ${input.viewerId}))
         `;
     return sql`
         with recursive folders as (
             select id, parent_id, kind from recording_folders
             where id = ${input.folderId} and user_id = ${input.ownerId}
+              and (restricted_at is null or ${input.isCurator === true} or exists (select 1 from restricted_folder_members member where member.folder_id = recording_folders.id and member.user_id = ${input.viewerId}))
             union
             select child.id, child.parent_id, child.kind
             from recording_folders child join folders parent on child.parent_id = parent.id
             where child.user_id = ${input.ownerId}
+              and (child.restricted_at is null or ${input.isCurator === true} or exists (select 1 from restricted_folder_members member where member.folder_id = child.id and member.user_id = ${input.viewerId}))
         ), visible_items as (${items})
     `;
 }

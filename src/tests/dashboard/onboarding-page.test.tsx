@@ -7,6 +7,7 @@ import {
     itemShares,
     plaudConnections,
     recordings,
+    restrictedFolderAccessRequests,
     transcriptions,
 } from "@/db/schema";
 import { appChromeConfig } from "@/lib/settings/app-chrome";
@@ -52,6 +53,7 @@ vi.mock("@/lib/access/service", () => ({
 }));
 vi.mock("@/lib/authz/curator", () => ({
     actsForOrganization: async () => false,
+    userCuratesOrganizationNow: async () => false,
 }));
 vi.mock("@/lib/encryption/fields", () => ({
     decryptText: (value: string) => value,
@@ -189,6 +191,7 @@ describe("layout onboarding seed", () => {
                         aiEnhancements,
                         plaudConnections,
                         itemShares,
+                        restrictedFolderAccessRequests,
                     ]).toContain(table);
                     const query = Object.assign(Promise.resolve(rows), {
                         innerJoin: () => query,

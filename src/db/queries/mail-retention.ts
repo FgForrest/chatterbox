@@ -12,6 +12,10 @@ import {
 } from "drizzle-orm";
 import { db } from "@/db";
 import {
+    organizationGovernsRetention,
+    organizationRetentionCondition,
+} from "@/db/queries/organization-retention";
+import {
     type RetentionGovernor,
     retentionCutoff,
     validRetentionDays,
@@ -34,7 +38,6 @@ import {
     pruneUnsupportedFactsInTx,
 } from "@/lib/knowledge/fact-evidence";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
-import { isRecordingShared, sharedItemCondition } from "@/lib/sharing/shared";
 import { deleteItemTaskVectorsInTx } from "@/lib/tasks/mentions";
 import { dropTasksWithoutSummaryInTx } from "@/lib/tasks/store";
 
@@ -204,11 +207,17 @@ function mailReapWhere(
     if (parts.length === 0) return null;
     // A shared mail is the Organization's policy's; the owner's yields it.
     const governed = policy.isOrg
-        ? sharedItemCondition(policy.userId, chatterItems.id)
+        ? organizationRetentionCondition(policy.userId, chatterItems.id, now)
         : and(
               eq(chatterItems.userId, policy.userId),
               orgUserId
-                  ? not(sharedItemCondition(orgUserId, chatterItems.id))
+                  ? not(
+                        organizationRetentionCondition(
+                            orgUserId,
+                            chatterItems.id,
+                            now,
+                        ),
+                    )
                   : undefined,
           );
     return and(governed, isNull(chatterItems.deletedAt), or(...parts)) as SQL;
@@ -280,6 +289,7 @@ async function lockGovernedMailInTx(
     itemId: string,
     ownerUserId: string,
     governor: RetentionGovernor,
+    at: Date,
 ): Promise<boolean> {
     const [item] = await tx
         .select({ id: chatterItems.id })
@@ -295,8 +305,12 @@ async function lockGovernedMailInTx(
     if (!item) return false;
     if (!governor.orgUserId) return !governor.isOrg;
     return (
-        (await isRecordingShared(itemId, governor.orgUserId, tx)) ===
-        governor.isOrg
+        (await organizationGovernsRetention(
+            tx,
+            governor.orgUserId,
+            itemId,
+            at,
+        )) === governor.isOrg
     );
 }
 
@@ -312,7 +326,9 @@ export async function reapRawMailMessage(
     removeFile: (key: string) => Promise<void>,
 ): Promise<boolean> {
     return db.transaction(async (tx) => {
-        if (!(await lockGovernedMailInTx(tx, itemId, ownerUserId, governor))) {
+        if (
+            !(await lockGovernedMailInTx(tx, itemId, ownerUserId, governor, at))
+        ) {
             return false;
         }
         const [message] = await tx
@@ -352,7 +368,9 @@ export async function deleteMailContent(
     at: Date,
 ): Promise<boolean> {
     return db.transaction(async (tx) => {
-        if (!(await lockGovernedMailInTx(tx, itemId, ownerUserId, governor))) {
+        if (
+            !(await lockGovernedMailInTx(tx, itemId, ownerUserId, governor, at))
+        ) {
             return false;
         }
         const knowledge = await knowledgeOnRecordingInTx(tx, itemId);
@@ -411,7 +429,9 @@ export async function deleteMailSummaries(
     at: Date,
 ): Promise<number> {
     return db.transaction(async (tx) => {
-        if (!(await lockGovernedMailInTx(tx, itemId, ownerUserId, governor))) {
+        if (
+            !(await lockGovernedMailInTx(tx, itemId, ownerUserId, governor, at))
+        ) {
             return 0;
         }
         const rows = await tx

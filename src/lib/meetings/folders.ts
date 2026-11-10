@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { meetingFolderVisibility } from "@/db/queries/meeting-folder-visibility";
 import { receivedMeetingFolderNodes } from "@/db/queries/received-meeting-folders";
 import { recordingFolders } from "@/db/schema";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { decryptText } from "@/lib/encryption/fields";
 
 /** Batch the viewer's folder metadata and received aliases for detail, lists and reminder paths. */
@@ -9,6 +10,7 @@ export async function meetingFolderNavigation(
     userId: string,
     orgUserId: string | null,
 ) {
+    const isCurator = await userCuratesOrganizationNow(userId);
     const [folders, received] = await Promise.all([
         db
             .select({
@@ -18,7 +20,7 @@ export async function meetingFolderNavigation(
                 parentId: recordingFolders.parentId,
             })
             .from(recordingFolders)
-            .where(meetingFolderVisibility(userId, orgUserId)),
+            .where(meetingFolderVisibility(userId, orgUserId, isCurator)),
         receivedMeetingFolderNodes(db, userId),
     ]);
     const aliases = new Map(

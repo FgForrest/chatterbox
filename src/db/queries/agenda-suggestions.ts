@@ -16,6 +16,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import { loadAgendaSourceVisibility } from "@/db/queries/agenda-source-visibility";
 import { type MeetingTx, meetingVisibility } from "@/db/queries/meetings";
+import { agendaInputItemCondition } from "@/db/queries/restricted-agenda-sources";
 import {
     ANY_TASK_ITEM,
     type TaskViewer,
@@ -77,7 +78,17 @@ async function folderSuggestionInputs(
         )
         .where(
             and(
-                meetingVisibility(input.userId, input.orgUserId),
+                meetingVisibility(
+                    input.userId,
+                    input.orgUserId,
+                    chatterItems,
+                    input.viewer.isCurator,
+                ),
+                agendaInputItemCondition(
+                    input.agenda.meetingItemId ??
+                        input.agenda.recordingItemId ??
+                        "",
+                ),
                 ne(meetingAgendas.id, agenda.id),
                 or(
                     eq(meetingAgendas.state, "held"),
@@ -106,7 +117,17 @@ async function folderSuggestionInputs(
         .innerJoin(chatterItems, eq(chatterItems.id, recordings.id))
         .where(
             and(
-                meetingVisibility(input.userId, input.orgUserId),
+                meetingVisibility(
+                    input.userId,
+                    input.orgUserId,
+                    chatterItems,
+                    input.viewer.isCurator,
+                ),
+                agendaInputItemCondition(
+                    input.agenda.meetingItemId ??
+                        input.agenda.recordingItemId ??
+                        "",
+                ),
                 sql`${chatterItems.occurredAt} < ${(agenda.plannedStart ?? agenda.createdAt).toISOString()}::timestamp`,
                 agenda.calendarSeriesId
                     ? eq(recordings.calendarSeriesId, agenda.calendarSeriesId)
@@ -157,7 +178,17 @@ async function folderSuggestionInputs(
                 and(
                     eq(recordingFolderAssignments.folderId, input.folderId),
                     gt(recordingFolderAssignments.createdAt, since),
-                    meetingVisibility(input.userId, input.orgUserId),
+                    meetingVisibility(
+                        input.userId,
+                        input.orgUserId,
+                        chatterItems,
+                        input.viewer.isCurator,
+                    ),
+                    agendaInputItemCondition(
+                        input.agenda.meetingItemId ??
+                            input.agenda.recordingItemId ??
+                            "",
+                    ),
                     inArray(chatterItems.kind, ["audio", "mail"]),
                     isNull(chatterItems.summaryReapedAt),
                     isNotNull(aiEnhancements.summary),
@@ -187,6 +218,11 @@ async function folderSuggestionInputs(
                     isNull(chatterItems.deletedAt),
                     sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
                     taskVisible(input.viewer, ANY_TASK_ITEM, true),
+                    agendaInputItemCondition(
+                        input.agenda.meetingItemId ??
+                            input.agenda.recordingItemId ??
+                            "",
+                    ),
                     sql`exists (select 1 from ${recordingFolderAssignments} where ${recordingFolderAssignments.folderId} = ${input.folderId} and (${recordingFolderAssignments.itemId} = ${recordingTasks.itemId} or exists (select 1 from ${taskMentions} inner join ${chatterItems} as agenda_mention_item on ${mentionItem.id} = ${taskMentions.itemId} where ${taskMentions.taskId} = ${recordingTasks.id} and ${taskMentions.itemId} = ${recordingFolderAssignments.itemId} and ${taskMentions.matchDecision} in ('home', 'accepted', 'kept_new') and ${taskMentionVisible(input.viewer, { itemId: taskMentions.itemId, userId: taskMentions.userId, view: taskMentions.view }, { id: mentionItem.id, userId: mentionItem.userId, deletedAt: mentionItem.deletedAt })})))`,
                 ),
             )
@@ -275,7 +311,17 @@ export async function agendaSuggestionInputs(input: {
                       .where(
                           and(
                               inArray(recordings.id, sourceItemIds),
-                              meetingVisibility(input.userId, input.orgUserId),
+                              meetingVisibility(
+                                  input.userId,
+                                  input.orgUserId,
+                                  chatterItems,
+                                  input.viewer.isCurator,
+                              ),
+                              agendaInputItemCondition(
+                                  input.agenda.meetingItemId ??
+                                      input.agenda.recordingItemId ??
+                                      "",
+                              ),
                           ),
                       )
                 : [];
@@ -301,10 +347,14 @@ export async function agendaSuggestionInputs(input: {
         },
         { isolationLevel: "repeatable read", accessMode: "read only" },
     );
-    const visibleSources = await loadAgendaSourceVisibility(input.viewer, [
-        ...snapshot.points.map((point) => point.sources),
-        ...snapshot.suggestions.map((suggestion) => suggestion.sources),
-    ]);
+    const visibleSources = await loadAgendaSourceVisibility(
+        input.viewer,
+        [
+            ...snapshot.points.map((point) => point.sources),
+            ...snapshot.suggestions.map((suggestion) => suggestion.sources),
+        ],
+        input.agenda.meetingItemId ?? input.agenda.recordingItemId ?? "",
+    );
     return {
         ...snapshot,
         points: snapshot.points.filter((point) =>

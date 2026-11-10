@@ -13,9 +13,9 @@ import {
     recordings,
     transcriptCorrectionPasses,
     transcriptions,
-    users,
 } from "@/db/schema";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
+import { recordingSharedCondition } from "@/lib/knowledge/org-people";
 import { LEARN_CORRECT_JOB_KIND } from "@/lib/learn/correction-pass-queue";
 import { learnRunCurrentScope, learnRunOpen } from "@/lib/learn/learn-open";
 import { staleReadingFingerprint } from "@/lib/learn/summary-refresh";
@@ -66,32 +66,17 @@ async function providerAvailable(
 
 async function readShared(itemId: string, userId: string): Promise<boolean> {
     const [row] = await db
-        .select({ itemId: recordingFolderAssignments.itemId })
-        .from(recordingFolderAssignments)
-        .innerJoin(
-            chatterItems,
-            and(
-                eq(chatterItems.id, recordingFolderAssignments.itemId),
-                eq(chatterItems.userId, userId),
-            ),
-        )
-        .innerJoin(
-            recordingFolders,
-            eq(recordingFolders.id, recordingFolderAssignments.folderId),
-        )
-        .innerJoin(
-            users,
-            and(eq(users.id, recordingFolders.userId), eq(users.role, "org")),
-        )
+        .select({ id: chatterItems.id })
+        .from(chatterItems)
         .where(
             and(
-                eq(recordingFolderAssignments.itemId, itemId),
-                eq(recordingFolderAssignments.userId, userId),
+                eq(chatterItems.id, itemId),
                 eq(chatterItems.userId, userId),
+                recordingSharedCondition(chatterItems.id),
             ),
         )
         .limit(1);
-    return row !== undefined;
+    return !!row;
 }
 
 /** Read the durable, owner-scoped facts consumed by the Stage 1 planner. */

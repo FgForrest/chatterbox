@@ -1,4 +1,4 @@
-import { sqlClient } from "@/db";
+import { withFolderExportLocks } from "@/db/queries/folder-export-locks";
 
 /**
  * Runs `work` under an advisory lock on one export configuration.
@@ -19,25 +19,13 @@ export async function withExportLock<T>(
     mode: "exclusive" | "shared",
     work: () => Promise<T>,
 ): Promise<T> {
-    if (!sqlClient) return work();
-    const key = `folder_export:${exportId}`;
-    const connection = await sqlClient.reserve();
-    try {
-        if (mode === "exclusive") {
-            await connection`select pg_advisory_lock(hashtextextended(${key}, 0))`;
-        } else {
-            await connection`select pg_advisory_lock_shared(hashtextextended(${key}, 0))`;
-        }
-        try {
-            return await work();
-        } finally {
-            if (mode === "exclusive") {
-                await connection`select pg_advisory_unlock(hashtextextended(${key}, 0))`;
-            } else {
-                await connection`select pg_advisory_unlock_shared(hashtextextended(${key}, 0))`;
-            }
-        }
-    } finally {
-        connection.release();
-    }
+    return withFolderExportLocks([exportId], mode, work);
+}
+
+/** Hold several export locks on one connection so large subtree deletion cannot exhaust the pool. */
+export async function withExportLocks<T>(
+    exportIds: string[],
+    work: () => Promise<T>,
+): Promise<T> {
+    return withFolderExportLocks(exportIds, "exclusive", work);
 }

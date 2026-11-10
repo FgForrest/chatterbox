@@ -31,8 +31,10 @@ export function isOrgScopeEnabled(): boolean {
     );
 }
 
-async function selectOrgAccountId(): Promise<string | null> {
-    const [row] = await db
+async function selectOrgAccountId(
+    executor: Pick<typeof db, "select"> = db,
+): Promise<string | null> {
+    const [row] = await executor
         .select({ id: users.id })
         .from(users)
         .where(sql`${users.role} = 'org'`)
@@ -44,10 +46,14 @@ async function selectOrgAccountId(): Promise<string | null> {
  * Id of the organization account, or null when the scope is not visible or
  * no account was ever created. Resolved by role, so it outlives its env vars.
  */
-export const getOrgUserId = cache(async (): Promise<string | null> => {
-    if (!isOrgScopeVisible()) return null;
-    return selectOrgAccountId();
-});
+export const getOrgUserId = cache(
+    async (
+        executor: Pick<typeof db, "select"> = db,
+    ): Promise<string | null> => {
+        if (!isOrgScopeVisible()) return null;
+        return selectOrgAccountId(executor);
+    },
+);
 
 /**
  * Id of the organization account whatever the deployment mode.
@@ -78,14 +84,19 @@ export function assertOrgScopeWritable(): void {
  * Checked by role, not by whether the scope is enabled: an org account left
  * behind by removed env vars must still never gain a private scope.
  */
-export const isOrgAccount = cache(async (userId: string): Promise<boolean> => {
-    const [row] = await db
-        .select({ role: users.role })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
-    return row?.role === "org";
-});
+export const isOrgAccount = cache(
+    async (
+        userId: string,
+        executor: Pick<typeof db, "select"> = db,
+    ): Promise<boolean> => {
+        const [row] = await executor
+            .select({ role: users.role })
+            .from(users)
+            .where(eq(users.id, userId))
+            .limit(1);
+        return row?.role === "org";
+    },
+);
 
 /** How long a refusal stays unreported after one for the same account and surface. */
 export const RECORDER_REFUSAL_REPORT_WINDOW_MS = 10 * 60 * 1000;

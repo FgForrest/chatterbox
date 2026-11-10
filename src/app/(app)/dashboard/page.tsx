@@ -17,10 +17,14 @@ import {
     users,
 } from "@/db/schema";
 import { getSessionActor, requireAuth } from "@/lib/auth-server";
-import { actsForOrganization } from "@/lib/authz/curator";
+import {
+    actsForOrganization,
+    userCuratesOrganizationNow,
+} from "@/lib/authz/curator";
 import { decryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { exportProvidersAvailability } from "@/lib/folder-exports/configurations";
+import { listMyRestrictedAccessInvitations } from "@/lib/folders/access-requests";
 import { listFolderOrganization } from "@/lib/folders/folders";
 import { organizationForDeployment } from "@/lib/folders/hierarchy";
 import { confirmedOverlays } from "@/lib/learn/llm-input";
@@ -136,6 +140,7 @@ async function loadOrganizationLibrary(
     reviewIds: ReadonlySet<string> = new Set(),
     received = false,
 ) {
+    const isCurator = await userCuratesOrganizationNow(viewerId);
     const rows = await db
         .select({
             id: recordings.id,
@@ -161,7 +166,7 @@ async function loadOrganizationLibrary(
             and(
                 isNull(recordings.deletedAt),
                 received
-                    ? receivedItemCondition(viewerId, recordings.id)
+                    ? receivedItemCondition(viewerId, recordings.id, isCurator)
                     : sharedRecordingCondition(orgUserId),
             ),
         )
@@ -181,7 +186,11 @@ async function loadOrganizationLibrary(
                 and(
                     isNull(recordings.deletedAt),
                     received
-                        ? receivedItemCondition(viewerId, recordings.id)
+                        ? receivedItemCondition(
+                              viewerId,
+                              recordings.id,
+                              isCurator,
+                          )
                         : sharedRecordingCondition(orgUserId),
                 ),
             )
@@ -201,7 +210,11 @@ async function loadOrganizationLibrary(
                     isNotNull(aiEnhancements.summary),
                     isNull(recordings.deletedAt),
                     received
-                        ? receivedItemCondition(viewerId, recordings.id)
+                        ? receivedItemCondition(
+                              viewerId,
+                              recordings.id,
+                              isCurator,
+                          )
                         : sharedRecordingCondition(orgUserId),
                 ),
             ),
@@ -421,7 +434,7 @@ export default async function DashboardPage() {
         : null;
 
     const personSharingEnabled = isOrgScopeVisible() && !viewerIsOrgAccount;
-    const [receivedLibrary, invitations, receivedShares] = personSharingEnabled
+    const [receivedLibrary, invitations, receivedShares] = isOrgScopeVisible()
         ? await Promise.all([
               loadOrganizationLibrary(
                   session.user.id,
@@ -430,10 +443,13 @@ export default async function DashboardPage() {
                   new Set(),
                   true,
               ),
-              Promise.all([
-                  listMyInvitations(session.user.id),
-                  listMyFolderInvitations(session.user.id),
-              ]).then((lists) => lists.flat()),
+              personSharingEnabled
+                  ? Promise.all([
+                        listMyInvitations(session.user.id),
+                        listMyFolderInvitations(session.user.id),
+                        listMyRestrictedAccessInvitations(session.user.id),
+                    ]).then((lists) => lists.flat())
+                  : Promise.resolve([]),
               db
                   .select({
                       id: itemShares.id,

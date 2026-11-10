@@ -24,7 +24,7 @@ export async function mayUseOrganizationProfiles(
     if (!isIdpAuthorization()) return true;
     const access = await (options.readOnly && options.readOnlyAccess
         ? options.readOnlyAccess()
-        : holderAccess(userId, options));
+        : holderAccess(userId, { ...options, verify: !options.executor }));
     return access.ok && access.capabilities.has("use");
 }
 

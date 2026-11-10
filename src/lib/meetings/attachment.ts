@@ -259,6 +259,8 @@ async function absorbInTx(
     orgUserId: string | null,
     explicit: boolean,
     arriving = false,
+    canCurate = false,
+    organizationTreeLocked = true,
 ) {
     await ownedRecording(tx, userId, recordingItemId);
     const row = await findMeeting(userId, orgUserId, agendaId, tx, true);
@@ -285,6 +287,17 @@ async function absorbInTx(
         agenda.meetingItemId,
         agenda.userId,
     );
+    if (
+        arriving &&
+        explicit &&
+        !organizationTreeLocked &&
+        folders.some((folder) => folder.userId === orgUserId)
+    )
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            "Agenda filing changed during arrival",
+            409,
+        );
     if (explicit && agenda.userId !== userId) {
         const recordingAudience = await meetingItemAudienceInTx(
             tx,
@@ -324,6 +337,7 @@ async function absorbInTx(
                 itemId: recordingItemId,
                 folderId: folder.id,
                 requestPipeline: !arriving,
+                canCurate,
             });
         } else {
             try {
@@ -418,6 +432,7 @@ export async function attachAgenda(
     await requireMeetingAccess(userId, id, "edit", { viewer });
     await retryOnDeadlock(() =>
         db.transaction(async (tx) => {
+            if (viewer.orgUserId) await lockOrgTree(tx);
             await requireMeetingAccess(userId, id, "edit", {
                 viewer,
                 executor: tx,
@@ -429,6 +444,8 @@ export async function attachAgenda(
                 recordingItemId,
                 viewer.orgUserId,
                 true,
+                false,
+                viewer.curator,
             );
         }),
     );
@@ -469,6 +486,8 @@ export async function attachArrivingRecordingInTx(
     itemId: string,
     fileId: string,
     agendaId?: string,
+    canCurate = false,
+    organizationTreeLocked = false,
 ) {
     try {
         await tx.transaction((savepoint) =>
@@ -478,6 +497,8 @@ export async function attachArrivingRecordingInTx(
                 itemId,
                 fileId,
                 agendaId,
+                canCurate,
+                organizationTreeLocked,
             ),
         );
     } catch (error) {
@@ -496,8 +517,10 @@ async function attachArrivalInSavepoint(
     itemId: string,
     fileId: string,
     agendaId?: string,
+    canCurate = false,
+    organizationTreeLocked = false,
 ) {
-    const orgUserId = await getOrgUserId();
+    const orgUserId = await getOrgUserId(tx);
     const [session] = fileId.startsWith("meeting-")
         ? await tx
               .select({ metadata: recordingSessions.metadata })
@@ -534,10 +557,20 @@ async function attachArrivalInSavepoint(
         const attached = await findMeeting(userId, orgUserId, explicitId, tx);
         if (attached?.agenda.recordingItemId === itemId) return;
         await requireMeetingAccess(userId, explicitId, "edit", {
-            viewer: { userId, orgUserId, curator: false },
+            viewer: { userId, orgUserId, curator: canCurate },
             executor: tx,
         });
-        await absorbInTx(tx, userId, explicitId, itemId, orgUserId, true, true);
+        await absorbInTx(
+            tx,
+            userId,
+            explicitId,
+            itemId,
+            orgUserId,
+            true,
+            true,
+            canCurate,
+            organizationTreeLocked,
+        );
         return;
     }
     const { candidates, overlappingCount } = await candidatesInTx(

@@ -3,7 +3,12 @@ import { folderParticipantCondition } from "@/db/queries/folder-participants";
 import { meetingItemAudienceInTx } from "@/db/queries/meeting-audience";
 import type { MeetingTx } from "@/db/queries/meetings";
 import { activeShareRecipientCondition } from "@/db/queries/share-recipients";
-import { folderShares, recordingFolders, users } from "@/db/schema";
+import {
+    folderShares,
+    recordingFolders,
+    restrictedFolderMembers,
+    users,
+} from "@/db/schema";
 
 /** Keep the agenda safety audience separate from the audience reached through fileable folders. */
 export async function meetingAttachmentAudienceInTx(
@@ -27,6 +32,7 @@ export async function meetingAttachmentAudienceInTx(
               .select({
                   id: recordingFolders.id,
                   userId: recordingFolders.userId,
+                  restrictedAt: recordingFolders.restrictedAt,
               })
               .from(recordingFolders)
               .where(
@@ -68,13 +74,24 @@ export async function meetingAttachmentAudienceInTx(
                   ),
               )
         : [];
+    const restrictedIds = folders
+        .filter((folder) => folder.restrictedAt)
+        .map((folder) => folder.id);
+    const audience = restrictedIds.length
+        ? await tx
+              .select({ userId: restrictedFolderMembers.userId })
+              .from(restrictedFolderMembers)
+              .where(inArray(restrictedFolderMembers.folderId, restrictedIds))
+        : [];
     const intended = {
         organization: folders.some(
-            (folder) => folder.userId === input.orgUserId,
+            (folder) =>
+                folder.userId === input.orgUserId && !folder.restrictedAt,
         ),
         userIds: new Set([
             input.actorUserId,
             ...folders.map((folder) => folder.userId),
+            ...audience.map((member) => member.userId),
             ...shares.map((share) => share.userId),
         ]),
     };

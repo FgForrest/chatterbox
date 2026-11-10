@@ -1379,6 +1379,13 @@ suite("meeting planning server (PostgreSQL)", () => {
     });
     it("manual points have no lineage even when their text matches a mail suggestion", async () => {
         const meeting = await create();
+        await db.insert(chatterItems).values({
+            id: "deleted-mail",
+            userId: "owner",
+            kind: "mail",
+            title: encryptText("Mail"),
+            occurredAt: start,
+        });
         await db.insert(agendaSuggestions).values({
             id: "mail-suggestion",
             userId: "owner",
@@ -1391,6 +1398,9 @@ suite("meeting planning server (PostgreSQL)", () => {
             text: "Same topic",
         });
         await decideSuggestion("owner", meeting.id, "mail-suggestion", "added");
+        await db
+            .delete(chatterItems)
+            .where(eq(chatterItems.id, "deleted-mail"));
         await db
             .delete(agendaSuggestions)
             .where(eq(agendaSuggestions.id, "mail-suggestion"));
@@ -1419,7 +1429,7 @@ suite("meeting planning server (PostgreSQL)", () => {
         await recording("audio");
         await recording("imported-audio");
         await db.insert(chatterItems).values(
-            ["mail", "imported-mail"].map((id) => ({
+            ["mail", "imported-mail", "missing-mail"].map((id) => ({
                 id,
                 userId: "owner",
                 kind: "mail" as const,
@@ -1428,7 +1438,7 @@ suite("meeting planning server (PostgreSQL)", () => {
             })),
         );
         await db.insert(recordingTasks).values(
-            ["mail-task", "imported-task"].map((id) => ({
+            ["mail-task", "imported-task", "missing-task"].map((id) => ({
                 id,
                 itemId: id === "mail-task" ? "mail" : "imported-mail",
                 userId: "owner",
@@ -1449,6 +1459,12 @@ suite("meeting planning server (PostgreSQL)", () => {
             },
         });
         await decideSuggestion("owner", meeting.id, "source", "added");
+        await db
+            .delete(chatterItems)
+            .where(eq(chatterItems.id, "missing-mail"));
+        await db
+            .delete(recordingTasks)
+            .where(eq(recordingTasks.id, "missing-task"));
         const point = (
             await db
                 .select()

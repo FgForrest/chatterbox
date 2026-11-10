@@ -1,5 +1,5 @@
 import { Readable } from "node:stream";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
     DriveExportProvider,
     DriveTargetLostError,
@@ -222,6 +222,46 @@ describe("Google Drive export provider", () => {
         expect(nodes.nodes.has(`${ROOT}/Old/audio.mp3`)).toBe(false);
     });
 
+    it("trashes a revoked owned copy without a duplicate and preserves foreign files", async () => {
+        const p = provider();
+        const target = `${ROOT}/Restricted/audio.mp3`;
+        await p.materialize(target, Buffer.from("abc"), file());
+        const id = drive.idAt(ROOT, "Restricted/audio.mp3") ?? "";
+        expect(
+            await p.removeFile(target, { duplicate: false, revoked: true }),
+        ).toBe(true);
+        expect(drive.isTrashed(id)).toBe(true);
+        const foreign = `${ROOT}/Restricted/foreign.md`;
+        await p.materialize(foreign, Buffer.from("foreign"), file());
+        const foreignId = drive.idAt(ROOT, "Restricted/foreign.md") ?? "";
+        const item = drive.items.get(foreignId);
+        if (!item) throw new Error("missing file");
+        item.appProperties = {};
+        expect(
+            await provider().removeFile(foreign, {
+                duplicate: false,
+                revoked: true,
+            }),
+        ).toBe(false);
+        expect(drive.isTrashed(foreignId)).toBe(false);
+    });
+    it("keeps a revoked file tracked when Drive refuses trashing so a retry can remove it", async () => {
+        const p = provider();
+        const target = `${ROOT}/Restricted/audio.mp3`;
+        await p.materialize(target, Buffer.from("abc"), file());
+        const update = vi
+            .spyOn(drive, "updateItem")
+            .mockRejectedValueOnce(new Error("unavailable"));
+        await expect(
+            p.removeFile(target, { duplicate: false, revoked: true }),
+        ).rejects.toThrow("unavailable");
+        expect(nodes.nodes.has(target)).toBe(true);
+        update.mockRestore();
+        expect(
+            await p.removeFile(target, { duplicate: false, revoked: true }),
+        ).toBe(true);
+    });
+
     it("creates the new folder when the previous one is gone", async () => {
         await expect(
             provider().reconcileDirectory(`${ROOT}/Missing`, `${ROOT}/Fresh`),
@@ -299,7 +339,7 @@ describe("Google Drive export provider", () => {
         expect(nodes.nodes.has(`${ROOT}/Empty`)).toBe(false);
     });
 
-    it("sends a person's file in a managed folder to the trash, not away", async () => {
+    it("preserves a person's file and its managed parent during pruning", async () => {
         const p = provider();
         await p.reconcileDirectory(null, `${ROOT}/Recording`);
         const mine = drive.userAddFile(
@@ -307,10 +347,10 @@ describe("Google Drive export provider", () => {
             "notes.txt",
         );
         await expect(p.removeEmptyDirectory(`${ROOT}/Recording`)).resolves.toBe(
-            true,
+            false,
         );
         expect(drive.items.has(mine)).toBe(true);
-        expect(drive.isTrashed(mine)).toBe(true);
+        expect(drive.isTrashed(mine)).toBe(false);
     });
 
     it("leaves a folder it did not tag alone", async () => {

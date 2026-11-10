@@ -60,6 +60,7 @@ import {
 import { collectArchivedFolderShares } from "@/lib/export/folder-shares";
 import { collectArchivedItemShares } from "@/lib/export/item-shares";
 import { collectArchivedMeetings } from "@/lib/export/meetings";
+import { collectRestrictedFolderArchive } from "@/lib/export/restricted-folders";
 import {
     type ArchivedTrimProposal,
     collectTrimProposals,
@@ -408,6 +409,11 @@ export async function buildAndUploadExportArchive(input: {
         taskReviews?: { count: number; path: string };
         personShares?: { count: number; path: string };
         folderShares?: { count: number; path: string };
+        restrictedFolders?: {
+            folders: number;
+            placements: number;
+            path: string;
+        };
         taskEvidence?: {
             mentions: { count: number; path: string | null };
             homeMoves: { count: number; path: string | null };
@@ -975,6 +981,21 @@ export async function buildAndUploadExportArchive(input: {
         });
         manifest.folderShares = { count: folderShares.length, path };
     }
+    const restrictedFolders = await collectRestrictedFolderArchive(scope);
+    if (
+        restrictedFolders.folders.length ||
+        restrictedFolders.placements.length
+    ) {
+        archive.append(
+            Buffer.from(JSON.stringify(restrictedFolders, null, 2)),
+            { name: "organization/restrictions.json" },
+        );
+        manifest.restrictedFolders = {
+            folders: restrictedFolders.folders.length,
+            placements: restrictedFolders.placements.length,
+            path: "organization/restrictions.json",
+        };
+    }
     const processingChoices = await collectProcessingChoices(scope);
     if (
         processingChoices.folderDefaults.length > 0 ||
@@ -1237,7 +1258,12 @@ interface ArchivedFolderOrganization {
         sortOrder: number;
         createdAt: string;
     }[];
-    assignments: { recordingId: string; folderId: string }[];
+    assignments: {
+        recordingId: string;
+        folderId: string;
+        withheld: boolean;
+        releasedAt: string | null;
+    }[];
 }
 
 interface ArchivedProcessingChoices {
@@ -1372,6 +1398,8 @@ async function collectFolderOrganization(
             .select({
                 recordingId: recordingFolderAssignments.itemId,
                 folderId: recordingFolderAssignments.folderId,
+                withheld: recordingFolderAssignments.withheld,
+                releasedAt: recordingFolderAssignments.releasedAt,
             })
             .from(recordingFolderAssignments)
             .innerJoin(
@@ -1384,7 +1412,19 @@ async function collectFolderOrganization(
                           eq(recordingFolderAssignments.userId, userId),
                           eq(recordingFolders.userId, userId),
                       )
-                    : eq(recordingFolders.userId, userId),
+                    : and(
+                          eq(recordingFolders.userId, userId),
+                          or(
+                              eq(recordingFolderAssignments.userId, userId),
+                              and(
+                                  eq(
+                                      recordingFolderAssignments.withheld,
+                                      false,
+                                  ),
+                                  isNull(recordingFolders.restrictedAt),
+                              ),
+                          ),
+                      ),
             ),
     ]);
 
@@ -1397,9 +1437,12 @@ async function collectFolderOrganization(
             sortOrder: row.sortOrder,
             createdAt: row.createdAt.toISOString(),
         })),
-        assignments: assignmentRows.filter((row) =>
-            activeRecordingIds.has(row.recordingId),
-        ),
+        assignments: assignmentRows
+            .filter((row) => activeRecordingIds.has(row.recordingId))
+            .map((row) => ({
+                ...row,
+                releasedAt: row.releasedAt?.toISOString() ?? null,
+            })),
     };
 }
 

@@ -18,6 +18,7 @@ import {
     mailPendingShares,
     users,
 } from "@/db/schema";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { decryptText } from "@/lib/encryption/fields";
 import { secretAddressMasker } from "@/lib/mail/redact";
 import { sharedItemCondition } from "@/lib/sharing/shared";
@@ -195,9 +196,16 @@ export async function loadReceivedMailRows(
     viewerUserId: string,
 ): Promise<Recording[]> {
     return (
-        await mailRows(receivedItemCondition(viewerUserId), {
-            viewerUserId,
-            organization: true,
-        })
+        await mailRows(
+            receivedItemCondition(
+                viewerUserId,
+                chatterItems.id,
+                await userCuratesOrganizationNow(viewerUserId),
+            ),
+            {
+                viewerUserId,
+                organization: true,
+            },
+        )
     ).map((row) => ({ ...row, view: "received" }));
 }

@@ -98,7 +98,7 @@ export interface DriveExportProviderOptions {
  * export creates is recorded in the node store and tagged with the export's
  * id, which also lets a retry find what a crashed attempt already created.
  * It trashes folders it created only while they hold none of its files, and
- * files it wrote only when the same artifact is in place elsewhere: under
+ * files it wrote when duplicated elsewhere or revoked by restriction: under
  * `drive.file` it cannot see what users put there.
  */
 export class DriveExportProvider implements ExportProvider {
@@ -371,37 +371,50 @@ export class DriveExportProvider implements ExportProvider {
 
     async removeFile(
         relativePath: string,
-        options: { duplicate: boolean },
+        options: { duplicate: boolean; revoked?: boolean },
     ): Promise<boolean> {
-        if (!options.duplicate || !this.inRoot(relativePath)) return false;
+        if (
+            (!options.duplicate && !options.revoked) ||
+            !this.inRoot(relativePath)
+        )
+            return false;
         const node = await this.nodes.get(relativePath);
         if (!node || node.kind === "folder") return false;
-        const item = await this.live(node.driveFileId);
-        await this.nodes.removeSubtree(relativePath);
-        if (!item || item.appProperties[EXPORT_PROPERTY] !== this.exportId) {
+        const item = await this.client.getItem(node.driveFileId);
+        if (!item || item.trashed) {
+            await this.nodes.removeSubtree(relativePath);
             return false;
         }
+        // Keep foreign nodes as directory guards so pruning cannot trash their parents.
+        if (item.appProperties[EXPORT_PROPERTY] !== this.exportId) return false;
         await this.client.updateItem(item.id, { trashed: true });
+        await this.nodes.removeSubtree(relativePath);
         this.snapshot?.delete(item.id);
         return true;
     }
 
     async ownedEntries(): Promise<Map<string, OwnedEntryKind>> {
-        return new Map(
-            (await this.nodes.list()).map((node) => [
-                node.logicalPath,
-                node.kind === "folder" ? "directory" : "file",
-            ]),
-        );
+        const entries = new Map<string, OwnedEntryKind>();
+        for (const node of await this.nodes.list()) {
+            const item = await this.live(node.driveFileId);
+            if (item?.appProperties[EXPORT_PROPERTY] === this.exportId)
+                entries.set(
+                    node.logicalPath,
+                    node.kind === "folder" ? "directory" : "file",
+                );
+        }
+        return entries;
     }
 
     async forgetMissing(): Promise<void> {
         await this.verifyRoot();
         await this.loadSnapshot();
         for (const node of await this.nodes.list()) {
-            if (!(await this.live(node.driveFileId))) {
+            const item =
+                (await this.live(node.driveFileId)) ??
+                (await this.client.getItem(node.driveFileId));
+            if (!item || item.trashed)
                 await this.nodes.removeSubtree(node.logicalPath);
-            }
         }
         this.folderIds.clear();
     }
@@ -441,11 +454,16 @@ export class DriveExportProvider implements ExportProvider {
         const node = await this.nodes.get(relativePath);
         if (!node || node.kind !== "folder") return false;
         if (await this.nodes.hasFilesUnder(relativePath)) return false;
-        const item = await this.live(node.driveFileId);
-        if (!item || item.appProperties[EXPORT_PROPERTY] !== this.exportId) {
+        const item = await this.client.getItem(node.driveFileId);
+        if (
+            !item ||
+            item.trashed ||
+            item.appProperties[EXPORT_PROPERTY] !== this.exportId
+        ) {
             await this.nodes.removeSubtree(relativePath);
             return false;
         }
+        if (await this.client.hasChildren(item.id)) return false;
         await this.client.updateItem(item.id, { trashed: true });
         this.snapshot?.delete(item.id);
         await this.nodes.removeSubtree(relativePath);

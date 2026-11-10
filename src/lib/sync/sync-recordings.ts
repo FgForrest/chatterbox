@@ -598,7 +598,11 @@ async function processRecording(
                 title,
                 occurredAt,
             },
-            { pipeline: "arrival", initializeInTx: requestArrivalInTx },
+            {
+                pipeline: "arrival",
+                lockOrganizationTree: false,
+                initializeInTx: requestArrivalInTx,
+            },
         );
 
         seenRecordingIds.add(newRecording.id);

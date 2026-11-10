@@ -38,6 +38,7 @@ export async function agendaSuggestionsProvider(userId: string, id: string) {
                           meetingFolderVisibility(
                               userId,
                               access.viewer.orgUserId,
+                              access.viewer.curator,
                           ),
                       ),
                   );
@@ -46,11 +47,7 @@ export async function agendaSuggestionsProvider(userId: string, id: string) {
         itemId: access.agenda.meetingItemId ?? id,
         channel: "audio",
         folderIds: visibleFolders.map((folder) => folder.id),
-        view: visibleFolders.some(
-            (folder) => folder.userId === access.viewer.orgUserId,
-        )
-            ? "org"
-            : "private",
+        view: access.shared ? "org" : "private",
         seedProfiles: false,
         executor: db,
         organizationUserId: access.viewer.orgUserId,

@@ -18,6 +18,10 @@ import {
 } from "@/db/queries/item-shares";
 import { meetingFolderVisibility } from "@/db/queries/meeting-folder-visibility";
 import { receivedMeetingCondition } from "@/db/queries/meeting-shares";
+import {
+    placementVisibleCondition,
+    restrictedItemCondition,
+} from "@/db/queries/restricted-folders";
 import { taskVisible } from "@/db/queries/task-visibility";
 import {
     agendaPoints,
@@ -32,6 +36,7 @@ import {
     recordingTasks,
     users,
 } from "@/db/schema";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { sharedItemCondition } from "@/lib/sharing/shared";
 
 export { meetingFolders } from "@/db/queries/meeting-folders";
@@ -50,11 +55,19 @@ export function meetingVisibility(
         "id" | "userId" | "kind" | "deletedAt",
         AnyColumn
     > = chatterItems,
+    isCurator = false,
+    organizationOnly = false,
 ): SQL {
+    if (organizationOnly)
+        return and(
+            isNull(item.deletedAt),
+            orgUserId ? sharedItemCondition(orgUserId, item.id) : sql`false`,
+        ) as SQL;
     return and(
         isNull(item.deletedAt),
         or(
             eq(item.userId, userId),
+            restrictedItemCondition({ userId, isCurator }, item.id),
             or(
                 and(
                     eq(item.kind, "meeting"),
@@ -65,7 +78,7 @@ export function meetingVisibility(
                 ),
                 and(
                     inArray(item.kind, ["audio", "mail"]),
-                    receivedItemCondition(userId, item.id),
+                    receivedItemCondition(userId, item.id, isCurator),
                 ),
             ),
             orgUserId ? sharedItemCondition(orgUserId, item.id) : undefined,
@@ -80,6 +93,8 @@ export async function findMeeting(
     id: string,
     executor: MeetingExecutor = db,
     lock = false,
+    isCurator = false,
+    organizationOnly = false,
 ) {
     const query = executor
         .select({ agenda: meetingAgendas, item: chatterItems })
@@ -98,7 +113,13 @@ export async function findMeeting(
                     eq(meetingAgendas.meetingItemId, id),
                     eq(meetingAgendas.recordingItemId, id),
                 ),
-                meetingVisibility(userId, orgUserId),
+                meetingVisibility(
+                    userId,
+                    orgUserId,
+                    chatterItems,
+                    isCurator,
+                    organizationOnly,
+                ),
             ),
         )
         .limit(1);
@@ -121,12 +142,19 @@ export async function findMeeting(
                 ),
                 isNotNull(meetingAgendas.recordingItemId),
                 eq(chatterItems.kind, "meeting"),
-                or(
-                    eq(chatterItems.userId, userId),
-                    receivedThroughFolderCondition(userId),
-                    receivedMeetingCondition(userId),
-                    orgUserId ? sharedItemCondition(orgUserId) : undefined,
-                ),
+                organizationOnly
+                    ? orgUserId
+                        ? sharedItemCondition(orgUserId)
+                        : sql`false`
+                    : or(
+                          eq(chatterItems.userId, userId),
+                          receivedThroughFolderCondition(userId),
+                          restrictedItemCondition({ userId, isCurator }),
+                          receivedMeetingCondition(userId),
+                          orgUserId
+                              ? sharedItemCondition(orgUserId)
+                              : undefined,
+                      ),
             ),
         )
         .limit(1);
@@ -150,23 +178,45 @@ export async function listMeetingRows(
         includeAbsorbed?: boolean;
         excludeAbsorbed?: boolean;
         limit?: number;
+        isCurator?: boolean;
+        organizationOnly?: boolean;
     } = {},
     executor: MeetingExecutor = db,
 ) {
+    const isCurator =
+        input.isCurator ??
+        (executor === db ? await userCuratesOrganizationNow(userId) : false);
+    function visibility(
+        item: Parameters<typeof meetingVisibility>[2] = chatterItems,
+    ) {
+        return input.organizationOnly
+            ? (and(
+                  isNull(item.deletedAt),
+                  orgUserId
+                      ? sharedItemCondition(orgUserId, item.id)
+                      : sql`false`,
+              ) as SQL)
+            : meetingVisibility(userId, orgUserId, item, isCurator);
+    }
     const taskItem = alias(chatterItems, "agenda_task_item");
     const attachedItem = alias(chatterItems, "list_attached_item");
     const recordingVisible = sql`exists (select 1 from ${chatterItems} list_attached_item
         where ${attachedItem.id} = ${meetingAgendas.recordingItemId}
-          and ${meetingVisibility(userId, orgUserId, attachedItem)})`;
+          and ${visibility(attachedItem)})`;
     const visibleOriginalAbsorbed = and(
         isNotNull(meetingAgendas.recordingItemId),
         eq(chatterItems.kind, "meeting"),
-        or(
-            eq(chatterItems.userId, userId),
-            receivedThroughFolderCondition(userId),
-            receivedMeetingCondition(userId),
-            orgUserId ? sharedItemCondition(orgUserId) : undefined,
-        ),
+        input.organizationOnly
+            ? orgUserId
+                ? sharedItemCondition(orgUserId)
+                : sql`false`
+            : or(
+                  eq(chatterItems.userId, userId),
+                  receivedThroughFolderCondition(userId),
+                  restrictedItemCondition({ userId, isCurator }),
+                  receivedMeetingCondition(userId),
+                  orgUserId ? sharedItemCondition(orgUserId) : undefined,
+              ),
         sql`not (${recordingVisible})`,
     );
     let absorbedFilter: SQL | undefined;
@@ -181,7 +231,7 @@ export async function listMeetingRows(
         userId,
         orgUserId,
         isOrg: userId === orgUserId,
-        isCurator: false,
+        isCurator,
         emailHash: "",
         includeReceived: true,
     };
@@ -198,7 +248,7 @@ export async function listMeetingRows(
                     where ${agendaTasks.agendaId} = ${meetingAgendas.id} and ${agendaTasks.userId} = ${meetingAgendas.userId}
                       and ${agendaTasks.removedAt} is null and ${recordingTasks.status} <> 'proposed'
                       and ${taskItem.deletedAt} is null and (${taskItem.id} is null or ${taskItem.kind} in ('audio', 'mail'))
-                      and ${taskVisible(taskViewer, taskItem, true)})`,
+                      and ${taskVisible(taskViewer, taskItem, true)} and ${input.organizationOnly ? (orgUserId ? sharedItemCondition(orgUserId, taskItem.id) : sql`false`) : sql`true`})`,
             },
         })
         .from(meetingAgendas)
@@ -214,21 +264,44 @@ export async function listMeetingRows(
         )
         .where(
             and(
-                or(
-                    meetingVisibility(userId, orgUserId),
-                    visibleOriginalAbsorbed,
-                ),
+                or(visibility(), visibleOriginalAbsorbed),
                 absorbedFilter,
                 input.folderId
                     ? sql`(exists (select 1 from ${recordingFolderAssignments}
                         inner join ${recordingFolders} on ${recordingFolders.id} = ${recordingFolderAssignments.folderId}
                         where ${recordingFolderAssignments.itemId} = ${chatterItems.id}
-                        and ${meetingFolderVisibility(userId, orgUserId)} and (${recordingFolderAssignments.folderId} = ${input.folderId}
+                        and ${
+                            input.organizationOnly
+                                ? and(
+                                      orgUserId
+                                          ? eq(
+                                                recordingFolders.userId,
+                                                orgUserId,
+                                            )
+                                          : sql`false`,
+                                      isNull(recordingFolders.restrictedAt),
+                                      eq(
+                                          recordingFolderAssignments.withheld,
+                                          false,
+                                      ),
+                                  )
+                                : and(
+                                      meetingFolderVisibility(
+                                          userId,
+                                          orgUserId,
+                                          isCurator,
+                                      ),
+                                      placementVisibleCondition({
+                                          userId,
+                                          isCurator,
+                                      }),
+                                  )
+                        } and (${recordingFolderAssignments.folderId} = ${input.folderId}
                         or ${recordingFolderAssignments.folderId} in (select ${folderShares.folderId} from ${receivedFolderAttachments}
                             inner join ${folderShares} on ${folderShares.id} = ${receivedFolderAttachments.shareId}
                             where ${receivedFolderAttachments.id} = ${input.folderId} and ${receivedFolderAttachments.userId} = ${userId}
                               and ${folderShares.receiverUserId} = ${userId} and ${folderShares.state} = 'accepted')))
-                        or (${receivedMeetingCondition(userId)} and exists (select 1 from ${itemShares} filing
+                        or (${input.organizationOnly ? sql`false` : receivedMeetingCondition(userId)} and exists (select 1 from ${itemShares} filing
                             where filing.item_id = ${chatterItems.id} and filing.receiver_user_id = ${userId}
                             and filing.state = 'accepted' and filing.filing_folder_id = ${input.folderId})))`
                     : undefined,

@@ -2,9 +2,27 @@ import { NextResponse } from "next/server";
 import { requireApiSessionActor } from "@/lib/auth-server";
 import { actsForOrganization } from "@/lib/authz/curator";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
-import { deleteFolder, moveFolder, renameFolder } from "@/lib/folders/folders";
+import {
+    deleteFolder,
+    listRecordingFolderTrees,
+    moveFolder,
+    renameFolder,
+} from "@/lib/folders/folders";
 
 type IdContext = { params: Promise<{ id: string }> };
+
+export const GET = apiHandler<IdContext>(async (request, context) => {
+    const { session, actor } = await requireApiSessionActor(request);
+    const { id } = await (context as IdContext).params;
+    const folders = await listRecordingFolderTrees(session.user.id);
+    const folder =
+        actor.kind === "service"
+            ? undefined
+            : folders.find((folder) => folder.id === id);
+    if (!folder)
+        throw new AppError(ErrorCode.NOT_FOUND, ErrorCode.NOT_FOUND, 404);
+    return NextResponse.json({ folder });
+});
 
 export const PATCH = apiHandler<IdContext>(async (request, context) => {
     const { actor, session } = await requireApiSessionActor(request);

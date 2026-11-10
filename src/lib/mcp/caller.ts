@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { receivedItemCondition } from "@/db/queries/item-shares";
 import { accounts, chatterItems, users } from "@/db/schema";
 import { holderAccess } from "@/lib/authz/access-state";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { env } from "@/lib/env";
 import { getClaimsProvider, isIdpAuthorization } from "@/lib/identity/factory";
 import type { McpRole } from "@/lib/mcp/roles";
@@ -25,6 +26,7 @@ interface CallerBase {
     /** The Organization account, when the instance shows the Organization. */
     orgUserId: string | null;
     receivedItemIds?: ReadonlySet<string>;
+    isCurator?: boolean;
 }
 
 /**
@@ -142,6 +144,7 @@ export async function resolveCaller(
                 };
             }
         }
+        const isCurator = await userCuratesOrganizationNow(linked.id);
         return {
             ok: true,
             caller: {
@@ -150,6 +153,7 @@ export async function resolveCaller(
                 userId: linked.id,
                 email: linked.email,
                 orgUserId,
+                ...(isCurator ? { isCurator: true } : {}),
                 receivedItemIds: isOrgScopeVisible()
                     ? new Set(
                           (
@@ -159,7 +163,11 @@ export async function resolveCaller(
                                   .where(
                                       and(
                                           isNull(chatterItems.deletedAt),
-                                          receivedItemCondition(linked.id),
+                                          receivedItemCondition(
+                                              linked.id,
+                                              chatterItems.id,
+                                              isCurator,
+                                          ),
                                           orgUserId
                                               ? not(
                                                     sharedItemCondition(

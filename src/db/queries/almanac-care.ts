@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
+import { sharedItemCondition } from "@/lib/sharing/shared";
 
 type Executor = Pick<typeof db, "execute">;
 export const CARE_RECORD_LIMIT = 2000;
@@ -102,9 +103,7 @@ export async function thinCareRecords(
             select s.* from sampled s join complete c on c.kind = s.kind and c.id = s.id
             where s.eligible and exists (
                 select 1 from chatter_items item where item.id = s.item_id and item.deleted_at is null
-                and exists (select 1 from recording_folder_assignments a
-                    join recording_folders folder on folder.id = a.folder_id and folder.user_id = ${scope}
-                    where a.recording_id = item.id and a.user_id = item.user_id)
+                and ${sharedItemCondition(scope, sql`item.id`)}
             )
         )
         select r.kind, r.id, max(u.at) as last_at, min(u.item_id) as item_id

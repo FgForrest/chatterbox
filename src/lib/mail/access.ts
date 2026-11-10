@@ -1,7 +1,9 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { isItemReceived } from "@/db/queries/item-shares";
+import { withheldItemCondition } from "@/db/queries/restricted-folders";
 import { chatterItems } from "@/db/schema";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { getOrgUserId } from "@/lib/org/config";
 import { isRecordingShared } from "@/lib/sharing/shared";
 
@@ -25,7 +27,10 @@ export async function resolveMailAccess(
     itemId: string,
 ): Promise<MailAccess | null> {
     const [item] = await db
-        .select({ userId: chatterItems.userId })
+        .select({
+            userId: chatterItems.userId,
+            restricted: sql<boolean>`${withheldItemCondition()}`,
+        })
         .from(chatterItems)
         .where(
             and(
@@ -43,7 +48,13 @@ export async function resolveMailAccess(
     const shared =
         orgUserId !== null && (await isRecordingShared(itemId, orgUserId));
     if (!shared) {
-        return (await isItemReceived(userId, itemId))
+        return (await isItemReceived(
+            userId,
+            itemId,
+            item.restricted === true
+                ? await userCuratesOrganizationNow(userId)
+                : false,
+        ))
             ? { itemId, ownerUserId: item.userId, role: "receiver" }
             : null;
     }

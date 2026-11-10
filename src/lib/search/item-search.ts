@@ -19,6 +19,7 @@ import {
     mailParticipants,
     transcriptions,
 } from "@/db/schema";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import type { ContentSegment } from "@/lib/content/types";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { secretAddressMasker } from "@/lib/mail/redact";
@@ -357,6 +358,7 @@ export async function searchItems({
     if (words.length === 0 || searchScopes.size === 0) {
         return { hits: [], scanned: 0, complete: true, continueBefore: null };
     }
+    const isCurator = await userCuratesOrganizationNow(viewerUserId);
     let scope: SQL;
     if (view === "org") {
         const orgUserId = await getOrgUserId();
@@ -372,10 +374,18 @@ export async function searchItems({
     } else {
         scope =
             view === "received"
-                ? receivedItemCondition(viewerUserId)
+                ? receivedItemCondition(
+                      viewerUserId,
+                      chatterItems.id,
+                      isCurator,
+                  )
                 : (or(
                       eq(chatterItems.userId, viewerUserId),
-                      receivedItemCondition(viewerUserId),
+                      receivedItemCondition(
+                          viewerUserId,
+                          chatterItems.id,
+                          isCurator,
+                      ),
                   ) as SQL);
     }
     const found: ItemSearchHit[] = [];

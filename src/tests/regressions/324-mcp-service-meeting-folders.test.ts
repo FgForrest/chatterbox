@@ -57,6 +57,7 @@ beforeEach(() => {
     service.list.mockResolvedValue([{ id: "agenda", folders: [sharedFolder] }]);
     service.get.mockResolvedValue({
         id: "agenda",
+        shared: true,
         folders: [sharedFolder],
         tasks: [],
         taskGroupOrder: [],
@@ -71,13 +72,22 @@ describe("#324 service clients reading shared agendas", () => {
         expect(await call("list_meetings")).toEqual({
             meetings: [{ id: "agenda", folders: [sharedFolder] }],
         });
-        expect(service.list).toHaveBeenCalledWith("org", {});
+        expect(service.list).toHaveBeenCalledWith("org", {
+            isCurator: false,
+            organizationOnly: true,
+        });
     });
 
     it("uses the Organization viewer for get_meeting", async () => {
         const result = await call("get_meeting", { meetingId: "agenda" });
         expect(result).toMatchObject({ meeting: { folders: [sharedFolder] } });
-        expect(service.get).toHaveBeenCalledWith("org", "agenda");
+        expect(service.get).toHaveBeenCalledWith(
+            "org",
+            "agenda",
+            undefined,
+            false,
+            true,
+        );
     });
 
     it("passes folder filters to the shared service without widening its result", async () => {
@@ -87,6 +97,8 @@ describe("#324 service clients reading shared agendas", () => {
         ).toEqual({ meetings: [] });
         expect(service.list).toHaveBeenLastCalledWith("org", {
             folderId: privateFolder.id,
+            isCurator: false,
+            organizationOnly: true,
         });
         expect(
             await call("list_meetings", { folderId: sharedFolder.id }),

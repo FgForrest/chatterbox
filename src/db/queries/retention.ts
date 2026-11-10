@@ -11,12 +11,14 @@ import {
 } from "drizzle-orm";
 import { db } from "@/db";
 import { recordingItemJoin, touchRecording } from "@/db/items";
+import {
+    organizationGovernsRetention,
+    organizationRetentionCondition,
+} from "@/db/queries/organization-retention";
 import { resolveTrimInTx } from "@/db/queries/trim-state";
 import {
     aiEnhancements,
     chatterItems,
-    recordingFolderAssignments,
-    recordingFolders,
     recordings,
     summaryRemarks,
     taskMentions,
@@ -29,7 +31,6 @@ import {
     pruneUnsupportedFactsInTx,
 } from "@/lib/knowledge/fact-evidence";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
-import { isRecordingShared } from "@/lib/sharing/shared";
 import { deleteItemTaskVectorsInTx } from "@/lib/tasks/mentions";
 import { dropTasksWithoutSummaryInTx } from "@/lib/tasks/store";
 
@@ -88,7 +89,8 @@ export function validRetentionDays(value: number | null): number | null {
         : null;
 }
 
-function effectivePolicy(row: {
+/** Normalize independent and legacy audio retention settings for sweeps and previews. */
+export function retentionPolicyOf(row: {
     userId: string;
     retentionRemoteOriginalDays: number | null;
     retentionLocalAudioDays: number | null;
@@ -187,7 +189,7 @@ export async function listArmedRetentionPolicies(
         .limit(limit);
 
     return rows.flatMap((row) => {
-        const policy = effectivePolicy(row);
+        const policy = retentionPolicyOf(row);
         if (!policy) return [];
         if (row.role !== "org") return [policy];
         // Plaud originals are their owners' Plaud accounts.
@@ -240,7 +242,7 @@ export async function dueOnWithdrawal(
         .from(userSettings)
         .where(eq(userSettings.userId, ownerUserId))
         .limit(1);
-    const policy = settings ? effectivePolicy(settings) : null;
+    const policy = settings ? retentionPolicyOf(settings) : null;
     if (!policy) return [];
     const [recording] = await db
         .select({
@@ -298,17 +300,6 @@ export async function dueOnWithdrawal(
     return found;
 }
 
-function sharedWithOrgCondition(orgUserId: string) {
-    return sql`exists (
-        select 1
-        from ${recordingFolderAssignments}
-        inner join ${recordingFolders}
-            on ${recordingFolders.id} = ${recordingFolderAssignments.folderId}
-        where ${recordingFolderAssignments.itemId} = ${recordings.id}
-            and ${recordingFolders.userId} = ${orgUserId}
-    )`;
-}
-
 /**
  * The predicate matching recordings older than `cutoff` that still hold
  * at least one of the kinds this policy removes. Shared by the sweep and
@@ -334,9 +325,9 @@ function reapCandidateWhere(
     // A shared recording's audio, transcripts and summaries are the
     // Organization's policy's, and only those: see `RetentionPolicy.isOrg`.
     const governed = policy.isOrg
-        ? sharedWithOrgCondition(policy.userId)
+        ? organizationRetentionCondition(policy.userId, recordings.id, now)
         : orgUserId
-          ? sql`not ${sharedWithOrgCondition(orgUserId)}`
+          ? sql`not ${organizationRetentionCondition(orgUserId, recordings.id, now)}`
           : undefined;
     const ungoverned = [];
     const governedKinds = [];
@@ -517,6 +508,7 @@ async function lockGovernedInTx(
     tx: Tx,
     recordingId: string,
     governor: RetentionGovernor,
+    at: Date,
 ): Promise<boolean> {
     await tx
         .select({ id: recordings.id })
@@ -524,7 +516,12 @@ async function lockGovernedInTx(
         .where(eq(recordings.id, recordingId))
         .for("update");
     if (!governor.orgUserId) return !governor.isOrg;
-    const shared = await isRecordingShared(recordingId, governor.orgUserId, tx);
+    const shared = await organizationGovernsRetention(
+        tx,
+        governor.orgUserId,
+        recordingId,
+        at,
+    );
     return shared === governor.isOrg;
 }
 
@@ -542,7 +539,8 @@ export async function reapAudioForRecording(
     removeFile: () => Promise<void>,
 ): Promise<boolean> {
     return db.transaction(async (tx) => {
-        if (!(await lockGovernedInTx(tx, recordingId, governor))) return false;
+        if (!(await lockGovernedInTx(tx, recordingId, governor, at)))
+            return false;
         await removeFile();
         await resolveTrimInTx(tx, {
             userId: ownerUserId,
@@ -575,7 +573,7 @@ export async function deleteTranscriptsForRecording(
     at: Date,
 ): Promise<number> {
     return db.transaction(async (tx) => {
-        if (!(await lockGovernedInTx(tx, recordingId, governor))) return 0;
+        if (!(await lockGovernedInTx(tx, recordingId, governor, at))) return 0;
         await resolveTrimInTx(tx, {
             userId: ownerUserId,
             recordingId,
@@ -624,7 +622,7 @@ export async function deleteSummaryForRecording(
     at: Date,
 ): Promise<number> {
     return db.transaction(async (tx) => {
-        if (!(await lockGovernedInTx(tx, recordingId, governor))) return 0;
+        if (!(await lockGovernedInTx(tx, recordingId, governor, at))) return 0;
         const rows = await tx
             .delete(aiEnhancements)
             .where(
