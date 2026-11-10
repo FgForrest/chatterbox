@@ -9,6 +9,7 @@ import {
 } from "../../../extensions/recorder/lib/agendas.js";
 import { STATE } from "../../../extensions/recorder/lib/constants.js";
 import { localizeDocument, t } from "../../../extensions/recorder/lib/i18n.js";
+import { isWaitingForUpload } from "../../../extensions/recorder/lib/upload-state.js";
 import {
     createFolderField,
     createRecordingFolder,
@@ -55,6 +56,7 @@ async function popup() {
         agendaFolder,
         supportsAgendas,
         STATE,
+        isWaitingForUpload,
         localizeDocument,
         t,
         bindMeetingPromptOffer: () => async () => {},
@@ -265,6 +267,7 @@ describe.each(["en", "cs"])("localized agenda completion in %s", (locale) => {
             createCaptureHost: () => ({}),
             openSystemAudio: vi.fn(),
             STATE,
+            isWaitingForUpload,
             RECORDER_WINDOW_WIDTH: 360,
             fitWindowToContent: vi.fn(),
             localizeDocument,

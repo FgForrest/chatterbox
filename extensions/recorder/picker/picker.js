@@ -2,6 +2,7 @@ import { createCaptureHost, openSystemAudio } from "../lib/capture-host.js";
 import { RECORDER_WINDOW_WIDTH, STATE } from "../lib/constants.js";
 import { fitWindowToContent } from "../lib/fit-window.js";
 import { localizeDocument, t } from "../lib/i18n.js";
+import { isWaitingForUpload } from "../lib/upload-state.js";
 
 import { createRecordingFolder } from "../generated/folders.js";
 
@@ -74,11 +75,12 @@ function renderState(state) {
 
     if (elapsedTimer) clearInterval(elapsedTimer);
     elapsedTimer = undefined;
-    if (state.state === STATE.finalizing && !finalizationTimer) {
+    const waitingForUpload = isWaitingForUpload(state);
+    if (waitingForUpload && !finalizationTimer) {
         finalizationTimer = setInterval(() => {
             void chrome.runtime.sendMessage({ type: "check-finalization" }).catch(() => {});
         }, 5000);
-    } else if (state.state !== STATE.finalizing && finalizationTimer) {
+    } else if (!waitingForUpload && finalizationTimer) {
         clearInterval(finalizationTimer);
         finalizationTimer = undefined;
     }
@@ -98,7 +100,7 @@ function renderState(state) {
         return;
     }
 
-    if ((state.state === STATE.recording && state.stopped) || state.state === STATE.finalizing) {
+    if (waitingForUpload) {
         const total = Math.max(0, state.chunkCount ?? 0);
         const uploaded = Math.min(total, state.uploaded?.length ?? 0);
         const processing = state.state === STATE.finalizing;

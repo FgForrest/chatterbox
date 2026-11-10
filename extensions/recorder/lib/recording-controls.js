@@ -6,6 +6,7 @@ import { bindMeetingPromptOffer } from "../lib/meeting-prompt-ui.js";
 import { microphonePermission } from "../lib/microphone.js";
 import { originOf } from "../lib/pairing.js";
 import { detectMeetingPlatform } from "../lib/platforms.js";
+import { isWaitingForUpload } from "../lib/upload-state.js";
 import {
     effectiveNoticeText,
     effectivePlatformModes,
@@ -352,13 +353,14 @@ export async function mountRecordingControls(
             return;
         }
 
-        if (state.state === STATE.finalizing && !finalizationTimer) {
+        const waitingForUpload = isWaitingForUpload(state);
+        if (waitingForUpload && !finalizationTimer) {
             finalizationTimer = setInterval(() => {
                 void sendMessage({ type: "check-finalization" }).catch(
                     () => {},
                 );
             }, 5000);
-        } else if (state.state !== STATE.finalizing && finalizationTimer) {
+        } else if (!waitingForUpload && finalizationTimer) {
             clearInterval(finalizationTimer);
             finalizationTimer = undefined;
         }

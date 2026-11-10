@@ -125,8 +125,8 @@
             <div id="recorder-settings" hidden>
             <section id="pending-buffers" hidden>
                 <h2 data-i18n="pendingBuffers">Pending encrypted recordings</h2>
-                <p class="hint" data-i18n="pendingBuffersHint">Finish uploading or discard these recordings before changing the connection. Discarding permanently deletes the encrypted browser buffer.</p>
-                <ul id="pending-buffer-list"></ul>
+                <p id="pending-buffers-hint" class="hint" data-i18n="pendingBuffersHint">Finish uploading or discard these recordings before changing the connection. Discarding permanently deletes the encrypted browser buffer.</p>
+                <ul id="pending-buffer-list" aria-describedby="pending-buffers-hint"></ul>
             </section>
 
             <section id="meeting-prompt" tabindex="-1" aria-labelledby="meeting-prompt-heading">
