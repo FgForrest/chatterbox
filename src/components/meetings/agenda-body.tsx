@@ -114,6 +114,11 @@ export function AgendaBody({
         userId,
     });
     const { detail, mutate } = agenda;
+    const readOnly =
+        variant === "recording" ||
+        Boolean(detail?.attachedRecording) ||
+        Boolean(detail?.recordingItemId);
+    const canEdit = Boolean(detail?.permissions.edit) && !readOnly;
     const [tasksCollapsed, toggleTasks] = useAgendaCollapse(id, "tasks");
     const [pointsCollapsed, togglePoints] = useAgendaCollapse(id, "points");
     const [olderOpen, setOlderOpen] = useState(false);
@@ -126,37 +131,53 @@ export function AgendaBody({
     const revealSuggestions = useRef(false);
     const [suggestionRequestPending, setSuggestionRequestPending] =
         useState(false);
-    const suggestionJobKey = JSON.stringify([
-        id,
-        detail?.aiSuggestions.job?.state ?? null,
-        detail?.aiSuggestions.job?.errorCode ?? null,
-        detail?.suggestions
-            .filter((entry) => entry.kind === "ai")
-            .map((entry) => [entry.id, entry.state]),
-    ]);
+    const suggestionJobKey = canEdit
+        ? JSON.stringify([
+              id,
+              detail?.aiSuggestions.job?.state ?? null,
+              detail?.aiSuggestions.job?.errorCode ?? null,
+              detail?.suggestions
+                  .filter((entry) => entry.kind === "ai")
+                  .map((entry) => [entry.id, entry.state]),
+          ])
+        : null;
     const [suggestionFailureKey, setSuggestionFailureKey] = useState<
         string | null
     >(null);
-    const suggestionRequestFailed = suggestionFailureKey === suggestionJobKey;
+    const suggestionRequestFailed =
+        canEdit && suggestionFailureKey === suggestionJobKey;
     useEffect(() => {
+        if (!canEdit) {
+            setSuggestionFailureKey(null);
+            return;
+        }
         if (
             suggestionFailureKey !== null &&
             suggestionFailureKey !== suggestionJobKey
         )
             setSuggestionFailureKey(null);
-    }, [suggestionFailureKey, suggestionJobKey]);
+    }, [canEdit, suggestionFailureKey, suggestionJobKey]);
     const [suggestionAnnouncement, setSuggestionAnnouncement] = useState("");
-    const suggestionState = suggestionRequestFailed
-        ? "failed"
-        : detail?.aiSuggestions.job?.state;
+    const suggestionState = !canEdit
+        ? undefined
+        : suggestionRequestFailed
+          ? "failed"
+          : detail?.aiSuggestions.job?.state;
     const previousSuggestionJob = useRef({ id, state: suggestionState });
     const aiSuggestionCount =
-        detail?.suggestions.filter(
-            (entry) => entry.kind === "ai" && entry.state === "open",
-        ).length ?? 0;
+        (canEdit
+            ? detail?.suggestions.filter(
+                  (entry) => entry.kind === "ai" && entry.state === "open",
+              ).length
+            : 0) ?? 0;
     const readyMessage = i18n("Point suggestions are ready.");
     const noSuggestionsMessage = i18n("No new points to suggest.");
     useEffect(() => {
+        if (!canEdit) {
+            setSuggestionAnnouncement("");
+            previousSuggestionJob.current = { id, state: undefined };
+            return;
+        }
         if (!suggestionState && suggestionRequestPending) return;
         const previous = previousSuggestionJob.current;
         if (
@@ -171,6 +192,7 @@ export function AgendaBody({
             setSuggestionAnnouncement("");
         previousSuggestionJob.current = { id, state: suggestionState };
     }, [
+        canEdit,
         id,
         suggestionState,
         suggestionRequestPending,
@@ -179,6 +201,10 @@ export function AgendaBody({
         noSuggestionsMessage,
     ]);
     useEffect(() => {
+        if (!canEdit) {
+            revealSuggestions.current = false;
+            return;
+        }
         if (!suggestionState && !suggestionRequestPending) return;
         if (!revealSuggestions.current || !suggestionsSection.current) return;
         revealSuggestions.current = false;
@@ -190,7 +216,7 @@ export function AgendaBody({
             block: "nearest",
         });
         suggestionsHeading.current?.focus({ preventScroll: true });
-    }, [suggestionState, suggestionRequestPending]);
+    }, [canEdit, suggestionState, suggestionRequestPending]);
     const sourceRecordings = useMemo(() => {
         const folderIds = new Set(detail?.folderRecordingIds ?? []);
         return [
@@ -206,10 +232,6 @@ export function AgendaBody({
                 a.id.localeCompare(b.id),
         );
     }, [recordings, detail?.folderRecordingIds]);
-    const readOnly =
-        variant === "recording" ||
-        Boolean(detail?.attachedRecording) ||
-        Boolean(detail?.recordingItemId);
     const live = !readOnly && (variant === "live" || detail?.state === "live");
     useEffect(() => {
         if (!live || !active) return;
@@ -245,7 +267,6 @@ export function AgendaBody({
                 </CardContent>
             </Card>
         );
-    const canEdit = detail.permissions.edit && !readOnly;
     const showAttribution = hasAgendaContributors(detail);
     const suggestionsErrorCode =
         "errorCode" in detail.aiSuggestions
@@ -801,8 +822,15 @@ export function AgendaBody({
                                                   [...value.points, point],
                                                   point.id,
                                                   parentId,
-                                                  siblingIndex,
-                                              ) ?? value.points
+                                                  Math.min(
+                                                      siblingIndex,
+                                                      value.points.filter(
+                                                          (entry) =>
+                                                              entry.parentId ===
+                                                              parentId,
+                                                      ).length,
+                                                  ),
+                                              ) ?? [...value.points, point]
                                           ).map((entry) =>
                                               entry.id !== point.id &&
                                               entry.position !==
@@ -1370,9 +1398,11 @@ export function AgendaBody({
                         )
                     );
                 })}
-            <p className="sr-only" aria-live="polite" aria-atomic="true">
-                {suggestionAnnouncement}
-            </p>
+            {canEdit && (
+                <p className="sr-only" aria-live="polite" aria-atomic="true">
+                    {suggestionAnnouncement}
+                </p>
+            )}
             {attachOpen && (
                 <AttachRecordingDialog
                     detail={detail}

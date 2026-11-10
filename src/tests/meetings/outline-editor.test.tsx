@@ -117,7 +117,7 @@ describe.each([
     });
 });
 describe("outline keyboard", () => {
-    it("grows wrapped point text when the pane narrows without changing the text", () => {
+    it("grows wrapped point text while editing when the pane narrows without changing the text", () => {
         let resize = () => {};
         const disconnect = vi.fn();
         vi.stubGlobal(
@@ -132,6 +132,7 @@ describe("outline keyboard", () => {
         );
         const { unmount } = editor([point("Long discussion point")]);
         const field = screen.getByLabelText("Discussion point");
+        act(() => field.focus());
         Object.defineProperty(field, "clientWidth", { value: 120 });
         Object.defineProperty(field, "scrollHeight", { value: 80 });
         act(() => resize());

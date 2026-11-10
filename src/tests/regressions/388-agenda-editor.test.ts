@@ -963,3 +963,332 @@ it("keeps a queued child attached to the point that is still saving", async () =
     expect(requests[1]).toMatchObject({ text: "Nested", parentId: "First" });
     await act(async () => completions[1]());
 });
+
+it.each([
+    null,
+    "Parent",
+])("keeps an optimistic indexed add under %s visible after remote sibling removal", async (parentId) => {
+    let server = detail({
+        points: [
+            ...(parentId ? [point(parentId)] : []),
+            ...["A", "B", "C"].map((id) =>
+                point(id, { parentId, position: 7 }),
+            ),
+        ],
+    });
+    let completePatch = () => {};
+    let completeAdd: (response: Response) => void = () => {};
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+        if (init?.method === "PATCH") {
+            await new Promise<void>((resolve) => {
+                completePatch = resolve;
+            });
+            return Response.json({ success: true });
+        }
+        if (init?.method === "POST")
+            return new Promise<Response>((resolve) => {
+                completeAdd = resolve;
+            });
+        return Response.json(server);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+        createElement(AgendaBody, {
+            id: "agenda",
+            initial: server,
+            userId: "owner",
+            variant: "live",
+        }),
+        { wrapper: ConfirmDialogProvider },
+    );
+    await act(async () =>
+        fireEvent.click(screen.getByRole("checkbox", { name: "Discussed: C" })),
+    );
+    fireEvent.keyDown(
+        within(screen.getByRole("group", { name: "B" })).getByLabelText(
+            "Discussion point",
+        ),
+        { key: "Enter" },
+    );
+    const draft = screen.getByLabelText("New discussion point");
+    fireEvent.change(draft, { target: { value: "Local point" } });
+    fireEvent.keyDown(draft, { key: "Enter" });
+    expect(screen.getByRole("group", { name: "Local point" })).toBeTruthy();
+    server = {
+        ...server,
+        version: 2,
+        points: server.points.filter((p) => !["A", "B"].includes(p.id)),
+    };
+    await act(async () => completePatch());
+    expect(
+        fetchMock.mock.calls.find(([, init]) => init?.method === "POST")?.[1]
+            ?.body,
+    ).toContain('"siblingIndex":2');
+    expect(screen.getByRole("group", { name: "Local point" })).toBeTruthy();
+    server = {
+        ...server,
+        version: 3,
+        points: [
+            ...server.points,
+            point("Local point", { parentId, position: 1 }),
+        ],
+    };
+    await act(async () => completeAdd(Response.json({ id: "Local point" })));
+    expect(screen.getByRole("group", { name: "Local point" })).toBeTruthy();
+});
+
+it.each([
+    "viewer",
+    "recording",
+    "attached",
+] as const)("does not announce suggestion completion to a %s", async (mode) => {
+    let server = detail({
+        permissions: {
+            view: true,
+            edit: mode !== "viewer",
+            manage: mode !== "viewer",
+        },
+        recordingItemId: mode === "attached" ? "recording" : null,
+        aiSuggestions: {
+            available: true,
+            reason: null,
+            job: { state: "running" },
+        },
+    });
+    vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json(server)),
+    );
+    const view = render(
+        createElement(AgendaBody, {
+            id: "agenda",
+            initial: server,
+            userId: "owner",
+            variant: mode === "recording" ? "recording" : "meeting",
+        }),
+        { wrapper: ConfirmDialogProvider },
+    );
+    server = {
+        ...server,
+        aiSuggestions: { ...server.aiSuggestions, job: { state: null } },
+    };
+    await act(async () =>
+        window.dispatchEvent(
+            new CustomEvent("agenda-text-saved", { detail: "agenda" }),
+        ),
+    );
+    expect(
+        view.container.querySelector('[aria-live][aria-atomic="true"]'),
+    ).toBeNull();
+    expect(screen.queryByText("No new points to suggest.")).toBeNull();
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(document.body);
+    server = {
+        ...server,
+        permissions: { view: true, edit: true, manage: true },
+        recordingItemId: null,
+    };
+    view.rerender(createElement(AgendaBody, { id: "agenda", userId: "owner" }));
+    await act(async () =>
+        window.dispatchEvent(
+            new CustomEvent("agenda-text-saved", { detail: "agenda" }),
+        ),
+    );
+    expect(screen.queryByText("No new points to suggest.")).toBeNull();
+});
+
+it.each([
+    "Discussion point",
+    "Point note",
+])("only measures %s while editing and refreshes its height on re-entry", async (label) => {
+    const resizeCallbacks: (() => void)[] = [];
+    vi.stubGlobal(
+        "ResizeObserver",
+        class {
+            constructor(callback: () => void) {
+                resizeCallbacks.push(callback);
+            }
+            observe = vi.fn();
+            disconnect = vi.fn();
+        },
+    );
+    const height = vi
+        .spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get")
+        .mockReturnValue(80);
+    const width = vi
+        .spyOn(HTMLTextAreaElement.prototype, "clientWidth", "get")
+        .mockReturnValue(400);
+    const props = {
+        detail: detail({ points: [point("A", { note: "Original note" })] }),
+        userId: "owner",
+        onPatch: vi.fn(),
+        onRemove: vi.fn(),
+        onAdd: vi.fn().mockResolvedValue(true),
+    };
+    const view = render(createElement(OutlineEditor, props));
+    const field = screen.getByLabelText<HTMLTextAreaElement>(label);
+    height.mockClear();
+    view.rerender(
+        createElement(OutlineEditor, {
+            ...props,
+            detail: detail({
+                points: [
+                    point("A", { text: "Remote point", note: "Remote note" }),
+                ],
+            }),
+        }),
+    );
+    expect(height).not.toHaveBeenCalled();
+    await act(async () => field.focus());
+    expect(field.style.height).toBe("80px");
+    height.mockReturnValue(120);
+    fireEvent.change(field, { target: { value: "A longer local draft" } });
+    expect(field.style.height).toBe("120px");
+    width.mockReturnValue(200);
+    height.mockReturnValue(160);
+    act(() => {
+        for (const callback of resizeCallbacks) callback();
+    });
+    expect(field.style.height).toBe("160px");
+    await act(async () => field.blur());
+    height.mockClear();
+    width.mockReturnValue(1);
+    act(() => {
+        for (const callback of resizeCallbacks) callback();
+    });
+    view.rerender(
+        createElement(OutlineEditor, {
+            ...props,
+            detail: detail({
+                points: [
+                    point("A", { text: "Latest point", note: "Latest note" }),
+                ],
+            }),
+        }),
+    );
+    expect(height).not.toHaveBeenCalled();
+    height.mockReturnValue(40);
+    await act(async () => field.focus());
+    expect(field.style.height).toBe("40px");
+    expect(field.style.maxHeight).toBe("");
+});
+
+it("aliases identical pending text to the earliest point regardless of array order", async () => {
+    const props = {
+        detail: detail({ points: [point("Root")] }),
+        userId: "owner",
+        onPatch: vi.fn(),
+        onRemove: vi.fn(),
+        onAdd: vi.fn(() => new Promise<boolean>(() => {})),
+    };
+    const view = render(createElement(OutlineEditor, props));
+    fireEvent.click(screen.getByRole("button", { name: "Add a point…" }));
+    const draft = screen.getByLabelText("New discussion point");
+    fireEvent.change(draft, { target: { value: "Identical" } });
+    await act(async () => fireEvent.keyDown(draft, { key: "Enter" }));
+    view.rerender(
+        createElement(OutlineEditor, {
+            ...props,
+            pendingPaths: ["/points"],
+            detail: detail({
+                points: [
+                    point("Root"),
+                    point("pending-later", {
+                        text: "Identical",
+                        position: 2,
+                        createdAt: "2026-11-03T10:00:02.000Z",
+                    }),
+                    point("pending-earlier", {
+                        text: "Identical",
+                        position: 1,
+                        createdAt: "2026-11-03T10:00:01.000Z",
+                    }),
+                ],
+            }),
+        }),
+    );
+    const earlier = document.getElementById("point-pending-earlier");
+    const later = document.getElementById("point-pending-later");
+    if (!earlier || !later) throw new Error("Missing pending points");
+    expect(
+        earlier.compareDocumentPosition(draft) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+        draft.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+});
+
+it.each([
+    "running",
+    null,
+] as const)("retains an indistinguishable failed attempt until the server reports %s", async (state) => {
+    let server = detail({
+        aiSuggestions: {
+            available: true,
+            reason: null,
+            job: { state: "failed", errorCode: "AI_PROVIDER_API_ERROR" },
+        },
+    });
+    vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string, init?: RequestInit) =>
+            init?.method === "POST"
+                ? Response.json(
+                      { error: "Unavailable", code: "INTERNAL_ERROR" },
+                      { status: 500 },
+                  )
+                : Response.json(server),
+        ),
+    );
+    render(
+        createElement(AgendaBody, {
+            id: "agenda",
+            initial: server,
+            userId: "owner",
+        }),
+        { wrapper: ConfirmDialogProvider },
+    );
+    await act(async () =>
+        fireEvent.click(screen.getByRole("button", { name: "Try again" })),
+    );
+    const section = screen.getByRole("region", {
+        name: "Suggestions from activity since the last meeting",
+    });
+    server = {
+        ...server,
+        version: server.version + 1,
+        aiSuggestions: {
+            ...server.aiSuggestions,
+            job: { state: "failed", errorCode: "AI_PROVIDER_API_ERROR" },
+        },
+    };
+    await act(async () =>
+        window.dispatchEvent(
+            new CustomEvent("agenda-text-saved", { detail: "agenda" }),
+        ),
+    );
+    expect(within(section).getByRole("alert").textContent).toContain(
+        "The provider returned invalid agenda suggestions.",
+    );
+    server = {
+        ...server,
+        aiSuggestions: { ...server.aiSuggestions, job: { state } },
+    };
+    await act(async () =>
+        window.dispatchEvent(
+            new CustomEvent("agenda-text-saved", { detail: "agenda" }),
+        ),
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    if (state === "running")
+        expect(within(section).getByRole("status").textContent).toContain(
+            "Analyzing previous meetings and tasks…",
+        );
+    else
+        expect(
+            screen.queryByRole("region", {
+                name: "Suggestions from activity since the last meeting",
+            }),
+        ).toBeNull();
+});

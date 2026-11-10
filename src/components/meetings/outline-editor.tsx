@@ -128,26 +128,6 @@ function PointField({
         };
     }, [bindings, point.id, textSync]);
     useEffect(() => {
-        const field = input.current;
-        if (!editable || !field || field.value !== draft) return;
-        const resize = () => {
-            field.style.height = "0px";
-            field.style.height = `${Math.max(32, field.scrollHeight)}px`;
-        };
-        resize();
-        let width = field.clientWidth;
-        const observer =
-            typeof ResizeObserver === "undefined"
-                ? null
-                : new ResizeObserver(() => {
-                      if (width === field.clientWidth) return;
-                      width = field.clientWidth;
-                      resize();
-                  });
-        observer?.observe(field);
-        return () => observer?.disconnect();
-    }, [draft, editable]);
-    useEffect(() => {
         if (!focused.current && !dirty.current) setDraft(point.text);
     }, [point.text]);
     const save = (outdent?: boolean, move?: -1 | 1) => {
@@ -376,14 +356,13 @@ function PointNote({
                     displayClassName="min-h-6 p-1"
                 >
                     <Textarea
-                        autoGrow
                         rows={1}
                         ref={input}
                         aria-label={i18n("Point note")}
                         placeholder={i18n("Note")}
                         maxLength={2000}
                         value={draft}
-                        className="min-h-6 min-w-0 flex-1 rounded border border-transparent bg-transparent p-1 text-xs shadow-none focus:border-input focus:outline-none md:text-xs"
+                        className="min-h-6 min-w-0 flex-1 resize-none overflow-y-auto rounded border border-transparent bg-transparent p-1 text-xs shadow-none focus:border-input focus:outline-none md:text-xs"
                         onFocus={() => {
                             focused.current = true;
                             editing.current = point;
@@ -568,12 +547,18 @@ export function OutlineEditor({
         const pending =
             index === 0 &&
             submitting.current &&
-            detail.points.find(
-                (point) =>
-                    point.id.startsWith("pending-") &&
-                    point.text === entry.text &&
-                    point.parentId === resolved.parentId,
-            );
+            detail.points
+                .filter(
+                    (point) =>
+                        point.id.startsWith("pending-") &&
+                        point.text === entry.text &&
+                        point.parentId === resolved.parentId,
+                )
+                .sort(
+                    (a, b) =>
+                        a.createdAt.localeCompare(b.createdAt) ||
+                        a.id.localeCompare(b.id),
+                )[0];
         if (pending) {
             aliases.set(entry.id, pending.id);
             continue;

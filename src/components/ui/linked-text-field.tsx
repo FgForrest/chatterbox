@@ -63,10 +63,25 @@ export function LinkedTextField({
     const [editing, setEditing] = useState(false);
     useLayoutEffect(() => {
         const input = inputRef.current;
-        if (!editing || !input) return;
-        input.style.height = "0px";
-        input.style.height = `${input.scrollHeight + input.offsetHeight - input.clientHeight}px`;
-    }, [editing, inputRef]);
+        if (!editing || !input || input.value !== text) return;
+        const resize = () => {
+            if (input.ownerDocument.activeElement !== input) return;
+            input.style.height = "0px";
+            input.style.height = `${input.scrollHeight + input.offsetHeight - input.clientHeight}px`;
+        };
+        resize();
+        let width = input.clientWidth;
+        const observer =
+            typeof ResizeObserver === "undefined"
+                ? null
+                : new ResizeObserver(() => {
+                      if (width === input.clientWidth) return;
+                      width = input.clientWidth;
+                      resize();
+                  });
+        observer?.observe(input);
+        return () => observer?.disconnect();
+    }, [editing, inputRef, text]);
     return (
         <div
             className={cn("relative flex min-w-0 flex-col", className)}
