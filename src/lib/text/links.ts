@@ -9,6 +9,9 @@ export type TextLinkSegment =
       };
 
 const labelLimit = 60;
+// A word and colon right before a URL ("Pozn.:https://…") is a label, unless it names a URI scheme.
+const uriScheme =
+    /^(?:javascript|vbscript|data|blob|file|filesystem|ftp|mailto|tel|sms|view-source|about|chrome|intent):$/iu;
 const closingPairs: Record<string, string> = {
     ")": "(",
     "]": "[",
@@ -56,9 +59,14 @@ export function splitTextLinks(text: string): TextLinkSegment[] {
     let cursor = 0;
     for (const match of text.matchAll(pattern)) {
         const start = match.index;
-        if (start && /[\p{L}\p{N}_@/:.-]/u.test(text[start - 1])) continue;
         const prefix = text.slice(0, start).match(/[^\s<>]*$/u)?.[0] ?? "";
-        if (/^[a-z][a-z\d+.-]*:/iu.test(prefix)) continue;
+        const label = /^[^/:]+:$/u.test(prefix) && !uriScheme.test(prefix);
+        if (
+            !label &&
+            ((start && /[\p{L}\p{N}_@/:.-]/u.test(text[start - 1])) ||
+                /^[a-z][a-z\d+.-]*:/iu.test(prefix))
+        )
+            continue;
         const source = trimEnd(match[0]);
         const href = /^www\./iu.test(source) ? `https://${source}` : source;
         let url: URL;

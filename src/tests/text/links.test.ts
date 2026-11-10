@@ -88,6 +88,14 @@ describe("plain text web links", () => {
         ).toBe(source);
     });
 
+    it.each([
+        ["Pozn.:https://example.com/a", "https://example.com/a"],
+        ["URL:www.example.org/b", "https://www.example.org/b"],
+        ["Zápis:https://example.net/c", "https://example.net/c"],
+    ])("links a URL right after a label in %s", (source, href) => {
+        expect(links(source).map((segment) => segment.href)).toEqual([href]);
+    });
+
     it("keeps Czech text, punctuation and several URLs exactly as written", () => {
         const source =
             "Podklady: „https://example.com/plán“, pak (www.example.org/bod). A http://example.net?x=1&y=2!";
