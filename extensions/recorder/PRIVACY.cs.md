@@ -47,7 +47,7 @@ karty a aktuální čas na propojený server. U ostatních platforem páruje pod
 Odkazy pro připojení ke schůzce přicházejí pouze prostřednictvím níže popsané funkce Kalendáře. Rozšíření nesbírá obsah
 stránek ani další zvuk. Izolovaná lišta zobrazuje údaje agendy ze serveru a posílá
 jen ovládací zprávy procesu na pozadí; klíč se stránce schůzky nezpřístupňuje.
-Zaškrtnutí bodů, poznámky, nové body a označení úkolů Hotovo nebo Zrušit ukládá
+Zaškrtnutí bodů, poznámky, nové body a označení úkolů Hotovo nebo Zahodit ukládá
 na váš server. Změna úkolu mění skutečný úkol podle vašich stávajících oprávnění.
 ID vybrané agendy zůstává v metadatech pro obnovení odesílání do
 dokončení nebo zahození nahrávky; ID se posílá při dokončení. Při odpojení nebo novém propojení se dočasné agendy a volby smažou.

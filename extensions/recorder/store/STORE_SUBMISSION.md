@@ -70,6 +70,13 @@ The privacy policy, store listing, permission explanations, and in-extension con
 - The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
 
+## What changed in 0.9.6
+
+- Czech only: the agenda's task action Drop reads Zahodit and a dropped task Zahozeno, as in the web
+  application, instead of Zrušit and Zrušeno. Zrušit stays reserved for Cancel. The Czech privacy policy
+  uses the same word.
+- No permission, data-use or server-contract change against 0.9.5.
+
 ## What changed in 0.9.5
 
 - Another agenda in the side panel and fallback window adds relevant unrecorded agendas planned within
