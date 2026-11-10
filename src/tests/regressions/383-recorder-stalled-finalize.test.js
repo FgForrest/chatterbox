@@ -685,6 +685,126 @@ function httpError(status, code) {
     return Object.assign(new Error("server error"), { status, code });
 }
 
+describe("#383 completion retries", () => {
+    it.each([
+        [503, "ACCESS_UNVERIFIABLE", 0],
+        [500, undefined, 0],
+        [502, undefined, 0],
+        [504, undefined, 0],
+        [429, undefined, 60],
+        [undefined, undefined, 0],
+    ])("retries transient completion failures with backoff (%s/%s, Retry-After=%s)", async (status, code, retryAfterSeconds) => {
+        vi.useFakeTimers();
+        const error = Object.assign(httpError(status, code), {
+            retryAfterSeconds,
+        });
+        const completeSession = vi
+            .fn()
+            .mockRejectedValueOnce(error)
+            .mockRejectedValueOnce(error)
+            .mockResolvedValue({ job_id: "job-one" });
+        const h = worker(undefined, { completeSession });
+        await drain();
+        h.values.recordingState = stopped();
+        await h.ctx.pumpUploads();
+        for (let attempt = 1; attempt <= 2; attempt++) {
+            expect(h.values.recordingState).toMatchObject({
+                state: "error",
+                stopped: true,
+                blocked: false,
+                error:
+                    code === "ACCESS_UNVERIFIABLE"
+                        ? "accessUnverifiable"
+                        : "server error",
+            });
+            const meta = h.metas.get("buffer-one");
+            const when = Date.parse(meta.nextRetryAt);
+            const backoff = 5000 * 2 ** (attempt - 1);
+            expect(meta.retryAttempt).toBe(attempt);
+            expect(when - Date.now()).toBeGreaterThanOrEqual(
+                Math.max(retryAfterSeconds * 1000, backoff * 0.75),
+            );
+            expect(when - Date.now()).toBeLessThanOrEqual(
+                Math.max(retryAfterSeconds * 1000, backoff * 1.25),
+            );
+            expect(h.chrome.alarms.create).toHaveBeenCalledWith(
+                ALARMS.uploadRetry,
+                { when },
+            );
+            expect(h.deps.deleteLocalSession).not.toHaveBeenCalled();
+            await h.listeners.alarm({ name: ALARMS.uploadRetry });
+            expect(completeSession).toHaveBeenCalledTimes(attempt);
+            await vi.advanceTimersByTimeAsync(when - Date.now());
+            await h.listeners.alarm({ name: ALARMS.uploadRetry });
+            expect(completeSession).toHaveBeenCalledTimes(attempt + 1);
+        }
+        expect(h.values.recordingState).toMatchObject({
+            state: "finalizing",
+            jobId: "job-one",
+        });
+        h.deps.getSession.mockResolvedValue({
+            status: "completed",
+            recording_id: "recording-one",
+        });
+        const alarm = h.listeners.alarm({ name: ALARMS.uploadRetry });
+        await drain();
+        expect(h.values.recordingState.state).toBe("completed");
+        expect(h.deps.deleteLocalSession).toHaveBeenCalledExactlyOnceWith(
+            "buffer-one",
+        );
+        expect(h.deps.uploadChunk).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(4000);
+        await alarm;
+    });
+
+    it.each([
+        400, 401, 403, 404, 409, 422,
+    ])("blocks permanent completion failure %s without scheduling a retry", async (status) => {
+        const h = worker(undefined, {
+            completeSession: vi.fn().mockRejectedValue(httpError(status)),
+        });
+        await drain();
+        h.values.recordingState = stopped();
+        await h.ctx.pumpUploads();
+        expect(h.values.recordingState).toMatchObject({
+            state: "error",
+            stopped: true,
+            blocked: true,
+        });
+        expect(h.chrome.alarms.create).not.toHaveBeenCalled();
+        expect(h.metas.get("buffer-one")).not.toHaveProperty("nextRetryAt");
+        await h.listeners.alarm({ name: ALARMS.uploadRetry });
+        expect(h.deps.completeSession).toHaveBeenCalledOnce();
+        expect(h.deps.deleteLocalSession).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        "sessionId",
+        "bufferId",
+    ])("ignores a transient completion failure after %s ownership changes", async (field) => {
+        const completion = deferred();
+        const h = worker(undefined, {
+            completeSession: vi.fn(() =>
+                completion.promise.then(() => {
+                    throw httpError(503, "ACCESS_UNVERIFIABLE");
+                }),
+            ),
+        });
+        await drain();
+        h.values.recordingState = stopped();
+        const pump = h.ctx.pumpUploads();
+        await drain();
+        expect(h.deps.completeSession).toHaveBeenCalledOnce();
+        const newer = stopped({ [field]: "different", stopped: false });
+        h.values.recordingState = newer;
+        completion.resolve();
+        await pump;
+        expect(h.values.recordingState).toEqual(newer);
+        expect(h.chrome.alarms.create).not.toHaveBeenCalled();
+        expect(h.metas.get("buffer-one")).not.toHaveProperty("nextRetryAt");
+    });
+});
+
 describe("#383 retry-buffer", () => {
     it("resumes an open buffer using server receipt indices and retained folder/agenda metadata", async () => {
         const h = worker();
@@ -988,7 +1108,7 @@ describe("#383 request timeouts", () => {
         expect(h.deps.completeSession).not.toHaveBeenCalled();
     });
 
-    it("puts a timed-out completion in the error view with its buffer intact", async () => {
+    it("retries a timed-out completion from the error view with its buffer intact", async () => {
         const fetch = hangRequests();
         const h = worker(stopped(), { completeSession: api.completeSession });
         await drain();
@@ -998,11 +1118,38 @@ describe("#383 request timeouts", () => {
         await check;
         expect(h.values.recordingState).toMatchObject({
             state: "error",
-            blocked: true,
+            stopped: true,
+            blocked: false,
             error: "requestTimedOut",
         });
         expect(fetch).toHaveBeenCalledOnce();
         expect(h.deps.deleteLocalSession).not.toHaveBeenCalled();
+        const meta = h.metas.get("buffer-one");
+        const when = Date.parse(meta.nextRetryAt);
+        expect(meta.retryAttempt).toBe(1);
+        expect(when - Date.now()).toBeGreaterThanOrEqual(3750);
+        expect(when - Date.now()).toBeLessThanOrEqual(6250);
+        expect(h.chrome.alarms.create).toHaveBeenCalledWith(
+            ALARMS.uploadRetry,
+            { when },
+        );
+        fetch.mockResolvedValueOnce(
+            new Response(JSON.stringify({ job_id: "job-one" })),
+        );
+        h.deps.getSession.mockResolvedValue({
+            status: "completed",
+            recording_id: "recording-one",
+        });
+        await vi.advanceTimersByTimeAsync(when - Date.now());
+        const alarm = h.listeners.alarm({ name: ALARMS.uploadRetry });
+        await drain();
+        expect(fetch).toHaveBeenCalledTimes(2);
+        expect(h.values.recordingState.state).toBe("completed");
+        expect(h.deps.deleteLocalSession).toHaveBeenCalledExactlyOnceWith(
+            "buffer-one",
+        );
+        await vi.advanceTimersByTimeAsync(4000);
+        await alarm;
     });
 
     it.each([

@@ -1059,11 +1059,13 @@ async function finalizeOnce(truncatedAtChunk) {
         await reconcileServerSession(state.sessionId, auth);
     } catch (error) {
         if (!sameUploadOwner(await getState(), state)) return;
+        const blocked = Boolean(error?.status && ![429, 500, 502, 503, 504].includes(error.status));
         await setState({
             state: STATE.error,
-            blocked: true,
+            blocked,
             error: retryErrorMessage(error, t("finalizeFailed")),
         });
+        if (!blocked) await scheduleUploadRetry(state.bufferId ?? state.sessionId, error);
     }
 }
 
