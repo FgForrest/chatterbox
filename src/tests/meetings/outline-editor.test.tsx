@@ -25,6 +25,9 @@ vi.mock("next-intl", () => ({
 afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    Reflect.deleteProperty(document, "caretPositionFromPoint");
+    Reflect.deleteProperty(document, "caretRangeFromPoint");
 });
 function editor(
     points = [point("Root"), point("Second", { position: 1 })],
@@ -114,7 +117,7 @@ describe.each([
     });
 });
 describe("outline keyboard", () => {
-    it("grows wrapped point text when the pane narrows without changing the text", () => {
+    it("grows wrapped point text while editing when the pane narrows without changing the text", () => {
         let resize = () => {};
         const disconnect = vi.fn();
         vi.stubGlobal(
@@ -129,6 +132,7 @@ describe("outline keyboard", () => {
         );
         const { unmount } = editor([point("Long discussion point")]);
         const field = screen.getByLabelText("Discussion point");
+        act(() => field.focus());
         Object.defineProperty(field, "clientWidth", { value: 120 });
         Object.defineProperty(field, "scrollHeight", { value: 80 });
         act(() => resize());
@@ -614,4 +618,132 @@ it("uses native point drag/drop and rejects a drop that would create a fourth le
         expect.objectContaining({ id: "Second", version: 0 }),
         { parentId: null, siblingIndex: 0 },
     );
+});
+
+describe("linked outline fields", () => {
+    it("opens links without editing and edits ordinary text with the same mounted input", async () => {
+        const text = "Review https://www.example.com/documents and decide";
+        const { props } = editor([point("p", { text })]);
+        const input =
+            screen.getByLabelText<HTMLTextAreaElement>("Discussion point");
+        const link = screen.getByRole("link", {
+            name: "example.com/documents",
+        });
+        link.addEventListener("click", (event) => event.preventDefault());
+        fireEvent.click(link);
+        expect(document.activeElement).not.toBe(input);
+        expect(input.style.clipPath).toBe("inset(50%)");
+        expect(props.onPatch).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByText("Review"));
+        expect(document.activeElement).toBe(input);
+        expect(input.style.clipPath).toBe("");
+        expect(input.value).toBe(text);
+        expect(input.selectionStart).toBe(text.length);
+        expect(screen.queryByRole("link")).toBeNull();
+        await act(async () => input.blur());
+        expect(screen.getByRole("link")).toBeTruthy();
+        expect(screen.getByLabelText("Discussion point")).toBe(input);
+    });
+
+    it.each([
+        "caretPositionFromPoint",
+        "caretRangeFromPoint",
+    ])("uses %s to place the caret after a shortened URL in the original text", (method) => {
+        const text = `Before https://example.com/${"path/".repeat(30)} after link`;
+        editor([point("p", { text })]);
+        const suffix = screen.getByText("after link");
+        const node = suffix.firstChild;
+        if (!node) throw new Error("Missing text node");
+        const range = document.createRange();
+        range.setStart(node, 4);
+        range.collapse(true);
+        const locate = vi.fn(() =>
+            method === "caretPositionFromPoint"
+                ? { offsetNode: node, offset: 4 }
+                : range,
+        );
+        Object.defineProperty(document, method, {
+            value: locate,
+            configurable: true,
+        });
+        fireEvent.click(suffix, { clientX: 42, clientY: 17 });
+        const input =
+            screen.getByLabelText<HTMLTextAreaElement>("Discussion point");
+        expect(input.selectionStart).toBe(text.indexOf(" after link") + 4);
+        expect(input.selectionEnd).toBe(input.selectionStart);
+        expect(locate).toHaveBeenCalledWith(42, 17);
+    });
+
+    it("updates links in an unfocused point and shows linked editable notes", () => {
+        const initial = point("p", {
+            text: "See https://example.com/old",
+            note: "Note www.example.org",
+        });
+        const { props, rerender } = editor([initial]);
+        expect(screen.getByRole("link", { name: "example.org" })).toBeTruthy();
+        const input = screen.getByLabelText("Discussion point");
+        rerender(
+            <OutlineEditor
+                {...props}
+                detail={detail({
+                    points: [
+                        {
+                            ...initial,
+                            text: "See https://example.com/new",
+                            version: 1,
+                        },
+                    ],
+                })}
+            />,
+        );
+        expect(
+            screen.queryByRole("link", { name: "example.com/old" }),
+        ).toBeNull();
+        expect(
+            screen.getByRole("link", { name: "example.com/new" }),
+        ).toBeTruthy();
+        expect(screen.getByLabelText("Discussion point")).toBe(input);
+        fireEvent.click(
+            screen.getByText("Note", { selector: "span[data-text-start]" }),
+        );
+        expect(document.activeElement).toBe(
+            screen.getByLabelText("Point note"),
+        );
+    });
+
+    it("grows add and point note fields, strips pasted line breaks and retains Enter behavior", async () => {
+        const height = vi
+            .spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get")
+            .mockReturnValue(80);
+        const { props } = editor([point("p")], {
+            live: true,
+            onPatch: vi.fn().mockResolvedValue(true),
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Add a point…" }));
+        const add = screen.getByLabelText<HTMLTextAreaElement>(
+            "New discussion point",
+        );
+        expect(add.tagName).toBe("TEXTAREA");
+        fireEvent.change(add, { target: { value: "First\r\nsecond\nthird" } });
+        expect(add.value).toBe("First second third");
+        expect(add.style.height).toBe("80px");
+        await act(async () => {
+            expect(fireEvent.keyDown(add, { key: "Enter" })).toBe(false);
+        });
+        expect(props.onAdd).toHaveBeenCalledWith("First second third", null, 1);
+        const note = screen.getByLabelText<HTMLTextAreaElement>("Point note");
+        act(() => note.focus());
+        height.mockReturnValue(128);
+        fireEvent.change(note, { target: { value: "Note\r\nwith\nwraps" } });
+        expect(note.value).toBe("Note with wraps");
+        expect(note.style.height).toBe("128px");
+        await act(async () => {
+            expect(fireEvent.keyDown(note, { key: "Enter" })).toBe(false);
+        });
+        expect(props.onPatch).toHaveBeenCalledWith(
+            expect.objectContaining({ id: "p" }),
+            { note: "Note with wraps" },
+        );
+        expect(document.activeElement).not.toBe(note);
+    });
 });

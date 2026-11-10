@@ -44,6 +44,7 @@ import type { TaskRowChange } from "@/components/tasks/use-recording-tasks";
 import { Button } from "@/components/ui/button";
 import { EditorActions } from "@/components/ui/editor-actions";
 import { InlineEditorTrigger } from "@/components/ui/inline-editor-trigger";
+import { LinkedText } from "@/components/ui/linked-text";
 import { Textarea } from "@/components/ui/textarea";
 import {
     ActionTooltip,
@@ -255,6 +256,7 @@ export function TaskRow({
                 <div className={cn(corner && "pr-7")}>
                     {editable ? (
                         <TaskTextInput
+                            linkify
                             text={task.text}
                             onSave={(text) => onChange({ text }, { text })}
                             className={cn(
@@ -270,7 +272,7 @@ export function TaskRow({
                                     "text-muted-foreground line-through",
                             )}
                         >
-                            {task.text}
+                            <LinkedText text={task.text} />
                         </p>
                     )}
                 </div>
@@ -350,8 +352,10 @@ export function TaskRow({
                 {task.note && !noteOpen && (
                     <div className="flex gap-2 border-l-2 border-border pl-3">
                         <MessageSquare className="mt-1 size-3 shrink-0" />
-                        <div>
-                            <p className="whitespace-pre-wrap">{task.note}</p>
+                        <div className="min-w-0">
+                            <p className="whitespace-pre-wrap">
+                                <LinkedText text={task.note} />
+                            </p>
                             <p className="text-xs text-muted-foreground">
                                 {task.noteBy?.name ?? i18n("Unknown author")}
                                 {task.noteUpdatedAt && (

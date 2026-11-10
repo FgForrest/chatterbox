@@ -195,6 +195,42 @@ describe.each([
         await act(async () => {});
         return view;
     }
+    it("links point text, point notes, task text and both kinds of task notes", async () => {
+        await mount({
+            points: [
+                point("p", {
+                    text: "Point https://example.com/point",
+                    note: "Point note www.example.com/point-note",
+                }),
+            ],
+            tasks: [
+                task("t", null, {
+                    text: "Task http://example.com/task",
+                    note: "Task note https://example.com/task-note",
+                    agendaNote: "Meeting note https://example.com/meeting-note",
+                }),
+            ],
+        });
+        for (const path of [
+            "point",
+            "point-note",
+            "task",
+            "task-note",
+            "meeting-note",
+        ]) {
+            const link = screen.getByRole<HTMLAnchorElement>("link", {
+                name: `example.com/${path}`,
+            });
+            expect(link.target).toBe("_blank");
+            expect(link.rel).toBe("noopener noreferrer");
+        }
+        expect(
+            fetchMock.mock.calls.some(
+                ([, init]) =>
+                    init?.method === "PATCH" || init?.method === "POST",
+            ),
+        ).toBe(false);
+    });
     it("counts only top-level points and their own discussed state", async () => {
         await mount({
             points: [
@@ -715,7 +751,13 @@ it("shows agenda badges and the labelled meeting note outside hover tools, with 
     });
     expect(document.activeElement).toBe(editor);
     expect(editor.closest(".task-row-pills")).toBeNull();
-    fireEvent.change(editor, { target: { value: "  Updated note  " } });
+    const height = vi
+        .spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get")
+        .mockReturnValue(144);
+    fireEvent.change(editor, { target: { value: "  Updated\r\nnote  " } });
+    expect(editor).toHaveProperty("value", "  Updated note  ");
+    expect(editor.style.height).toBe("144px");
+    height.mockRestore();
     await act(async () =>
         fireEvent.click(screen.getByRole("button", { name: "Save" })),
     );

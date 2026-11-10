@@ -3,7 +3,9 @@
 import { CalendarDays, X } from "lucide-react";
 import { useExtracted, useFormatter } from "next-intl";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { LinkedTextField } from "@/components/ui/linked-text-field";
 import { getPasswordManagerAttributes } from "@/lib/password-manager";
+import { splitTextLinks } from "@/lib/text/links";
 import { cn } from "@/lib/utils";
 
 /** Today in the viewer's time zone, `YYYY-MM-DD`. */
@@ -22,11 +24,13 @@ export function TaskTextInput({
     className,
     onSave,
     onEdit,
+    linkify = false,
 }: {
     text: string;
     className?: string;
     onSave: (text: string) => void;
     onEdit?: () => void;
+    linkify?: boolean;
 }) {
     const i18n = useExtracted();
     const [draft, setDraft] = useState(text);
@@ -48,7 +52,7 @@ export function TaskTextInput({
         onSave(next);
     };
 
-    return (
+    const field = (
         <textarea
             {...getPasswordManagerAttributes()}
             ref={input}
@@ -76,6 +80,21 @@ export function TaskTextInput({
                 className,
             )}
         />
+    );
+    return linkify &&
+        splitTextLinks(text).some((segment) => segment.type === "link") ? (
+        <LinkedTextField
+            text={draft}
+            inputRef={input}
+            displayClassName={cn(
+                "min-h-6 border border-transparent px-1",
+                className,
+            )}
+        >
+            {field}
+        </LinkedTextField>
+    ) : (
+        field
     );
 }
 
