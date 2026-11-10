@@ -15,7 +15,8 @@ import { ExportPathTakenError } from "./filesystem-provider";
 export function isExportErrorRetryable(error: unknown): boolean {
     if (
         error instanceof AppError &&
-        error.code === ErrorCode.EXPORT_REVOCATION_PENDING
+        (error.code === ErrorCode.EXPORT_REVOCATION_PENDING ||
+            error.code === ErrorCode.EXPORT_LOCK_BUSY)
     )
         return true;
     if (

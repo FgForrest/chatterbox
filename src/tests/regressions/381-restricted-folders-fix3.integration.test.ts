@@ -18,7 +18,10 @@ import {
 } from "vitest";
 import { z } from "zod";
 import { POST as audiencePost } from "@/app/api/folders/[id]/audience/route";
+import { DELETE as exportDelete } from "@/app/api/folders/[id]/exports/[exportId]/route";
+import { DELETE as folderDelete } from "@/app/api/folders/[id]/route";
 import { db } from "@/db";
+import { withFolderExportLocks } from "@/db/queries/folder-export-locks";
 import * as schema from "@/db/schema";
 import {
     accounts,
@@ -49,6 +52,7 @@ import { DbDriveNodeStore } from "@/lib/folder-exports/drive-nodes";
 import { DriveExportProvider } from "@/lib/folder-exports/drive-provider";
 import { exportPlanJobHandler } from "@/lib/folder-exports/job-handlers";
 import { enqueueExportPlan } from "@/lib/folder-exports/jobs";
+import { withExportLock } from "@/lib/folder-exports/lock";
 import { planFolderExport } from "@/lib/folder-exports/planner";
 import * as exportProviders from "@/lib/folder-exports/provider-factory";
 import { requestRestrictedFolderAccess } from "@/lib/folders/access-requests";
@@ -684,7 +688,7 @@ suite("restricted folders review 3 (PostgreSQL)", () => {
                     ),
                 ),
             ).toContain(remaining.agendaId);
-    });
+    }, 30000);
 
     async function exportedDrive(extra = 0, direct = false) {
         await makeShareable();
@@ -959,7 +963,7 @@ suite("restricted folders review 3 (PostgreSQL)", () => {
         } finally {
             fixture.spy.mockRestore();
         }
-    });
+    }, 30000);
     it("cleans multiple configurations on a two-connection pool", async () => {
         const fixture = await exportedDrive();
         await db.insert(folderExportConfigurations).values({
@@ -990,6 +994,206 @@ suite("restricted folders review 3 (PostgreSQL)", () => {
             fixture.spy.mockRestore();
         }
     });
+    it.each([
+        "configuration",
+        "folder",
+    ])("keeps queries and cleanup available during concurrent %s deletions", async (kind) => {
+        const fixture = await exportedDrive();
+        await changeFolderRestriction("curator", restrictedId, "restrict");
+        const client = postgres(database.url);
+        ref.current = drizzle(client, { schema }) as unknown as Record<
+            PropertyKey,
+            unknown
+        >;
+        sqlRef.current = client;
+        const entered = _barrier();
+        const resume = _barrier();
+        const updateItem = fixture.drive.updateItem.bind(fixture.drive);
+        const pause = vi
+            .spyOn(fixture.drive, "updateItem")
+            .mockImplementationOnce(async (...args) => {
+                entered.release();
+                await resume.promise;
+                return updateItem(...args);
+            });
+        const remove = async (target: string) => {
+            const request = new Request("http://localhost/api/test", {
+                method: "DELETE",
+                headers: { "x-test-user": "org" },
+            });
+            return target === "configuration"
+                ? exportDelete(request, {
+                      params: Promise.resolve({
+                          id: openId,
+                          exportId: "drive",
+                      }),
+                  })
+                : folderDelete(request, {
+                      params: Promise.resolve({ id: openId }),
+                  });
+        };
+        const holder = remove(kind);
+        const contenders: Promise<Response>[] = [];
+        try {
+            await entered.promise;
+            const responses: Response[] = [];
+            const count = client.options.max * 2;
+            for (let index = 0; index < count; index++)
+                contenders.push(
+                    remove(index % 2 ? "configuration" : "folder").then(
+                        (response) => {
+                            responses.push(response);
+                            return response;
+                        },
+                    ),
+                );
+            let queried = false;
+            const unrelated = db
+                .select({ id: users.id })
+                .from(users)
+                .where(eq(users.id, "other"))
+                .then((rows) => {
+                    queried = true;
+                    return rows;
+                });
+            await expect
+                .poll(() => responses.length, { timeout: 5000 })
+                .toBe(count);
+            await expect.poll(() => queried, { timeout: 5000 }).toBe(true);
+            expect(await unrelated).toEqual([{ id: "other" }]);
+            for (const response of responses) {
+                expect(response.status).toBe(409);
+                expect(await response.json()).toMatchObject({
+                    code: ErrorCode.EXPORT_LOCK_BUSY,
+                    details: { retryable: true },
+                });
+            }
+            resume.release();
+            expect((await holder).status).toBe(200);
+            expect(await db.select().from(folderExportConfigurations)).toEqual(
+                [],
+            );
+            expect(
+                await db.select().from(folderExportMaterializations),
+            ).toEqual([]);
+            for (const id of fixture.owned)
+                expect(fixture.drive.isTrashed(id)).toBe(true);
+            expect(fixture.drive.isTrashed(fixture.foreign)).toBe(false);
+            const [locks] = await client`select count(*)::int as n from pg_locks
+                where locktype = 'advisory' and granted
+                  and database = (select oid from pg_database where datname = current_database())`;
+            expect(locks.n).toBe(0);
+        } finally {
+            resume.release();
+            await client.end({ timeout: 1 });
+            await Promise.allSettled([holder, ...contenders]);
+            ref.current = database.db as unknown as Record<
+                PropertyKey,
+                unknown
+            >;
+            sqlRef.current = database.sql;
+            pause.mockRestore();
+            fixture.spy.mockRestore();
+        }
+    }, 30000);
+    it("retries a background plan after a held export lock is released", async () => {
+        const fixture = await exportedDrive();
+        const entered = _barrier();
+        const resume = _barrier();
+        const holder = withExportLock("drive", "exclusive", async () => {
+            entered.release();
+            await resume.promise;
+        });
+        try {
+            await entered.promise;
+            await db
+                .delete(asyncJobs)
+                .where(eq(asyncJobs.kind, "folder-export-plan"));
+            const { job } = await enqueueExportPlan("org", "drive");
+            registerJobHandler(exportPlanJobHandler);
+            await tick();
+            await expect
+                .poll(
+                    async () =>
+                        (
+                            await db
+                                .select()
+                                .from(asyncJobs)
+                                .where(eq(asyncJobs.id, job.id))
+                        )[0]?.status,
+                    { timeout: 5000 },
+                )
+                .toBe("pending");
+            await waitForIdle();
+            const [retry] = await db
+                .select()
+                .from(asyncJobs)
+                .where(eq(asyncJobs.id, job.id));
+            expect(retry).toMatchObject({
+                attempts: 1,
+                errorCode: ErrorCode.EXPORT_LOCK_BUSY,
+            });
+            expect(retry.nextAttemptAt.getTime()).toBeGreaterThan(Date.now());
+            expect(fixture.spy).toHaveBeenCalledTimes(1);
+            resume.release();
+            await holder;
+            await db
+                .update(asyncJobs)
+                .set({ nextAttemptAt: new Date(0) })
+                .where(eq(asyncJobs.id, job.id));
+            await tick();
+            await waitForIdle();
+            expect(
+                (
+                    await db
+                        .select()
+                        .from(asyncJobs)
+                        .where(eq(asyncJobs.id, job.id))
+                )[0],
+            ).toMatchObject({ status: "completed", attempts: 2 });
+            expect(fixture.spy).toHaveBeenCalledTimes(2);
+        } finally {
+            resume.release();
+            await holder;
+            await waitForIdle();
+            clearJobHandlers();
+            fixture.spy.mockRestore();
+        }
+    }, 30000);
+    it.each([
+        "exclusive",
+        "shared",
+    ] as const)("releases partial %s lock sets and callback failures", async (mode) => {
+        const gate = await database.sql.reserve();
+        await gate`select pg_advisory_lock(hashtextextended('folder_export:z', 0))`;
+        const work = vi.fn(async () => {});
+        try {
+            await expect(
+                withFolderExportLocks(["z", "a", "a"], mode, work),
+            ).rejects.toMatchObject({
+                code: ErrorCode.EXPORT_LOCK_BUSY,
+                details: { retryable: true },
+            });
+            expect(work).not.toHaveBeenCalled();
+            const [available] =
+                await gate`select pg_try_advisory_lock(hashtextextended('folder_export:a', 0)) as acquired`;
+            expect(available.acquired).toBe(true);
+        } finally {
+            await gate`select pg_advisory_unlock_all()`;
+            gate.release();
+        }
+        const failure = new Error("callback failed");
+        await expect(
+            withFolderExportLocks(["z", "a", "a"], mode, async () => {
+                throw failure;
+            }),
+        ).rejects.toBe(failure);
+        const [locks] =
+            await database.sql`select count(*)::int as n from pg_locks
+            where locktype = 'advisory' and granted
+              and database = (select oid from pg_database where datname = current_database())`;
+        expect(locks.n).toBe(0);
+    }, 30000);
     it("reports skipped recipients through the audience POST response", async () => {
         await idpStates();
         const result = await interleave(
