@@ -53,6 +53,8 @@ export const HELP_TOPICS = {
         anchor: "tasks-from-a-summary",
     },
     "tasks.page": { page: "summaries-and-tasks", anchor: "the-tasks-page" },
+    "meetings.tasks": { page: "meetings", anchor: "task-review" },
+    "meetings.points": { page: "meetings", anchor: "discussion-points" },
     "almanac.people": { page: "almanac", anchor: "people" },
     "almanac.things": { page: "almanac", anchor: "things" },
     "almanac.vocabulary": { page: "almanac", anchor: "vocabulary" },

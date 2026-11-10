@@ -135,6 +135,8 @@ Výběr soukromé složky v seznamu **Moje** nebo **Všechny** zahrne vlastní �
 
 Pravé tlačítko na **Úkoly** v navigaci, klávesa místní nabídky, Shift+F10 nebo dlouhý dotyk otevřou Moje se zaměřeným formulářem. Ctrl+kliknutí a prostřední tlačítko nadále otevřou novou záložku prohlížeče. Pro nabídku prohlížeče podržte při kliknutí pravým tlačítkem Shift, Ctrl, Alt nebo Meta.
 
+<span id="notes-and-follows" />
+
 ### Poznámky a sledování
 
 Zaškrtnutí úkolu otevře nepovinnou poznámku. Zvolte **Přeskočit** nebo **Uložit poznámku**. Akce **Poznámka** ji po zavření editoru znovu otevře. Během úprav je její tlačítko neaktivní; použijte **Přeskočit** nebo **Uložit poznámku**. Zaměření se pak vrátí na **Poznámku**. Úkol má jednu šifrovanou poznámku do 2 000 znaků; uložení nahradí předchozí text. Všichni čtenáři úkolu ji vidí spolu s autorem a časem. Psát ji může každý, kdo smí úkol označit jako hotový. Poznámky se prohledávají a zálohují, do instrukcí pro shrnutí se neposílají.
@@ -157,4 +159,4 @@ Přeskočené kontroly a značky jejich úprav jsou v `tasks/reviews.json`, po p
 
 Každý vlastní úkol nese `folderId`. Po obnově soukromých složek ze souboru `organization/folders.json` přidejte do požadavku `folders: [{id, restoredId}]`, kde `id` je ID složky v archivu a `restoredId` je ID obnovené soukromé složky. Odkaz bez mapování se nastaví na null, včetně složek vynechaných ze zálohy. Cílové složky Organizace i jiných uživatelů jsou odmítnuty. Zálohy Organizace se nemění.
 
-Dále: [Almanach](almanac.md)
+Dále: [Schůzky a agendy](meetings.md)

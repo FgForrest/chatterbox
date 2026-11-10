@@ -94,13 +94,13 @@ export function ItemHeader({
             className={cn(
                 "flex min-w-0 items-start justify-between gap-4 px-1",
                 kind === "meeting" &&
-                    "rounded-r-lg border-l-2 border-meeting bg-meeting/5 py-2 pl-3",
+                    "rounded-r-lg border-l-2 border-meeting bg-meeting/5 py-2 pr-2 pl-3",
                 organization &&
                     kind !== "meeting" &&
-                    "rounded-r-lg border-l-2 border-organization bg-organization/5 py-2 pl-3",
+                    "rounded-r-lg border-l-2 border-organization bg-organization/5 py-2 pr-2 pl-3",
                 received &&
                     kind !== "meeting" &&
-                    "rounded-r-lg border-l-2 border-person-share bg-person-share/5 py-2 pl-3",
+                    "rounded-r-lg border-l-2 border-person-share bg-person-share/5 py-2 pr-2 pl-3",
             )}
         >
             <div className="min-w-0 flex-1">
