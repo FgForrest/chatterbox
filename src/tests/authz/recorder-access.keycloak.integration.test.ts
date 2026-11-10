@@ -509,7 +509,11 @@ describeWithKeycloak(
                 await paused;
                 await changeAccess("race", { remove: ["use"] });
                 release();
-                expect((await pending).status).toBe(503);
+                const refused = await pending;
+                expect(refused.status).toBe(403);
+                expect(await refused.json()).toMatchObject({
+                    code: "ACCESS_NOT_GRANTED",
+                });
                 expect((await upload(key, capture, 0)).status).toBe(403);
                 const [state] = await db()
                     .select()
