@@ -1,9 +1,9 @@
 ---
 title: Klepna v Claude
-description: Ptejte se Claude nebo Claude Code na své nahrávky, lidi a úkoly.
+description: Ptejte se Claude nebo Claude Code na své nahrávky, lidi, úkoly a agendy schůzek.
 ---
 
-Pokud to Váš administrátor nastavil, Claude za Vás umí vyhledávat v aplikaci Klepna. Prohledá Vaše přepisy a poštu, přečte shrnutí, řekne Vám, kdo je někdo v Almanachu, nebo vypíše Vaše otevřené úkoly. Ptáte se vlastními slovy a Claude si vybere, co vyhledat.
+Pokud to Váš administrátor nastavil, Claude za Vás umí vyhledávat v aplikaci Klepna. Prohledá Vaše přepisy a poštu, přečte shrnutí, řekne Vám, kdo je někdo v Almanachu, vypíše Vaše otevřené úkoly nebo připraví agendu Vaší příští schůzky. Ptáte se vlastními slovy a Claude si vybere, co vyhledat.
 
 Funguje v Claude na webu (claude.ai), v desktopové a mobilní aplikaci Claude, v Cowork a v Claude Code.
 
@@ -17,10 +17,15 @@ Claude vidí to, co vidíte Vy v aplikaci Klepna, a nikdy víc:
 - **Pošta**: e-maily ve Vašich Klepech a e-maily sdílené s Vámi, pokud Vaše instance přijímá poštu. Poštu píší lidé zvenčí, proto má Claude pokyn brát ji jako informace, ne jako instrukce.
 - **Almanach**: Vaše osoby a věci a ty z Organizace.
 - **Úkoly**: ty, které vidíte na stránce Úkoly: úkoly u Vašich položek, úkoly přiřazené Vám, úkoly, které sledujete, a Vaše vlastní úkoly.
+- **Agendy schůzek**: [agendy](meetings.md), které vidíte v Klepně, nadcházející i schůzky proběhlé bez nahrávky, s kontrolou úkolů a body k projednání. Claude je čte s přístupem ke shrnutím nebo k úkolům; kontrola úkolů potřebuje úkoly. Úkoly, body a návrhy, které pocházejí z pošty, potřebují přístup k poště.
 
 Které oblasti máte otevřené, určuje Váš administrátor: Almanach, přepisy, shrnutí, poštu, úkoly a změny úkolů. Claude dostane nabídnuté jen vyhledávání pro Vaše oblasti, takže může říct, že se k něčemu nedostane, i když to v aplikaci vidíte.
 
-S právem měnit úkoly může Claude spravovat úkoly tam, kde by Vám to dovolila stránka Úkoly: vytvářet vlastní úkoly, upravovat je, dokončovat, znovu otevírat, rušit, přeřazovat, sledovat a slučovat. Může také napsat nebo vymazat jednu poznámku k úkolu (až 2 000 znaků), pokud ho smíte dokončit. Nová poznámka nahradí celou předchozí; chcete-li ji doplnit, požádejte Claude, aby ji nejdřív přečetl. Dokončení i poznámku může zapsat najednou. Poznámky úkolů z pošty smí číst a měnit jen s přístupem k poště. Vše ostatní je jen pro čtení. Klepna zaznamenává každé vyhledávání (co se hledalo a kterých nahrávek či záznamů se týkalo), nikdy ne to, na co jste se ptali ani co Claude odpověděl.
+S právem měnit úkoly může Claude spravovat úkoly tam, kde by Vám to dovolila stránka Úkoly: vytvářet vlastní úkoly, upravovat je, dokončovat, znovu otevírat, rušit, přeřazovat, sledovat a slučovat. Může také napsat nebo vymazat jednu poznámku k úkolu (až 2 000 znaků), pokud ho smíte dokončit. Nová poznámka nahradí celou předchozí; chcete-li ji doplnit, požádejte Claude, aby ji nejdřív přečetl. Dokončení i poznámku může zapsat najednou. Poznámky úkolů z pošty smí číst a měnit jen s přístupem k poště.
+
+Stejné právo dovolí Claude pracovat s agendami tak, jak by Vám to dovolila stránka agendy: připravit agendu pro složku nebo událost v Kalendáři, přidávat, upravovat, odsazovat, přesouvat, odškrtávat a odebírat body k projednání, přidávat úkoly do kontroly úkolů nebo je z ní odebírat a měnit jejich pořadí, psát k úkolu poznámku ze schůzky, měnit název, čas, zdroj úkolů nebo stav a nechat si navrhnout body, které pak přidá nebo zamítne. Návrh bodů spustí Vašeho poskytovatele shrnutí stejně jako **Navrhnout body** na stránce agendy. Poznámky ze schůzky zůstávají u agendy; pro dokončení úkolu nebo změnu jeho vlastní poznámky Claude mění samotný úkol. Smazání agendy, její sdílení, připojení nahrávky a zápis do Kalendáře zůstávají v aplikaci. Agenda, která přešla k nahrávce, je jen pro čtení.
+
+Vše ostatní je jen pro čtení. Klepna zaznamenává každé vyhledávání (co se hledalo a kterých nahrávek či záznamů se týkalo), nikdy ne to, na co jste se ptali ani co Claude odpověděl.
 
 <span id="before-you-connect" />
 
@@ -75,6 +80,8 @@ Ptejte se tak, jako byste se ptali kolegy, který všechno četl:
 - „Které moje úkoly jsou po termínu?“
 - „Najdi e-mail, ve kterém Bluefin Logistics potvrdili termíny dodávek.“
 - „Označ úkol o přístupu k Dispatch API jako hotový a poznamenej, že byl dodán ve vydání X.“
+- „Připrav agendu na zítřejší weekly sync: otevřené úkoly z minula a bod o uživatelském testování Harboru.“
+- „Co z dnešní agendy ještě není probrané? Odškrtni bod o vydání Pathfinderu.“
 
 Jména fungují všude, kde by Claude jinak potřeboval ID: osoby, věci a nahrávky se najdou podle jmen, přezdívek a názvů. Když jméno může znamenat víc lidí, Claude dostane kandidáty a měl by se Vás zeptat, kterého myslíte.
 
@@ -102,6 +109,7 @@ Pro ukončení zvolte **Disconnect** (nebo **Remove**) v **Customize → Connect
 | Claude hned po přihlášení říká, že konektor nemůže použít | Jednou se přihlaste do aplikace Klepna v prohlížeči a připojte se znovu. Pokud to stále nejde, zeptejte se administrátora: log aplikace Klepna uvádí, proč přístup odmítl. |
 | Claude se nedostane k přepisům, shrnutím, poště nebo úkolům | Tuto oblast nemáte otevřenou. Zeptejte se administrátora. |
 | Vyhledávání odpoví „Unknown tool“ | Změnilo se, co smíte vidět. Obnovte konektor nebo se připojte znovu. |
+| Claude nezná nástroje pro agendy | Konektor má ještě seznam z doby, kdy v něm nebyly. Obnovte konektor v **Customize → Connectors**, nebo se odpojte a připojte znovu. |
 | Claude Code se nepřipojí | Připojte se z firemní sítě nebo přes VPN. |
 
 Dále: [Pro administrátory](administrators.md)

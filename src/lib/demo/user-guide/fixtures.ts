@@ -431,6 +431,37 @@ export const DEMO_MAIL: DemoMail = {
     orgFolders: ["Clients/Bluefin Logistics"],
 };
 
+export interface DemoMeeting {
+    calendarEventId: string;
+    owner: DemoUserKey;
+    title: string;
+    folder: DemoFolderPath;
+    taskSource: string;
+    hour: number;
+    durationMinutes: number;
+    invitees: DemoPersonKey[];
+    points: { text: string; children?: string[] }[];
+}
+
+export const DEMO_MEETING: DemoMeeting = {
+    calendarEventId: "demo-weekly-sync-event",
+    owner: "alex",
+    title: "Weekly sync",
+    folder: "Internal/Team syncs",
+    taskSource: "product-sync",
+    hour: 15,
+    durationMinutes: 30,
+    invitees: ["alex", "priya"],
+    points: [
+        { text: "Confirm the Pathfinder release checklist for Thursday" },
+        {
+            text: "Plan the Harbor prototype usability sessions",
+            children: ["Agree how to explain the arrival window to customers"],
+        },
+        { text: "Resolve the Dispatch API write permission for rescheduling" },
+    ],
+};
+
 const KICKOFF: DemoTurn[] = [
     {
         speaker: "speaker_0",
@@ -765,6 +796,26 @@ export const DEMO_RECORDINGS: readonly DemoRecording[] = [
             ],
         },
         tasks: [
+            {
+                text: "Check the Pathfinder offline maps fix in beta",
+                assignee: "alex",
+                status: "done",
+                atTurn: 1,
+            },
+            {
+                text: "Explain the Harbor prototype to the usability participants",
+                assignee: "priya",
+                dueInDays: 5,
+                status: "open",
+                atTurn: 4,
+            },
+            {
+                text: "Follow up on the Dispatch API write permission",
+                assignee: "marek",
+                dueInDays: 1,
+                status: "open",
+                atTurn: 7,
+            },
             {
                 text: "Write the Pathfinder release notes for support",
                 assigneeHint: "Marek",
