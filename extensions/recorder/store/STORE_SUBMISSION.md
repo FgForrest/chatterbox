@@ -70,6 +70,15 @@ The privacy policy, store listing, permission explanations, and in-extension con
 - The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
 
+## What changed in 0.9.5
+
+- Another agenda in the side panel and fallback window adds relevant unrecorded agendas planned within
+  the previous or next 24 hours, before and during recording. Up to ten choices are ordered by distance
+  to their planned interval, with own agendas first on ties. English and Czech rows show planned times.
+- Automatic popup, banner and notification matching keeps its existing time window. Either agenda lookup
+  can fail without hiding results from the other. Uses existing agenda endpoints on released servers;
+  no new capability, permission or data-use change.
+
 ## What changed in 0.9.4
 
 - Target folders use the web application's folder chip in the popup, agenda panel, recorder window and in-page

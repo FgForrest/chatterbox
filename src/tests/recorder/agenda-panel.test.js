@@ -177,7 +177,7 @@ async function start(doc = document, tabId = 7) {
         "location",
         "canChooseRecordingAgenda",
         "agendaRequest",
-        "matchAgendas",
+        "agendaChoices",
         "supportsAgendas",
         "localizeDocument",
         "t",
@@ -209,6 +209,120 @@ async function start(doc = document, tabId = 7) {
         formatMeetingTime,
     );
 }
+
+describe("#369 manual agenda panel choices", () => {
+    it.each([
+        [7, false, "en"],
+        [7, true, "en"],
+        [null, false, "en"],
+        [null, true, "en"],
+        [7, false, "cs"],
+        [7, true, "cs"],
+        [null, false, "cs"],
+        [null, true, "cs"],
+    ])("renders planned times and selects a missed agenda (tab %s, recording %s, %s)", async (tabId, recording, locale) => {
+        vi.setSystemTime(new Date(2026, 10, 9, 12));
+        const catalog = JSON.parse(
+            readFileSync(
+                `extensions/recorder/_locales/${locale}/messages.json`,
+                "utf8",
+            ),
+        );
+        chrome.i18n.getUILanguage = () => locale;
+        chrome.i18n.getMessage = (key) => catalog[key]?.message ?? key;
+        session[agendaPanelKey(tabId)] = { agendaIds: [data.id], tabId: 7 };
+        if (recording)
+            session.recordingState = {
+                state: "recording",
+                sessionId: "session-one",
+                startedAt: new Date().toISOString(),
+            };
+        matches.mockResolvedValue([
+            {
+                id: "missed",
+                title: "Acme review",
+                state: "held",
+                start: new Date(2026, 10, 8, 14).toISOString(),
+                end: null,
+            },
+            {
+                id: "today",
+                title: "Acme review",
+                start: new Date(2026, 10, 9, 10).toISOString(),
+                end: new Date(2026, 10, 9, 11).toISOString(),
+            },
+            {
+                id: "tomorrow",
+                title: "Acme review",
+                start: new Date(2026, 10, 10, 9).toISOString(),
+                end: null,
+            },
+        ]);
+        await start(document, tabId);
+        el("other").click();
+        await settle();
+        expect(matches).toHaveBeenCalledExactlyOnceWith(Date.now(), []);
+        const buttons = [...el("choice-list").querySelectorAll("button")];
+        expect(buttons.map((node) => node.textContent)).toEqual([
+            `Acme review · ${catalog.agendaYesterday.message} 14:00`,
+            `Acme review · ${catalog.agendaToday.message} 10:00–11:00`,
+            `Acme review · ${catalog.agendaTomorrow.message} 09:00`,
+        ]);
+        buttons[0].click();
+        await settle();
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+            type: "select-agenda",
+            agendaId: "missed",
+            tabId: 7,
+            sessionId: recording ? "session-one" : undefined,
+        });
+    });
+
+    it.each([
+        7,
+        null,
+    ])("passes requested agenda IDs to the picker before limiting choices (tab %s)", async (tabId) => {
+        const agendaIds = ["agenda-one", "agenda-two"];
+        session[agendaPanelKey(tabId)] = { agendaIds, tabId: 7 };
+        await start(document, tabId);
+        expect(matches).toHaveBeenCalledExactlyOnceWith(Date.now(), agendaIds);
+        expect(
+            [...el("choice-list").querySelectorAll("button")].map(
+                (node) => node.textContent,
+            ),
+        ).toEqual(["Acme review", "Other review"]);
+    });
+
+    it("ignores choices received after a newer list has rendered", async () => {
+        await start();
+        let release;
+        matches.mockImplementationOnce(
+            () =>
+                new Promise((resolve) => {
+                    release = resolve;
+                }),
+        );
+        el("other").click();
+        await settle();
+        matches.mockResolvedValueOnce([
+            { id: "newer", title: "Newer choices" },
+        ]);
+        el("other").click();
+        await settle();
+        release([{ id: "stale", title: "Stale choices" }]);
+        await settle();
+        expect(el("choice-list").textContent).toBe("Newer choices");
+    });
+
+    it("shows the existing error and retry when both choice lookups fail", async () => {
+        await start();
+        matches.mockRejectedValueOnce(new Error("Both unavailable"));
+        el("other").click();
+        await settle();
+        expect(el("status").textContent).toBe(messages.agendaFailed.message);
+        expect(el("retry").hidden).toBe(false);
+    });
+});
 
 describe("agenda side panel", () => {
     it("counts top-level points and keeps parent and child ticks independent", async () => {
