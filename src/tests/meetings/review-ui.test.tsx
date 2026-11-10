@@ -120,7 +120,9 @@ describe.each([
             "/api/meetings/agenda?since=1%3Astandalone%3Aqueued",
             expect.any(Object),
         );
-        expect(screen.getByText("Suggesting points…")).toBeTruthy();
+        expect(
+            screen.getByText("Analyzing previous meetings and tasks…"),
+        ).toBeTruthy();
         server = {
             ...server,
             version: 2,
@@ -148,7 +150,9 @@ describe.each([
             ],
         };
         await act(async () => vi.advanceTimersByTimeAsync(15000));
-        expect(screen.queryByText("Suggesting points…")).toBeNull();
+        expect(
+            screen.queryByText("Analyzing previous meetings and tasks…"),
+        ).toBeNull();
         if (variant === "meeting")
             expect(screen.getByText("New suggestion")).toBeTruthy();
     });

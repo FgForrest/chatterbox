@@ -1047,6 +1047,33 @@ describe.skipIf(!url)("agenda ordering (PostgreSQL)", () => {
         ).rejects.toMatchObject({ statusCode: 409 });
         expect(await version()).toBe(1);
     });
+    it("adds a point right after its anchor among tied siblings by sibling index", async () => {
+        const a = await addPoint("owner", "agenda", { text: "A" });
+        const b = await addPoint("owner", "agenda", { text: "B" });
+        await database.db.update(agendaPoints).set({ position: 0 });
+        const before = await getMeeting("owner", "agenda");
+        if (before.unchanged) throw new Error("Missing detail");
+        const [first, second] = before.pointTree.map((point) => point.id);
+        const added = await addPoint("owner", "agenda", {
+            text: "New",
+            siblingIndex: 1,
+        });
+        const after = await getMeeting("owner", "agenda");
+        if (after.unchanged) throw new Error("Missing detail");
+        expect(after.pointTree.map((point) => point.id)).toEqual([
+            first,
+            added.id,
+            second,
+        ]);
+        expect(new Set([first, second])).toEqual(new Set([a.id, b.id]));
+        await expect(
+            addPoint("owner", "agenda", {
+                text: "Both",
+                siblingIndex: 0,
+                position: 0,
+            }),
+        ).rejects.toMatchObject({ statusCode: 400 });
+    });
     it.each([
         0, 99999,
     ])("renumbers tied and capped point siblings atomically (%s)", async (position) => {

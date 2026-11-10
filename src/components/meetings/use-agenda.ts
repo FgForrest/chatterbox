@@ -176,6 +176,7 @@ export function useAgenda(
             method: string,
             body: unknown | ((value: MeetingDetail) => unknown),
             optimistic: (value: MeetingDetail) => MeetingDetail,
+            onSaved?: (result: unknown) => void,
         ) => {
             const token = {};
             revision.current++;
@@ -191,12 +192,13 @@ export function useAgenda(
                         typeof body === "function" && base.current
                             ? body(base.current)
                             : body;
-                    await meetingRequest(
+                    const result = await meetingRequest(
                         path.startsWith("/api/") ? path : meetingUrl(id, path),
                         method,
                         payload,
                     );
                     saved = true;
+                    onSaved?.(result);
                     if (mounted.current) setConflict(false);
                 } catch (err) {
                     if (mounted.current) {

@@ -105,6 +105,7 @@ export const createPointInput = z.object({
     text: line.min(1),
     parentId: id.nullable().optional(),
     position: z.number().int().nonnegative().max(100000).optional(),
+    siblingIndex: z.number().int().nonnegative().max(100000).optional(),
     origin: z.enum(["manual", "live"]).optional(),
 });
 export const patchPointInput = createPointInput

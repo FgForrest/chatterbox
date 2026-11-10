@@ -1589,6 +1589,8 @@ export async function addPoint(
     raw: z.input<typeof createPointInput>,
 ) {
     const input = createPointInput.parse(raw);
+    if (input.siblingIndex !== undefined && input.position !== undefined)
+        invalid("Use either a sibling index or a position");
     return editMeeting(
         userId,
         id,
@@ -1598,11 +1600,52 @@ export async function addPoint(
                 .select()
                 .from(agendaPoints)
                 .where(pointWhere(agenda));
-            const next = {
+            let next = {
                 id: nanoid(),
                 parentId: input.parentId ?? null,
                 position: input.position ?? points.length,
             };
+            if (input.siblingIndex !== undefined) {
+                const ordered = moveAgendaPoint(
+                    [
+                        ...points.map(({ id, parentId, position }) => ({
+                            id,
+                            parentId,
+                            position,
+                        })),
+                        next,
+                    ],
+                    next.id,
+                    next.parentId,
+                    input.siblingIndex,
+                );
+                if (!ordered)
+                    throw new AppError(
+                        ErrorCode.CONFLICT,
+                        "Agenda point siblings changed",
+                        409,
+                    );
+                next = ordered.find((entry) => entry.id === next.id) ?? next;
+                const positions = new Map(
+                    ordered.map((entry) => [entry.id, entry.position]),
+                );
+                for (const point of points) {
+                    const position = positions.get(point.id);
+                    if (position !== undefined && position !== point.position)
+                        await tx
+                            .update(agendaPoints)
+                            .set({
+                                position,
+                                version: sql`${agendaPoints.version} + 1`,
+                            })
+                            .where(
+                                and(
+                                    pointWhere(agenda),
+                                    eq(agendaPoints.id, point.id),
+                                ),
+                            );
+                }
+            }
             validatePointTree([...points, next]);
             if (input.position !== undefined)
                 await tx
