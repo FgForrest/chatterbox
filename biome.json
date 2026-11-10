@@ -10,6 +10,8 @@
         "includes": [
             "src/**/*.{js,jsx,ts,tsx,json,css}",
             "*.{js,jsx,ts,tsx,json}",
+            "messages/**/*.json",
+            "scripts/extract-messages.mts",
             "!src/db/migrations",
             "!src/.source",
             "!src/lib/knowledge/stemming/snowball"
@@ -40,6 +42,14 @@
             }
         }
     },
+    "overrides": [
+        {
+            "includes": ["messages/**/*.json"],
+            "formatter": {
+                "indentWidth": 2
+            }
+        }
+    ],
     "css": {
         "parser": {
             "tailwindDirectives": true

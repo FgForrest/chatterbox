@@ -38,6 +38,8 @@
         "db:migrate": "bun src/db/migrate.ts",
         "db:studio": "drizzle-kit studio",
         "authz:export": "bun scripts/export-authz.ts",
+        "i18n:extract": "node scripts/extract-messages.mts",
+        "i18n:check": "node scripts/extract-messages.mts --check",
         "adr:index": "node scripts/generate-adr-index.mts",
         "adr:index:check": "node scripts/generate-adr-index.mts --check"
     },
