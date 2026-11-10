@@ -1342,7 +1342,10 @@ describe("#386 Join bindings and visible match failures", () => {
         for (const from of [
             sender(),
             { ...sender(), frameId: 1 },
-            { ...extension, url: "chrome-extension://test/options/options.html" },
+            {
+                ...extension,
+                url: "chrome-extension://test/options/options.html",
+            },
             { ...extension, id: "other" },
         ]) {
             expect(
