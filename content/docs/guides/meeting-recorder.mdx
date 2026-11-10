@@ -168,6 +168,51 @@ assembles and saves the recording. The extension opens your dashboard with the
 new recording selected after the server confirms it is saved. You can download
 a playable copy from that recording's page.
 
+## Agendas
+
+When you prepare an agenda for a meeting in Chatterbox (see
+[Meetings and agendas](../user-guide/meetings.md)), the extension shows it
+beside the meeting. This needs extension 0.9.0 or later and a server with
+agendas; on an older server the extension says that agendas will appear after
+the server is updated.
+
+- **Matching.** A Google Meet tab matches the agenda of its Calendar event by
+  the room code; other platforms match by time. The extension sends only the
+  room code and the time, never page content or the tab address. It offers
+  agendas that are running or start within fifteen minutes; several matches
+  offer a choice.
+- **Side panel.** On a tab with a matching agenda, the toolbar icon opens the
+  agenda in the browser's side panel, together with the recording controls;
+  a second click closes it. Recording starts from the panel's consent button,
+  and the keyboard shortcut still starts and stops recording. If the browser
+  refuses the side panel, the agenda opens in a separate window. With the
+  in-meeting prompt on, **Offer agendas in the meeting banner** adds **Show
+  agenda** to the banner.
+- **Preparation and Live meeting.** The panel shows the task review and the
+  discussion points as in Chatterbox and stays available while you record.
+  During the meeting, tick points as **Discussed**, mark tasks **Done** or
+  **Drop** them, and add notes. These change the real agenda and tasks, and
+  colleagues' changes appear as they happen. **Open in Chatterbox** opens the
+  full agenda.
+- **Which agenda the recording carries.** The panel says **The recording will
+  carry this agenda**. **Unlink** detaches it and **Switch to this agenda**
+  moves the recording to another one. **No agenda** skips attaching one; a
+  server that ignores this choice may still attach an agenda automatically. Colleagues with the same agenda open see who is recording and
+  can choose **Record too…**.
+- **Another agenda…** lists agendas you can attach even when nothing matched.
+  From version 0.9.5 it also offers agendas without a recording planned within
+  24 hours before or after now, so a meeting whose start you missed can still
+  get its agenda. It shows up to ten, the ones whose planned start to end lies
+  closest to now first and your own agendas first on ties, each with its
+  planned time.
+
+With Google Calendar connected, a supporting server also shows **Next
+meeting** in the popup and the panel: the next Google Meet event from your
+primary calendar that is running or starts within twelve hours, with **Join in
+Meet**. Joining never records. **Notify me of meetings** in **Options** sends at
+most one notification per meeting, 0, 1, 2, 5 or 10 minutes before it starts,
+and none while the meeting room is already open.
+
 ## Microphone
 
 The recorder uses your system default input unless you choose another device

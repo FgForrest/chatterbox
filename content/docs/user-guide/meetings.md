@@ -7,6 +7,8 @@ An **agenda** is what you prepare in Chatterbox for a meeting, usually tied to i
 
 An agenda has two parts: **1 · Task review** and **2 · Discussion points**. Colleagues who can edit the agenda work on it at the same time, and their changes appear without reloading.
 
+![An agenda with its task review and discussion points](images/meeting-agenda.png)
+
 ## Task review
 
 The task review lists the tasks from the previous meeting, grouped by assignee: invitees first, then people marked **Not invited**, then tasks with **No assignee**. The footer names where the tasks come from. For an event of a recurring series it is the last recording of that series before the meeting; otherwise the newest earlier recording with tasks in the agenda's folders. Its pencil picks another recording, or **No source** for an agenda without tasks from other meetings.
@@ -22,6 +24,8 @@ Ticking a task marks it done everywhere it appears. During the meeting, **Meetin
 ## Discussion points
 
 Points form an outline up to three levels deep. Type in **Add a point…** at the end of the list and press **Enter** to add the next point.
+
+![Discussion points with a sub-point](images/meeting-points.png)
 
 **Suggest points**, the wand icon in the section header, proposes points from activity in the agenda's folders since the last meeting. It uses the summary provider of your default processing profile. Proposals appear below the agenda under **Suggestions from activity since the last meeting**, each with **Add** and **Dismiss**. Points left open last time appear under **Not covered last time**.
 
@@ -39,6 +43,10 @@ Points form an outline up to three levels deep. Type in **Add a point…** at th
 ## During the meeting
 
 **Start meeting** in the header switches the agenda to the meeting view: a timer, a checkbox to mark each point as discussed, and a count of points discussed and tasks changed. **End meeting** finishes it.
+
+![The meeting view with its timer and one point discussed](images/meeting-live.png)
+
+In a browser meeting, the [Meeting Recorder](../guides/meeting-recorder.mdx#agendas) shows the same agenda in a side panel next to the meeting, so you can tick points off while you record.
 
 When the meeting's recording arrives, or when you attach one with **Attach recording…**, the agenda moves to the recording and is read-only there. An agenda that ended without a recording stays as **Agenda without recording**: discussed points and notes remain, and task changes already apply.
 

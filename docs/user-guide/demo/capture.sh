@@ -432,6 +432,26 @@ section_palette() {
     escape
 }
 
+section_meetings() {
+    ab set viewport 1440 1500 >/dev/null
+    select_recording "Weekly sync"
+    ab wait "[data-agenda-variant='meeting']" >/dev/null
+    tag meeting-header "Weekly sync" "header"
+    tag meeting-tasks "1 · Task review" "[data-workflow-widget]"
+    tag meeting-points "2 · Discussion points" "[data-workflow-widget]"
+    crop meeting-agenda meeting-header meeting-tasks meeting-points
+    ab set viewport 1440 900 >/dev/null
+    scroll_to meeting-points
+    crop meeting-points meeting-points
+    click_button "Start meeting" 1500
+    click_button "Collapse task review"
+    ab find role checkbox click --name "Discussed: Confirm the Pathfinder release checklist for Thursday" >/dev/null
+    ab wait 900 >/dev/null
+    blur
+    scroll_to meeting-header
+    crop meeting-live meeting-header meeting-tasks meeting-points
+}
+
 # Last: finishing the review changes the demo data.
 section_learn_finish() {
     select_recording "Weekly product sync"
@@ -475,7 +495,7 @@ section_summary_corrections() {
 
 sections=(onboarding dashboard recording filing workflow transcript learn summary
     task_review tasks folders organization almanac profiles settings help palette
-    summary_corrections learn_finish routed_inbox)
+    meetings summary_corrections learn_finish routed_inbox)
 if [[ $# -gt 0 ]]; then sections=("$@"); fi
 
 sign_in alex@example.com demo-password-123
