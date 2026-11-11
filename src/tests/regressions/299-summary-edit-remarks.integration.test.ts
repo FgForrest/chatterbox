@@ -203,6 +203,7 @@ import {
 } from "@/lib/knowledge/speaker-references";
 import { refreshSummaryAfterCorrections } from "@/lib/learn/summary-refresh";
 import { planAdvance } from "@/lib/pipeline/plan";
+import { requestAdvance } from "@/lib/pipeline/trigger";
 import * as profilesModule from "@/lib/profiles/resolve";
 import * as manualProfilesModule from "@/lib/profiles/resolve-manual";
 import { buildSeedProfiles } from "@/lib/profiles/seed";
@@ -471,6 +472,42 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
                 ),
                 context,
             );
+
+        async function advanceSummaryInput() {
+            const [mail] =
+                kind === "mail"
+                    ? await db()
+                          .select({ id: mailContents.id })
+                          .from(mailContents)
+                          .where(
+                              and(
+                                  eq(mailContents.itemId, ITEM),
+                                  eq(mailContents.userId, "owner"),
+                              ),
+                          )
+                    : [];
+            const contentId = kind === "audio" ? "transcript" : mail.id;
+            await db()
+                .update(aiEnhancements)
+                .set({
+                    inputs: {
+                        contentId,
+                        contentSourceId: kind === "audio" ? "riffado" : "mail",
+                        contentRevision: 0,
+                    },
+                })
+                .where(
+                    and(
+                        eq(aiEnhancements.itemId, ITEM),
+                        eq(aiEnhancements.userId, "owner"),
+                    ),
+                );
+            const table = kind === "audio" ? transcriptions : mailContents;
+            await db()
+                .update(table)
+                .set({ revision: 1 })
+                .where(and(eq(table.id, contentId), eq(table.userId, "owner")));
+        }
 
         it.each([
             "provider",
@@ -896,6 +933,7 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
         ] as const)("replays remarks on an automatic owner run of a shared item in %s", async (view) => {
             await add();
             await share();
+            await advanceSummaryInput();
             await generateSummaryForRecording("owner", ITEM, {
                 view,
                 trigger: "auto",
@@ -1325,6 +1363,7 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
 
         it("replays encrypted stored remarks on later automatic runs without the old summary", async () => {
             await add();
+            await advanceSummaryInput();
             const [remark] = await db().select().from(summaryRemarks);
             expect(remark?.text).not.toContain("Thursday");
             await generateSummaryForRecording("owner", ITEM, {
@@ -2031,6 +2070,11 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
                 false,
                 true,
             ])("uses its own first committed version for Learn catch-up, intervening edit: %s", async (interveningEdit) => {
+                await db().insert(itemProcessing).values({
+                    itemId: ITEM,
+                    userId: "owner",
+                    view: "private",
+                });
                 await db().insert(asyncJobs).values({
                     id: "summary-job",
                     userId: "owner",
@@ -2038,8 +2082,16 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
                     subjectId: ITEM,
                     status: "processing",
                 });
-                mocks.completion.mockImplementation(async () => {
+                mocks.sidecars.mockImplementationOnce(async () => {
                     mocks.reading = "new-reading";
+                    await requestAdvance({
+                        itemId: ITEM,
+                        userId: "owner",
+                        view: "private",
+                        reason: "summary-input-changed",
+                    });
+                });
+                mocks.completion.mockImplementation(async () => {
                     const row = await stored();
                     if (interveningEdit && row?.revision === 1) {
                         const response = await editRoute(

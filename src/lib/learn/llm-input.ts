@@ -11,11 +11,13 @@
  */
 
 import { createHmac, hkdfSync } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
+    knowledgeEntities,
     learnReviewItems,
     learnRuns,
+    people,
     recordings,
     transcriptions,
 } from "@/db/schema";
@@ -30,6 +32,7 @@ import {
     listLibraryCorrections,
 } from "@/lib/knowledge/corrections";
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
+import { readableScopes } from "@/lib/knowledge/scope";
 import {
     correctedTimeline,
     flattenTurns,
@@ -93,6 +96,7 @@ export async function correctionOverlay(
         turns,
         sharedAs,
         ownerAuthoredOnly = false,
+        executor = db,
     }: {
         pending?: boolean;
         /**
@@ -115,6 +119,7 @@ export async function correctionOverlay(
          * content carries.
          */
         ownerAuthoredOnly?: boolean;
+        executor?: Pick<typeof db, "select">;
     } = {},
 ): Promise<OverlayCorrection[]> {
     const orgUserId = await sharingOrgUserId();
@@ -126,13 +131,14 @@ export async function correctionOverlay(
                       (await isRecordingShared(
                           transcript.recordingId,
                           orgUserId,
+                          executor,
                       ));
                   return {
                       shared: sharedNow,
                       confirmed: await listCorrections(
                           transcript.userId,
                           transcript.id,
-                          db,
+                          executor,
                           { shared: sharedNow, ownerAuthoredOnly },
                       ),
                   };
@@ -169,7 +175,7 @@ export async function correctionOverlay(
               });
     const [run] = !pending
         ? []
-        : await db
+        : await executor
               .select({ id: learnRuns.id })
               .from(learnRuns)
               .where(
@@ -184,7 +190,7 @@ export async function correctionOverlay(
               .limit(1);
     const ticked = run
         ? (
-              await db
+              await executor
                   .select()
                   .from(learnReviewItems)
                   .where(
@@ -203,12 +209,71 @@ export async function correctionOverlay(
     if (confirmed.length === 0 && ticked.length === 0) return [];
 
     // A link shows its target's current name, as the view's readers see it.
-    const view = await knowledgeView({
-        kind: "recording",
+    const context = {
+        kind: "recording" as const,
         ownerUserId: transcript.userId,
         shared,
-    });
-    const names = new Map(view.items.map((item) => [item.id, item.name]));
+    };
+    const scopes = readableScopes(context, orgUserId);
+    const targetIds = [
+        ...new Set([
+            ...confirmed.flatMap(
+                (correction) =>
+                    correction.targetPersonId ??
+                    correction.targetEntityId ??
+                    [],
+            ),
+            ...ticked.flatMap((item) => {
+                const payload = decryptJsonField<ItemPayload>(item.payload);
+                if (!payload) return [];
+                return "personId" in payload.target
+                    ? payload.target.personId
+                    : payload.target.entityId;
+            }),
+        ]),
+    ];
+    const names =
+        executor === db
+            ? new Map(
+                  (await knowledgeView(context)).items.map((item) => [
+                      item.id,
+                      item.name,
+                  ]),
+              )
+            : new Map(
+                  (
+                      await Promise.all([
+                          executor
+                              .select({
+                                  id: people.id,
+                                  name: people.displayName,
+                              })
+                              .from(people)
+                              .where(
+                                  and(
+                                      inArray(people.userId, scopes),
+                                      inArray(people.id, targetIds),
+                                      isNull(people.mergedIntoId),
+                                  ),
+                              ),
+                          executor
+                              .select({
+                                  id: knowledgeEntities.id,
+                                  name: knowledgeEntities.name,
+                              })
+                              .from(knowledgeEntities)
+                              .where(
+                                  and(
+                                      inArray(knowledgeEntities.userId, scopes),
+                                      inArray(knowledgeEntities.id, targetIds),
+                                      isNull(knowledgeEntities.mergedIntoId),
+                                  ),
+                              ),
+                      ])
+                  )
+                      .flat()
+                      .map((row) => [row.id, decryptText(row.name)]),
+              );
     const overlay = confirmedOverlay(confirmed, names);
     for (const item of ticked) {
         const payload = decryptJsonField<ItemPayload>(item.payload);
@@ -311,12 +376,15 @@ export async function confirmedOverlays(
  * A transcript as a model reads it: its turns corrected, as one text, and
  * the fingerprint of that text. Null for a transcript without turns.
  */
-export async function llmRendering(transcriptionId: string): Promise<{
+export async function llmRendering(
+    transcriptionId: string,
+    executor: Pick<typeof db, "select"> = db,
+): Promise<{
     turns: TranscriptTurn[];
     text: string;
     fingerprint: string;
 } | null> {
-    const [transcript] = await db
+    const [transcript] = await executor
         .select()
         .from(transcriptions)
         .where(eq(transcriptions.id, transcriptionId))
@@ -326,7 +394,7 @@ export async function llmRendering(transcriptionId: string): Promise<{
     if (!stored?.length) return null;
     const turns = renderTurnsForLlm(
         stored,
-        await correctionOverlay(transcript, { turns: stored }),
+        await correctionOverlay(transcript, { turns: stored, executor }),
     );
     return {
         turns,

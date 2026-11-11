@@ -30,6 +30,9 @@ import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 // Without corrections a model reads the stored text as it is.
 // Task proposals read and write the database; covered on their own.
 // Mail's masking reads mail configuration; no mail is summarized here.
+vi.mock("@/lib/summary/replacement", () => ({
+    mayAutomaticallyReplaceSummary: vi.fn().mockResolvedValue(true),
+}));
 vi.mock("@/lib/mail/redact", () => ({
     maskedContentForModel: async (content: unknown) => content,
     secretAddressMasker: async () => (text: string) => text,
@@ -193,7 +196,7 @@ function stage(settings: Settings) {
                 text: "a transcript",
             },
         ],
-        [{ id: "transcription-1", revision: 4 }],
+        [{ id: "transcription-1", revision: 4, source: "riffado" }],
     ]);
     selectResults.set(userSettings, [
         [{ summaryPrompt: null, aiOutputLanguage: null, ...settings }],

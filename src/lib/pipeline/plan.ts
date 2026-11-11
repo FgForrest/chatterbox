@@ -1,3 +1,4 @@
+import { placementKeepsCompletedTranscript } from "@/lib/pipeline/effective-profile";
 import {
     markPhasesOutdatedForInputs,
     processAgainPending,
@@ -223,6 +224,7 @@ function plaudTasksPending(
         facts.item.kind !== "audio" ||
         !source ||
         facts.summary.edited ||
+        (facts.summary.manualRefreshOnly && facts.summary.source !== "plaud") ||
         facts.profile?.tasksEnabled === false ||
         !facts.profile?.automatic.summary ||
         stepProviderAvailable(facts, "summary")
@@ -230,6 +232,11 @@ function plaudTasksPending(
         return false;
     }
     const step = facts.phases.summary?.steps?.summary;
+    if (
+        minimumGeneration === undefined &&
+        step?.sourceFingerprint === source.fingerprint
+    )
+        return false;
     return (
         !stepRequested(
             facts.phases.summary,
@@ -334,6 +341,7 @@ function recoveredSummaryRecord(
     const summary = facts.phases.summary;
     if (
         !facts.summary.current ||
+        facts.summary.refreshRequested ||
         facts.summary.jobActive ||
         !summary ||
         !sameInput(summary, input) ||
@@ -380,7 +388,11 @@ function planMail(
     const actions: PipelineAction[] = [];
     const steps = { ...facts.phases.summary?.steps };
     for (const step of ["summary"] as const) {
-        if (step === "summary" && facts.summary.edited) continue;
+        if (
+            step === "summary" &&
+            (facts.summary.edited || facts.summary.manualRefreshOnly)
+        )
+            continue;
         if (
             facts.profile?.automatic[step] &&
             !stepProviderAvailable(facts, step) &&
@@ -399,6 +411,7 @@ function planMail(
     }
     if (
         !facts.summary.edited &&
+        !facts.summary.manualRefreshOnly &&
         facts.profile?.automatic.summary &&
         stepProviderAvailable(facts, "summary") &&
         !stepRequested(
@@ -541,7 +554,11 @@ function planReleasedAudio(
             true,
         );
     for (const step of ["topics", "summary"] as const) {
-        if (step === "summary" && facts.summary.edited) continue;
+        if (
+            step === "summary" &&
+            (facts.summary.edited || facts.summary.manualRefreshOnly)
+        )
+            continue;
         if (
             facts.profile?.automatic[step] &&
             !stepProviderAvailable(facts, step) &&
@@ -586,10 +603,13 @@ function planReleasedAudio(
         actions.push(plaudTasksAction(facts, input, steps));
     } else if (
         !facts.summary.edited &&
+        !facts.summary.manualRefreshOnly &&
         facts.profile?.automatic.summary &&
         stepProviderAvailable(facts, "summary") &&
         !facts.summary.jobActive &&
-        (!facts.summary.exists || facts.summary.stale) &&
+        (!facts.summary.exists ||
+            facts.summary.stale ||
+            facts.summary.refreshRequested) &&
         notRequested("summary", true)
     ) {
         actions.push({
@@ -615,7 +635,11 @@ function planTranscriptAudio(
         ? (["topics", "summary"] as const)
         : (["summary"] as const);
     for (const step of providerSteps) {
-        if (step === "summary" && facts.summary.edited) continue;
+        if (
+            step === "summary" &&
+            (facts.summary.edited || facts.summary.manualRefreshOnly)
+        )
+            continue;
         if (
             facts.profile?.automatic[step] &&
             !stepProviderAvailable(facts, step) &&
@@ -685,6 +709,7 @@ function planTranscriptAudio(
         actions.push(plaudTasksAction(facts, input, steps));
     } else if (
         !facts.summary.edited &&
+        !facts.summary.manualRefreshOnly &&
         facts.profile?.automatic.summary &&
         stepProviderAvailable(facts, "summary") &&
         !stepRequested(
@@ -931,6 +956,9 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
                 facts.phases.learn.reason === "released"
               ? facts.phases.learn.generation
               : undefined;
+    const summaryMinimumGeneration = facts.summary.refreshRequested
+        ? categorize?.summaryRefresh?.generation
+        : minimumGeneration;
 
     const profileHasAutomaticStep =
         facts.profile?.transcribe?.automatic === true ||
@@ -951,7 +979,12 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
     const content =
         facts.item.kind === "audio"
             ? (riffadoTranscript ??
-              (profileTranscription?.plaudTranscript === "use"
+              (profileTranscription?.plaudTranscript === "use" ||
+              placementKeepsCompletedTranscript(
+                  facts.phases,
+                  facts.trimContent ?? plaudTranscript,
+                  minimumGeneration,
+              )
                   ? facts.trimContent?.contentSourceId === "mixed"
                       ? facts.trimContent
                       : plaudTranscript
@@ -1312,7 +1345,7 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
                 facts.phases.summary,
                 "summary",
                 input,
-                minimumGeneration,
+                summaryMinimumGeneration,
             )
         ) {
             actions.push(
@@ -1326,7 +1359,7 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
             );
         }
         if (facts.item.kind === "mail") {
-            actions.push(...planMail(facts, input, minimumGeneration));
+            actions.push(...planMail(facts, input, summaryMinimumGeneration));
         } else if (
             learn?.state === "done" &&
             learn.reason === "released" &&
@@ -1337,12 +1370,16 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
                     facts,
                     input,
                     learn.generation,
-                    minimumGeneration,
+                    summaryMinimumGeneration,
                 ),
             );
         } else {
             actions.push(
-                ...planTranscriptAudio(facts, content, minimumGeneration),
+                ...planTranscriptAudio(
+                    facts,
+                    content,
+                    summaryMinimumGeneration,
+                ),
             );
         }
         const summarySettled =

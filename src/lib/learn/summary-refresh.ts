@@ -18,6 +18,7 @@ import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import type { RecordingView } from "@/lib/sharing/view";
 import { summaryEditState } from "@/lib/summary/corrections";
+import { mayAutomaticallyReplaceSummary } from "@/lib/summary/replacement";
 import { enqueueSummaryJob } from "@/lib/summary/summary-job";
 
 /**
@@ -109,6 +110,13 @@ export async function summaryRefreshDue(input: {
     view: RecordingView;
 }): Promise<{ presetId?: string } | null> {
     if (input.view !== "private") return null;
+    if (
+        !(await mayAutomaticallyReplaceSummary(
+            input.ownerUserId,
+            input.recordingId,
+        ))
+    )
+        return null;
     if (
         (await summaryEditState(input.ownerUserId, input.recordingId))?.editedAt
     )

@@ -236,14 +236,14 @@ export async function generateSummaryForRecording(
     // The owner's rows in either view: a shared recording is one recording.
     const userId = ctx.contentUserId;
 
-    const itemProfileRevisionId =
-        (
-            await readProcessing(
-                recordingId,
-                pipelineDriver(ctx.ownerUserId).view,
-                ctx.ownerUserId,
-            )
-        )?.profileRevisionId ?? null;
+    const processing = await readProcessing(
+        recordingId,
+        pipelineDriver(ctx.ownerUserId).view,
+        ctx.ownerUserId,
+    );
+    const itemProfileRevisionId = processing?.profileRevisionId ?? null;
+    const summaryRefreshGeneration =
+        processing?.phases?.categorize?.summaryRefresh?.generation ?? 0;
 
     const [recording] = await db
         .select(audioItemColumns)
@@ -593,6 +593,7 @@ export async function generateSummaryForRecording(
             contentSourceId: transcription.source,
             contentRevision: transcription.revision,
             itemProfileRevisionId,
+            summaryRefreshGeneration,
             ...(tasksContext.scopeFingerprint
                 ? { scopeFingerprint: tasksContext.scopeFingerprint }
                 : {}),

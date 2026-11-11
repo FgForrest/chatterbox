@@ -16,6 +16,9 @@ vi.mock("@/db/queries/async-jobs", () => ({
 vi.mock("@/lib/summary/corrections", () => ({
     summaryEditState: vi.fn().mockResolvedValue(null),
 }));
+vi.mock("@/lib/summary/replacement", () => ({
+    mayAutomaticallyReplaceSummary: vi.fn().mockResolvedValue(true),
+}));
 vi.mock("@/lib/env", () => ({
     env: { AUTO_SUMMARY_RATE_LIMIT_PER_HOUR: 2 },
 }));

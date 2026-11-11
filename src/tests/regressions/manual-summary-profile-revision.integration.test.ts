@@ -277,7 +277,7 @@ describeWithDatabase(
                         source: "riffado",
                         provider: "test",
                         model: "test",
-                        revision: 0,
+                        revision: 1,
                     });
             } else {
                 await db()
@@ -307,6 +307,7 @@ describeWithDatabase(
                         itemId: ITEM,
                         userId: USER,
                         parserVersion: 1,
+                        revision: 1,
                         language: "en",
                         segments: encryptJsonField([
                             {
@@ -320,7 +321,7 @@ describeWithDatabase(
             const content = {
                 contentId: CONTENT,
                 contentSourceId: channel === "audio" ? "riffado" : "mail",
-                contentRevision: 0,
+                contentRevision: 1,
             };
             const phases: PipelinePhases = {
                 categorize: {
@@ -369,6 +370,11 @@ describeWithDatabase(
                     source: "riffado",
                     provider: "test",
                     model: "test",
+                    inputs: {
+                        ...content,
+                        contentRevision: 0,
+                        itemProfileRevisionId: R1,
+                    },
                 });
             return phases;
         }

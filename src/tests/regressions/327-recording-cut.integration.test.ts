@@ -2023,7 +2023,7 @@ describe.skipIf(!adminUrl)("recording cut routes and transaction", () => {
     it.each([
         "use",
         "also_transcribe",
-    ] as const)("gathers Learn correction state from the profile's source after cutting (%s)", async (plaudTranscript) => {
+    ] as const)("gathers Learn correction state from the preferred source after cutting (%s)", async (plaudTranscript) => {
         await database.db
             .delete(transcriptions)
             .where(eq(transcriptions.id, "riffado"));
@@ -2076,6 +2076,6 @@ describe.skipIf(!adminUrl)("recording cut routes and transaction", () => {
         expect(facts.profile?.transcribe?.plaudTranscript).toBe(
             plaudTranscript,
         );
-        expect(facts.learnCorrectionInFlight).toBe(plaudTranscript === "use");
+        expect(facts.learnCorrectionInFlight).toBe(true);
     });
 });

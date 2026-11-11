@@ -1,7 +1,11 @@
 import { and, eq, or } from "drizzle-orm";
 import { db } from "@/db";
 import { lockTrimRecording } from "@/db/queries/trim-state";
-import { processingProfileRevisions, processingProfiles } from "@/db/schema";
+import {
+    chatterItems,
+    processingProfileRevisions,
+    processingProfiles,
+} from "@/db/schema";
 import { AppError, ErrorCode } from "@/lib/errors";
 import {
     lockPipelineTargetsInTx,
@@ -53,12 +57,27 @@ export async function withProfileRevisionGuard<T>(
     ) => Promise<T>,
 ): Promise<T> {
     return db.transaction(async (tx) => {
-        if (input.pipelineTarget)
-            await lockTrimRecording(
+        if (input.pipelineTarget) {
+            const recording = await lockTrimRecording(
                 tx,
                 input.pipelineTarget.userId,
                 input.pipelineTarget.itemId,
             );
+            if (!recording)
+                await tx
+                    .select({ id: chatterItems.id })
+                    .from(chatterItems)
+                    .where(
+                        and(
+                            eq(chatterItems.id, input.pipelineTarget.itemId),
+                            eq(
+                                chatterItems.userId,
+                                input.pipelineTarget.userId,
+                            ),
+                        ),
+                    )
+                    .for("update");
+        }
         if (input.pipelineTarget)
             await lockPipelineTargetsInTx(tx, [input.pipelineTarget], true);
         async function findOwner() {

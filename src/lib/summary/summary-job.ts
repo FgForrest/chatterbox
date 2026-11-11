@@ -13,12 +13,17 @@
  * provider client in to read a number.
  */
 
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
 import { type EnqueueJobResult, enqueueJob } from "@/db/queries/async-jobs";
 import { withProfileRevisionGuard } from "@/db/queries/profile-revision-guard";
+import { lockTrimRecording } from "@/db/queries/trim-state";
+import { chatterItems } from "@/db/schema";
 import { nudge } from "@/lib/jobs/nudge";
 import { InvalidJobPayloadError } from "@/lib/jobs/types";
 import { getOrgUserId } from "@/lib/org/config";
 import { type RecordingView, recordingJobSubject } from "@/lib/sharing/view";
+import { mayAutomaticallyReplaceSummary } from "@/lib/summary/replacement";
 
 export const SUMMARY_JOB_KIND = "summary";
 
@@ -183,10 +188,43 @@ export interface EnqueueSummaryInput {
  * double-clicked button, two browser tabs, and a manual click racing an
  * auto-summary all converge on one job rather than paying for the work twice.
  */
+export function enqueueSummaryJob(
+    input: EnqueueSummaryInput & { trigger: "manual" },
+): Promise<EnqueueJobResult>;
+export function enqueueSummaryJob(
+    input: EnqueueSummaryInput,
+): Promise<EnqueueJobResult | null>;
 export async function enqueueSummaryJob(
     input: EnqueueSummaryInput,
-): Promise<EnqueueJobResult> {
-    const queue = (executor?: Parameters<typeof enqueueJob>[1]) => {
+): Promise<EnqueueJobResult | null> {
+    const queue = async (executor?: Parameters<typeof enqueueJob>[1]) => {
+        if (input.trigger === "auto" && executor) {
+            const owner = input.ownerUserId ?? input.userId;
+            const recording = await lockTrimRecording(
+                executor,
+                owner,
+                input.recordingId,
+            );
+            if (!recording)
+                await executor
+                    .select({ id: chatterItems.id })
+                    .from(chatterItems)
+                    .where(
+                        and(
+                            eq(chatterItems.id, input.recordingId),
+                            eq(chatterItems.userId, owner),
+                        ),
+                    )
+                    .for("update");
+            if (
+                !(await mayAutomaticallyReplaceSummary(
+                    owner,
+                    input.recordingId,
+                    executor,
+                ))
+            )
+                return null;
+        }
         const request = {
             ...(input.delayMs ? { delayMs: input.delayMs } : {}),
             // A click starts what a rate limit put off, not wait for it.
@@ -248,9 +286,11 @@ export async function enqueueSummaryJob(
               },
               queue,
           )
-        : await queue();
+        : input.trigger === "auto"
+          ? await db.transaction(queue)
+          : await queue();
     // Start it now rather than at the next sweep, when this process is the
     // one that will run it. Costs nothing when it is not.
-    if (enqueued.created) nudge();
+    if (enqueued?.created) nudge();
     return enqueued;
 }

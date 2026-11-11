@@ -182,9 +182,10 @@ function selectRows(rows: unknown[], captureWhere?: (expr: unknown) => void) {
         // Awaitable as well as `.limit()`-able: Drizzle query
         // builders are thenable, and not every caller narrows
         // with `.limit()`.
-        return Object.assign(Promise.resolve(rows), {
+        const result = Object.assign(Promise.resolve(rows), {
             limit: vi.fn().mockResolvedValue(rows),
         });
+        return Object.assign(result, { for: vi.fn(() => result) });
     });
     // A recording read with its item joins `chatterItems` first.
     return {
@@ -397,7 +398,11 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
                 .mockReturnValueOnce(lockedRecordingRows([{ deletedAt: null }]))
                 .mockReturnValueOnce(selectRows([]))
                 .mockReturnValueOnce(selectRows([]))
-                .mockReturnValueOnce(selectRows([{ id: "tr-1", revision: 0 }])),
+                .mockReturnValueOnce(
+                    selectRows([
+                        { id: "tr-1", revision: 0, source: "riffado" },
+                    ]),
+                ),
             insert: vi.fn().mockReturnValue({ values: txInsertValues }),
             update: vi.fn().mockReturnValue({ set: recordingBumpSet }),
         };
@@ -498,7 +503,11 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
                     selectRows([{ id: "enh-1", userId, revision: 0 }]),
                 )
                 .mockReturnValueOnce(selectRows([]))
-                .mockReturnValueOnce(selectRows([{ id: "tr-1", revision: 0 }])),
+                .mockReturnValueOnce(
+                    selectRows([
+                        { id: "tr-1", revision: 0, source: "riffado" },
+                    ]),
+                ),
             insert: vi.fn(),
             update: vi
                 .fn()

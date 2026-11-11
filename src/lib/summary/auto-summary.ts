@@ -5,7 +5,7 @@ import {
 import { env } from "@/lib/env";
 import { JobDeferredError } from "@/lib/jobs/retryable";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
-import { summaryEditState } from "@/lib/summary/corrections";
+import { mayAutomaticallyReplaceSummary } from "@/lib/summary/replacement";
 import { enqueueSummaryJob, SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
 import { emitEvent } from "@/lib/webhooks/emit";
 
@@ -67,7 +67,8 @@ export async function queueAutoSummary(
     // summary is written and readable, just from the worker.
     let dropped = false;
     try {
-        if ((await summaryEditState(userId, recordingId))?.editedAt) return;
+        if (!(await mayAutomaticallyReplaceSummary(userId, recordingId)))
+            return;
         // A backlog the cap put off means the cap is full. Held work waits
         // behind it, in turn: fresh work taking each new window first could
         // keep that backlog waiting for ever. Its jobs pass the cap when

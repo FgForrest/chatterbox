@@ -48,6 +48,7 @@ import {
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { lockTranscriptForChange } from "@/lib/knowledge/transcript-lock";
 import { getOrgUserId } from "@/lib/org/config";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { isRecordingShared } from "@/lib/sharing/shared";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -187,7 +188,13 @@ export async function acceptCorrection(
 ): Promise<string> {
     return db.transaction(async (tx) => {
         await lockOrgPeopleShared(tx);
-        const { id, scopeUserId } = await acceptInTx(tx, args);
+        const { id, scopeUserId, recordingId } = await acceptInTx(tx, args);
+        await requestAdvanceInTx(tx, {
+            itemId: recordingId,
+            userId: args.userId,
+            view: "private",
+            reason: "summary-input-changed",
+        });
         await bumpScopeInTx(tx, [scopeUserId]);
         return id;
     });
@@ -208,10 +215,10 @@ export async function acceptCorrectionInTx(
 async function acceptInTx(
     tx: Tx,
     args: AcceptCorrectionArgs,
-): Promise<{ id: string; scopeUserId: string }> {
+): Promise<{ id: string; scopeUserId: string; recordingId: string }> {
     const { anchor, kind, actorUserId } = args;
     const replacement = cleanReplacement(kind, args.replacement, anchor.heard);
-    const { revision, turns, language, provider, scopeUserId } =
+    const { recordingId, revision, turns, language, provider, scopeUserId } =
         await lockTranscriptForChange(tx, args, args);
     if (revision !== args.revision) throw transcriptChanged();
     if (!anchorMatches(anchor, turns)) {
@@ -274,7 +281,7 @@ async function acceptInTx(
             correctionId: id,
         });
     }
-    return { id, scopeUserId };
+    return { id, scopeUserId, recordingId };
 }
 
 /**
@@ -288,7 +295,11 @@ export async function revertCorrection(
         Writer & { correctionId: string },
 ): Promise<void> {
     await db.transaction(async (tx) => {
-        const { scopeUserId } = await lockTranscriptForChange(tx, args, args);
+        const { recordingId, scopeUserId } = await lockTranscriptForChange(
+            tx,
+            args,
+            args,
+        );
         const deleted = await tx
             .delete(transcriptCorrections)
             .where(
@@ -303,6 +314,12 @@ export async function revertCorrection(
             )
             .returning({ id: transcriptCorrections.id });
         if (deleted.length === 0) throw correctionNotFound();
+        await requestAdvanceInTx(tx, {
+            itemId: recordingId,
+            userId: args.userId,
+            view: "private",
+            reason: "summary-input-changed",
+        });
         await bumpScopeInTx(tx, [scopeUserId]);
     });
 }

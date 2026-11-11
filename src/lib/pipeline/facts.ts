@@ -44,6 +44,10 @@ import { loadShareGate } from "@/lib/sharing/load-share-gate";
 import { isRecordingShared } from "@/lib/sharing/shared";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { readPlaudTaskSource } from "@/lib/summary/read-summary";
+import {
+    automaticSummaryReplacementAllowed,
+    initialCustomSummaryPending,
+} from "@/lib/summary/replacement";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
 import { plaudActionItemsFingerprint } from "@/lib/tasks/plaud-proposals";
 import { waitingTaskDecisions } from "@/lib/tasks/waiting-review";
@@ -272,7 +276,9 @@ export async function gatherFacts(
         mailPromise,
         db
             .select({
+                source: aiEnhancements.source,
                 id: aiEnhancements.id,
+                revision: aiEnhancements.revision,
                 editedAt: aiEnhancements.editedAt,
                 inputs: aiEnhancements.inputs,
                 transcriptionId: aiEnhancements.transcriptionId,
@@ -283,9 +289,10 @@ export async function gatherFacts(
                 and(
                     eq(aiEnhancements.itemId, itemId),
                     eq(aiEnhancements.userId, userId),
-                    eq(aiEnhancements.source, "riffado"),
+                    isNotNull(aiEnhancements.summary),
                 ),
             )
+            .orderBy(desc(aiEnhancements.source))
             .limit(1),
         db
             .select({ kind: asyncJobs.kind })
@@ -498,8 +505,11 @@ export async function gatherFacts(
     const intendedFolderIds = intents.map((row) => row.folderId);
     const storedPhases = processing?.phases ?? {};
     const placementOnly =
+        storedPhases.categorize?.arrivalGeneration === undefined &&
         Object.keys(storedPhases).length === 1 &&
-        storedPhases.categorize?.reason === "placement";
+        (storedPhases.categorize?.reason === "placement" ||
+            (storedPhases.categorize?.reason === "legacy" &&
+                storedPhases.categorize.summaryRefresh !== undefined));
     const [arrival] =
         options.legacyIfEmpty !== false && placementOnly && content
             ? await db
@@ -545,6 +555,8 @@ export async function gatherFacts(
                             placementProfile:
                                 storedPhases.categorize?.placementProfile,
                             heldProfiles: storedPhases.categorize?.heldProfiles,
+                            summaryRefresh:
+                                storedPhases.categorize?.summaryRefresh,
                         },
                     }
                   : {}),
@@ -711,28 +723,48 @@ export async function gatherFacts(
                     mailShareProblems(tx, itemId, userId),
                 )
               : await loadShareGate(db, itemId, userId);
-    const learnContent =
-        content ??
-        (profile?.transcribe?.plaudTranscript === "use"
-            ? plaudTranscript
-            : null);
+    const trimTranscript =
+        item.kind === "audio"
+            ? await readPreferredTranscript(itemId, userId)
+            : null;
+    const preferredContent = trimTranscript
+        ? {
+              id: trimTranscript.id,
+              revision: trimTranscript.revision,
+              source: trimTranscript.source,
+              timed: trimTranscript.turns !== null,
+          }
+        : content
+          ? { ...content, source: "mail" }
+          : null;
+    const learnContent = preferredContent;
     const summaryExists = summary !== undefined;
     const staleFingerprint = summary
         ? await staleReadingFingerprint(summary)
         : null;
     const summaryStale = staleFingerprint !== null;
-    const summarySource =
-        item.kind === "mail"
-            ? "mail"
-            : summary?.inputs?.contentSourceId === "plaud"
-              ? "plaud"
-              : "riffado";
-    const summaryContent =
-        summarySource === "plaud" ? plaudTranscript : content;
-    const trimTranscript =
-        item.kind === "audio"
-            ? await readPreferredTranscript(itemId, userId)
-            : null;
+    const summaryInputsCurrent = Boolean(
+        preferredContent &&
+            summary?.inputs &&
+            summary.inputs.contentId === preferredContent.id &&
+            summary.inputs.contentRevision === preferredContent.revision &&
+            summary.inputs.contentSourceId === preferredContent.source &&
+            itemProfileFenceMatches(
+                summary.inputs.itemProfileRevisionId,
+                processing,
+            ),
+    );
+    const manualRefreshOnly = !automaticSummaryReplacementAllowed(
+        summary,
+        preferredContent
+            ? {
+                  contentId: preferredContent.id,
+                  contentSourceId: preferredContent.source,
+                  contentRevision: preferredContent.revision,
+              }
+            : null,
+        processing ?? undefined,
+    );
     return {
         trimContent: trimTranscript
             ? {
@@ -845,20 +877,19 @@ export async function gatherFacts(
                 : undefined,
         mail: item.kind === "mail" && mail ? { ...mail, shared } : null,
         summary: {
+            source: summary?.source,
             edited: summary?.editedAt != null,
             exists: summaryExists,
+            manualRefreshOnly,
+            refreshRequested:
+                initialCustomSummaryPending(summary, processing ?? undefined) ||
+                (summary !== undefined &&
+                    phases.categorize?.summaryRefresh?.id === summary.id &&
+                    phases.categorize.summaryRefresh.revision ===
+                        summary.revision),
             stale: summaryStale,
             staleFingerprint: staleFingerprint ?? undefined,
-            current:
-                !summaryStale &&
-                summaryContent !== null &&
-                summary?.inputs?.contentId === summaryContent.id &&
-                summary.inputs.contentRevision === summaryContent.revision &&
-                summary.inputs.contentSourceId === summarySource &&
-                itemProfileFenceMatches(
-                    summary.inputs.itemProfileRevisionId,
-                    processing,
-                ),
+            current: !summaryStale && summaryInputsCurrent,
             jobActive: activeSummaryJobs.some(
                 (job) => job.kind === SUMMARY_JOB_KIND,
             ),

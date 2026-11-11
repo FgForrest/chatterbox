@@ -1259,7 +1259,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         expect(await kinds()).toEqual(["pipeline.advance"]);
     });
 
-    it("makes the summary again where the one there was made from an older reading", async () => {
+    it("makes the summary again after a real correction input change", async () => {
         await hold();
         await db()
             .insert(aiEnhancements)
@@ -1274,6 +1274,12 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
                 inputFingerprint: "an-older-reading",
             });
 
+        await requestAdvance({
+            itemId: REC,
+            userId: OWNER,
+            view: "private",
+            reason: "summary-input-changed",
+        });
         expect(await releaseAutoLearnHold(REC)).toBe(true);
         await runAdvance();
 
