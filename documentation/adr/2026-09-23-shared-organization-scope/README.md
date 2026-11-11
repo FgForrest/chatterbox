@@ -1,15 +1,15 @@
 ---
 title: Shared Organization scope on self-host, with a dedicated Organization account and nothing copied
 date: 2026-09-23
-updated: 2026-11-10 11:00
+updated: 2026-11-11 02:32
 status: superseded
 kind: feature
 issues: []
 prs: [53]
 areas: [src/lib/sharing, src/lib/org, src/lib/folders/folders.ts, src/lib/knowledge/people.ts, src/db/queries/retention.ts, src/db/queries/events.ts, src/app/api/events/route.ts, src/lib/folder-exports, content/docs/self-hosting/organization.mdx]
 supersedes: []
-superseded-by: [2026-09-30-shared-recording-edited-by-organization, 2026-10-14-identity-provider-authorization, 2026-10-19-processing-profiles-and-workflow, 2026-10-19-provider-defaults-and-no-fallback, 2026-10-21-curators-manage-organization-almanac]
-relates: [2026-10-07-backup-scope, 2026-09-30-learn, 2026-10-22-owner-edits-shared-recording, 2026-10-22-person-to-person-sharing, 2026-11-10-restricted-organization-folders]
+superseded-by: [2026-09-30-shared-recording-edited-by-organization, 2026-10-14-identity-provider-authorization, 2026-10-19-processing-profiles-and-workflow, 2026-10-19-provider-defaults-and-no-fallback, 2026-10-21-curators-manage-organization-almanac, 2026-11-10-restricted-organization-folders]
+relates: [2026-10-07-backup-scope, 2026-09-30-learn, 2026-10-22-owner-edits-shared-recording, 2026-10-22-person-to-person-sharing]
 ---
 
 # Shared Organization scope on self-host, with a dedicated Organization account and nothing copied
@@ -22,6 +22,8 @@ it, attribute speakers to Organization people, and see changes live. PR #53 buil
 merge. Several of its rules were changed within a month; the *Later changes* list below says which,
 and points to the records that carry them. **Superseded in part:** those records supersede this one
 for the rules they changed; the rest still holds.
+
+**Superseded in part:** [Restricted Organization folders](../2026-11-10-restricted-organization-folders.md) changes publication for withheld placements: Organization filing alone no longer publishes those items or their knowledge; the rest still holds.
 
 ## Why
 
@@ -151,6 +153,7 @@ the client localizes the folder conflict (409) only.
 
 ## Related work
 
+- [Restricted Organization folders](../2026-11-10-restricted-organization-folders.md): supersedes the publication rule for withheld placements; Organization filing publishes only released placements.
 - [Person-to-person sharing](../2026-10-22-person-to-person-sharing.md): adds accepted receivers without publishing items or knowledge to the Organization; receiver archives still exclude those items.
 - [2026-09-30-shared-recording-edited-by-organization](../2026-09-30-shared-recording-edited-by-organization.md): replaced the two-view model with one set of
   rows and changed the retention rule.
@@ -173,5 +176,3 @@ the client localizes the folder conflict (409) only.
 - **2026-10-14**: curators through `org.curate` (PR #131).
 - **2026-10-16**: Organization tree restructuring made curator-only (merged with PR #135 on 2026-10-17).
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
-
-- [Restricted Organization folders](../2026-11-10-restricted-organization-folders.md): Organization-owned antechambers reuse receiver rights without publishing withheld content.

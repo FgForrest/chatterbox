@@ -140,7 +140,7 @@ async function loadOrganizationLibrary(
     reviewIds: ReadonlySet<string> = new Set(),
     received = false,
 ) {
-    const isCurator = await userCuratesOrganizationNow(viewerId);
+    const isCurator = received && (await userCuratesOrganizationNow(viewerId));
     const rows = await db
         .select({
             id: recordings.id,

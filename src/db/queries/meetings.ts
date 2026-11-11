@@ -91,10 +91,24 @@ export async function findMeeting(
     userId: string,
     orgUserId: string | null,
     id: string,
-    executor: MeetingExecutor = db,
-    lock = false,
-    isCurator = false,
-    organizationOnly = false,
+    ...[
+        executor = db,
+        lock = false,
+        isCurator = false,
+        organizationOnly = false,
+    ]:
+        | [
+              executor?: undefined,
+              lock?: boolean,
+              isCurator?: boolean,
+              organizationOnly?: boolean,
+          ]
+        | [
+              executor: MeetingExecutor,
+              lock: boolean | undefined,
+              isCurator: boolean,
+              organizationOnly?: boolean,
+          ]
 ) {
     const query = executor
         .select({ agenda: meetingAgendas, item: chatterItems })

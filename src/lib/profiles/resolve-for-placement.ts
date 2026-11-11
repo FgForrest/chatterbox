@@ -225,6 +225,7 @@ export async function folderDefaultProfileDetails(
             parentId,
             [folder.ownerUserId],
             input,
+            input.actorUserId,
         );
         if (!parent || parent.parentId === null) break;
         const inherited = await usableDefaultAtFolder({

@@ -11,7 +11,11 @@ import {
     vi,
 } from "vitest";
 import { db } from "@/db";
-import { listMeetingRows, type MeetingTx } from "@/db/queries/meetings";
+import {
+    findMeeting,
+    listMeetingRows,
+    type MeetingTx,
+} from "@/db/queries/meetings";
 import {
     chatterItems,
     folderDefaultProfiles,
@@ -146,6 +150,24 @@ suite("restricted folders review 6 (PostgreSQL)", () => {
         );
         // @ts-expect-error Transactional meeting reads require explicit curator authority.
         expectTypeOf(listMeetingRows).toBeCallableWith(...missingCurator);
+        const find = expectTypeOf(findMeeting);
+        find.toBeCallableWith("owner", "org", "agenda");
+        find.toBeCallableWith("owner", "org", "agenda", tx, true, true);
+        find.toBeCallableWith("owner", "org", "agenda", tx, undefined, false);
+        // @ts-expect-error Transactional agenda reads require explicit curator authority.
+        find.toBeCallableWith("owner", "org", "agenda", tx);
+        // @ts-expect-error A lock flag does not replace explicit curator authority.
+        find.toBeCallableWith("owner", "org", "agenda", tx, true);
+        const unknownAuthority = [
+            "owner",
+            "org",
+            "agenda",
+            tx,
+            false,
+            undefined,
+        ] as const;
+        // @ts-expect-error Transactional agenda reads reject undefined curator authority.
+        find.toBeCallableWith(...unknownAuthority);
         const profileInput = {
             folderId,
             folderOwnerUserId: "org",
@@ -272,6 +294,12 @@ suite("restricted folders review 6 (PostgreSQL)", () => {
         expect(rows.map((row) => row.agenda.id)).toEqual(
             actor === "curator" ? [meeting.id] : [],
         );
+        const found = await db.transaction((tx) =>
+            findMeeting(actor, "org", meeting.id, tx, true, isCurator),
+        );
+        expect(found?.agenda.id ?? null).toBe(
+            actor === "curator" ? meeting.id : null,
+        );
         expect(curator).not.toHaveBeenCalled();
     }, 30000);
 
@@ -299,6 +327,49 @@ suite("restricted folders review 6 (PostgreSQL)", () => {
         else expect(details).toBeNull();
         expect(curator).not.toHaveBeenCalled();
     }, 30000);
+
+    it("checks ancestor audience independently of the restricted leaf rule", async () => {
+        const child = await folders.createFolder({
+            userId: "org",
+            parentId: folderId,
+            name: "Child",
+            canCurate: true,
+        });
+        await db
+            .update(recordingFolders)
+            .set({ restrictedAt: new Date() })
+            .where(eq(recordingFolders.id, folderId));
+        await db.insert(folderDefaultProfiles).values({
+            folderId,
+            channel: "audio",
+            manualOnly: true,
+        });
+        await db.insert(restrictedFolderMembers).values({
+            folderId,
+            userId: "member",
+        });
+        curator.mockClear();
+        for (const actorUserId of ["other", "member", "curator"]) {
+            const details = await db.transaction((executor) =>
+                folderDefaultProfileDetails({
+                    folderId: child.id,
+                    folderOwnerUserId: "org",
+                    actorUserId,
+                    channel: "audio",
+                    organizationUserId: "org",
+                    executor,
+                    isCurator: actorUserId === "curator",
+                }),
+            );
+            expect(details).toMatchObject({
+                ownManualOnly: false,
+                effectiveManualOnly: actorUserId !== "other",
+                inheritedFromFolderId:
+                    actorUserId === "other" ? null : folderId,
+            });
+        }
+        expect(curator).not.toHaveBeenCalled();
+    });
 
     it("skips and rolls back a restore when its authorized folder is deleted concurrently", async () => {
         await folders.ensureRootFolders("owner");

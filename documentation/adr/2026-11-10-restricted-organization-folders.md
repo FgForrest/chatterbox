@@ -1,15 +1,15 @@
 ---
 title: Restricted Organization folders withhold placements until normal publication succeeds
 date: 2026-11-10
-updated: 2026-11-11 00:16
+updated: 2026-11-11 02:32
 status: partially-implemented
 kind: feature
 issues: [381]
 prs: []
 areas: [src/lib/folders, src/lib/sharing, src/db/queries, src/lib/export, src/lib/meetings, src/lib/mail, src/lib/mcp, src/db/schema.ts]
-supersedes: [2026-10-07-backup-scope, 2026-10-06-export-ownership-ledger]
+supersedes: [2026-10-07-backup-scope, 2026-10-06-export-ownership-ledger, 2026-09-23-shared-organization-scope]
 superseded-by: []
-relates: [2026-09-23-shared-organization-scope, 2026-10-22-person-to-person-sharing]
+relates: [2026-10-22-person-to-person-sharing]
 ---
 
 # Restricted Organization folders withhold placements until normal publication succeeds
@@ -99,6 +99,6 @@ Fix round 5 adds 22 PostgreSQL cases in `src/tests/regressions/381-restricted-fo
 ## Related work
 
 - [Export ownership ledger](2026-10-06-export-ownership-ledger.md): superseded for restricted-placement revocation and foreign-file protection during directory pruning. Drive trashes its own revoked copies even when they are not duplicates; managed directories containing foreign files remain.
-- [Shared Organization scope](2026-09-23-shared-organization-scope/README.md): relates; ordinary released placements retain its publication model.
+- [Shared Organization scope](2026-09-23-shared-organization-scope/README.md): superseded in part. Filing a withheld placement into an Organization folder no longer publishes the item or its knowledge; ordinary released placements retain its publication model.
 - [Person-to-person sharing](2026-10-22-person-to-person-sharing.md): relates; receiver rights and private knowledge isolation are reused.
 - [Backup scope](2026-10-07-backup-scope.md): superseded in part. Owner archives now include Organization placement references and release grace, and focused restriction restore adapters exist. The Organization archive includes its own restricted and unfiled items as well as published member items. Scope selection, authored-content filtering and download ownership remain unchanged.
