@@ -24,6 +24,7 @@
 import { and, count, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
+    aiEnhancements,
     chatterItems,
     knowledgeEntities,
     knowledgeFacts,
@@ -90,6 +91,7 @@ import {
 import { releaseAutoLearnHold } from "@/lib/learn/auto-learn";
 import { queueCorrectionPassInTx } from "@/lib/learn/correction-pass-queue";
 import { settleDeadLearnRuns } from "@/lib/learn/learn-job";
+import { llmRendering } from "@/lib/learn/llm-input";
 import type {
     MailNewRecordPayload,
     MailReviewCandidate,
@@ -1347,6 +1349,7 @@ function finishInTx(
         const skipped: FinishedReview["skipped"] = [];
         let applied = 0;
         let confirmedLanguageChanged = false;
+        let correctionsApplied = false;
         /** Apply one item in a savepoint; false when it was skipped. */
         const attempt = async (
             itemId: string,
@@ -1725,6 +1728,7 @@ function finishInTx(
                                 replacement: place.replacement,
                             }),
                         );
+                        correctionsApplied = true;
                         written.add(anchorKey(place));
                     } catch (error) {
                         if (
@@ -1898,7 +1902,7 @@ function finishInTx(
             }
             // All its occurrences or none. The item groups them by their
             // words in any case; each is applied at its own.
-            await attempt(item.id, async (sp) => {
+            const corrected = await attempt(item.id, async (sp) => {
                 for (const anchor of payload.anchors) {
                     await acceptCorrectionInTx(sp, {
                         ...writer,
@@ -1919,6 +1923,7 @@ function finishInTx(
                     });
                 }
             });
+            correctionsApplied ||= corrected && payload.anchors.length > 0;
         }
 
         /** Whom a fact's speaker-bound side names now, or null. */
@@ -2236,11 +2241,43 @@ function finishInTx(
                     ),
                 );
         }
+        const [savedSummary] =
+            isRecordingRun(latest) &&
+            rows.some((row) => row.kind === "correction")
+                ? await tx
+                      .select({
+                          transcriptionId: aiEnhancements.transcriptionId,
+                          inputFingerprint: aiEnhancements.inputFingerprint,
+                      })
+                      .from(aiEnhancements)
+                      .where(
+                          and(
+                              eq(aiEnhancements.itemId, run.itemId),
+                              eq(aiEnhancements.userId, run.userId),
+                              eq(aiEnhancements.source, "riffado"),
+                          ),
+                      )
+                      .limit(1)
+                : [];
+        const currentReading =
+            savedSummary?.transcriptionId === latest.transcriptionId &&
+            savedSummary?.inputFingerprint &&
+            isRecordingRun(latest)
+                ? await llmRendering(latest.transcriptionId, tx)
+                : null;
+        const savedReadingChanged =
+            currentReading !== null &&
+            currentReading.fingerprint !== savedSummary?.inputFingerprint;
         const advance = await requestAdvanceInTx(tx, {
             itemId: run.itemId,
             userId: run.userId,
             view: run.view,
-            reason: "review-finished",
+            reason:
+                correctionsApplied ||
+                savedReadingChanged ||
+                confirmedLanguageChanged
+                    ? "summary-input-changed"
+                    : "review-finished",
         });
         if (quick && advance) {
             await markLearnReleasedInTx(tx, {

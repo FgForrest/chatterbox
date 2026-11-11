@@ -73,6 +73,9 @@ vi.mock("@/lib/learn/hold", () => ({
 vi.mock("@/lib/learn/summary-refresh", () => ({
     summaryRefreshDue: vi.fn().mockResolvedValue(null),
 }));
+vi.mock("@/lib/summary/replacement", () => ({
+    mayAutomaticallyReplaceSummary: vi.fn().mockResolvedValue(true),
+}));
 vi.mock("@/lib/pipeline/state", () => ({
     readProcessing: vi
         .fn()

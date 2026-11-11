@@ -606,6 +606,7 @@ export async function loadPrivateItemProcessing(
         db
             .select({
                 id: aiEnhancements.id,
+                source: aiEnhancements.source,
                 transcriptionId: aiEnhancements.transcriptionId,
                 inputs: aiEnhancements.inputs,
             })
@@ -614,7 +615,6 @@ export async function loadPrivateItemProcessing(
                 and(
                     eq(aiEnhancements.itemId, itemId),
                     eq(aiEnhancements.userId, ownerUserId),
-                    eq(aiEnhancements.source, "riffado"),
                     isNotNull(aiEnhancements.summary),
                 ),
             ),
@@ -755,6 +755,7 @@ export async function loadPrivateItemProcessing(
         );
     });
     const summaryCurrent = summaries.some((summary) => {
+        if (summary.source !== "riffado") return false;
         const inputs = summary.inputs as {
             contentId?: unknown;
             contentRevision?: unknown;
@@ -832,7 +833,7 @@ export async function loadPrivateItemProcessing(
         intents,
         outputs: {
             transcript: transcripts.length > 0,
-            summary: summaryCurrent,
+            summary: summaries.length > 0,
             learn: learnDone,
         },
         processAgain,

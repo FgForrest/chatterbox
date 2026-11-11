@@ -347,7 +347,10 @@ async function runPass({
                     itemId: pass.recordingId,
                     userId: pass.userId,
                     view: pass.view,
-                    reason: "correction-finished",
+                    reason:
+                        (stats.written ?? 0) > 0
+                            ? "summary-input-changed"
+                            : "correction-finished",
                 });
             };
             const baseStats = {

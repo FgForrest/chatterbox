@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { retryLostPipelineStepsInTx } from "@/db/queries/pipeline-jobs";
 import { lockTrimRecording } from "@/db/queries/trim-state";
-import { itemProcessing, recordings } from "@/db/schema";
+import { chatterItems, itemProcessing, recordings } from "@/db/schema";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { nudge } from "@/lib/jobs/nudge";
@@ -13,6 +13,7 @@ import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { requireRecordingView } from "@/lib/sharing/access";
+import { authorizeSummaryReplacementInTx } from "@/lib/summary/replacement";
 
 type IdContext = { params: Promise<{ id: string }> };
 
@@ -31,6 +32,18 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
 
     const advance = await db.transaction(async (tx) => {
         const recording = await lockTrimRecording(tx, userId, itemId);
+        // Mail has no recordings row: lock the item first, as the pipeline lock order requires.
+        if (!recording)
+            await tx
+                .select({ id: chatterItems.id })
+                .from(chatterItems)
+                .where(
+                    and(
+                        eq(chatterItems.id, itemId),
+                        eq(chatterItems.userId, userId),
+                    ),
+                )
+                .for("update");
         const [processing] = await tx
             .select({
                 manualOnly: itemProcessing.manualOnly,
@@ -50,12 +63,19 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             processing &&
             (await retryLostPipelineStepsInTx(tx, itemId, userId))
         ) {
-            return requestAdvanceInTx(tx, {
+            const requested = await requestAdvanceInTx(tx, {
                 itemId,
                 userId,
                 view: "private",
                 reason: "process-again",
             });
+            if (requested)
+                await authorizeSummaryReplacementInTx(tx, {
+                    itemId,
+                    userId,
+                    generation: requested.requestedGeneration,
+                });
+            return requested;
         }
         if (!hasAutomaticStep)
             throw new AppError(
@@ -122,6 +142,11 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             reason: "process_again",
             generation: requested.requestedGeneration,
             at: new Date().toISOString(),
+        });
+        await authorizeSummaryReplacementInTx(tx, {
+            itemId,
+            userId,
+            generation: requested.requestedGeneration,
         });
         return requested;
     });

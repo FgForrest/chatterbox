@@ -25,6 +25,7 @@ import type { PipelineJobResult } from "@/lib/pipeline/outcome";
 import { allowManualArtifactGeneration } from "@/lib/recordings/erase";
 import { updateTitleAfterSummary } from "@/lib/recordings/title-after-summary";
 import { admitRateLimitedAutoSummary } from "@/lib/summary/auto-summary";
+import { mayAutomaticallyReplaceSummary } from "@/lib/summary/replacement";
 import { emitEvent } from "@/lib/webhooks/emit";
 import { generateSummaryForRecording } from "./generate-summary";
 import {
@@ -69,6 +70,14 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
         reportProgress,
     }): Promise<PipelineJobResult> {
         const orgView = payload.view === "org";
+        if (
+            payload.trigger !== "manual" &&
+            !(await mayAutomaticallyReplaceSummary(userId, payload.recordingId))
+        )
+            return {
+                skipped: "outdated",
+                outcome: { kind: "skipped", reason: "outdated" },
+            };
         // An automatic summary queued before automatic Learn held the
         // recording again: the hold's release makes it, from the reviewed
         // transcript.

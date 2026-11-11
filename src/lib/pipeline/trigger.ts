@@ -9,6 +9,7 @@ import { nudge } from "@/lib/jobs/nudge";
 import { pipelineDriver } from "@/lib/pipeline/driver";
 import type { PipelineView } from "@/lib/pipeline/types";
 import { recordingJobSubject } from "@/lib/sharing/view";
+import { authorizeSummaryReplacementInTx } from "@/lib/summary/replacement";
 
 /** Queue kind for the durable pipeline driver. */
 export const PIPELINE_ADVANCE_JOB_KIND = "pipeline.advance";
@@ -30,7 +31,8 @@ export type PipelineAdvanceReason =
     | "transcription-failed"
     | "summary-step-failed"
     | "transcription-retry"
-    | "process-again";
+    | "process-again"
+    | "summary-input-changed";
 
 export interface RequestAdvanceInput {
     itemId: string;
@@ -55,6 +57,11 @@ export async function requestAdvanceInTx(
         ...input,
         ...pipelineDriver(input.userId),
     });
+    if (result && input.reason === "summary-input-changed")
+        await authorizeSummaryReplacementInTx(tx, {
+            ...input,
+            generation: result.requestedGeneration,
+        });
     if (
         result &&
         (input.reason === "arrival" ||

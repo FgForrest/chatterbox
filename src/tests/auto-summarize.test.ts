@@ -21,6 +21,9 @@ const pipelineMocks = vi.hoisted(() => ({
 vi.mock("@/lib/summary/corrections", () => ({
     summaryEditState: vi.fn().mockResolvedValue(null),
 }));
+vi.mock("@/lib/summary/replacement", () => ({
+    mayAutomaticallyReplaceSummary: vi.fn().mockResolvedValue(true),
+}));
 
 vi.mock("@/db", () => ({
     db: {

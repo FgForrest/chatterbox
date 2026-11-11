@@ -75,6 +75,12 @@ export interface PhaseRecord {
     profileRevisionId?: string;
     proposalId?: string;
     staleFingerprint?: string;
+    arrivalGeneration?: number;
+    summaryRefresh?: {
+        id: string | null;
+        revision: number | null;
+        generation: number;
+    };
     problems?: ShareGateProblem[];
     profileChoice?: "manual" | "placement";
     placementProfile?: PlacementProfileBinding;
@@ -168,8 +174,12 @@ export interface PipelineFacts {
         shared: boolean;
     } | null;
     summary: {
+        source?: string;
         edited?: boolean;
         exists: boolean;
+        /** Saved output needs changed base input or an explicit replacement request. */
+        manualRefreshOnly?: boolean;
+        refreshRequested?: boolean;
         stale: boolean;
         staleFingerprint?: string;
         current?: boolean;

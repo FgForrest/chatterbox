@@ -69,6 +69,7 @@ import {
     readProcessing,
     updatePhaseInTx,
 } from "@/lib/pipeline/state";
+import { requestAdvance } from "@/lib/pipeline/trigger";
 import type { PipelinePhases } from "@/lib/pipeline/types";
 import * as placementBinding from "@/lib/profiles/placement-binding";
 import { bindPlacementProfileInTx } from "@/lib/profiles/placement-binding";
@@ -1671,7 +1672,7 @@ const content = {
         it.each([
             true,
             false,
-        ])("refreshes a stale summary using the placement policy (automatic: %s)", async (automatic) => {
+        ])("refreshes changed correction input using the placement policy (automatic: %s)", async (automatic) => {
             await db()
                 .update(itemProcessing)
                 .set({ manualOnly: automatic })
@@ -1696,6 +1697,12 @@ const content = {
                 });
             await share();
             expect(await isSummaryStale(OWNER, ITEM)).toBe(true);
+            await requestAdvance({
+                itemId: ITEM,
+                userId: OWNER,
+                view: "private",
+                reason: "summary-input-changed",
+            });
             const input = {
                 ownerUserId: OWNER,
                 recordingId: ITEM,

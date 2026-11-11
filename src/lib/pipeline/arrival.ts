@@ -197,6 +197,38 @@ export async function requestArrivalInTx(
         view,
         reason: "arrival",
     });
+    if (advance && view === "private") {
+        const [processing] = await tx
+            .select({ phases: itemProcessing.phases })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, input.itemId),
+                    eq(itemProcessing.userId, input.userId),
+                    eq(itemProcessing.view, view),
+                ),
+            )
+            .for("update")
+            .limit(1);
+        if (!processing?.phases.summary) {
+            await updatePhaseInTx(
+                tx,
+                input.itemId,
+                view,
+                input.userId,
+                "categorize",
+                // Defaults first: a tracked phase keeps its own state and reason.
+                {
+                    state: "pending",
+                    reason: "arrival",
+                    at: new Date().toISOString(),
+                    ...processing?.phases.categorize,
+                    generation: advance.requestedGeneration,
+                    arrivalGeneration: advance.requestedGeneration,
+                },
+            );
+        }
+    }
     if (!advance || !profile || view !== "private") return advance;
 
     const [latest] = await tx

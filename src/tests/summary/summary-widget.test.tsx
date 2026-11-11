@@ -1012,10 +1012,36 @@ describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
         expect(screen.getByText("A concise result")).toBeTruthy();
     });
 
+    it.each([
+        false,
+        true,
+    ])("#395 keeps saved output accessible while an unwanted job is active (workflow: %s)", (workflowVisible) => {
+        state.isSummarizing = true;
+        renderWidget(kind, {
+            workflowVisible,
+            widget: widget({
+                collapsed: workflowVisible,
+                active: true,
+                tone: "working",
+            }),
+        });
+        if (workflowVisible)
+            fireEvent.click(
+                screen.getByRole("button", { name: "View summary" }),
+            );
+        expect(
+            screen.getByRole("region", { name: "Summary content" }),
+        ).toBeTruthy();
+        expect(screen.getByText("A concise result")).toBeTruthy();
+        expect(screen.getByText("First point")).toBeTruthy();
+        expect(screen.getByText("Send the proposal")).toBeTruthy();
+    });
+
     it("shows multi-pass progress and elapsed time while running", () => {
         state.isSummarizing = true;
         state.summaryProgress = { phase: "passes", completed: 2, total: 3 };
         state.summaryElapsedMs = 65_000;
+        state.summaryData = null;
         renderWidget(kind);
 
         expect(
