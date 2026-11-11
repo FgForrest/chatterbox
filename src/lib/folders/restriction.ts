@@ -3,12 +3,51 @@ import { db } from "@/db";
 import { restrictedMemberCondition } from "@/db/queries/restricted-folders";
 import { activeShareRecipientCondition } from "@/db/queries/share-recipients";
 import {
+    recordingFolders,
     restrictedFolderAccessRequests,
     restrictedFolderMembers,
     users,
 } from "@/db/schema";
+import { holderAccess } from "@/lib/authz/access-state";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { isIdpAuthorization } from "@/lib/identity/factory";
 import type { RecordingFolder } from "@/types/folder";
+
+/** Recheck creator authority from stored access using the supplied executor, without provider calls. */
+export async function creatorMayRestrictFolder(
+    userId: string,
+    folderId: string,
+    executor: Pick<typeof db, "select"> = db,
+) {
+    if (isIdpAuthorization()) {
+        const access = await holderAccess(userId, { executor, verify: false });
+        if (!access.ok) return false;
+    }
+    return (await restrictableCreatedFolders(userId, [folderId], executor)).has(
+        folderId,
+    );
+}
+
+async function restrictableCreatedFolders(
+    userId: string,
+    folderIds: readonly string[],
+    executor: Pick<typeof db, "select"> = db,
+) {
+    if (!folderIds.length) return new Set<string>();
+    const rows = await executor
+        .select({ id: recordingFolders.id })
+        .from(recordingFolders)
+        .innerJoin(users, eq(users.id, recordingFolders.createdByUserId))
+        .where(
+            and(
+                inArray(recordingFolders.id, [...folderIds]),
+                eq(recordingFolders.createdByUserId, userId),
+                eq(recordingFolders.kind, "custom"),
+                activeShareRecipientCondition(),
+            ),
+        );
+    return new Set(rows.map((row) => row.id));
+}
 
 /** Restricted Organization folders are leaves, independently of person-shared folder rules. */
 export function assertRestrictedFolderContainer(folder: {
@@ -100,6 +139,25 @@ export async function restrictedFolderNodes(
     folders: RecordingFolder[],
     viewer: { userId: string; isCurator: boolean },
 ): Promise<RecordingFolder[]> {
+    const created = await restrictableCreatedFolders(
+        viewer.userId,
+        folders
+            .filter(
+                (folder) =>
+                    folder.scope === "org" &&
+                    folder.kind === "custom" &&
+                    !folder.restricted,
+            )
+            .map((folder) => folder.id),
+    );
+    folders = folders.map((folder) =>
+        folder.scope === "org" && folder.kind === "custom" && !folder.restricted
+            ? {
+                  ...folder,
+                  canRestrict: viewer.isCurator || created.has(folder.id),
+              }
+            : folder,
+    );
     const ids = folders
         .filter((folder) => folder.restricted)
         .map((folder) => folder.id);

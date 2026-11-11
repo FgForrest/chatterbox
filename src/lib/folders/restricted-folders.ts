@@ -45,6 +45,7 @@ import {
     shareItemToOrganizationFolderInTx,
 } from "@/lib/folders/folders";
 import {
+    creatorMayRestrictFolder,
     initializeRestrictedAudienceInTx,
     validateRestrictedAudience,
 } from "@/lib/folders/restriction";
@@ -274,17 +275,22 @@ async function folderItems(folderId: string) {
         );
 }
 
+async function requireRestrictionAccess(userId: string, folderId: string) {
+    const isCurator = await userCuratesOrganizationNow(userId);
+    const folder = await resolveReadableFolder(userId, folderId);
+    if (!folder || folder.scope !== "org" || folder.folder.kind !== "custom")
+        throw new AppError(ErrorCode.NOT_FOUND, ErrorCode.NOT_FOUND, 404);
+    if (!isCurator && !(await creatorMayRestrictFolder(userId, folderId)))
+        throw new AppError(ErrorCode.FORBIDDEN, ErrorCode.FORBIDDEN, 403);
+    return { ...folder, isCurator };
+}
+
 /** Preview the withdrawal and permanent Almanac additions before restricting an open folder. */
 export async function previewFolderRestriction(
     userId: string,
     folderId: string,
 ) {
-    const isCurator = await userCuratesOrganizationNow(userId);
-    const folder = await resolveReadableFolder(userId, folderId);
-    if (!folder || folder.scope !== "org" || folder.folder.kind !== "custom")
-        throw new AppError(ErrorCode.NOT_FOUND, ErrorCode.NOT_FOUND, 404);
-    if (!isCurator)
-        throw new AppError(ErrorCode.FORBIDDEN, ErrorCode.FORBIDDEN, 403);
+    const folder = await requireRestrictionAccess(userId, folderId);
     const items = await folderItems(folderId);
     const otherOpen = items.length
         ? await db
@@ -372,6 +378,25 @@ export async function previewFolderRestriction(
     }
     return {
         counts: [...counts.values()],
+        audience: folder.folder.restrictingAt
+            ? await db
+                  .select({
+                      id: users.id,
+                      name: users.name,
+                      email: users.email,
+                  })
+                  .from(restrictedFolderMembers)
+                  .innerJoin(
+                      users,
+                      eq(users.id, restrictedFolderMembers.userId),
+                  )
+                  .where(
+                      and(
+                          eq(restrictedFolderMembers.folderId, folderId),
+                          activeShareRecipientCondition(),
+                      ),
+                  )
+            : [],
         items,
         withdrawnItems: items.filter((item) => !remainsShared.has(item.id)),
         retainedAlmanacAdditions: additions,
@@ -623,9 +648,7 @@ export async function changeFolderRestriction(
     const access =
         operation === "lift"
             ? await requireAudienceAccess(userId, folderId, true)
-            : null;
-    if (operation === "restrict")
-        await previewFolderRestriction(userId, folderId);
+            : await requireRestrictionAccess(userId, folderId);
     assertOrgScopeWritable();
     const audience = await validateRestrictedAudience(audienceUserIds);
     const orgUserId = access?.ownerId ?? (await getOrgUserId());
@@ -656,14 +679,18 @@ export async function changeFolderRestriction(
                 ErrorCode.RESTRICTED_FOLDER_HAS_CHILDREN,
                 409,
             );
-        await restrictedAudienceAuthorityInTx(
-            tx,
-            userId,
-            folderId,
-            operation === "restrict" || access?.isCurator === true,
-            true,
-            operation === "restrict",
-        );
+        const creatorMayRestrict =
+            operation === "restrict" &&
+            (await creatorMayRestrictFolder(userId, folderId, tx));
+        if (!creatorMayRestrict)
+            await restrictedAudienceAuthorityInTx(
+                tx,
+                userId,
+                folderId,
+                access.isCurator,
+                true,
+                operation === "restrict",
+            );
         if (operation === "lift") await cancelFolderRequests(tx, folderId);
         if (operation === "restrict" && folder.restrictedAt) return [];
         const restriction =
@@ -705,6 +732,22 @@ export async function changeFolderRestriction(
                     )
                     .onConflictDoNothing();
             }
+            if (creatorMayRestrict)
+                await tx
+                    .insert(restrictedFolderMembers)
+                    .values({
+                        folderId,
+                        userId,
+                        role: "manager",
+                        addedByUserId: userId,
+                    })
+                    .onConflictDoUpdate({
+                        target: [
+                            restrictedFolderMembers.folderId,
+                            restrictedFolderMembers.userId,
+                        ],
+                        set: { role: "manager" },
+                    });
             const owners = await tx
                 .selectDistinct({ userId: recordingFolderAssignments.userId })
                 .from(recordingFolderAssignments)

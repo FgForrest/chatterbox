@@ -4,6 +4,8 @@ import { expect, it } from "vitest";
 
 const ROOT = join(__dirname, "../..");
 const ALLOWED: Record<string, string> = {
+    "db/queries/folder-restriction-contacts.ts":
+        "Creator contact lookup is scoped to a custom Organization folder already resolved through the caller's read authorization.",
     "db/queries/task-list.ts":
         "Task folder options intersect current task visibility with readable placements, private-folder participation and receiver aliases.",
     "lib/events/visibility.ts":
