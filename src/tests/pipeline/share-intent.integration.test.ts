@@ -204,6 +204,7 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
     async function recordIntent(itemId: string): Promise<void> {
         await appDb.transaction((tx) =>
             recordIntendedPlacementInTx(tx, {
+                canCurate: false,
                 ownerUserId: ALICE,
                 itemId,
                 folderId: orgFolderId,
@@ -374,6 +375,7 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
         await confirmIntendedPlacements(ALICE, itemId);
         await appDb.transaction((tx) =>
             recordIntendedPlacementInTx(tx, {
+                canCurate: false,
                 ownerUserId: ALICE,
                 itemId,
                 folderId: secondOrgFolderId,

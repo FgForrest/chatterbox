@@ -267,13 +267,27 @@ async function absorbInTx(
     organizationTreeLocked = true,
 ) {
     await ownedRecording(tx, userId, recordingItemId);
-    const row = await findMeeting(userId, orgUserId, agendaId, tx, true);
+    const row = await findMeeting(
+        userId,
+        orgUserId,
+        agendaId,
+        tx,
+        true,
+        canCurate,
+    );
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "Meeting not found", 404);
     const { agenda } = row;
     if (agenda.recordingItemId === recordingItemId) return;
     if (agenda.recordingItemId)
         throw new AppError(ErrorCode.CONFLICT, "Agenda already attached", 409);
-    const existing = await findMeeting(userId, orgUserId, recordingItemId, tx);
+    const existing = await findMeeting(
+        userId,
+        orgUserId,
+        recordingItemId,
+        tx,
+        false,
+        canCurate,
+    );
     if (existing)
         throw new AppError(
             ErrorCode.CONFLICT,
@@ -558,7 +572,14 @@ async function attachArrivalInSavepoint(
             ? session.metadata.agendaId
             : null);
     if (explicitId) {
-        const attached = await findMeeting(userId, orgUserId, explicitId, tx);
+        const attached = await findMeeting(
+            userId,
+            orgUserId,
+            explicitId,
+            tx,
+            false,
+            canCurate,
+        );
         if (attached?.agenda.recordingItemId === itemId) return;
         await requireMeetingAccess(userId, explicitId, "edit", {
             viewer: { userId, orgUserId, curator: canCurate },
@@ -596,6 +617,9 @@ async function attachArrivalInSavepoint(
             itemId,
             orgUserId,
             false,
+            true,
+            canCurate,
+            organizationTreeLocked,
         );
     }
 }
@@ -671,6 +695,7 @@ export async function detachAgenda(userId: string, recordingItemId: string) {
                 recordingItemId,
                 tx,
                 true,
+                viewer.curator,
             );
             if (
                 !row ||

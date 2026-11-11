@@ -164,28 +164,33 @@ export async function findMeeting(
     return original ? { ...original, recordingVisible: false } : null;
 }
 
+interface MeetingListInput {
+    folderId?: string;
+    overlapWith?: { start: Date; end: Date };
+    from?: Date;
+    to?: Date;
+    calendarEventId?: string;
+    includePast?: boolean;
+    includeAbsorbed?: boolean;
+    excludeAbsorbed?: boolean;
+    limit?: number;
+    isCurator?: boolean;
+    organizationOnly?: boolean;
+}
+
 /** Visible standalone agendas, bounded for polling, calendar annotation and recorder reminders. */
 export async function listMeetingRows(
     userId: string,
     orgUserId: string | null,
-    input: {
-        folderId?: string;
-        overlapWith?: { start: Date; end: Date };
-        from?: Date;
-        to?: Date;
-        calendarEventId?: string;
-        includePast?: boolean;
-        includeAbsorbed?: boolean;
-        excludeAbsorbed?: boolean;
-        limit?: number;
-        isCurator?: boolean;
-        organizationOnly?: boolean;
-    } = {},
-    executor: MeetingExecutor = db,
+    ...[input = {}, executor = db]:
+        | [input?: MeetingListInput, executor?: undefined]
+        | [
+              input: MeetingListInput & { isCurator: boolean },
+              executor: MeetingExecutor,
+          ]
 ) {
     const isCurator =
-        input.isCurator ??
-        (executor === db ? await userCuratesOrganizationNow(userId) : false);
+        input.isCurator ?? (await userCuratesOrganizationNow(userId));
     function visibility(
         item: Parameters<typeof meetingVisibility>[2] = chatterItems,
     ) {

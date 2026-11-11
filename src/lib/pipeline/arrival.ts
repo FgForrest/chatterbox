@@ -78,7 +78,7 @@ export async function requestArrivalInTx(
         folder?: ArrivalFolder | null;
         agendaId?: string;
         allowUnavailableFolder?: boolean;
-        canCurate?: boolean;
+        canCurate: boolean;
         lockOrganizationTree?: boolean;
     },
 ) {
@@ -151,6 +151,7 @@ export async function requestArrivalInTx(
                 folderIds: [],
                 view: "private",
                 executor: tx,
+                isCurator: input.canCurate,
                 seedProfiles: false,
                 throwOnUnavailable: false,
             });

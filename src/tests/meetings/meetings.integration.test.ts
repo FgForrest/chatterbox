@@ -1901,7 +1901,11 @@ suite("meeting planning server (PostgreSQL)", () => {
             .where(eq(recordings.id, "finalized"));
         expect(await agendaCandidates("owner", "finalized")).toHaveLength(1);
         await db.transaction((tx) =>
-            requestArrivalInTx(tx, { userId: "owner", itemId: "finalized" }),
+            requestArrivalInTx(tx, {
+                userId: "owner",
+                itemId: "finalized",
+                canCurate: false,
+            }),
         );
         expect(
             (await requireMeetingAccess("owner", candidate.id)).agenda
@@ -1909,7 +1913,11 @@ suite("meeting planning server (PostgreSQL)", () => {
         ).toBe(agendaId === null ? null : "finalized");
         await markRecordingSessionCompleted(session.id, "owner", "finalized");
         await db.transaction((tx) =>
-            requestArrivalInTx(tx, { userId: "owner", itemId: "finalized" }),
+            requestArrivalInTx(tx, {
+                userId: "owner",
+                itemId: "finalized",
+                canCurate: false,
+            }),
         );
         expect(
             (await requireMeetingAccess("owner", candidate.id)).agenda

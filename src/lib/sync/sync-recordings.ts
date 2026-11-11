@@ -13,6 +13,7 @@ import {
 } from "@/db/schema";
 import { generateIngestWaveform } from "@/lib/audio/ingest-waveform";
 import { sniffAudio } from "@/lib/audio/sniff";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { encryptText } from "@/lib/encryption/fields";
 import { isHostedLockedOut } from "@/lib/entitlements";
 import { env } from "@/lib/env";
@@ -590,6 +591,7 @@ async function processRecording(
             };
         }
 
+        const canCurate = await userCuratesOrganizationNow(context.userId);
         const newRecording = await insertAudioItem(
             db,
             {
@@ -601,7 +603,8 @@ async function processRecording(
             {
                 pipeline: "arrival",
                 lockOrganizationTree: false,
-                initializeInTx: requestArrivalInTx,
+                initializeInTx: (tx, input) =>
+                    requestArrivalInTx(tx, { ...input, canCurate }),
             },
         );
 

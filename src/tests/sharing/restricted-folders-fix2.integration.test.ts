@@ -387,7 +387,12 @@ suite("restricted folders review 2 (PostgreSQL)", () => {
                 pipeline: "arrival",
                 lockOrganizationTree: folder?.scope === "org",
                 initializeInTx: (tx, input) =>
-                    requestArrivalInTx(tx, { ...input, folder, profile }),
+                    requestArrivalInTx(tx, {
+                        ...input,
+                        folder,
+                        profile,
+                        canCurate: false,
+                    }),
             },
         );
     }
@@ -625,7 +630,12 @@ suite("restricted folders review 2 (PostgreSQL)", () => {
                     pipeline: "arrival",
                     lockOrganizationTree: true,
                     initializeInTx: (tx, input) =>
-                        requestArrivalInTx(tx, { ...input, folder, profile }),
+                        requestArrivalInTx(tx, {
+                            ...input,
+                            folder,
+                            profile,
+                            canCurate: false,
+                        }),
                 },
             );
         const first = start("pool-first");

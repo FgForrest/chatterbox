@@ -72,6 +72,7 @@ export async function agendaSuggestionsProvider(userId: string, id: string) {
         view: access.shared ? "org" : "private",
         seedProfiles: false,
         executor: db,
+        isCurator: access.viewer.curator,
         organizationUserId: access.viewer.orgUserId,
         ignoreItemAssignment: true,
     });

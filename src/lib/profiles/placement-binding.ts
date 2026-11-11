@@ -106,6 +106,8 @@ export async function bindPlacementProfileInTx(
                 .map((row) => row.folderId),
             view: "private",
             executor: tx,
+            // These placements are owned or open; restricted Organization defaults never apply.
+            isCurator: false,
             organizationUserId: input.orgUserId,
             ignoreItemAssignment: true,
             seedProfiles: false,
@@ -132,6 +134,7 @@ export async function bindPlacementProfileInTx(
             .map((row) => row.folderId),
         view: shared ? "org" : "private",
         executor: tx,
+        isCurator: false,
         organizationUserId: input.orgUserId,
         ignoreItemAssignment: true,
         seedProfiles: false,

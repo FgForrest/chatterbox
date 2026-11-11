@@ -47,6 +47,10 @@ type FolderDefaultOutcome =
 
 type ProfileReader = Pick<typeof db, "select">;
 
+type ProfileAuthority =
+    | { executor?: undefined; isCurator?: boolean }
+    | { executor?: ProfileReader; isCurator: boolean };
+
 async function organizationUserIdOr(
     known: string | null | undefined,
     executor?: ProfileReader,
@@ -64,9 +68,10 @@ interface FolderContext {
 async function accessibleFolder(
     folderId: string,
     allowedOwnerUserIds: readonly string[],
-    executor: ProfileReader = db,
+    authority: ProfileAuthority,
     actorUserId?: string,
 ): Promise<FolderContext | null> {
+    const executor = authority.executor ?? db;
     if (allowedOwnerUserIds.length === 0) return null;
     const [folder] = await executor
         .select({
@@ -93,9 +98,8 @@ async function accessibleFolder(
                     restrictedFolderVisibleCondition({
                         userId: actorUserId,
                         isCurator:
-                            executor === db
-                                ? await userCuratesOrganizationNow(actorUserId)
-                                : false,
+                            authority.isCurator ??
+                            (await userCuratesOrganizationNow(actorUserId)),
                     }),
                 ),
             )
@@ -165,15 +169,16 @@ async function usableDefaultAtFolder(input: {
 }
 
 /** Read a folder's own and nearest inherited usable default for one channel. */
-export async function folderDefaultProfileDetails(input: {
-    folderId: string;
-    folderOwnerUserId: string;
-    actorUserId: string;
-    channel: ProfileChannel;
-    organizationOnly?: boolean;
-    executor?: ProfileReader;
-    organizationUserId?: string | null;
-}): Promise<FolderDefaultProfileDetails | null> {
+export async function folderDefaultProfileDetails(
+    input: {
+        folderId: string;
+        folderOwnerUserId: string;
+        actorUserId: string;
+        channel: ProfileChannel;
+        organizationOnly?: boolean;
+        organizationUserId?: string | null;
+    } & ProfileAuthority,
+): Promise<FolderDefaultProfileDetails | null> {
     const organizationUserId = await organizationUserIdOr(
         input.organizationUserId,
         input.executor,
@@ -181,7 +186,7 @@ export async function folderDefaultProfileDetails(input: {
     const folder = await accessibleFolder(
         input.folderId,
         [input.folderOwnerUserId],
-        input.executor,
+        input,
         input.actorUserId,
     );
     if (!folder) return null;
@@ -219,7 +224,7 @@ export async function folderDefaultProfileDetails(input: {
         const parent = await accessibleFolder(
             parentId,
             [folder.ownerUserId],
-            input.executor,
+            input,
         );
         if (!parent || parent.parentId === null) break;
         const inherited = await usableDefaultAtFolder({
@@ -356,14 +361,15 @@ async function organizationItemProfile(input: {
     return null;
 }
 
-async function defaultsForPlacements(input: {
-    ownerUserId: string;
-    channel: ProfileChannel;
-    folderIds: readonly string[];
-    view: RecordingView;
-    executor?: ProfileReader;
-    organizationUserId?: string | null;
-}): Promise<FolderDefaultOutcome[]> {
+async function defaultsForPlacements(
+    input: {
+        ownerUserId: string;
+        channel: ProfileChannel;
+        folderIds: readonly string[];
+        view: RecordingView;
+        organizationUserId?: string | null;
+    } & ProfileAuthority,
+): Promise<FolderDefaultOutcome[]> {
     const organizationUserId = await organizationUserIdOr(
         input.organizationUserId,
         input.executor,
@@ -385,17 +391,17 @@ async function defaultsForPlacements(input: {
             const folder = await accessibleFolder(
                 folderId,
                 allowedOwners,
-                input.executor,
+                input,
                 input.ownerUserId,
             );
             if (!folder || folder.restrictedAt) return null;
             const details = await folderDefaultProfileDetails({
+                ...input,
                 folderId,
                 folderOwnerUserId: folder.ownerUserId,
                 actorUserId: input.ownerUserId,
                 channel: input.channel,
                 organizationOnly: input.view === "org",
-                executor: input.executor,
                 organizationUserId,
             });
             if (details?.effectiveManualOnly) {
@@ -496,18 +502,19 @@ function profileCandidates(
 }
 
 /** Resolve a categorization profile without throwing for human-choice outcomes. */
-export async function resolveProfileForPlacements(input: {
-    ownerUserId: string;
-    itemId: string;
-    channel: ProfileChannel;
-    folderIds: readonly string[];
-    view: RecordingView;
-    seedProfiles?: boolean;
-    throwOnUnavailable?: boolean;
-    executor?: ProfileReader;
-    organizationUserId?: string | null;
-    ignoreItemAssignment?: boolean;
-}): Promise<PlacementProfileResolution> {
+export async function resolveProfileForPlacements(
+    input: {
+        ownerUserId: string;
+        itemId: string;
+        channel: ProfileChannel;
+        folderIds: readonly string[];
+        view: RecordingView;
+        seedProfiles?: boolean;
+        throwOnUnavailable?: boolean;
+        organizationUserId?: string | null;
+        ignoreItemAssignment?: boolean;
+    } & ProfileAuthority,
+): Promise<PlacementProfileResolution> {
     input = {
         ...input,
         organizationUserId: await organizationUserIdOr(

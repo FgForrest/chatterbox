@@ -284,6 +284,12 @@ export async function restoreMeetings(
                         })
                         .from(recordingFolders)
                         .where(eq(recordingFolders.id, folderId));
+                    if (!folder)
+                        throw new AppError(
+                            ErrorCode.NOT_FOUND,
+                            "Mapped folder no longer exists",
+                            404,
+                        );
                     const placement = meeting.folderPlacements.find(
                         (placement) =>
                             input.folderIdMap[placement.folderId] === folderId,

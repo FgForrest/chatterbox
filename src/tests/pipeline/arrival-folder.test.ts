@@ -66,6 +66,7 @@ describe("folder-known-at-arrival", () => {
 
     it("creates a personal assignment before requesting processing", async () => {
         await requestArrivalInTx(tx as never, {
+            canCurate: false,
             itemId: "recording",
             userId: "owner",
             folder: {
@@ -81,7 +82,7 @@ describe("folder-known-at-arrival", () => {
             "owner",
             "personal-folder",
             false,
-            undefined,
+            false,
         );
         expect(lockFolder.mock.invocationCallOrder[0]).toBeLessThan(
             values.mock.invocationCallOrder[0],
@@ -98,7 +99,7 @@ describe("folder-known-at-arrival", () => {
             "recording",
             "file",
             undefined,
-            undefined,
+            false,
             false,
         );
         expect(onConflictDoNothing.mock.invocationCallOrder[0]).toBeLessThan(
@@ -117,6 +118,7 @@ describe("folder-known-at-arrival", () => {
 
     it("records an Organization intent before requesting processing", async () => {
         await requestArrivalInTx(tx as never, {
+            canCurate: false,
             itemId: "recording",
             userId: "owner",
             folder: {
@@ -131,7 +133,7 @@ describe("folder-known-at-arrival", () => {
             itemId: "recording",
             folderId: "org-folder",
             requestPipeline: false,
-            canCurate: undefined,
+            canCurate: false,
         });
         expect(tx.insert).not.toHaveBeenCalled();
         expect(requestAdvance).toHaveBeenCalledOnce();
@@ -139,6 +141,7 @@ describe("folder-known-at-arrival", () => {
 
     it("leaves placement empty when the client chooses File later", async () => {
         await requestArrivalInTx(tx as never, {
+            canCurate: false,
             itemId: "recording",
             userId: "owner",
         });
@@ -150,6 +153,7 @@ describe("folder-known-at-arrival", () => {
     it("does not serialize hosted arrivals on a global Organization lock", async () => {
         mockEnv.IS_HOSTED = true;
         await requestArrivalInTx(tx as never, {
+            canCurate: false,
             itemId: "recording",
             userId: "owner",
         });

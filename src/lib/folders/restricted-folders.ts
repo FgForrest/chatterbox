@@ -678,15 +678,28 @@ export async function changeFolderRestriction(
         if (operation === "restrict") {
             await revokePlacementExportsInTx(tx, orgUserId, null, folderId);
             await notifyRestrictedAudienceInTx(tx, folderId);
-            await tx
-                .delete(restrictedFolderMembers)
-                .where(eq(restrictedFolderMembers.folderId, folderId));
-            await initializeRestrictedAudienceInTx(
-                tx,
-                folderId,
-                userId,
-                audience,
-            );
+            if (!folder.restrictingAt) {
+                await tx
+                    .delete(restrictedFolderMembers)
+                    .where(eq(restrictedFolderMembers.folderId, folderId));
+                await initializeRestrictedAudienceInTx(
+                    tx,
+                    folderId,
+                    userId,
+                    audience,
+                );
+            } else if (audience.length) {
+                await tx
+                    .insert(restrictedFolderMembers)
+                    .values(
+                        audience.map((id) => ({
+                            folderId,
+                            userId: id,
+                            addedByUserId: userId,
+                        })),
+                    )
+                    .onConflictDoNothing();
+            }
             const owners = await tx
                 .selectDistinct({ userId: recordingFolderAssignments.userId })
                 .from(recordingFolderAssignments)

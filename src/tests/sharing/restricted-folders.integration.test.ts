@@ -587,6 +587,7 @@ suite("restricted Organization folders (PostgreSQL)", () => {
         await changeFolderRestriction("owner", restrictedId, "lift");
         await db.transaction((tx) =>
             recordIntendedPlacementInTx(tx, {
+                canCurate: false,
                 ownerUserId: "owner",
                 itemId: "recording",
                 folderId: openId,
@@ -807,6 +808,7 @@ suite("restricted Organization folders (PostgreSQL)", () => {
                         initializeInTx: (tx, input) =>
                             requestArrivalInTx(tx, {
                                 ...input,
+                                canCurate: false,
                                 folder: target,
                                 profile: staleProfile,
                             }),

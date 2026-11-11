@@ -1602,6 +1602,7 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
         try {
             await database.db.transaction(async (tx) => {
                 await requestArrivalInTx(tx, {
+                    canCurate: false,
                     itemId: "later",
                     userId: "owner",
                     folder: {
@@ -1651,6 +1652,7 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
         try {
             await database.db.transaction(async (tx) => {
                 await requestArrivalInTx(tx, {
+                    canCurate: false,
                     itemId: "later",
                     userId: "owner",
                     folder: {
@@ -3379,6 +3381,7 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
         try {
             await database.db.transaction(async (tx) => {
                 await requestArrivalInTx(tx, {
+                    canCurate: false,
                     userId: "receiver",
                     itemId: "arriving",
                     folder: {
@@ -3600,6 +3603,7 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
         });
         await database.db.transaction((tx) =>
             requestArrivalInTx(tx, {
+                canCurate: false,
                 itemId: "deferred",
                 userId: "receiver",
                 folder,
@@ -3619,6 +3623,7 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
         await expect(
             database.db.transaction((tx) =>
                 requestArrivalInTx(tx, {
+                    canCurate: false,
                     itemId: "deferred",
                     userId: "receiver",
                     folder,

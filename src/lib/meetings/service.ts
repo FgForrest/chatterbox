@@ -588,6 +588,7 @@ export async function prepareMeeting(
                     calendarEventId: event.id,
                     includePast: true,
                     includeAbsorbed: true,
+                    isCurator: viewer.curator,
                 },
                 tx,
             );
@@ -1604,6 +1605,7 @@ export async function patchMeeting(
                         calendarEventId: event.id,
                         includePast: true,
                         includeAbsorbed: true,
+                        isCurator: access.viewer.curator,
                     },
                     tx,
                 );

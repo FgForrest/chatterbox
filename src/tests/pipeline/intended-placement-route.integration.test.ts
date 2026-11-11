@@ -206,6 +206,7 @@ describeWithDatabase("DELETE intended placement route", () => {
         });
         await appDb.transaction((tx) =>
             recordIntendedPlacementInTx(tx, {
+                canCurate: false,
                 ownerUserId: OWNER,
                 itemId: ITEM,
                 folderId: INTENDED_FOLDER,

@@ -12,6 +12,7 @@ import {
     recordingFolderAssignments,
     recordingFolders,
 } from "@/db/schema";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
 import { notifyMailAccepted } from "@/lib/events/personal";
 import { nudge } from "@/lib/jobs/nudge";
@@ -261,6 +262,7 @@ export async function storeMailForOwner(input: {
         ),
     ]);
     const segments = markKnownQuotes(segmented.segments, knownQuotes);
+    const canCurate = await userCuratesOrganizationNow(owner);
     const rawStoragePath = await storeRawMail(owner, itemId, input.raw);
     const arrivalProfile = await resolveArrivalProfile({
         ownerUserId: owner,
@@ -358,6 +360,7 @@ export async function storeMailForOwner(input: {
             return requestArrivalInTx(tx, {
                 itemId,
                 userId: owner,
+                canCurate,
                 profile: arrivalProfile?.profile ?? null,
                 manualOnly: arrivalProfile?.manualOnly ?? false,
             });

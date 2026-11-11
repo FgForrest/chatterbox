@@ -44,7 +44,7 @@ export async function recordIntendedPlacementInTx(
         itemId: string;
         folderId: string;
         requestPipeline?: boolean;
-        canCurate?: boolean;
+        canCurate: boolean;
     },
 ): Promise<void> {
     await lockOrgTree(tx);
@@ -74,7 +74,7 @@ export async function recordIntendedPlacementInTx(
             input.ownerUserId,
             input.itemId,
             folder.folderId,
-            input.canCurate ?? input.ownerUserId === folder.ownerId,
+            input.canCurate,
         );
         return;
     }
