@@ -74,7 +74,9 @@ The privacy policy, store listing, permission explanations, and in-extension con
 
 - Includes the 0.9.7 changes below; its ZIP was not uploaded to the Store. Use the 0.9.8 package instead.
 - Supporting servers mark accessible restricted Organization folders with an olive folder-lock icon in the
-  shared picker and target chip. Inaccessible folders are absent from recorder results. If a saved target
+  target chips and folder choosers in the popup, agenda panel (or fallback window), recorder window,
+  full-page picker and in-page recording pill, after folder results load.
+  Inaccessible folders are absent from recorder results. If a saved target
   becomes unavailable, the chooser explains that it must be selected again or left unfiled.
 - Older server responses without the optional restricted marker keep the ordinary folder appearance.
   No new request parameter, permission or data collection.

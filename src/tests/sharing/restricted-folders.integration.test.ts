@@ -1899,6 +1899,49 @@ suite("restricted Organization folders (PostgreSQL)", () => {
             );
         }
     });
+    it("ignores soft-deleted items when reporting restricted audience ownership", async () => {
+        await insertRecording(database.db, {
+            id: "member-item",
+            userId: "member",
+        });
+        await addRecordingToFolder({
+            userId: "member",
+            recordingId: "member-item",
+            folderId: restrictedId,
+        });
+        const before = await listRestrictedAudience("owner", restrictedId);
+        expect(
+            before.members.find((member) => member.userId === "member"),
+        ).toMatchObject({ ownsItems: true });
+        await db
+            .update(chatterItems)
+            .set({ deletedAt: new Date() })
+            .where(
+                and(
+                    eq(chatterItems.id, "member-item"),
+                    eq(chatterItems.userId, "member"),
+                ),
+            );
+        const after = await listRestrictedAudience("owner", restrictedId);
+        expect(
+            after.members.find((member) => member.userId === "member"),
+        ).toMatchObject({ ownsItems: false });
+        expect(
+            after.members.find((member) => member.userId === "owner"),
+        ).toMatchObject({ ownsItems: true });
+        expect(
+            await db
+                .select()
+                .from(recordingFolderAssignments)
+                .where(
+                    and(
+                        eq(recordingFolderAssignments.itemId, "member-item"),
+                        eq(recordingFolderAssignments.userId, "member"),
+                        eq(recordingFolderAssignments.folderId, restrictedId),
+                    ),
+                ),
+        ).toHaveLength(1);
+    });
     it("removes a contributor without unfiling and exposes audience data only to readers", async () => {
         expect(
             (await listRestrictedAudience("member", restrictedId)).members.find(

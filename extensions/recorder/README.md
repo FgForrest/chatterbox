@@ -52,7 +52,9 @@ continues in the extension. If a changed folder is unavailable when saving, the
 server uses the start folder instead.
 
 On supporting servers, an accessible restricted Organization folder shows an olive
-folder-lock icon in the target chip and shared folder chooser. Inaccessible folders
+folder-lock icon in the target chips and folder choosers in the popup, agenda
+panel (or fallback window), recorder window, full-page picker and in-page
+recording pill. The marker appears after folder results load. Inaccessible folders
 are omitted. If a remembered folder is no longer available, the chooser asks you
 to select another folder or leave the recording unfiled. Older servers without
 the optional marker keep the ordinary folder appearance.
