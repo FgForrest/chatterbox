@@ -45,7 +45,7 @@ Automatic forwarding keeps the original sender, so it needs a secret address.
 
 ## Reading mail
 
-A mail shows who sent it, with **Verified** when the sender's domain signed it, the recipients and the date. Quoted and forwarded messages are folded under their author. **Show formatted** shows the mail as it was designed, with nothing loaded from the internet. Attachments download only.
+A mail shows who sent it, with **Verified** when the sender's domain signed it, the recipients and the date. Quoted and forwarded messages are folded under their author. The chevron beside **Message** collapses and expands its text. The formatted-view icon (**Show formatted** / **Show text**) switches between plain text and the mail as it was designed, with nothing loaded from the internet. The download and copy icons give every reader the message as Markdown (subject, sender, recipients, date and text, including quoted messages), even while the formatted view is shown. At narrow widths, these two actions are in **Message actions** (⋯). The separate **Download the original message** icon downloads the original `.eml` file and is available only to you, the owner. Attachments download only.
 
 Search in Chatter also finds words in forwarded and quoted messages. Signatures and disclaimers are not searched.
 

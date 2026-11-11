@@ -59,7 +59,17 @@ describe("MarkdownActions", () => {
             />,
         );
         const actions = screen.getByRole("button", { name: "Summary actions" });
-        expect(actions.title).toBe("Summary actions");
+        expect(actions.hasAttribute("title")).toBe(false);
+        expect(
+            screen
+                .getByRole("link", { name: "Download summary Markdown" })
+                .hasAttribute("title"),
+        ).toBe(false);
+        expect(
+            screen
+                .getByRole("button", { name: "Copy summary Markdown" })
+                .hasAttribute("title"),
+        ).toBe(false);
         expect(actions.parentElement?.className).toBe(
             "@min-[560px]/summary:hidden",
         );

@@ -63,6 +63,47 @@ function sizeOf(bytes: number): string {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Render only the headers and text already visible in the mail detail. */
+export function buildMailMessageMarkdown(detail: MailDetail): string {
+    const from = withRole(detail, "from");
+    const to = withRole(detail, "to");
+    const cc = withRole(detail, "cc");
+    const headers = [
+        from.length > 0 ? `**From:** ${from.join(", ")}` : null,
+        to.length > 0 ? `**To:** ${to.join(", ")}` : null,
+        cc.length > 0 ? `**Cc:** ${cc.join(", ")}` : null,
+        `**Date:** ${detail.sentAt ?? detail.receivedAt}`,
+    ].filter((line): line is string => line !== null);
+
+    const parts: string[] = [];
+    for (const segment of detail.segments) {
+        const text = segment.text.trim();
+        if (!text) continue;
+        if (segment.role === "quoted" || segment.role === "quoted_signature") {
+            const header = quoteHeader(detail, segment);
+            parts.push(
+                [header, blockquote(text, segment.depth)]
+                    .filter(Boolean)
+                    .join("\n\n"),
+            );
+        } else if (segment.role === "signature") {
+            parts.push(`-- \n${text}`);
+        } else {
+            parts.push(text);
+        }
+    }
+    if (parts.length === 0 && detail.unreadable) {
+        parts.push("_The content of this mail could not be read._");
+    }
+
+    const sections = [
+        `# ${detail.subject.trim() || "(no subject)"}`,
+        headers.join("  \n"),
+        ...parts,
+    ];
+    return `${sections.join("\n\n")}\n`;
+}
+
 /**
  * A mail as Markdown: its headers, its text part by part (quoted messages
  * as quotes under who wrote them), its attachments, and its summary and
@@ -91,40 +132,7 @@ export function buildMailMarkdown(
         "---",
     ].join("\n");
 
-    const headers = [
-        from.length > 0 ? `**From:** ${from.join(", ")}` : null,
-        to.length > 0 ? `**To:** ${to.join(", ")}` : null,
-        cc.length > 0 ? `**Cc:** ${cc.join(", ")}` : null,
-        `**Date:** ${detail.sentAt ?? detail.receivedAt}`,
-    ].filter((line): line is string => line !== null);
-
-    const parts: string[] = [];
-    for (const segment of detail.segments) {
-        const text = segment.text.trim();
-        if (!text) continue;
-        if (segment.role === "quoted" || segment.role === "quoted_signature") {
-            const header =
-                segment.role === "quoted" ? quoteHeader(detail, segment) : null;
-            parts.push(
-                [header, blockquote(text, segment.depth)]
-                    .filter(Boolean)
-                    .join("\n\n"),
-            );
-        } else if (segment.role === "signature") {
-            parts.push(`-- \n${text}`);
-        } else {
-            parts.push(text);
-        }
-    }
-    if (parts.length === 0 && detail.unreadable) {
-        parts.push("_The content of this mail could not be read._");
-    }
-
-    const sections = [
-        `# ${detail.subject.trim() || "(no subject)"}`,
-        headers.join("  \n"),
-        ...parts,
-    ];
+    const sections = [buildMailMessageMarkdown(detail).trimEnd()];
     if (detail.attachments.length > 0) {
         sections.push(
             `## Attachments\n\n${detail.attachments
