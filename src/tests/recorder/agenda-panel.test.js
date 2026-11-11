@@ -9,7 +9,10 @@ import {
     canChooseRecordingAgenda,
 } from "../../../extensions/recorder/lib/agendas.js";
 import { localizeDocument, t } from "../../../extensions/recorder/lib/i18n.js";
+import { renderLinkedText } from "../../../extensions/recorder/lib/linkify.js";
+import { meetCode } from "../../../extensions/recorder/lib/meet-code.js";
 import { formatMeetingTime } from "../../../extensions/recorder/lib/meeting-time.js";
+import { detectMeetingPlatform } from "../../../extensions/recorder/lib/platforms.js";
 
 const html = readFileSync("extensions/recorder/agenda/agenda.html", "utf8");
 const source = readFileSync(
@@ -20,6 +23,8 @@ const messages = JSON.parse(
     readFileSync("extensions/recorder/_locales/en/messages.json", "utf8"),
 );
 let data;
+let tab;
+let controlOptions;
 let session;
 let settings;
 let request;
@@ -47,6 +52,7 @@ beforeEach(async () => {
         [agendaPanelKey(7)]: { agendaIds: ["agenda-one"], tabId: 7 },
         recordingState: { state: "idle" },
     };
+    tab = { id: 7, url: "https://meet.google.com/meet/abc-defg-hij" };
     data = {
         id: "agenda-one",
         meetingItemId: "meeting-one",
@@ -187,6 +193,9 @@ async function start(doc = document, tabId = 7) {
         "bindAgendaTextInput",
         "subscribeAgenda",
         "formatMeetingTime",
+        "detectMeetingPlatform",
+        "meetCode",
+        "renderLinkedText",
         `return (async () => { ${source} })();`,
     );
     await run(
@@ -202,11 +211,23 @@ async function start(doc = document, tabId = 7) {
         localizeDocument,
         t,
         async () => settings,
-        async () => ({ folder: vi.fn(), destroy: vi.fn() }),
+        async (_root, options) => {
+            controlOptions = options;
+            options.onTab(tab);
+            return {
+                folder: vi.fn(),
+                destroy: vi.fn(),
+                refreshMeeting: vi.fn(),
+                refreshTab: vi.fn(),
+            };
+        },
         () => ({}),
         bindAgendaTextInput,
         subscribe,
         formatMeetingTime,
+        detectMeetingPlatform,
+        meetCode,
+        renderLinkedText,
     );
 }
 
@@ -259,16 +280,20 @@ describe("#369 manual agenda panel choices", () => {
             },
         ]);
         await start(document, tabId);
-        el("other").click();
+        el("change-agenda").click();
         await settle();
-        expect(matches).toHaveBeenCalledExactlyOnceWith(Date.now(), []);
+        expect(matches).toHaveBeenCalledExactlyOnceWith(
+            Date.now(),
+            [],
+            expect.objectContaining({ onError: expect.any(Function) }),
+        );
         const buttons = [...el("choice-list").querySelectorAll("button")];
-        expect(buttons.map((node) => node.textContent)).toEqual([
-            `Acme review · ${catalog.agendaYesterday.message} 14:00`,
-            `Acme review · ${catalog.agendaToday.message} 10:00–11:00`,
-            `Acme review · ${catalog.agendaTomorrow.message} 09:00`,
+        expect(buttons.slice(-3).map((node) => node.textContent)).toEqual([
+            `Acme review${catalog.agendaYesterday.message} 14:00`,
+            `Acme review${catalog.agendaToday.message} 10:00–11:00`,
+            `Acme review${catalog.agendaTomorrow.message} 09:00`,
         ]);
-        buttons[0].click();
+        buttons[buttons.length - 3].click();
         await settle();
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
             type: "select-agenda",
@@ -285,7 +310,11 @@ describe("#369 manual agenda panel choices", () => {
         const agendaIds = ["agenda-one", "agenda-two"];
         session[agendaPanelKey(tabId)] = { agendaIds, tabId: 7 };
         await start(document, tabId);
-        expect(matches).toHaveBeenCalledExactlyOnceWith(Date.now(), agendaIds);
+        expect(matches).toHaveBeenCalledExactlyOnceWith(
+            Date.now(),
+            agendaIds,
+            expect.objectContaining({ onError: expect.any(Function) }),
+        );
         expect(
             [...el("choice-list").querySelectorAll("button")].map(
                 (node) => node.textContent,
@@ -302,25 +331,96 @@ describe("#369 manual agenda panel choices", () => {
                     release = resolve;
                 }),
         );
-        el("other").click();
+        el("change-agenda").click();
         await settle();
         matches.mockResolvedValueOnce([
             { id: "newer", title: "Newer choices" },
         ]);
-        el("other").click();
+        el("change-agenda").click();
         await settle();
         release([{ id: "stale", title: "Stale choices" }]);
         await settle();
-        expect(el("choice-list").textContent).toBe("Newer choices");
+        expect(el("choice-list").textContent).toContain("Newer choices");
+        expect(el("choice-list").textContent).not.toContain("Stale choices");
     });
 
     it("shows the existing error and retry when both choice lookups fail", async () => {
         await start();
         matches.mockRejectedValueOnce(new Error("Both unavailable"));
-        el("other").click();
+        el("change-agenda").click();
         await settle();
-        expect(el("status").textContent).toBe(messages.agendaFailed.message);
+        expect(el("status").textContent).toBe(messages.agendaLoadError.message);
         expect(el("retry").hidden).toBe(false);
+    });
+
+    it.each([
+        "initial",
+        "change",
+    ])("keeps recording controls visible through %s chooser loading, failure, Retry and Back", async (entry) => {
+        session.recordingState = {
+            state: "recording",
+            sessionId: "session-one",
+        };
+        if (entry === "initial")
+            session[agendaPanelKey(7)] = {
+                agendaIds: [],
+                choose: true,
+                tabId: 7,
+            };
+        let rejectChoices;
+        matches.mockImplementationOnce(
+            () =>
+                new Promise((_resolve, reject) => {
+                    rejectChoices = reject;
+                }),
+        );
+        const opening = start();
+        await settle();
+        if (entry === "change") {
+            await opening;
+            el("change-agenda").click();
+            await settle();
+        }
+        expect(el("choices").hidden).toBe(false);
+        expect(el("recorder-controls").closest("[hidden]")).toBeNull();
+        rejectChoices(new Error("Offline"));
+        await opening;
+        await settle();
+        expect(el("agenda-error").hidden).toBe(false);
+        expect(el("retry").closest("[hidden]")).toBeNull();
+        expect(el("back").closest("[hidden]")).toBeNull();
+        expect(el("recorder-controls").closest("[hidden]")).toBeNull();
+        el("retry").click();
+        await settle();
+        expect(matches).toHaveBeenCalledTimes(2);
+        expect(el("agenda-error").hidden).toBe(true);
+        expect(
+            el("choice-list").querySelectorAll("button").length,
+        ).toBeGreaterThan(0);
+        expect(el("recorder-controls").closest("[hidden]")).toBeNull();
+        el("back").click();
+        expect(el("choices").hidden).toBe(true);
+        expect(el("recorder-controls").closest("[hidden]")).toBeNull();
+        if (entry === "change") expect(el("agenda").hidden).toBe(false);
+    });
+
+    it("shows recording controls in a chooser and on errors while a colleague records", async () => {
+        data.recordingBy = [{ name: "Acme colleague", self: false }];
+        await start();
+        expect(el("recorder-controls").hidden).toBe(true);
+        matches.mockImplementationOnce(async (_now, _ids, { onError }) => {
+            onError();
+            return [];
+        });
+        el("change-agenda").click();
+        await settle();
+        expect(el("agenda-error").hidden).toBe(false);
+        expect(el("recorder-controls").closest("[hidden]")).toBeNull();
+        el("back").click();
+        request.mockRejectedValueOnce(new Error("Offline"));
+        await vi.advanceTimersByTimeAsync(15000);
+        expect(el("agenda-error").hidden).toBe(false);
+        expect(el("recorder-controls").closest("[hidden]")).toBeNull();
     });
 });
 
@@ -334,17 +434,16 @@ describe("agenda side panel", () => {
             { id: "p5", text: "Next steps", parentId: null, version: 0 },
         );
         await start();
-        expect(el("point-count").textContent).toBe("1 of 3 discussed");
-        el("live").click();
+        expect(el("point-count").textContent).toBe("Discussed 1 of 3");
         const checkboxes = () =>
             el("points").querySelectorAll('input[type="checkbox"]');
         checkboxes()[1].click();
         await settle();
-        expect(el("point-count").textContent).toBe("1 of 3 discussed");
+        expect(el("point-count").textContent).toBe("Discussed 1 of 3");
         expect(checkboxes()[0].checked).toBe(true);
         checkboxes()[2].click();
         await settle();
-        expect(el("point-count").textContent).toBe("2 of 3 discussed");
+        expect(el("point-count").textContent).toBe("Discussed 2 of 3");
         expect(checkboxes()[3].checked).toBe(false);
     });
     it("keeps two mounted tab panels on their own agendas for reads, edits and selection", async () => {
@@ -377,8 +476,10 @@ describe("agenda side panel", () => {
             [first, "agenda-one"],
             [second, "agenda-two"],
         ]) {
-            doc.getElementById("live").click();
-            const note = doc.querySelector('#points input[type="text"]');
+            doc.querySelector("#points .link").click();
+            const note = doc.querySelector(
+                '#points textarea[data-field="point:p1:note"]',
+            );
             note.value = `Note for ${id}`;
             note.dispatchEvent(new Event("change"));
             await settle();
@@ -392,7 +493,7 @@ describe("agenda side panel", () => {
                     }),
                 }),
             );
-            doc.querySelector("#tasks button").click();
+            doc.querySelector("#tasks input[type=checkbox]").click();
             await settle();
             expect(request).toHaveBeenCalledWith(
                 `/${id}/tasks/task-one`,
@@ -407,7 +508,7 @@ describe("agenda side panel", () => {
         expect(request.mock.calls.map(([path]) => path)).toEqual([
             "/agenda-two",
         ]);
-        first.getElementById("other").click();
+        first.getElementById("change-agenda").click();
         await settle();
         first.querySelector("#choice-list button").click();
         await settle();
@@ -435,21 +536,20 @@ describe("agenda side panel", () => {
         await settle();
         expect(request).toHaveBeenCalledExactlyOnceWith("/agenda-one");
     });
-    it("shows prep outline, nested points, task groups, notes and the stable app link", async () => {
+    it("shows an away outline with nested points and task status icons", async () => {
+        tab.url = "https://example.com";
+        data.taskGroups[0].tasks[0].agendaNote = "Agenda note";
         await start();
         expect(el("title").textContent).toBe("Acme review");
-        expect(el("points").children[1].style.marginInlineStart).toBe("16px");
-        expect(el("tasks").textContent).toContain("Assignee note");
+        expect(el("points").children[1].style.marginInlineStart).toBe("26px");
+        expect(el("tasks").textContent).toContain("Agenda note");
         expect(el("tasks").textContent).toContain("Not invited");
-        el("open-app").click();
-        await settle();
-        expect(chrome.tabs.create).toHaveBeenCalledWith({
-            url: "https://recorder.example.com/meetings/meeting-one",
-        });
+        expect(el("agenda").querySelectorAll("input")).toHaveLength(0);
+        expect(el("tasks").querySelectorAll("svg")).toHaveLength(2);
+        expect(el("away-hint").hidden).toBe(false);
     });
     it("saves discussed ticks and notes with each point's current version", async () => {
         await start();
-        el("live").click();
         const check = el("points").querySelector('input[type="checkbox"]');
         check.click();
         await settle();
@@ -460,7 +560,10 @@ describe("agenda side panel", () => {
                 body: JSON.stringify({ version: 2, discussed: true }),
             }),
         );
-        const note = el("points").querySelector('input[type="text"]');
+        el("points").querySelector(".link").click();
+        const note = el("points").querySelector(
+            'textarea[data-field="point:p1:note"]',
+        );
         note.value = "Move to next week";
         note.dispatchEvent(new Event("change"));
         await settle();
@@ -470,21 +573,27 @@ describe("agenda side panel", () => {
                 body: JSON.stringify({ version: 3, note: "Move to next week" }),
             }),
         );
-        expect(el("points").querySelector('input[type="text"]').value).toBe(
-            "Move to next week",
-        );
+        expect(
+            el("points").querySelector('textarea[data-field="point:p1:note"]')
+                .value,
+        ).toBe("Move to next week");
     });
-    it("quick-adds a point and honors distinct Done and Drop task permissions", async () => {
+    it("uses done checkboxes with canClose, reopens done tasks and leaves dropped tasks read-only", async () => {
+        data.taskGroups[0].tasks.push({
+            id: "dropped",
+            text: "Dropped task",
+            status: "dropped",
+            version: 1,
+            canClose: true,
+        });
         await start();
-        el("live").click();
-        const actions = el("tasks").querySelectorAll("button");
-        expect([...actions].map((node) => node.disabled)).toEqual([
+        const checks = () =>
+            el("tasks").querySelectorAll("input[type=checkbox]");
+        expect([...checks()].map((node) => node.disabled)).toEqual([
             false,
             true,
-            true,
-            false,
         ]);
-        actions[0].click();
+        checks()[0].click();
         await settle();
         expect(request).toHaveBeenCalledWith(
             "/agenda-one/tasks/task-one",
@@ -492,23 +601,24 @@ describe("agenda side panel", () => {
                 body: JSON.stringify({ version: 3, status: "done" }),
             }),
         );
-        el("point-text").value = "Follow-up";
-        el("quick-add").dispatchEvent(
-            new Event("submit", { cancelable: true }),
-        );
+        expect(checks()[0].checked).toBe(true);
+        checks()[0].click();
         await settle();
         expect(request).toHaveBeenCalledWith(
-            "/agenda-one/points",
+            "/agenda-one/tasks/task-one",
             expect.objectContaining({
-                method: "POST",
-                body: JSON.stringify({ text: "Follow-up" }),
+                body: JSON.stringify({ version: 3, status: "open" }),
             }),
         );
-        expect(el("points").textContent).toContain("Follow-up");
+        expect(el("tasks").querySelector(".dropped input")).toBeNull();
+        expect(el("tasks").querySelector(".dropped svg")).not.toBeNull();
+        expect(document.getElementById("quick-add")).toBeNull();
+        expect(el("points").querySelectorAll("input[type=text]")).toHaveLength(
+            0,
+        );
     });
     it("explains a version conflict, rolls back and loads colleagues' changes", async () => {
         await start();
-        el("live").click();
         request.mockRejectedValueOnce(
             Object.assign(new Error("changed"), { status: 409 }),
         );
@@ -530,11 +640,8 @@ describe("agenda side panel", () => {
             startedAt: new Date().toISOString(),
         };
         await start();
-        expect(el("attachment-text").textContent).toBe(
-            "The recording will carry this agenda",
-        );
-        expect(el("recording-state").textContent).toContain("Recording");
-        el("other").click();
+        expect(el("change-agenda").hidden).toBe(false);
+        el("change-agenda").click();
         await settle();
         el("choice-list").querySelectorAll("button")[1].click();
         await settle();
@@ -544,7 +651,7 @@ describe("agenda side panel", () => {
             sessionId: "session-one",
             tabId: 7,
         });
-        el("other").click();
+        el("change-agenda").click();
         await settle();
         el("none").click();
         await settle();
@@ -558,8 +665,7 @@ describe("agenda side panel", () => {
     it("keeps absorbed agendas read-only", async () => {
         data.permissions.edit = false;
         await start();
-        el("live").click();
-        expect(el("quick-add").hidden).toBe(true);
+        expect(document.getElementById("quick-add")).toBeNull();
         expect(
             [...el("points").querySelectorAll("input")].every(
                 (node) => node.disabled,
@@ -587,8 +693,8 @@ describe("agenda side panel", () => {
         expect(el("recording-state").textContent).toBe(
             catalog.agendaUnavailable.message,
         );
-        expect(el("retry").hidden).toBe(true);
-        expect(el("attachment").hidden).toBe(true);
+        expect(el("agenda-error").hidden).toBe(true);
+        expect(document.getElementById("attachment")).toBeNull();
     });
     it("shows unsupported status and makes no calls on a released server", async () => {
         settings.supported = false;
@@ -607,8 +713,8 @@ describe("agenda side panel", () => {
         );
         await vi.advanceTimersByTimeAsync(15000);
         expect(el("agenda").hidden).toBe(true);
-        expect(el("open-app").hidden).toBe(true);
-        expect(el("status").textContent).toContain("Could not load");
+        expect(document.getElementById("open-app")).toBeNull();
+        expect(el("status").textContent).toContain("could not be loaded");
     });
     it("uses since and preserves the detail on an unchanged poll", async () => {
         data.version = 4;
@@ -659,8 +765,10 @@ describe("live panel collaboration", () => {
         settings.serverDefaults = { agendas: true };
         data.textProtocol = 1;
         await start();
-        el("live").click();
-        const note = el("points").querySelector("input[type=text]");
+        el("points").querySelector(".link").click();
+        const note = el("points").querySelector(
+            'textarea[data-field="point:p1:note"]',
+        );
         note.focus();
         note.value = "Legacy note";
         note.dispatchEvent(new Event("change"));
@@ -674,7 +782,7 @@ describe("live panel collaboration", () => {
             expect.objectContaining({ method: "PATCH" }),
         );
     });
-    it("keeps Preparation selected during recording and reveals controls only after Record too", async () => {
+    it("reveals controls only after Record as well and stays a live checklist during capture", async () => {
         data.recordingBy = [{ name: "Jitka Dvořáková", self: false }];
         await start();
         expect(el("recording-by").textContent).toContain("Jitka Dvořáková");
@@ -690,10 +798,10 @@ describe("live panel collaboration", () => {
             recordingState: session.recordingState,
         });
         await settle();
-        expect(el("live").getAttribute("aria-pressed")).toBe("true");
-        el("prep").click();
-        await vi.advanceTimersByTimeAsync(15000);
-        expect(el("prep").getAttribute("aria-pressed")).toBe("true");
+        expect(
+            el("points").querySelector("input[type=checkbox]"),
+        ).not.toBeNull();
+        expect(document.getElementById("prep")).toBeNull();
     });
     it("links the edited agenda after a successful tick during recording", async () => {
         session.recordingState = {
@@ -712,7 +820,7 @@ describe("live panel collaboration", () => {
             tabId: 7,
         });
     });
-    it("reuses the shared CRDT binding, keeps a focused input/caret, and flushes its materialized version before ticking", async () => {
+    it("reuses the shared CRDT binding, keeps a focused textarea/caret, and flushes its materialized version before ticking", async () => {
         settings.serverDefaults = { agendaLive: true, agendaText: 1 };
         data.textProtocol = 1;
         data.cursor = "4:standalone:idle";
@@ -748,8 +856,10 @@ describe("live panel collaboration", () => {
             return base(path, init);
         });
         await start();
-        el("live").click();
-        const note = el("points").querySelector("input[type=text]");
+        el("points").querySelector(".link").click();
+        const note = el("points").querySelector(
+            'textarea[data-field="point:p1:note"]',
+        );
         note.focus();
         await settle();
         expect(note.value).toBe("Initial");
@@ -757,10 +867,26 @@ describe("live panel collaboration", () => {
         ytext.insert(0, "Remote ");
         await subscription.invalidate();
         await settle();
-        expect(el("points").querySelector("input[type=text]")).toBe(note);
+        expect(
+            el("points").querySelector('textarea[data-field="point:p1:note"]'),
+        ).toBe(note);
         expect(document.activeElement).toBe(note);
         expect(note.value).toBe("Remote Initial");
         expect(note.selectionStart).toBe(10);
+        const remote = ytext.toString();
+        ytext.delete(0, ytext.length);
+        data.points[0].note = "";
+        await subscription.invalidate();
+        await settle();
+        expect(
+            el("points").querySelector('textarea[data-field="point:p1:note"]'),
+        ).toBe(note);
+        expect(document.activeElement).toBe(note);
+        expect(note.value).toBe("");
+        ytext.insert(0, remote);
+        data.points[0].note = remote;
+        await subscription.invalidate();
+        await settle();
         note.value += " local";
         note.dispatchEvent(new Event("input"));
         el("points").querySelector("input[type=checkbox]").click();
@@ -804,4 +930,84 @@ it("reconciles an attached agenda even while its stream remains connected", asyn
     expect(request).toHaveBeenCalledExactlyOnceWith(
         "/agenda-one?since=4%3Arecording%3Aidle",
     );
+});
+
+it("#386 changes from the away outline to a checklist and back without editing point titles", async () => {
+    tab.url = "https://example.com";
+    await start();
+    expect(el("points").querySelector("input[type=checkbox]")).toBeNull();
+    controlOptions.onTab({
+        ...tab,
+        url: "https://meet.google.com/meet/abc-defg-hij",
+    });
+    expect(el("points").querySelector("input[type=checkbox]")).not.toBeNull();
+    expect(el("points").querySelector("input[type=text]")).toBeNull();
+    expect(el("points").querySelector(".link").textContent).toBe("Note");
+    controlOptions.onState({
+        state: "recording",
+        sessionId: "one",
+        stopped: true,
+        uploaded: [0],
+        chunkCount: 2,
+    });
+    expect(el("points").querySelectorAll("input")).toHaveLength(0);
+    expect(el("tasks").hidden).toBe(true);
+    expect(el("task-count").textContent).toBe("Done 0 of 2");
+});
+
+it("#386 mounts recording controls even if the agenda detail fails, and Retry recovers it", async () => {
+    request.mockRejectedValueOnce(new Error("offline"));
+    await start();
+    expect(controlOptions.variant).toBe("panel");
+    expect(el("recorder-controls").hidden).toBe(false);
+    expect(el("agenda-error").hidden).toBe(false);
+    expect(el("status").textContent).toBe(messages.agendaLoadError.message);
+    el("retry").click();
+    await settle();
+    expect(el("agenda-error").hidden).toBe(true);
+    expect(el("agenda").hidden).toBe(false);
+});
+
+it("#386 shows non-empty point and task notes without a Note click", async () => {
+    settings.serverDefaults = { agendaText: 1 };
+    data.points[0].note = "Point note";
+    data.taskGroups[0].tasks[0].agendaNote = "Task note";
+    await start();
+    const note = el("points").querySelector(
+        'textarea[data-field="point:p1:note"]',
+    );
+    expect(note.value).toBe("Point note");
+    expect(note.hidden).toBe(true);
+    const preview = el("points").querySelector(".note-readonly");
+    expect(preview.textContent).toBe("Point note");
+    expect(preview.hidden).toBe(false);
+    expect(el("tasks").querySelector(".note-readonly").textContent).toBe(
+        "Task note",
+    );
+    expect(el("tasks").querySelector(".note-readonly").hidden).toBe(false);
+});
+
+it("shows a partial choice lookup failure without claiming there are no agendas", async () => {
+    await start();
+    matches.mockImplementationOnce(async (_now, _ids, { onError }) => {
+        onError();
+        return [];
+    });
+    el("change-agenda").click();
+    await settle();
+    expect(el("agenda-error").hidden).toBe(false);
+    expect(el("choice-list").textContent).not.toContain(
+        messages.agendaEmpty.message,
+    );
+});
+
+it("keeps Back from reopening an initial empty chooser on the next poll", async () => {
+    session[agendaPanelKey(7)] = { agendaIds: [], choose: true, tabId: 7 };
+    await start();
+    expect(el("choices").hidden).toBe(false);
+    el("back").click();
+    expect(el("choices").hidden).toBe(true);
+    expect(el("recorder-controls").hidden).toBe(false);
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(el("choices").hidden).toBe(true);
 });

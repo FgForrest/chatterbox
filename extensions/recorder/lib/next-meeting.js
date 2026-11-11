@@ -4,6 +4,7 @@ import { formatMeetingTime } from "./meeting-time.js";
 import { claimMeetingNotification } from "./meeting-notifications.js";
 import { t } from "./i18n.js";
 import { getSettings } from "./settings.js";
+import { meetCode } from "./meet-code.js";
 
 export const NEXT_MEETING_KEY = "recorderNextMeeting";
 export const NEXT_REFRESH = "recorder-next-refresh";
@@ -24,16 +25,8 @@ export function supportsNextMeeting(settings) {
 
 /** Extract only validated Meet room URLs, preserving the server's authuser selection. */
 export function meetingRoom(url) {
-    try {
-        const parsed = new URL(url);
-        return parsed.protocol === "https:" &&
-            parsed.hostname === "meet.google.com" &&
-            /^\/[a-z]{3}-[a-z]{4}-[a-z]{3}\/?$/i.test(parsed.pathname)
-            ? parsed.pathname.replace(/\/$/, "").toLowerCase()
-            : null;
-    } catch {
-        return null;
-    }
+    const code = meetCode(url);
+    return code ? `/${code}` : null;
 }
 
 /** Hide meeting offers when the user already has the room open. */
@@ -45,6 +38,7 @@ export function roomIsOpen(meeting, tabs) {
 /** Read only the current pairing's transient Calendar cache. */
 export async function cachedNextMeeting() {
     const settings = await getSettings();
+    if (!supportsNextMeeting(settings)) return null;
     const cached = (await chrome.storage.session.get(NEXT_MEETING_KEY))[
         NEXT_MEETING_KEY
     ];

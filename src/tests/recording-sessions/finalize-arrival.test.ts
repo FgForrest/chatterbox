@@ -35,6 +35,12 @@ vi.mock("@/lib/folders/folders", () => ({
 const { requestArrivalInTx } = vi.hoisted(() => ({
     requestArrivalInTx: vi.fn(async () => ({ shouldNudge: true })),
 }));
+vi.mock("@/lib/pipeline/arrival-context", () => ({
+    resolveArrivalOrganizationContext: vi.fn(async () => ({
+        canCurate: false,
+        lockOrganizationTree: false,
+    })),
+}));
 vi.mock("@/lib/pipeline/arrival", () => ({
     requestArrivalInTx,
     resolveArrivalProfile: vi.fn(async () => ({
@@ -132,6 +138,9 @@ describe("recording-session finalization arrival", () => {
             },
             profile: expect.objectContaining({ id: "profile-1" }),
             manualOnly: false,
+            allowUnavailableFolder: false,
+            canCurate: false,
+            lockOrganizationTree: false,
         });
     });
 

@@ -1,14 +1,14 @@
 ---
 title: Folder exports keep a ledger of what they wrote and move it, instead of never deleting anything
 date: 2026-10-06
-updated: 2026-10-23 06:35
-status: accepted
+updated: 2026-11-10 15:33
+status: superseded
 kind: fix
 issues: []
 prs: [87]
 areas: [src/lib/folder-exports, src/lib/folder-exports/filesystem-nodes.ts, src/lib/folder-exports/drive-provider.ts, src/db/schema.ts]
 supersedes: [2026-09-28-google-drive-export]
-superseded-by: []
+superseded-by: [2026-11-10-restricted-organization-folders]
 relates: [2026-10-22-security-assessment-hardening]
 ---
 
@@ -21,6 +21,8 @@ moved between folders, renamed) the export moves its directory instead of writin
 recording deliberately filed in several folders still gets one copy per folder. The Google Drive
 export moves files the same way and trashes only its own duplicates. This reverses the maintainer's
 earlier rule that an export never deletes files.
+
+**Superseded in part:** [Restricted Organization folders](2026-11-10-restricted-organization-folders.md) requires trashing the export's own Drive files when their placement is withheld by restriction, even without another copy. Drive directory pruning also checks live children and preserves foreign files within managed directories. Ordinary orphan preservation and the remaining rules still hold.
 
 ## Why
 

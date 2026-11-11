@@ -24,6 +24,7 @@ export function subscribeAgenda(id, { invalidate, onConnection = () => {} }) {
                 { signal: controller.signal },
                 (value) => !destroyed && supportsAgendas(value) && value.serverDefaults?.agendaLive === true,
                 settings,
+                { connectTimeoutOnly: true },
             );
             if (destroyed) return;
             if (

@@ -45,6 +45,7 @@ import {
     listOutgoingSharedItemIds,
     receivedItemCondition,
 } from "@/db/queries/item-shares";
+import * as privateFolderTree from "@/db/queries/private-folder-tree";
 import {
     accounts,
     asyncJobs,
@@ -64,11 +65,13 @@ import {
     userAccessStates,
     users,
 } from "@/db/schema";
+import { isSerializationFailure } from "@/lib/deadlock-retry";
 import {
     decryptText,
     encryptJsonField,
     encryptText,
 } from "@/lib/encryption/fields";
+import { ErrorCode } from "@/lib/errors";
 import { archivedItemCondition } from "@/lib/export/archive-scope";
 import { collectArchivedFolderShares } from "@/lib/export/folder-shares";
 import { collectArchivedMeetings } from "@/lib/export/meetings";
@@ -77,6 +80,7 @@ import {
     addRecordingToFolder,
     assertCategorizableFolder,
     assertCategorizableFolders,
+    createFolder,
     deleteFolder,
     listExportFolderOrganization,
     listFolderOrganization,
@@ -87,6 +91,7 @@ import {
     removeRecordingFromFolder,
     renameFolder,
 } from "@/lib/folders/folders";
+import { folderHasSubfolders } from "@/lib/folders/person-shared-leaf";
 import * as knowledgeLoader from "@/lib/knowledge/knowledge-loader";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { resolveMailAccess } from "@/lib/mail/access";
@@ -289,7 +294,7 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
             {
                 id: "child",
                 userId: "owner",
-                parentId: "source",
+                parentId: "owner-root",
                 name: encryptText("Unrelated private context"),
                 nameHash: "child",
             },
@@ -394,6 +399,893 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
             .map((row) => row.id)
             .sort();
 
+    const raceTreeWrites = async (
+        first: () => Response | Promise<Response>,
+        second: () => Response | Promise<Response>,
+    ) => {
+        const held = Promise.withResolvers<void>();
+        const release = Promise.withResolvers<void>();
+        const waiting = Promise.withResolvers<void>();
+        const lock = privateFolderTree.lockPrivateFolderTree;
+        const serializationFailures: unknown[] = [];
+        let calls = 0;
+        const spy = vi
+            .spyOn(privateFolderTree, "lockPrivateFolderTree")
+            .mockImplementation(async (tx, userId) => {
+                const call = ++calls;
+                if (call === 2) waiting.resolve();
+                try {
+                    await lock(tx, userId);
+                } catch (error) {
+                    if (isSerializationFailure(error))
+                        serializationFailures.push(error);
+                    throw error;
+                }
+                if (call === 1) {
+                    held.resolve();
+                    await release.promise;
+                }
+            });
+        const winner = Promise.resolve(first());
+        let loser: Promise<Response> | undefined;
+        try {
+            await held.promise;
+            loser = Promise.resolve(second());
+            await waiting.promise;
+            release.resolve();
+            return {
+                responses: await Promise.all([winner, loser]),
+                serializationFailures,
+            };
+        } finally {
+            release.resolve();
+            await Promise.allSettled([winner, ...(loser ? [loser] : [])]);
+            spy.mockRestore();
+        }
+    };
+    it("counts a received attachment for sharing GET, invitation and archive restoration", async () => {
+        await accept();
+        const listed = await listRoute(
+            request("folders/my-folder/shares", "GET"),
+            context("my-folder"),
+        );
+        expect(listed.status).toBe(200);
+        expect(await listed.json()).toMatchObject({
+            shares: [],
+            hasSubfolders: true,
+        });
+        const invited = await inviteRoute(
+            request("folders/my-folder/shares", "POST", {
+                receiverIds: ["other"],
+            }),
+            context("my-folder"),
+        );
+        expect(invited.status).toBe(409);
+        expect(await invited.json()).toMatchObject({
+            code: ErrorCode.FOLDER_HAS_SUBFOLDERS,
+        });
+        const restored = await restoreRoute(
+            request("folder-shares/restore", "POST", {
+                shares: [
+                    {
+                        folderId: "old",
+                        receiverEmail: "priya@example.com",
+                        state: "accepted",
+                    },
+                ],
+                folderIds: { old: "my-folder" },
+            }),
+        );
+        expect(restored.status).toBe(200);
+        expect(await restored.json()).toMatchObject({
+            restored: 0,
+            skipped: [{ reason: "has_subfolders" }],
+        });
+        expect(await listFolderShares("receiver", "my-folder")).toEqual([]);
+    });
+    it("does not count another caller's attachment beneath an owned folder", async () => {
+        const [share] = await inviteToFolder("owner", "source", ["other"]);
+        await changeFolderShare("other", share.id, {
+            action: "accept",
+            version: 0,
+        });
+        await database.db
+            .update(receivedFolderAttachments)
+            .set({ parentId: "my-folder" })
+            .where(eq(receivedFolderAttachments.shareId, share.id));
+        expect(
+            await folderHasSubfolders(database.db, "receiver", "my-folder"),
+        ).toBe(false);
+        expect(
+            await folderHasSubfolders(database.db, "other", "my-folder"),
+        ).toBe(false);
+    });
+    describe.each([
+        "accept",
+        "move",
+    ] as const)("attachment %s versus invitation", (action) => {
+        it.each([
+            "attachment",
+            "invitation",
+        ] as const)("serializes with %s first and returns a dedicated 409", async (first) => {
+            const share = await invite();
+            if (action === "move")
+                await changeFolderShare("receiver", share.id, {
+                    action: "accept",
+                    version: 0,
+                });
+            const attachment = () =>
+                folderAction(
+                    request(`folder-shares/${share.id}`, "PATCH", {
+                        action,
+                        version: action === "accept" ? 0 : 1,
+                        parentId: "my-folder",
+                    }),
+                    context(share.id),
+                );
+            const invitation = () =>
+                inviteRoute(
+                    request("folders/my-folder/shares", "POST", {
+                        receiverIds: ["other"],
+                    }),
+                    context("my-folder"),
+                );
+            const {
+                responses: [winner, loser],
+            } = await raceTreeWrites(
+                first === "attachment" ? attachment : invitation,
+                first === "attachment" ? invitation : attachment,
+            );
+            expect(winner.status).toBe(200);
+            expect(loser.status).toBe(409);
+            expect(await loser.json()).toMatchObject({
+                code:
+                    first === "attachment"
+                        ? ErrorCode.FOLDER_HAS_SUBFOLDERS
+                        : ErrorCode.SHARED_FOLDER_HAS_NO_SUBFOLDERS,
+            });
+            const children = await database.db
+                .select()
+                .from(receivedFolderAttachments)
+                .where(
+                    and(
+                        eq(receivedFolderAttachments.userId, "receiver"),
+                        eq(receivedFolderAttachments.parentId, "my-folder"),
+                    ),
+                );
+            const shares = await listFolderShares("receiver", "my-folder");
+            expect(children.length + shares.length).toBe(1);
+        });
+    });
+    it("marks a legacy attachment child without passing its contents to the parent's receivers", async () => {
+        await accept();
+        await insertRecording(database.db, {
+            id: "receiver-own",
+            userId: "receiver",
+            title: "Acme private",
+        });
+        await addRecordingToFolder({
+            userId: "receiver",
+            recordingId: "receiver-own",
+            folderId: "my-folder",
+        });
+        await database.db.insert(folderShares).values({
+            id: "legacy-parent",
+            userId: "receiver",
+            folderId: "my-folder",
+            receiverUserId: "other",
+            invitedByUserId: "receiver",
+        });
+        await changeFolderShare("other", "legacy-parent", {
+            action: "accept",
+            version: 0,
+        });
+        const ownerTree = await listFolderOrganization("receiver");
+        expect(
+            ownerTree.folders.find(
+                (folder) => folder.receivedFolder?.sourceFolderId === "source",
+            ),
+        ).toMatchObject({ parentId: "my-folder", insideSharedFolder: true });
+        expect(await visibleIds("receiver")).toEqual(["audio", "mail"]);
+        expect(await visibleIds("other")).toEqual(["receiver-own"]);
+        expect(await resolveRecordingAccess("other", "audio")).toBeNull();
+        expect(await resolveMailAccess("other", "mail")).toBeNull();
+        const receiverTree = await listFolderOrganization("other");
+        expect(
+            receiverTree.folders.filter((folder) => folder.receivedFolder),
+        ).toHaveLength(1);
+        expect(
+            receiverTree.folders.some(
+                (folder) => folder.receivedFolder?.sourceFolderId === "source",
+            ),
+        ).toBe(false);
+        expect(receiverTree.assignments.map((row) => row.recordingId)).toEqual([
+            "receiver-own",
+        ]);
+    });
+    it.each([
+        "pending",
+        "accepted",
+    ] as const)("preserves independently %s shared legacy children and their unshared siblings", async (state) => {
+        const [ownShare] = await inviteToFolder("owner", "child", ["other"]);
+        if (state === "accepted")
+            await changeFolderShare("other", ownShare.id, {
+                action: "accept",
+                version: 0,
+            });
+        await invite();
+        await database.db
+            .update(recordingFolders)
+            .set({ parentId: "source" })
+            .where(sql`${recordingFolders.id} in (${"child"}, ${"elsewhere"})`);
+        const tree = await listFolderOrganization("owner");
+        expect(
+            tree.folders.find((folder) => folder.id === "child"),
+        ).toMatchObject({ insideSharedFolder: true, sharedWithPeople: true });
+        expect(
+            tree.folders.find((folder) => folder.id === "elsewhere"),
+        ).toMatchObject({ insideSharedFolder: true });
+        expect(
+            tree.folders.find((folder) => folder.id === "elsewhere")
+                ?.sharedWithPeople,
+        ).toBeUndefined();
+        expect(await visibleIds("other")).toEqual(
+            state === "accepted" ? ["nested"] : [],
+        );
+    });
+    it.each([
+        "pending",
+        "accepted",
+    ] as const)("ignores retained %s invitations and attachments for private writes in local mode", async (state) => {
+        const share = await invite();
+        if (state === "accepted")
+            await changeFolderShare("receiver", share.id, {
+                action: "accept",
+                version: 0,
+                parentId: "my-folder",
+            });
+        mockEnv.SELF_HOST_MODE = "local";
+        expect(
+            await folderHasSubfolders(database.db, "receiver", "my-folder"),
+        ).toBe(false);
+        const created = await createRoute(
+            request(
+                "folders",
+                "POST",
+                { parentId: "source", name: "Acme local" },
+                "owner",
+            ),
+        );
+        expect(created.status).toBe(201);
+        const moved = await renameRoute(
+            request(
+                "folders/elsewhere",
+                "PATCH",
+                { parentId: "source", version: 0 },
+                "owner",
+            ),
+            context("elsewhere"),
+        );
+        expect(moved.status).toBe(200);
+        expect(
+            (await listFolderOrganization("owner")).folders.find(
+                (folder) => folder.id === "source",
+            )?.sharedWithPeople,
+        ).toBeUndefined();
+        expect(await folderHasSubfolders(database.db, "owner", "source")).toBe(
+            false,
+        );
+        const routes = [
+            await listRoute(
+                request("folders/source/shares", "GET", undefined, "owner"),
+                context(),
+            ),
+            await inviteRoute(
+                request(
+                    "folders/source/shares",
+                    "POST",
+                    { receiverIds: ["other"] },
+                    "owner",
+                ),
+                context(),
+            ),
+            await folderAction(
+                request(
+                    `folder-shares/${share.id}`,
+                    "PATCH",
+                    { action: "cancel", version: 0 },
+                    "owner",
+                ),
+                context(share.id),
+            ),
+            await restoreRoute(
+                request(
+                    "folder-shares/restore",
+                    "POST",
+                    { shares: [], folderIds: {} },
+                    "owner",
+                ),
+            ),
+        ];
+        expect(routes.map((response) => response.status)).toEqual([
+            404, 404, 404, 404,
+        ]);
+        expect((await database.db.select().from(folderShares))[0].state).toBe(
+            state,
+        );
+    });
+    it.each([
+        "source",
+        "child",
+    ])("retries a real stale move snapshot after an invitation commits, destination=%s", async (parentId) => {
+        const {
+            responses: [invited, moved],
+            serializationFailures,
+        } = await raceTreeWrites(
+            () =>
+                inviteRoute(
+                    request(
+                        "folders/source/shares",
+                        "POST",
+                        { receiverIds: ["receiver"] },
+                        "owner",
+                    ),
+                    context(),
+                ),
+            () =>
+                renameRoute(
+                    request(
+                        "folders/elsewhere",
+                        "PATCH",
+                        { parentId, version: 0 },
+                        "owner",
+                    ),
+                    context("elsewhere"),
+                ),
+        );
+        expect(invited.status).toBe(200);
+        expect(serializationFailures).toHaveLength(1);
+        expect(moved.status).toBe(parentId === "source" ? 409 : 200);
+        if (parentId === "source")
+            expect(await moved.json()).toMatchObject({
+                code: ErrorCode.SHARED_FOLDER_HAS_NO_SUBFOLDERS,
+            });
+        else
+            expect(await moved.json()).toMatchObject({
+                folder: { id: "elsewhere", parentId: "child", version: 1 },
+            });
+    });
+    it.each([
+        "version",
+        "owner",
+    ] as const)("rechecks folder %s after a serialization retry", async (change) => {
+        const {
+            responses: [changed, moved],
+            serializationFailures,
+        } = await raceTreeWrites(
+            () =>
+                database.db.transaction(async (tx) => {
+                    await privateFolderTree.lockPrivateFolderTree(tx, "owner");
+                    await tx
+                        .update(recordingFolders)
+                        .set(
+                            change === "version"
+                                ? { version: 1 }
+                                : { userId: "other" },
+                        )
+                        .where(
+                            and(
+                                eq(recordingFolders.id, "elsewhere"),
+                                eq(recordingFolders.userId, "owner"),
+                            ),
+                        );
+                    return Response.json({ success: true });
+                }),
+            () =>
+                renameRoute(
+                    request(
+                        "folders/elsewhere",
+                        "PATCH",
+                        { parentId: "child", version: 0 },
+                        "owner",
+                    ),
+                    context("elsewhere"),
+                ),
+        );
+        expect(changed.status).toBe(200);
+        expect(serializationFailures).toHaveLength(1);
+        expect(moved.status).toBe(change === "version" ? 409 : 404);
+        expect(await moved.json()).toMatchObject({
+            code:
+                change === "version" ? ErrorCode.CONFLICT : ErrorCode.NOT_FOUND,
+        });
+    });
+    it("returns a child-presence 409 when the move wins the invitation race", async () => {
+        const {
+            responses: [moved, invited],
+        } = await raceTreeWrites(
+            () =>
+                renameRoute(
+                    request(
+                        "folders/elsewhere",
+                        "PATCH",
+                        { parentId: "source", version: 0 },
+                        "owner",
+                    ),
+                    context("elsewhere"),
+                ),
+            () =>
+                inviteRoute(
+                    request(
+                        "folders/source/shares",
+                        "POST",
+                        { receiverIds: ["receiver"] },
+                        "owner",
+                    ),
+                    context(),
+                ),
+        );
+        expect(moved.status).toBe(200);
+        expect(invited.status).toBe(409);
+        expect(await invited.json()).toMatchObject({
+            code: ErrorCode.FOLDER_HAS_SUBFOLDERS,
+        });
+    });
+    it("returns an explicit retryable conflict after serialization retries are exhausted", async () => {
+        const error = new Error("Failed query", {
+            cause: Object.assign(new Error("serialization failure"), {
+                code: "40001",
+            }),
+        });
+        const lock = vi
+            .spyOn(privateFolderTree, "lockPrivateFolderTree")
+            .mockRejectedValue(error);
+        try {
+            const response = await renameRoute(
+                request(
+                    "folders/elsewhere",
+                    "PATCH",
+                    { parentId: "child" },
+                    "owner",
+                ),
+                context("elsewhere"),
+            );
+            expect(response.status).toBe(409);
+            expect(await response.json()).toMatchObject({
+                code: ErrorCode.CONFLICT,
+                details: { retryable: true },
+            });
+            expect(lock).toHaveBeenCalledTimes(3);
+        } finally {
+            lock.mockRestore();
+        }
+    });
+    it.each([
+        "pending",
+        "accepted",
+    ] as const)("refuses owner creation and moves into a %s shared folder with localized error codes", async (state) => {
+        const share = await invite();
+        if (state === "accepted")
+            await changeFolderShare("receiver", share.id, {
+                action: "accept",
+                version: share.version,
+            });
+        const created = await createRoute(
+            request(
+                "folders",
+                "POST",
+                { parentId: "source", name: "Acme plans" },
+                "owner",
+            ),
+        );
+        expect(created.status).toBe(409);
+        expect(await created.json()).toMatchObject({
+            code: ErrorCode.SHARED_FOLDER_HAS_NO_SUBFOLDERS,
+            error: "A shared folder has no subfolders.",
+        });
+        const moved = await renameRoute(
+            request(
+                "folders/elsewhere",
+                "PATCH",
+                { parentId: "source" },
+                "owner",
+            ),
+            context("elsewhere"),
+        );
+        expect(moved.status).toBe(409);
+        expect(await moved.json()).toMatchObject({
+            code: ErrorCode.SHARED_FOLDER_HAS_NO_SUBFOLDERS,
+        });
+        const [child] = await database.db
+            .select()
+            .from(recordingFolders)
+            .where(eq(recordingFolders.parentId, "source"));
+        expect(child).toBeUndefined();
+    });
+    it.each([
+        "owner",
+        "other",
+    ])("refuses an invitation with a child owned by %s before creating any share", async (childOwner) => {
+        if (childOwner !== "owner")
+            await database.db
+                .update(recordingFolders)
+                .set({ userId: childOwner })
+                .where(eq(recordingFolders.id, "child"));
+        await database.db
+            .update(recordingFolders)
+            .set({ parentId: "source" })
+            .where(eq(recordingFolders.id, "child"));
+        const listed = await listRoute(
+            request("folders/source/shares", "GET", undefined, "owner"),
+            context(),
+        );
+        expect(await listed.json()).toMatchObject({
+            shares: [],
+            hasSubfolders: true,
+        });
+        const response = await inviteRoute(
+            request(
+                "folders/source/shares",
+                "POST",
+                { receiverIds: ["receiver"] },
+                "owner",
+            ),
+            context(),
+        );
+        expect(response.status).toBe(409);
+        expect(await response.json()).toMatchObject({
+            code: ErrorCode.FOLDER_HAS_SUBFOLDERS,
+            error: "Move this folder's subfolders elsewhere first. A shared folder has no subfolders.",
+        });
+        expect(await database.db.select().from(folderShares)).toEqual([]);
+    });
+    it("reports restored invitations to folders with children as skipped", async () => {
+        await database.db
+            .update(recordingFolders)
+            .set({ parentId: "source" })
+            .where(eq(recordingFolders.id, "child"));
+        expect(
+            await restoreArchivedFolderShares(
+                "owner",
+                [
+                    {
+                        folderId: "old",
+                        receiverEmail: "lena@example.com",
+                        state: "accepted",
+                    },
+                ],
+                new Map([["old", "source"]]),
+            ),
+        ).toMatchObject({
+            restored: 0,
+            skipped: [{ reason: "has_subfolders" }],
+        });
+        expect(await database.db.select().from(folderShares)).toEqual([]);
+    });
+    it("serializes restored invitations against concurrent child creation", async () => {
+        const [created, restored] = await Promise.allSettled([
+            createFolder({
+                userId: "owner",
+                parentId: "source",
+                name: "Acme restored",
+            }),
+            restoreArchivedFolderShares(
+                "owner",
+                [
+                    {
+                        folderId: "old",
+                        receiverEmail: "lena@example.com",
+                        state: "accepted",
+                    },
+                ],
+                new Map([["old", "source"]]),
+            ),
+        ]);
+        expect(restored.status).toBe("fulfilled");
+        const shares = await listFolderShares("owner", "source");
+        const children = await database.db
+            .select()
+            .from(recordingFolders)
+            .where(eq(recordingFolders.parentId, "source"));
+        expect(children.length + shares.length).toBe(1);
+        if (created.status === "fulfilled") expect(shares).toEqual([]);
+        else expect(children).toEqual([]);
+    });
+    it.each([
+        "accept",
+        "move",
+    ] as const)("refuses placing a received folder inside a person-shared folder on %s", async (action) => {
+        const share = await invite();
+        if (action === "move")
+            await changeFolderShare("receiver", share.id, {
+                action: "accept",
+                version: 0,
+            });
+        await inviteToFolder("receiver", "my-folder", ["other"]);
+        await expect(
+            changeFolderShare("receiver", share.id, {
+                action,
+                version: action === "accept" ? 0 : 1,
+                parentId: "my-folder",
+            }),
+        ).rejects.toMatchObject({
+            code: ErrorCode.SHARED_FOLDER_HAS_NO_SUBFOLDERS,
+            statusCode: 409,
+        });
+    });
+    it.each([
+        "decline",
+        "cancel",
+        "remove",
+    ] as const)("allows children after the last invitation ends through %s and refuses inviting again", async (action) => {
+        const share = await invite();
+        if (action === "remove")
+            await changeFolderShare("receiver", share.id, {
+                action: "accept",
+                version: 0,
+            });
+        await changeFolderShare(
+            action === "cancel" ? "owner" : "receiver",
+            share.id,
+            { action, version: action === "remove" ? 1 : 0 },
+        );
+        const child = await createFolder({
+            userId: "owner",
+            parentId: "source",
+            name: "Acme plans",
+        });
+        expect(child.parentId).toBe("source");
+        expect(
+            (await listFolderOrganization("owner")).folders.find(
+                (folder) => folder.id === "source",
+            )?.sharedWithPeople,
+        ).toBeUndefined();
+        await expect(
+            inviteToFolder("owner", "source", ["receiver"]),
+        ).rejects.toMatchObject({
+            code: ErrorCode.FOLDER_HAS_SUBFOLDERS,
+            statusCode: 409,
+        });
+    });
+    it("keeps blocking children until every pending or accepted invitation ends", async () => {
+        const shares = await inviteToFolder("owner", "source", [
+            "receiver",
+            "other",
+        ]);
+        for (const share of shares) {
+            await changeFolderShare(share.receiverUserId, share.id, {
+                action: "decline",
+                version: share.version,
+            });
+            if (share !== shares.at(-1))
+                await expect(
+                    createFolder({
+                        userId: "owner",
+                        parentId: "source",
+                        name: "Acme plans",
+                    }),
+                ).rejects.toMatchObject({
+                    code: ErrorCode.SHARED_FOLDER_HAS_NO_SUBFOLDERS,
+                });
+        }
+        expect(
+            (
+                await createFolder({
+                    userId: "owner",
+                    parentId: "source",
+                    name: "Acme plans",
+                })
+            ).parentId,
+        ).toBe("source");
+    });
+    it("preserves legacy children and direct sharing, marks only direct children, and lets the owner move them out", async () => {
+        await database.db
+            .update(recordingFolders)
+            .set({ parentId: "source" })
+            .where(eq(recordingFolders.id, "child"));
+        await database.db.insert(recordingFolders).values({
+            id: "grandchild",
+            userId: "owner",
+            parentId: "child",
+            name: encryptText("Acme notes"),
+            nameHash: "notes",
+        });
+        await database.db.insert(folderShares).values({
+            id: "legacy",
+            userId: "owner",
+            folderId: "source",
+            receiverUserId: "receiver",
+            invitedByUserId: "owner",
+        });
+        await changeFolderShare("receiver", "legacy", {
+            action: "accept",
+            version: 0,
+        });
+        expect(await visibleIds()).toEqual(["audio", "mail"]);
+        const tree = await listFolderOrganization("owner");
+        expect(
+            tree.folders.find((folder) => folder.id === "child"),
+        ).toMatchObject({ parentId: "source", insideSharedFolder: true });
+        expect(
+            tree.folders.find((folder) => folder.id === "grandchild")
+                ?.insideSharedFolder,
+        ).toBeUndefined();
+        expect(
+            (await listReceivedFolderOrganization("receiver")).folders,
+        ).toHaveLength(1);
+        await renameFolder({
+            userId: "owner",
+            folderId: "child",
+            name: "Acme renamed",
+        });
+        await expect(
+            createFolder({
+                userId: "owner",
+                parentId: "source",
+                name: "Acme new",
+            }),
+        ).rejects.toMatchObject({
+            code: ErrorCode.SHARED_FOLDER_HAS_NO_SUBFOLDERS,
+        });
+        await moveFolder({
+            userId: "owner",
+            folderId: "child",
+            parentId: "elsewhere",
+        });
+        expect(
+            (await listFolderOrganization("owner")).folders.find(
+                (folder) => folder.id === "child",
+            )?.insideSharedFolder,
+        ).toBeUndefined();
+        expect(await visibleIds()).toEqual(["audio", "mail"]);
+    });
+    it("allows reordering existing children of a shared folder", async () => {
+        await accept();
+        await database.db
+            .update(recordingFolders)
+            .set({ parentId: "source", sortOrder: 1000 })
+            .where(
+                and(
+                    eq(recordingFolders.userId, "owner"),
+                    eq(recordingFolders.id, "child"),
+                ),
+            );
+        await database.db.insert(recordingFolders).values({
+            id: "legacy-sibling",
+            userId: "owner",
+            parentId: "source",
+            name: encryptText("Acme sibling"),
+            nameHash: "legacy-sibling",
+            sortOrder: 0,
+        });
+        const children = () =>
+            database.db
+                .select({
+                    id: recordingFolders.id,
+                    sortOrder: recordingFolders.sortOrder,
+                })
+                .from(recordingFolders)
+                .where(
+                    and(
+                        eq(recordingFolders.userId, "owner"),
+                        eq(recordingFolders.parentId, "source"),
+                    ),
+                )
+                .orderBy(recordingFolders.sortOrder);
+        expect(await children()).toEqual([
+            { id: "legacy-sibling", sortOrder: 0 },
+            { id: "child", sortOrder: 1000 },
+        ]);
+        expect(
+            await moveFolder({
+                userId: "owner",
+                folderId: "child",
+                parentId: "source",
+                beforeId: "legacy-sibling",
+            }),
+        ).toMatchObject({ parentId: "source", sortOrder: 0, version: 1 });
+        const reordered = [
+            { id: "child", sortOrder: 0 },
+            { id: "legacy-sibling", sortOrder: 1000 },
+        ];
+        expect(await children()).toEqual(reordered);
+        await expect(
+            moveFolder({
+                userId: "owner",
+                folderId: "elsewhere",
+                parentId: "source",
+                beforeId: "legacy-sibling",
+            }),
+        ).rejects.toMatchObject({
+            code: ErrorCode.SHARED_FOLDER_HAS_NO_SUBFOLDERS,
+            statusCode: 409,
+        });
+        expect(await children()).toEqual(reordered);
+        expect(
+            (await listFolderOrganization("owner")).folders.find(
+                (folder) => folder.id === "elsewhere",
+            ),
+        ).toMatchObject({ parentId: "owner-root", version: 0 });
+    });
+    it.each([
+        "create",
+        "move",
+    ] as const)("serializes concurrent %s and invitation transactions without adding a child to a shared folder", async (operation) => {
+        const results = await Promise.all([
+            operation === "create"
+                ? createRoute(
+                      request(
+                          "folders",
+                          "POST",
+                          { parentId: "source", name: "Acme concurrent" },
+                          "owner",
+                      ),
+                  )
+                : renameRoute(
+                      request(
+                          "folders/elsewhere",
+                          "PATCH",
+                          { parentId: "source" },
+                          "owner",
+                      ),
+                      context("elsewhere"),
+                  ),
+            inviteRoute(
+                request(
+                    "folders/source/shares",
+                    "POST",
+                    { receiverIds: ["receiver"] },
+                    "owner",
+                ),
+                context(),
+            ),
+        ]);
+        expect(results.filter((response) => response.ok)).toHaveLength(1);
+        const loserIndex = results.findIndex((response) => !response.ok);
+        expect(results[loserIndex].status).toBe(409);
+        expect(await results[loserIndex].json()).toMatchObject({
+            code:
+                loserIndex === 0
+                    ? ErrorCode.SHARED_FOLDER_HAS_NO_SUBFOLDERS
+                    : ErrorCode.FOLDER_HAS_SUBFOLDERS,
+        });
+        const children = await database.db
+            .select()
+            .from(recordingFolders)
+            .where(
+                and(
+                    eq(recordingFolders.userId, "owner"),
+                    eq(recordingFolders.parentId, "source"),
+                ),
+            );
+        const shares = await listFolderShares("owner", "source");
+        expect(
+            children.length === 0 ||
+                shares.every(
+                    (share) =>
+                        share.state !== "pending" && share.state !== "accepted",
+                ),
+        ).toBe(true);
+        expect(children.length + shares.length).toBe(1);
+    });
+    it("leaves Organization subfolder creation and moves unchanged", async () => {
+        const folder = await createFolder({
+            userId: "owner",
+            parentId: "org-folder",
+            name: "Acme team",
+        });
+        expect(folder.scope).toBe("org");
+        expect(
+            (
+                await moveFolder({
+                    userId: "curator",
+                    folderId: folder.id,
+                    parentId: "org-root",
+                    canCurate: true,
+                })
+            ).parentId,
+        ).toBe("org-root");
+    });
     it("requires acceptance and reveals no owner tree beyond the shared folder", async () => {
         const share = await invite();
         expect(await visibleIds()).toEqual([]);
@@ -451,6 +1343,10 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
     });
     it("never inherits a subfolder's items or its invitation", async () => {
         await accept();
+        await database.db
+            .update(recordingFolders)
+            .set({ parentId: "source" })
+            .where(eq(recordingFolders.id, "child"));
         expect(await isItemReceived("receiver", "nested")).toBe(false);
         expect(await listMyFolderInvitations("receiver")).toEqual([]);
         const tree = await listFolderOrganization("receiver");
@@ -706,6 +1602,7 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
         try {
             await database.db.transaction(async (tx) => {
                 await requestArrivalInTx(tx, {
+                    canCurate: false,
                     itemId: "later",
                     userId: "owner",
                     folder: {
@@ -755,6 +1652,7 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
         try {
             await database.db.transaction(async (tx) => {
                 await requestArrivalInTx(tx, {
+                    canCurate: false,
                     itemId: "later",
                     userId: "owner",
                     folder: {
@@ -824,6 +1722,10 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
             action: "accept",
             version: 0,
         });
+        await database.db
+            .update(recordingFolders)
+            .set({ parentId: "source" })
+            .where(eq(recordingFolders.id, "child"));
         const notifications: unknown[] = [];
         const listener = await database.sql.listen(
             "riffado_personal",
@@ -945,6 +1847,10 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
     });
     it("marks direct and folder-shared owner items but excludes subfolder items", async () => {
         const share = await accept();
+        await database.db
+            .update(recordingFolders)
+            .set({ parentId: "source" })
+            .where(eq(recordingFolders.id, "child"));
         await inviteToItem("owner", "later", ["receiver"]);
         expect(await listOutgoingSharedItemIds("owner")).toEqual(
             new Set(["audio", "mail", "later"]),
@@ -2475,6 +3381,7 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
         try {
             await database.db.transaction(async (tx) => {
                 await requestArrivalInTx(tx, {
+                    canCurate: false,
                     userId: "receiver",
                     itemId: "arriving",
                     folder: {
@@ -2696,6 +3603,7 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
         });
         await database.db.transaction((tx) =>
             requestArrivalInTx(tx, {
+                canCurate: false,
                 itemId: "deferred",
                 userId: "receiver",
                 folder,
@@ -2715,6 +3623,7 @@ describe.skipIf(!url)("live folder sharing (PostgreSQL)", () => {
         await expect(
             database.db.transaction((tx) =>
                 requestArrivalInTx(tx, {
+                    canCurate: false,
                     itemId: "deferred",
                     userId: "receiver",
                     folder,

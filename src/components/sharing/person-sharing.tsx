@@ -50,8 +50,10 @@ import {
 } from "@/components/ui/popover";
 import { ActionTooltip } from "@/components/ui/tooltip";
 import { useDashboardRefresh } from "@/hooks/use-dashboard-refresh";
+import { useFolderRefusal } from "@/hooks/use-folder-refusal";
 import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
 import { subscribeEvents } from "@/lib/events/client";
+import type { listMyRestrictedAccessInvitations } from "@/lib/folders/access-requests";
 import type { listMyFolderInvitations } from "@/lib/sharing/folder-shares";
 import type {
     listItemFolderAudience,
@@ -72,7 +74,8 @@ export type Invitation =
                   "suggestedFolder" | "plannedStart" | "recorded"
               >
           >)
-    | Awaited<ReturnType<typeof listMyFolderInvitations>>[number];
+    | Awaited<ReturnType<typeof listMyFolderInvitations>>[number]
+    | Awaited<ReturnType<typeof listMyRestrictedAccessInvitations>>[number];
 const SharingContext = createContext(false);
 const SharingRefreshContext = createContext<() => void>(() => {});
 
@@ -150,6 +153,11 @@ export function PersonShareDialog({
 }) {
     const i18n = useExtracted();
     const refreshSharing = usePersonSharingRefresh();
+    const folderRefusal = useFolderRefusal();
+    const [hasSubfolders, setHasSubfolders] = useState<boolean | null>(
+        kind === "folder" ? null : false,
+    );
+    const canInvite = allowInvite && hasSubfolders === false;
     const endpoint =
         kind === "folder"
             ? `/api/folders/${encodeURIComponent(itemId)}/shares`
@@ -184,9 +192,11 @@ export function PersonShareDialog({
             );
         const data = (await response.json()) as {
             shares: Share[];
+            hasSubfolders?: boolean;
             folderAudience?: FolderAudience;
             agendaTasks?: typeof taskDisclosure;
         };
+        setHasSubfolders(data.hasSubfolders ?? false);
         setTaskDisclosure(data.agendaTasks ?? null);
         setShares(data.shares);
         setFolderAudience(data.folderAudience ?? []);
@@ -203,7 +213,7 @@ export function PersonShareDialog({
         });
     }, [open, load]);
     useEffect(() => {
-        if (!open || query.trim().length < 2) {
+        if (!open || !canInvite || query.trim().length < 2) {
             setPeople([]);
             return;
         }
@@ -233,7 +243,7 @@ export function PersonShareDialog({
             clearTimeout(timer);
             abort.abort();
         };
-    }, [query, open, i18n]);
+    }, [query, open, i18n, canInvite]);
     const act = async (action: () => Promise<void>) => {
         if (busy) return;
         setBusy(true);
@@ -243,6 +253,14 @@ export function PersonShareDialog({
             await load();
             refreshSharing();
         } catch (error) {
+            if (
+                error instanceof Error &&
+                "code" in error &&
+                error.code === "FOLDER_HAS_SUBFOLDERS"
+            ) {
+                setHasSubfolders(true);
+                return;
+            }
             setError(
                 error instanceof Error
                     ? error.message
@@ -253,18 +271,24 @@ export function PersonShareDialog({
         }
     };
     const invite = async (receiverId: string) => {
+        if (!canInvite) return;
         const response = await fetch(endpoint, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ receiverIds: [receiverId] }),
         });
-        if (!response.ok)
+        if (!response.ok) {
+            const error = await parseApiError(response);
+            if (error.code === "FOLDER_HAS_SUBFOLDERS")
+                throw Object.assign(new Error(error.error), {
+                    code: error.code,
+                });
+            const refusal = folderRefusal(error);
+            if (refusal) toast.error(refusal);
             throw new Error(
-                await getApiErrorMessage(
-                    response,
-                    i18n("Could not update sharing"),
-                ),
+                refusal ?? (error.error || i18n("Could not update sharing")),
             );
+        }
         setQuery("");
     };
     const content = (
@@ -359,16 +383,24 @@ export function PersonShareDialog({
                     )}
                 </output>
             )}
+            {kind === "folder" && hasSubfolders && (
+                <p role="alert" className="text-sm text-muted-foreground">
+                    {i18n(
+                        "Move this folder's subfolders elsewhere first. A shared folder has no subfolders.",
+                    )}
+                </p>
+            )}
             {allowInvite && (
                 <Input
                     type="search"
+                    disabled={busy || !canInvite}
                     aria-label={i18n("Colleague's name or email")}
                     placeholder={i18n("Colleague's name or email")}
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
                 />
             )}
-            {(allowInvite ? people : [])
+            {(canInvite ? people : [])
                 .filter(
                     (person) =>
                         folderAudience.some(
@@ -515,7 +547,7 @@ export function PersonShareDialog({
                                         ? i18n("Declined")
                                         : i18n("Removed")}
                             </span>
-                            {((allowInvite &&
+                            {((canInvite &&
                                 !folderAudience.some(
                                     (member) =>
                                         member.receiverUserId ===
@@ -918,6 +950,40 @@ function InvitationCard({
 }) {
     const i18n = useExtracted();
     const format = useFormatter();
+    if (invitation.kind === "folder-access")
+        return (
+            <article className="space-y-3 rounded-lg border p-4">
+                <p className="text-xs text-muted-foreground">
+                    {i18n("Access request")}
+                </p>
+                <h3 className="font-medium">{invitation.folderName}</h3>
+                <p>
+                    {invitation.notice
+                        ? invitation.state === "approved"
+                            ? i18n("Your access request was approved.")
+                            : i18n(
+                                  "Your access request was declined. You may request again.",
+                              )
+                        : i18n(
+                              "{person} requests access to this restricted folder.",
+                              {
+                                  person:
+                                      invitation.name ?? i18n("A colleague"),
+                              },
+                          )}
+                </p>
+                <div className="flex gap-2">
+                    <Button size="sm" onClick={onAccept}>
+                        {invitation.notice ? i18n("Dismiss") : i18n("Approve")}
+                    </Button>
+                    {!invitation.notice && (
+                        <Button size="sm" variant="outline" onClick={onDecline}>
+                            {i18n("Decline")}
+                        </Button>
+                    )}
+                </div>
+            </article>
+        );
     const paths =
         invitation.kind === "folder" ? [] : (invitation.visibleInFolders ?? []);
     const Icon =
@@ -1113,6 +1179,7 @@ export function PersonInvitations({
                     recording={{
                         id: newest.itemId,
                         kind:
+                            newest.kind === "folder-access" ||
                             newest.kind === "folder" ||
                             newest.kind === "meeting"
                                 ? "audio"
@@ -1125,6 +1192,17 @@ export function PersonInvitations({
                         ownerName: newest.ownerName,
                     }}
                     invitation
+                    invitationTitle={
+                        newest.kind === "folder-access"
+                            ? newest.notice
+                                ? newest.state === "approved"
+                                    ? i18n("Your access request was approved.")
+                                    : i18n(
+                                          "Your access request was declined. You may request again.",
+                                      )
+                                : i18n("Access request")
+                            : undefined
+                    }
                     folderInvitation={newest.kind === "folder"}
                     agendaInvitation={newest.kind === "meeting"}
                     more={list.length - 1}
@@ -1136,7 +1214,7 @@ export function PersonInvitations({
                     }}
                 />
             )),
-        [openList],
+        [openList, i18n],
     );
     useEffect(() => {
         if (!enabled || !notifications) return;
@@ -1214,7 +1292,29 @@ export function PersonInvitations({
             items.filter((item) => item.id !== invitation.id),
         );
         try {
-            if (invitation.kind === "folder")
+            if (invitation.kind === "folder-access") {
+                const response = await fetch(
+                    `/api/folders/${encodeURIComponent(invitation.folderId)}/access-requests/${encodeURIComponent(invitation.id)}`,
+                    {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            state: invitation.notice
+                                ? "dismissed"
+                                : action === "accept"
+                                  ? "approved"
+                                  : "declined",
+                        }),
+                    },
+                );
+                if (!response.ok)
+                    throw new Error(
+                        await getApiErrorMessage(
+                            response,
+                            i18n("Could not update sharing"),
+                        ),
+                    );
+            } else if (invitation.kind === "folder")
                 await changeFolderShareRequest(
                     invitation.id,
                     invitation.version,
@@ -1270,7 +1370,7 @@ export function PersonInvitations({
                     </DialogTitle>
                     <DialogDescription>
                         {i18n(
-                            "Colleagues share their private folders, agendas, recordings and email with you. You see the content once you accept. The Organization does not.",
+                            "Review sharing invitations, restricted folder access requests and decisions about your own requests.",
                         )}
                     </DialogDescription>
                     {invitations.map((invitation) => (
@@ -1286,8 +1386,9 @@ export function PersonInvitations({
                             }
                             onAccept={() => {
                                 if (
-                                    invitation.kind !== "folder" &&
-                                    invitation.visibleInFolders?.length
+                                    invitation.kind === "folder-access" ||
+                                    (invitation.kind !== "folder" &&
+                                        invitation.visibleInFolders?.length)
                                 ) {
                                     void respond(invitation, "accept").catch(
                                         () => {},
@@ -1334,25 +1435,27 @@ export function PersonInvitations({
                     }}
                 />
             )}
-            {filing && filing.kind !== "folder" && (
-                <ReceivedItemDialog
-                    key={filing.id}
-                    item={{
-                        ...filing,
-                        visibleInFolders: filing.visibleInFolders ?? [],
-                        recorded: filing.recorded === true,
-                    }}
-                    folders={folders}
-                    onFolderCreated={onFolderCreated}
-                    initiallyAlso={filingAlso}
-                    open
-                    onOpenChange={closeFiling}
-                    onSave={async (folderId) => {
-                        await respond(filing, "accept", folderId);
-                        filingSaved.current = true;
-                    }}
-                />
-            )}
+            {filing &&
+                filing.kind !== "folder" &&
+                filing.kind !== "folder-access" && (
+                    <ReceivedItemDialog
+                        key={filing.id}
+                        item={{
+                            ...filing,
+                            visibleInFolders: filing.visibleInFolders ?? [],
+                            recorded: filing.recorded === true,
+                        }}
+                        folders={folders}
+                        onFolderCreated={onFolderCreated}
+                        initiallyAlso={filingAlso}
+                        open
+                        onOpenChange={closeFiling}
+                        onSave={async (folderId) => {
+                            await respond(filing, "accept", folderId);
+                            filingSaved.current = true;
+                        }}
+                    />
+                )}
         </>
     );
 }

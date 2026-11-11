@@ -1,8 +1,10 @@
 import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { activeShareRecipientCondition } from "@/db/queries/item-shares";
+import { lockPrivateFolderTree } from "@/db/queries/private-folder-tree";
 import type { ItemShareState } from "@/db/schema";
 import { folderShares, recordingFolders, users } from "@/db/schema";
+import { folderHasSubfolders } from "@/lib/folders/person-shared-leaf";
 import { announceFolderInvitations } from "@/lib/sharing/folder-shares";
 import { requirePersonSharing } from "@/lib/sharing/person-shares";
 
@@ -24,6 +26,7 @@ export async function restoreArchivedFolderShares(
             | "organization_shared"
             | "inactive"
             | "folder_missing"
+            | "has_subfolders"
             | "receiver_missing"
             | "already_shared";
     }[] = [];
@@ -46,6 +49,7 @@ export async function restoreArchivedFolderShares(
             continue;
         }
         const outcome = await db.transaction(async (tx) => {
+            await lockPrivateFolderTree(tx, userId);
             const [folder] = await tx
                 .select({
                     id: recordingFolders.id,
@@ -85,6 +89,8 @@ export async function restoreArchivedFolderShares(
                     ),
                 );
             if (existing) return "already_shared" as const;
+            if (await folderHasSubfolders(tx, userId, folderId))
+                return "has_subfolders" as const;
             await tx.insert(folderShares).values({
                 userId,
                 folderId,

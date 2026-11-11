@@ -7,6 +7,7 @@ import {
     itemShares,
     plaudConnections,
     recordings,
+    restrictedFolderAccessRequests,
     transcriptions,
 } from "@/db/schema";
 import { appChromeConfig } from "@/lib/settings/app-chrome";
@@ -21,12 +22,14 @@ const {
     settings,
     orgAccount,
     connection,
+    curator,
 } = vi.hoisted(() => ({
     state: {
         completed: true,
         connection: { invalidatedAt: null as Date | null },
         organization: false,
         personSharing: false,
+        orgConfigured: false,
         outgoing: false,
     },
     readiness: vi.fn(),
@@ -36,6 +39,7 @@ const {
     settings: vi.fn(),
     orgAccount: vi.fn(),
     connection: vi.fn(),
+    curator: vi.fn(async () => false),
 }));
 vi.mock("@/components/dashboard/workstation", () => ({
     Workstation: () => null,
@@ -52,6 +56,7 @@ vi.mock("@/lib/access/service", () => ({
 }));
 vi.mock("@/lib/authz/curator", () => ({
     actsForOrganization: async () => false,
+    userCuratesOrganizationNow: curator,
 }));
 vi.mock("@/lib/encryption/fields", () => ({
     decryptText: (value: string) => value,
@@ -93,7 +98,8 @@ vi.mock("@/lib/onboarding/readiness", () => ({
     loadOnboardingCapabilities: capabilities,
 }));
 vi.mock("@/lib/org/config", () => ({
-    getOrgUserId: async () => (state.personSharing ? "organization" : null),
+    getOrgUserId: async () =>
+        state.personSharing || state.orgConfigured ? "organization" : null,
     isOrgAccount: orgAccount,
     isOrgScopeVisible: () => state.personSharing,
 }));
@@ -105,6 +111,7 @@ describe("layout onboarding seed", () => {
         state.completed = true;
         state.organization = false;
         state.personSharing = false;
+        state.orgConfigured = false;
         state.outgoing = false;
         settings.mockImplementation(async () => ({
             onboardingCompleted: state.completed,
@@ -189,6 +196,7 @@ describe("layout onboarding seed", () => {
                         aiEnhancements,
                         plaudConnections,
                         itemShares,
+                        restrictedFolderAccessRequests,
                     ]).toContain(table);
                     const query = Object.assign(Promise.resolve(rows), {
                         innerJoin: () => query,
@@ -294,6 +302,19 @@ describe("layout onboarding seed", () => {
             ),
         ).toMatchObject({ sharedWithPeople: true });
     });
+    it("loads the Organization library without a curator lookup when Received is disabled", async () => {
+        state.orgConfigured = true;
+        const page = (await DashboardPage()) as ReactElement<{
+            children: ReactElement<{
+                organizationLibrary: { recordings: Recording[] };
+            }>;
+        }>;
+        expect(page.props.children.props.organizationLibrary).toMatchObject({
+            recordings: [],
+        });
+        expect(curator).not.toHaveBeenCalled();
+    });
+
     it("keeps the Organization entry and the received copy in separate libraries", async () => {
         state.personSharing = true;
         const page = (await DashboardPage()) as ReactElement<{
@@ -320,5 +341,6 @@ describe("layout onboarding seed", () => {
             isOwn: false,
         });
         expect(organizationLibrary.recordings[0].receivedShare).toBeUndefined();
+        expect(curator).toHaveBeenCalledExactlyOnceWith("viewer");
     });
 });

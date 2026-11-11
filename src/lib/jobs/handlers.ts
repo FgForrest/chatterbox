@@ -12,6 +12,7 @@ import {
     exportPlanJobHandler,
     exportReconcileJobHandler,
 } from "@/lib/folder-exports/job-handlers";
+import { restrictedFolderJobHandler } from "@/lib/folders/restriction-job";
 import { knowledgeEmbedJobHandler } from "@/lib/knowledge/knowledge-embed";
 import { learnReleaseJobHandler } from "@/lib/learn/auto-learn";
 import { correctionPassJobHandler } from "@/lib/learn/correction-pass-job";
@@ -35,6 +36,7 @@ import { registerJobHandler } from "./registry";
 
 /** Idempotent: safe to call from more than one entry point. */
 export function registerJobHandlers(): void {
+    registerJobHandler(restrictedFolderJobHandler);
     registerJobHandler(agendaSuggestionsJobHandler);
     registerJobHandler(summaryJobHandler);
     registerJobHandler(recordingCutJobHandler);

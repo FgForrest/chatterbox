@@ -10,11 +10,20 @@ export async function requirePersonShareSession(request: Request) {
         throw new AppError(ErrorCode.NOT_FOUND, "Not found", 404);
     const session = await requireApiSession(request);
     await requirePersonSharing(session.user.id);
+    await consumePersonShareRateLimit(request, session.user.id);
+    return session;
+}
+
+/** Shared invitation/request buckets protect recipients from repeated notification writes. */
+export async function consumePersonShareRateLimit(
+    request: Request,
+    userId: string,
+) {
     const read = request.method === "GET";
     const bucket = await consumeRateLimitBucket(
         read
-            ? `person-shares:read:${new URL(request.url).pathname}:${session.user.id}`
-            : `person-shares:${request.method}:${session.user.id}`,
+            ? `person-shares:read:${new URL(request.url).pathname}:${userId}`
+            : `person-shares:${request.method}:${userId}`,
         { limit: read ? 240 : 60, windowMs: 60_000 },
     );
     if (!bucket.allowed)
@@ -23,5 +32,4 @@ export async function requirePersonShareSession(request: Request) {
             "Too many sharing requests",
             429,
         );
-    return session;
 }

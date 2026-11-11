@@ -6,8 +6,9 @@ import { bindMeetingPromptOffer } from "../lib/meeting-prompt-ui.js";
 import { microphonePermission } from "../lib/microphone.js";
 import { originOf } from "../lib/pairing.js";
 import { detectMeetingPlatform } from "../lib/platforms.js";
+import { isWaitingForUpload } from "../lib/upload-state.js";
 import {
-    effectiveNoticeText,
+    customNoticeText,
     effectivePlatformModes,
     getSettings,
     isPaired,
@@ -28,6 +29,8 @@ export async function mountRecordingControls(
         tabId,
         agendaChoice = () => ({}),
         onState = () => {},
+        onTab = () => {},
+        selectedAgenda = () => null,
         beforeAction = async () => {},
     } = {},
 ) {
@@ -44,6 +47,7 @@ export async function mountRecordingControls(
             ),
         );
     }
+    if (variant === "panel") root.querySelector("header").hidden = true;
     const views = {
         connect: root.querySelector("#" + "view-connect"),
         unpaired: root.querySelector("#" + "view-unpaired"),
@@ -100,7 +104,8 @@ export async function mountRecordingControls(
     }
 
     async function activeTab() {
-        if (tabId != null) return chrome.tabs.get(tabId).catch(() => null);
+        const id = typeof tabId === "function" ? tabId() : tabId;
+        if (id != null) return chrome.tabs.get(id).catch(() => null);
         const [tab] = await chrome.tabs.query({
             active: true,
             currentWindow: true,
@@ -125,6 +130,7 @@ export async function mountRecordingControls(
     }
 
     let popupFolderChoice;
+    let agendaFolderChoice;
     const folderCombobox = createFolderField({
         container: el("folder-row"),
         request: (params) => sendMessage({ type: "get-folders", ...params }),
@@ -204,20 +210,15 @@ export async function mountRecordingControls(
         const settings = await getSettings();
         if (version !== renderVersion) return;
         const hint = el("idle-hint");
-        if (variant === "panel") {
-            const heading = root.querySelector("header h1 span");
-            if (heading)
-                heading.textContent = currentPlatform
-                    ? t("recordThis", currentPlatform.name)
-                    : t("ready");
-            hint.hidden = true;
-        }
+        hint.hidden = variant === "panel";
+        el("start").hidden = variant === "panel" && !currentPlatform;
         const autoHint = el("auto-hint");
         autoHint.hidden = true;
         el("start").textContent = t("recordTabWithConsent");
-        el("notice-text").textContent = effectiveNoticeText(settings);
-        el("picker-hint").hidden = false;
-        folderCombobox.reset(popupFolderChoice ?? settings);
+        el("notice-text").textContent = customNoticeText(settings);
+        el("notice-text").hidden = !el("notice-text").textContent;
+        el("picker-hint").hidden = variant === "panel" && Boolean(currentPlatform);
+        folderCombobox.reset(popupFolderChoice ?? agendaFolderChoice ?? settings);
 
         if (currentPlatform) {
             hint.textContent = t("recordThis", currentPlatform.name);
@@ -331,6 +332,7 @@ export async function mountRecordingControls(
         const version = ++renderVersion;
         currentState = state;
         onState(state);
+        void meetingCard?.render();
         if (state.state !== STATE.idle)
             void getSettings().then((settings) =>
                 renderAgendaCard(settings, state),
@@ -352,13 +354,14 @@ export async function mountRecordingControls(
             return;
         }
 
-        if (state.state === STATE.finalizing && !finalizationTimer) {
+        const waitingForUpload = isWaitingForUpload(state);
+        if (waitingForUpload && !finalizationTimer) {
             finalizationTimer = setInterval(() => {
                 void sendMessage({ type: "check-finalization" }).catch(
                     () => {},
                 );
             }, 5000);
-        } else if (state.state !== STATE.finalizing && finalizationTimer) {
+        } else if (!waitingForUpload && finalizationTimer) {
             clearInterval(finalizationTimer);
             finalizationTimer = undefined;
         }
@@ -371,6 +374,8 @@ export async function mountRecordingControls(
                 }
                 show("recording");
                 recordingFolder.render(state);
+                el("mic-bar").style.width = dbToWidth(state.levels?.micDb ?? -100);
+                el("sys-bar").style.width = dbToWidth(state.levels?.systemDb ?? -100);
                 const tick = () => {
                     el("elapsed").textContent = formatElapsed(state.startedAt);
                 };
@@ -499,6 +504,7 @@ export async function mountRecordingControls(
         currentPlatform = currentTab?.url
             ? detectMeetingPlatform(currentTab.url)
             : null;
+        onTab(currentTab);
         const response = await sendMessage({ type: "get-state" });
         await render(response?.state ?? { state: STATE.idle });
     })();
@@ -506,22 +512,33 @@ export async function mountRecordingControls(
     meetingCard = createNextMeetingCard(
         el("next-meeting-card"),
         () => currentTab,
+        { popup: variant === "popup", state: () => currentState, ...(variant === "panel" ? { agendaId: selectedAgenda, compact: true } : {}) },
     );
+    if (variant === "panel") el("view-idle").prepend(el("next-meeting-card"));
     const tabUpdated = (id, change, tab) => {
         if (id !== currentTab?.id || !change.url) return;
         currentTab = tab;
         currentPlatform = detectMeetingPlatform(tab.url);
+        onTab(currentTab);
         if (currentState.state === STATE.idle) void render(currentState);
         void meetingCard.render();
     };
     chrome.tabs.onUpdated?.addListener(tabUpdated);
+    const tabActivated = async () => {
+        currentTab = await activeTab();
+        currentPlatform = detectMeetingPlatform(currentTab?.url);
+        onTab(currentTab);
+        if (currentState.state === STATE.idle) await render(currentState);
+        void meetingCard.render();
+    };
+    chrome.tabs.onActivated?.addListener(tabActivated);
     const settingsChanged = (changes, area) => {
         if (
             area !== "local" ||
             !(
                 changes.serverUrl ||
                 changes.encryptedApiKey ||
-                changes.dataUseAcknowledgedAt
+                changes.dataUseAcknowledgedAt || changes.serverDefaults || changes.noticeText
             )
         )
             return;
@@ -532,7 +549,10 @@ export async function mountRecordingControls(
     chrome.storage.onChanged.addListener(settingsChanged);
     return {
         render,
+        refreshTab: tabActivated,
+        refreshMeeting: () => meetingCard.render(),
         folder: (folder) => {
+            agendaFolderChoice = folder;
             if (!popupFolderChoice)
                 folderCombobox.reset(folder, { refresh: false });
         },
@@ -541,6 +561,7 @@ export async function mountRecordingControls(
             clearInterval(finalizationTimer);
             chrome.runtime.onMessage.removeListener?.(listener);
             chrome.tabs.onUpdated?.removeListener(tabUpdated);
+            chrome.tabs.onActivated?.removeListener(tabActivated);
             chrome.storage.onChanged.removeListener?.(settingsChanged);
             meetingCard.destroy();
             folderCombobox.destroy();

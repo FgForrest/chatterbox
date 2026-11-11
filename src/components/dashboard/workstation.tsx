@@ -52,6 +52,7 @@ import {
     useDashboardRefresh,
 } from "@/hooks/use-dashboard-refresh";
 import { useFolderLabel } from "@/hooks/use-folder-label";
+import { useFolderRefusal } from "@/hooks/use-folder-refusal";
 import {
     LibraryPreferencesContext,
     useLibraryPreferencesState,
@@ -171,6 +172,7 @@ export function Workstation({
 }: WorkstationProps) {
     const i18n = useExtracted();
     const folderLabel = useFolderLabel();
+    const folderRefusal = useFolderRefusal();
     const shareRefusal = useShareRefusal();
     const refresh = useDashboardRefresh();
     // A stable empty list: a fresh `[]` per render would re-run every effect
@@ -1358,11 +1360,10 @@ export function Workstation({
                 body: JSON.stringify({ parentId, name }),
             });
             if (!response.ok) {
+                const error = await parseApiError(response);
                 toast.error(
-                    await getApiErrorMessage(
-                        response,
-                        i18n("Could not create folder"),
-                    ),
+                    folderRefusal(error) ??
+                        (error.error || i18n("Could not create folder")),
                 );
                 throw new Error(i18n("Could not create folder"));
             }
@@ -1372,7 +1373,7 @@ export function Workstation({
             handleFolderCreated(folder);
             toast.success(i18n("Folder created"));
         },
-        [handleFolderCreated, i18n],
+        [handleFolderCreated, i18n, folderRefusal],
     );
 
     const handleRenameFolder = useCallback(
@@ -1407,7 +1408,7 @@ export function Workstation({
             setFolderOrganization((current) => ({
                 ...current,
                 folders: current.folders.map((item) =>
-                    item.id === folder.id ? folder : item,
+                    item.id === folder.id ? { ...item, ...folder } : item,
                 ),
             }));
             toast.success(i18n("Folder renamed"));
@@ -1477,6 +1478,13 @@ export function Workstation({
                                       folder.id === folderId
                                           ? parentId
                                           : folder.parentId,
+                                  ...(folder.id === folderId
+                                      ? {
+                                            insideSharedFolder:
+                                                destinationFolder?.sharedWithPeople ||
+                                                undefined,
+                                        }
+                                      : {}),
                                   sortOrder,
                               };
                     }),
@@ -1494,21 +1502,17 @@ export function Workstation({
                     version,
                 }),
             });
-            if (response.status === 409) {
-                setFolderOrganization(previous);
-                refresh();
-                toast.error(
-                    i18n("Someone else changed this folder. Try again."),
-                );
-                throw new Error(i18n("Could not move folder"));
-            }
             if (!response.ok) {
                 setFolderOrganization(previous);
+                const error = await parseApiError(response);
+                if (response.status === 409) refresh();
                 toast.error(
-                    await getApiErrorMessage(
-                        response,
-                        i18n("Could not move folder"),
-                    ),
+                    folderRefusal(error) ??
+                        (response.status === 409
+                            ? i18n(
+                                  "Someone else changed this folder. Try again.",
+                              )
+                            : error.error || i18n("Could not move folder")),
                 );
                 throw new Error(i18n("Could not move folder"));
             }
@@ -1522,7 +1526,7 @@ export function Workstation({
             }));
             toast.success(i18n("Folder moved"));
         },
-        [folderOrganization, i18n, refresh],
+        [folderOrganization, i18n, refresh, folderRefusal],
     );
 
     const handleDeleteFolder = useCallback(

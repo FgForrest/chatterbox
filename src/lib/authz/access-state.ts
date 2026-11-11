@@ -1,14 +1,20 @@
 import { and, eq, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { lockOrgTree } from "@/db/queries/organization-tree";
+import { cancelUserFolderRequests } from "@/db/queries/restricted-folder-access-requests";
 import { accounts, userAccessStates } from "@/db/schema";
 import { type Capability, isCapability } from "@/lib/authz/catalog";
 import { expandGrants, orderedCapabilities } from "@/lib/authz/policy";
 import { env } from "@/lib/env";
 import { getAccessVerifier } from "@/lib/identity/factory";
-import { IdentityProviderError } from "@/lib/identity/ports";
+import {
+    type AccessVerification,
+    IdentityProviderError,
+} from "@/lib/identity/ports";
+import { isOrgScopeVisible } from "@/lib/org/config";
 import { SSO_PROVIDER_ID } from "@/lib/sso/constants";
 
-type Executor = Pick<typeof db, "insert">;
+type Executor = Pick<typeof db, "insert" | "update" | "execute">;
 
 export type AccessStateSource =
     | "login"
@@ -40,6 +46,17 @@ export async function recordAccessState(
         source: input.source,
         updatedAt: now,
     };
+    const cancelRequests =
+        isOrgScopeVisible() &&
+        (values.status !== "active" || !values.capabilities.includes("use"));
+    if (cancelRequests && executor === db)
+        return db.transaction((tx) =>
+            recordAccessState(
+                { ...input, capabilities: values.capabilities },
+                tx,
+            ),
+        );
+    if (cancelRequests) await lockOrgTree(executor);
     const insert = executor
         .insert(userAccessStates)
         .values({ userId: input.userId, ...values });
@@ -61,6 +78,8 @@ export async function recordAccessState(
                     : undefined,
           })
     ).returning({ userId: userAccessStates.userId });
+    if (written.length && cancelRequests)
+        await cancelUserFolderRequests(executor, input.userId);
     return written.length > 0;
 }
 
@@ -98,6 +117,31 @@ function capabilitiesOf(stored: unknown): Set<Capability> {
     );
 }
 
+async function storedAccessState(
+    userId: string,
+    executor: Pick<typeof db, "select"> = db,
+) {
+    const [state] = await executor
+        .select()
+        .from(userAccessStates)
+        .where(eq(userAccessStates.userId, userId))
+        .limit(1);
+    return state;
+}
+
+function freshStoredAccess(
+    state: typeof userAccessStates.$inferSelect | undefined,
+): HolderAccess | null {
+    if (!state || Date.now() - state.verifiedAt.getTime() >= maxAgeMs()) {
+        return null;
+    }
+    if (state.status !== "active") return { ok: false, reason: "disabled" };
+    const capabilities = capabilitiesOf(state.capabilities);
+    return capabilities.has("use")
+        ? { ok: true, capabilities, verifiedAt: state.verifiedAt }
+        : { ok: false, reason: "not-granted" };
+}
+
 async function providerIdentity(
     userId: string,
     executor: Pick<typeof db, "select"> = db,
@@ -126,22 +170,17 @@ async function providerIdentity(
  */
 export async function holderAccess(
     userId: string,
-    options: { readOnly?: boolean; executor?: Pick<typeof db, "select"> } = {},
+    options: {
+        readOnly?: boolean;
+        executor?: Pick<typeof db, "select">;
+        verify?: boolean;
+    } = {},
 ): Promise<HolderAccess> {
-    const [state] = await (options.executor ?? db)
-        .select()
-        .from(userAccessStates)
-        .where(eq(userAccessStates.userId, userId))
-        .limit(1);
-    const now = Date.now();
-    if (state && now - state.verifiedAt.getTime() < maxAgeMs()) {
-        if (state.status !== "active") return { ok: false, reason: "disabled" };
-        const capabilities = capabilitiesOf(state.capabilities);
-        return capabilities.has("use")
-            ? { ok: true, capabilities, verifiedAt: state.verifiedAt }
-            : { ok: false, reason: "not-granted" };
-    }
+    const state = await storedAccessState(userId, options.executor);
+    const fresh = freshStoredAccess(state);
+    if (fresh) return fresh;
 
+    if (options.verify === false) return { ok: false, reason: "unverifiable" };
     const verifier = getAccessVerifier();
     const identity = await providerIdentity(userId, options.executor);
     if (!verifier || !identity) return { ok: false, reason: "unverifiable" };
@@ -175,8 +214,21 @@ export async function holderAccess(
             source: "verifier",
             expectedUpdatedAt: state?.updatedAt ?? null,
         });
-        if (!stored) return { ok: false, reason: "unavailable" };
+        if (!stored) {
+            const own = verdictAccess(verdict);
+            // A denial this request verified never yields to a grant stored meanwhile.
+            if (!own.ok) return own;
+            return (
+                freshStoredAccess(
+                    await storedAccessState(userId, options.executor),
+                ) ?? { ok: false, reason: "unavailable" }
+            );
+        }
     }
+    return verdictAccess(verdict);
+}
+
+function verdictAccess(verdict: AccessVerification): HolderAccess {
     if (verdict.status !== "active") return { ok: false, reason: "disabled" };
     return verdict.capabilities.has("use")
         ? {

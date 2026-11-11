@@ -241,6 +241,7 @@ export function FolderTree({
     const canDropFolderOn = (
         draggedId: string,
         target: RecordingFolder,
+        placement: DropPlacement,
     ): boolean => {
         const dragged = folders.find((folder) => folder.id === draggedId);
         if (
@@ -249,6 +250,11 @@ export function FolderTree({
             target.receivedFolder ||
             dragged.scope !== target.scope
         )
+            return false;
+        if (placement === "inside" && target.sharedWithPeople) return false;
+        const container =
+            placement === "inside" ? target : byId.get(target.parentId ?? "");
+        if (container?.sharedWithPeople && dragged.parentId !== container.id)
             return false;
         return dragged.scope !== "org" || canCurate;
     };
@@ -261,7 +267,7 @@ export function FolderTree({
         if (draggedId === target.id) return;
         // A folder never changes tree: Private folders are nobody else's
         // business and Organization folders are nobody's to take private.
-        if (!canDropFolderOn(draggedId, target)) return;
+        if (!canDropFolderOn(draggedId, target, placement)) return;
         if (placement === "inside") {
             void onMoveFolder(draggedId, target.id, null).catch(() => {});
             return;
@@ -396,10 +402,16 @@ export function FolderTree({
                                 setRecordingDropFolderId(folder.id);
                                 return;
                             }
+                            const placement = dropPlacementFor(event, folder);
                             if (
                                 !draggedFolderId ||
-                                !canDropFolderOn(draggedFolderId, folder)
+                                !canDropFolderOn(
+                                    draggedFolderId,
+                                    folder,
+                                    placement,
+                                )
                             ) {
+                                event.dataTransfer.dropEffect = "none";
                                 setDropTarget(null);
                                 return;
                             }
@@ -408,7 +420,7 @@ export function FolderTree({
                             setRecordingDropFolderId(null);
                             setDropTarget({
                                 folderId: folder.id,
-                                placement: dropPlacementFor(event, folder),
+                                placement,
                             });
                         }}
                         onDragLeave={() => {
@@ -478,16 +490,19 @@ export function FolderTree({
                             const draggedId =
                                 draggedFolderId ||
                                 event.dataTransfer.getData(FOLDER_DRAG_TYPE);
-                            if (!canDropFolderOn(draggedId, folder)) {
+                            const placement =
+                                dropTarget?.folderId === folder.id
+                                    ? dropTarget.placement
+                                    : dropPlacementFor(event, folder);
+                            if (
+                                !canDropFolderOn(draggedId, folder, placement)
+                            ) {
+                                event.dataTransfer.dropEffect = "none";
                                 setDropTarget(null);
                                 setDraggedFolderId(null);
                                 return;
                             }
                             event.preventDefault();
-                            const placement =
-                                dropTarget?.folderId === folder.id
-                                    ? dropTarget.placement
-                                    : dropPlacementFor(event, folder);
                             setDropTarget(null);
                             setDraggedFolderId(null);
                             if (draggedId) {
@@ -531,6 +546,7 @@ export function FolderTree({
                             />
                         )}
                         <span className="truncate">{folderLabel(folder)}</span>
+                        <UnsharedSubfolderLabel folder={folder} />
                         <span className="ml-auto text-xs tabular-nums text-muted-foreground">
                             {countByFolder.get(folder.id) ?? 0}
                         </span>
@@ -565,18 +581,29 @@ export function FolderTree({
                                 />
                             ) : (
                                 <>
-                                    {canCreateSubfolder(
-                                        folder,
-                                        canCurate,
-                                        isOrgAccount,
-                                    ) && (
+                                    {(folder.sharedWithPeople ||
+                                        canCreateSubfolder(
+                                            folder,
+                                            canCurate,
+                                            isOrgAccount,
+                                        )) && (
                                         <DropdownMenuItem
+                                            disabled={!!folder.sharedWithPeople}
                                             onSelect={() =>
                                                 onSettings(folder, "create")
                                             }
                                         >
                                             <FolderPlus />{" "}
-                                            {i18n("New subfolder")}
+                                            <span>
+                                                {i18n("New subfolder")}
+                                                {folder.sharedWithPeople && (
+                                                    <span className="block text-xs text-muted-foreground">
+                                                        {i18n(
+                                                            "A shared folder has no subfolders.",
+                                                        )}
+                                                    </span>
+                                                )}
+                                            </span>
                                         </DropdownMenuItem>
                                     )}
                                     {onPrepareMeeting &&
@@ -773,6 +800,9 @@ export function FolderTree({
                                         <span className="truncate">
                                             {folderLabel(folder)}
                                         </span>
+                                        <UnsharedSubfolderLabel
+                                            folder={folder}
+                                        />
                                         <span className="ml-auto text-xs text-muted-foreground">
                                             {countByFolder.get(folder.id) ?? 0}
                                         </span>
@@ -805,5 +835,20 @@ export function FolderTree({
                 </CardContent>
             </Card>
         </>
+    );
+}
+
+function UnsharedSubfolderLabel({ folder }: { folder: RecordingFolder }) {
+    const i18n = useExtracted();
+    if (!folder.insideSharedFolder || folder.sharedWithPeople) return null;
+    return (
+        <span
+            className="shrink-0 text-xs text-muted-foreground"
+            title={i18n(
+                "Only the shared folder's own items are shared, not its subfolders.",
+            )}
+        >
+            {i18n("not shared")}
+        </span>
     );
 }

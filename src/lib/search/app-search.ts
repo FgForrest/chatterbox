@@ -157,13 +157,14 @@ async function searchChatter(
     userId: string,
     query: string,
     signal?: AbortSignal,
+    isCurator = false,
 ): Promise<{ hits: ChatterSearchHit[]; limited: boolean }> {
     signal?.throwIfAborted();
     const orgUserId = await getOrgUserId();
     signal?.throwIfAborted();
     const visibility = or(
         eq(chatterItems.userId, userId),
-        receivedItemCondition(userId),
+        receivedItemCondition(userId, chatterItems.id, isCurator),
         orgUserId ? sharedItemCondition(orgUserId, chatterItems.id) : undefined,
     );
     const searches = query
@@ -201,7 +202,7 @@ async function searchChatter(
             userId: chatterItems.userId,
             title: chatterItems.title,
             kind: chatterItems.kind,
-            received: sql<boolean>`${receivedItemCondition(userId)}`,
+            received: sql<boolean>`${receivedItemCondition(userId, chatterItems.id, isCurator)}`,
         })
         .from(chatterItems)
         .where(
@@ -253,7 +254,7 @@ export async function searchApp(
 ): Promise<AppSearchResults> {
     const [chatter, almanac, tasks] = await Promise.all([
         scope === "chatter" || scope === "all"
-            ? searchChatter(viewer.userId, query, signal)
+            ? searchChatter(viewer.userId, query, signal, viewer.isCurator)
             : null,
         scope === "almanac" || scope === "all"
             ? searchAlmanac(viewer.userId, query, signal)

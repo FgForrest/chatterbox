@@ -4,13 +4,14 @@ import { pickerWindowBounds } from "./picker-window.js";
 import { getSettings } from "./settings.js";
 import { formatMeetingTime } from "./meeting-time.js";
 import { claimMeetingNotification } from "./meeting-notifications.js";
+import { meetCode } from "./meet-code.js";
 
 export const AGENDA_ALARM_PREFIX = "agenda:";
 export const AGENDA_CACHE_KEY = "recorderAgendas";
 export const AGENDA_PANEL_KEY = "recorderAgendaPanel";
 export const AGENDA_SELECTION_KEY = "recorderAgendaSelection";
 
-/** Storage context for one tab's panel or the fallback window. */
+/** Storage context for a tab or the fallback window. */
 export function agendaPanelKey(tabId) {
     return `${AGENDA_PANEL_KEY}:${tabId ?? "window"}`;
 }
@@ -70,9 +71,7 @@ export async function matchAgendas(tabUrl, now = Date.now(), init = {}) {
     if (tabUrl) {
         const url = new URL(tabUrl);
         if (url.hostname === "meet.google.com") {
-            const code = /^\/([a-z]{3}-[a-z]{4}-[a-z]{3})\/?$/i.exec(
-                url.pathname,
-            )?.[1];
+            const code = meetCode(url);
             if (!code) return [];
             query.set("meetCode", code.toLowerCase());
         }
@@ -82,7 +81,7 @@ export async function matchAgendas(tabUrl, now = Date.now(), init = {}) {
 }
 
 /** Offer nearby manual choices alongside every current automatic time match. */
-export async function agendaChoices(now = Date.now(), agendaIds = []) {
+export async function agendaChoices(now = Date.now(), agendaIds = [], { onError = () => {} } = {}) {
     if (!supportsAgendas(await getSettings())) return [];
     const query = new URLSearchParams({
         from: new Date(now - 86400000).toISOString(),
@@ -94,6 +93,7 @@ export async function agendaChoices(now = Date.now(), agendaIds = []) {
     ]);
     if (matched.status === "rejected" && listed.status === "rejected")
         throw matched.reason;
+    if (matched.status === "rejected" || listed.status === "rejected") onError();
     const rows = new Map();
     for (const row of [
         ...(matched.status === "fulfilled" ? matched.value : []),
@@ -124,8 +124,10 @@ export async function clearAgendas() {
         AGENDA_CACHE_KEY,
         AGENDA_PANEL_KEY,
         AGENDA_SELECTION_KEY,
-        ...Object.keys(stored).filter((key) => key.startsWith("agenda-route:") || key.startsWith("agenda-match:") || key.startsWith(`${AGENDA_PANEL_KEY}:`)),
+        ...Object.keys(stored).filter((key) => key.startsWith("agenda-route:") || key.startsWith("agenda-match:") || key.startsWith("meeting-tab:") || key.startsWith(`${AGENDA_PANEL_KEY}:`)),
     ];
+    for (const alarm of (await chrome.alarms?.getAll?.()) ?? [])
+        if (alarm.name.startsWith("meeting-tab-end:")) await chrome.alarms.clear(alarm.name);
     await chrome.storage.session.remove(keys);
     await clearAgendaReminders();
 }
@@ -309,33 +311,37 @@ export function openAgendaPanel(context = {}, agendaIds = []) {
             return key;
         })
         .catch(async () => {
-            const fallbackKey = agendaPanelKey();
-            await chrome.storage.session.set({ [fallbackKey]: panelContext });
-            const anchor = await chrome.windows
-                .getLastFocused({ windowTypes: ["normal"] })
-                .catch(() => null);
-            const bounds = pickerWindowBounds(anchor);
-            const width = 430;
-            const height = 640;
-            await chrome.windows.create({
-                url: chrome.runtime.getURL("agenda/agenda.html"),
-                type: "popup",
-                focused: true,
-                width,
-                height,
-                ...(bounds.left != null
-                    ? {
-                          left:
-                              bounds.left +
-                              Math.round((bounds.width - width) / 2),
-                          top:
-                              bounds.top +
-                              Math.round((bounds.height - height) / 2),
-                      }
-                    : {}),
-            });
-            return fallbackKey;
+            return openAgendaWindow(context, agendaIds);
         });
+}
+
+/** Show the agenda in a separate window after Chrome refuses a side panel. */
+export async function openAgendaWindow(context = {}, agendaIds = [], key = agendaPanelKey()) {
+    await chrome.storage.session.set({ [key]: { agendaIds, choose: agendaIds.length !== 1, tabId: context.matchTabId ?? context.tabId } });
+    const anchor = await chrome.windows
+        .getLastFocused({ windowTypes: ["normal"] })
+        .catch(() => null);
+    const bounds = pickerWindowBounds(anchor);
+    const width = 430;
+    const height = 640;
+    await chrome.windows.create({
+        url: chrome.runtime.getURL(`agenda/agenda.html${key === agendaPanelKey(context.tabId) && context.tabId != null ? `?tab=${context.tabId}` : ""}`),
+        type: "popup",
+        focused: true,
+        width,
+        height,
+        ...(bounds.left != null
+            ? {
+                  left:
+                      bounds.left +
+                      Math.round((bounds.width - width) / 2),
+                  top:
+                      bounds.top +
+                      Math.round((bounds.height - height) / 2),
+              }
+            : {}),
+    });
+    return key;
 }
 
 /** Completion remains unchanged on servers that do not advertise agendas. */

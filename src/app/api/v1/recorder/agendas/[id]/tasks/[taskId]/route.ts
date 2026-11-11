@@ -11,7 +11,7 @@ export const PATCH = meetingRoute(async ({ userId, params, request }) => {
     const input = z
         .object({
             version: z.number().int().nonnegative(),
-            status: z.enum(["done", "dropped"]),
+            status: z.enum(["open", "done", "dropped"]),
         })
         .parse(await request.json());
     const { agenda } = await requireMeetingAccess(userId, params.id, "edit");

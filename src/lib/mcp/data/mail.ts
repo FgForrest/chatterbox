@@ -203,6 +203,7 @@ export async function mailFilterConditions(
             caller.kind === "user" ? caller.userId : caller.orgUserId,
             filters.folderId,
             { id: chatterItems.id, userId: chatterItems.userId },
+            caller.kind === "user" && caller.isCurator === true,
         );
         if (!folder) throw new McpToolError("No such folder", "not_found");
         conditions.push(folder);

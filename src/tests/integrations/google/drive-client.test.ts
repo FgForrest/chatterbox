@@ -123,6 +123,23 @@ describe("Google Drive HTTP client", () => {
         expect(shared.requests[0]?.url.searchParams.get("driveId")).toBe("d1");
     });
 
+    it.each([
+        false,
+        true,
+    ])("checks untagged children before pruning (present=%s)", async (present) => {
+        const { drive, requests } = client(() =>
+            json({
+                files: present ? [{ ...ITEM, appProperties: {} }] : [],
+            }),
+        );
+        expect(await drive.hasChildren("folder1")).toBe(present);
+        expect(requests).toHaveLength(1);
+        expect(requests[0].url.searchParams.get("q")).toBe(
+            "'folder1' in parents and trashed = false",
+        );
+        expect(requests[0].url.searchParams.get("pageSize")).toBe("1");
+    });
+
     it("finds a child by parent, name and tag", async () => {
         const { drive, requests } = client(() => json({ files: [ITEM] }));
         await drive.findChild("folder1", "it's.md", {

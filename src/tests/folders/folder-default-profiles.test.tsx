@@ -11,8 +11,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { FolderDefaultProfiles } from "@/components/dashboard/folder-default-profiles";
 
 describe("folder default profile picker", () => {
-    afterEach(() => {
+    afterEach(async () => {
         cleanup();
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
         vi.unstubAllGlobals();
     });
 

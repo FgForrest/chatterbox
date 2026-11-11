@@ -6,6 +6,7 @@ import {
     screen,
     waitFor,
 } from "@testing-library/react";
+import { toast } from "sonner";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { NewFolderForm } from "@/components/pipeline/new-folder-form";
 import type { RecordingFolder } from "@/types/folder";
@@ -154,4 +155,84 @@ it("updates available parents and refuses creation with no allowed parent", () =
     expect(
         screen.getByRole("button", { name: "Create folder" }),
     ).toHaveProperty("disabled", true);
+});
+
+it("removes shared parents live and submits to an available private parent", async () => {
+    const fetch = vi
+        .fn()
+        .mockResolvedValue(
+            Response.json({ folder: { ...project, id: "new" } }),
+        );
+    vi.stubGlobal("fetch", fetch);
+    const view = render(
+        <NewFolderForm
+            parents={[parents[1], parents[0]]}
+            idPrefix="test"
+            initialName="Acme plans"
+            onCancel={vi.fn()}
+            onCreated={vi.fn()}
+        />,
+    );
+    view.rerender(
+        <NewFolderForm
+            parents={[
+                {
+                    ...parents[1],
+                    folder: { ...project, sharedWithPeople: true },
+                },
+                parents[0],
+            ]}
+            idPrefix="test"
+            initialName="Acme plans"
+            onCancel={vi.fn()}
+            onCreated={vi.fn()}
+        />,
+    );
+    fireEvent.click(screen.getByRole("combobox", { name: "Parent folder" }));
+    expect(
+        screen.queryByRole("option", { name: "Projects Private" }),
+    ).toBeNull();
+    fireEvent.keyDown(screen.getByPlaceholderText("Find a folder…"), {
+        key: "Escape",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create folder" }));
+    await waitFor(() =>
+        expect(fetch).toHaveBeenCalledWith(
+            "/api/folders",
+            expect.objectContaining({
+                body: JSON.stringify({ parentId: "root", name: "Acme plans" }),
+            }),
+        ),
+    );
+});
+it("localizes a shared-parent refusal after a stale folder choice", async () => {
+    vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+            Response.json(
+                {
+                    code: "SHARED_FOLDER_HAS_NO_SUBFOLDERS",
+                    error: "Server text",
+                },
+                { status: 409 },
+            ),
+        ),
+    );
+    const error = vi.spyOn(toast, "error");
+    render(
+        <NewFolderForm
+            parents={parents}
+            idPrefix="test"
+            initialName="Acme plans"
+            onCancel={vi.fn()}
+            onCreated={vi.fn()}
+        />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create folder" }));
+    await waitFor(() =>
+        expect(error).toHaveBeenCalledWith(
+            "A shared folder has no subfolders.",
+        ),
+    );
+    error.mockRestore();
 });

@@ -8,10 +8,12 @@ import {
     mailParticipants,
 } from "@/db/schema";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
-import type { ArchiveScope } from "@/lib/export/archive-scope";
+import {
+    type ArchiveScope,
+    archivedItemCondition,
+} from "@/lib/export/archive-scope";
 import type { MailAuth } from "@/lib/mail/dkim";
 import type { AttachmentMeta } from "@/lib/mail/parse";
-import { sharedItemCondition } from "@/lib/sharing/shared";
 
 /** A mail as an archive carries it, beside its raw message. */
 export interface ArchivedMail {
@@ -102,9 +104,7 @@ export async function collectArchivedMail(
             and(
                 eq(chatterItems.kind, "mail"),
                 isNull(chatterItems.deletedAt),
-                scope.kind === "personal"
-                    ? eq(chatterItems.userId, scope.userId)
-                    : sharedItemCondition(scope.orgUserId),
+                archivedItemCondition(scope),
             ),
         )
         .orderBy(asc(chatterItems.occurredAt), asc(chatterItems.id));

@@ -11,6 +11,11 @@ import {
 } from "drizzle-orm";
 import { db } from "@/db";
 import { loadPipelineProcessingJobs } from "@/db/queries/pipeline-processing";
+import {
+    placementVisibleCondition,
+    restrictedFolderVisibleCondition,
+    restrictedMemberCondition,
+} from "@/db/queries/restricted-folders";
 import { readOwnerTrimProposal } from "@/db/queries/trim-proposal";
 import {
     aiEnhancements,
@@ -376,6 +381,10 @@ export async function loadPrivateItemProcessing(
     if (!item || item.kind === "meeting") return null;
 
     const orgUserId = await getOrgUserId();
+    const restrictedViewer = {
+        userId: viewerUserId,
+        isCurator: await userCuratesOrganizationNow(viewerUserId),
+    };
     const [
         placementRows,
         intentRows,
@@ -406,6 +415,7 @@ export async function loadPrivateItemProcessing(
             )
             .where(
                 and(
+                    placementVisibleCondition(restrictedViewer),
                     eq(recordingFolderAssignments.itemId, itemId),
                     eq(recordingFolderAssignments.userId, ownerUserId),
                 ),
@@ -426,6 +436,10 @@ export async function loadPrivateItemProcessing(
             )
             .where(
                 and(
+                    restrictedFolderVisibleCondition(restrictedViewer),
+                    restrictedViewer.isCurator
+                        ? undefined
+                        : sql`(not exists (select 1 from ${recordingFolderAssignments} where ${recordingFolderAssignments.folderId} = ${mailPendingShares.folderId} and ${recordingFolderAssignments.itemId} = ${mailPendingShares.itemId} and ${recordingFolderAssignments.withheld}) or ${restrictedMemberCondition(viewerUserId)})`,
                     eq(mailPendingShares.itemId, itemId),
                     eq(mailPendingShares.userId, ownerUserId),
                 ),

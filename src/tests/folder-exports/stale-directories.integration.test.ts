@@ -116,6 +116,7 @@ vi.mock("@/lib/storage/factory", () => ({
 }));
 
 import { encryptText } from "@/lib/encryption/fields";
+import { ErrorCode } from "@/lib/errors";
 import { createFolderExport } from "@/lib/folder-exports/configurations";
 import { materializeFolderExport } from "@/lib/folder-exports/execution";
 import { withExportLock } from "@/lib/folder-exports/lock";
@@ -285,11 +286,15 @@ describeWithDatabase("Export directories after a rename (PostgreSQL)", () => {
         download.hold = { started, released };
         const writing = materializeFolderExport(orgUserId, audio?.id ?? "");
         await downloading;
-        const planning = planFolderExport(orgUserId, exportId);
-        // Long enough for an unlocked plan to finish its rename first.
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        release();
-        await Promise.all([writing, planning]);
+        try {
+            await expect(
+                planFolderExport(orgUserId, exportId),
+            ).rejects.toMatchObject({ code: ErrorCode.EXPORT_LOCK_BUSY });
+        } finally {
+            release();
+            await writing;
+        }
+        await planFolderExport(orgUserId, exportId);
         await materializeAll();
 
         expect(treeUnder(root())).toEqual([
@@ -318,17 +323,19 @@ describeWithDatabase("Export directories after a rename (PostgreSQL)", () => {
         );
         // Asking for the lock is not holding it: plan only once it is held.
         await held;
-        let planned = false;
-        const planning = planFolderExport(orgUserId, exportId).then(() => {
-            planned = true;
-        });
-        await new Promise((resolve) => setTimeout(resolve, 200));
-        expect(planned).toBe(false);
-
-        finishWrite();
-        await writing;
-        await planning;
-        expect(planned).toBe(true);
+        try {
+            await expect(
+                planFolderExport(orgUserId, exportId),
+            ).rejects.toMatchObject({
+                code: ErrorCode.EXPORT_LOCK_BUSY,
+                statusCode: 409,
+                details: { retryable: true },
+            });
+        } finally {
+            finishWrite();
+            await writing;
+        }
+        await planFolderExport(orgUserId, exportId);
     });
 
     it("removes the directory of a recording that left the export, only while empty", async () => {

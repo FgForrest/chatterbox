@@ -1,6 +1,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { knowledgeEntities, people } from "@/db/schema";
+import { sharedItemCondition } from "@/lib/sharing/shared";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -34,9 +35,7 @@ export async function shareRecordHasOtherSources(
         with source_item as materialized (
             select item.id from chatter_items item
             where item.id = ${input.itemId} and item.deleted_at is null
-                and exists (select 1 from recording_folder_assignments a
-                    join recording_folders folder on folder.id = a.folder_id and folder.user_id = ${input.scope}
-                    where a.recording_id = item.id and a.user_id = item.user_id)
+                and ${sharedItemCondition(input.scope, sql`item.id`)}
         )
         select exists (
             select 1 from knowledge_facts f

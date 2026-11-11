@@ -1,5 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { db } from "@/db";
+import { lockOrgTree } from "@/db/queries/organization-tree";
 import { lockPipelineTargetsInTx } from "@/db/queries/pipeline-jobs";
 import { lockProfileMutation } from "@/db/queries/profile-mutations";
 import {
@@ -8,7 +9,8 @@ import {
     recordingFolderAssignments,
     recordings,
 } from "@/db/schema";
-import { AppError } from "@/lib/errors";
+import { env } from "@/lib/env";
+import { AppError, ErrorCode } from "@/lib/errors";
 import {
     type assertCategorizableFolder,
     lockCategorizableFolderInTx,
@@ -51,6 +53,19 @@ export async function resolveArrivalProfile(input: {
         : null;
 }
 
+/** Take the tree lock before arrival writes that can change an Organization placement. */
+export async function lockArrivalOrganizationTree(
+    tx: Tx,
+    touchesOrganization = false,
+): Promise<void> {
+    if (
+        touchesOrganization &&
+        !env.IS_HOSTED &&
+        env.SELF_HOST_MODE === "shared"
+    )
+        await lockOrgTree(tx);
+}
+
 /** Request arrival and freeze a resolved placement profile in the creating transaction. */
 export async function requestArrivalInTx(
     tx: Tx,
@@ -63,27 +78,37 @@ export async function requestArrivalInTx(
         folder?: ArrivalFolder | null;
         agendaId?: string;
         allowUnavailableFolder?: boolean;
+        canCurate: boolean;
+        lockOrganizationTree?: boolean;
     },
 ) {
+    const touchesOrganization =
+        input.folder?.scope === "org" || input.lockOrganizationTree === true;
+    await lockArrivalOrganizationTree(tx, touchesOrganization);
     const view = input.view ?? "private";
     let folder = input.folder;
     let profile = input.profile;
-    if (folder && folder.scope !== "org" && view === "private") {
+    let manualOnly = input.manualOnly ?? false;
+    if (folder && view === "private") {
         try {
             await lockCategorizableFolderInTx(
                 tx,
                 input.userId,
                 folder.folderId,
+                false,
+                input.canCurate,
             );
         } catch (error) {
             if (
                 !input.allowUnavailableFolder ||
                 !(error instanceof AppError) ||
-                error.statusCode !== 404
+                (error.statusCode !== 404 &&
+                    error.code !== ErrorCode.RESTRICTED_FOLDER_NO_ACCESS)
             )
                 throw error;
             folder = null;
             profile = null;
+            manualOnly = false;
         }
     }
     if (folder && view === "private") {
@@ -93,6 +118,7 @@ export async function requestArrivalInTx(
                 itemId: input.itemId,
                 folderId: folder.folderId,
                 requestPipeline: false,
+                canCurate: input.canCurate,
             });
         } else {
             await tx
@@ -103,6 +129,36 @@ export async function requestArrivalInTx(
                     folderId: folder.folderId,
                 })
                 .onConflictDoNothing();
+        }
+    }
+    if (profile && view === "private") {
+        const [withheld] = await tx
+            .select({ id: recordingFolderAssignments.itemId })
+            .from(recordingFolderAssignments)
+            .where(
+                and(
+                    eq(recordingFolderAssignments.userId, input.userId),
+                    eq(recordingFolderAssignments.itemId, input.itemId),
+                    eq(recordingFolderAssignments.withheld, true),
+                ),
+            )
+            .limit(1);
+        if (withheld) {
+            const resolution = await resolveProfileForPlacements({
+                ownerUserId: input.userId,
+                itemId: input.itemId,
+                channel: profile.channel,
+                folderIds: [],
+                view: "private",
+                executor: tx,
+                isCurator: input.canCurate,
+                seedProfiles: false,
+                throwOnUnavailable: false,
+            });
+            profile =
+                resolution.status === "resolved" ? resolution.profile : null;
+            manualOnly =
+                resolution.status === "resolved" && resolution.manualOnly;
         }
     }
     if (view === "private") {
@@ -122,7 +178,9 @@ export async function requestArrivalInTx(
                 input.userId,
                 input.itemId,
                 recording.plaudFileId,
-                ...(input.agendaId ? [input.agendaId] : []),
+                input.agendaId,
+                input.canCurate,
+                touchesOrganization,
             );
     }
     if (profile && view === "private") {
@@ -164,7 +222,7 @@ export async function requestArrivalInTx(
         .set({
             profileId: latest.id,
             profileRevisionId: latest.revisionId,
-            manualOnly: input.manualOnly ?? false,
+            manualOnly,
             updatedAt: new Date(),
         })
         .where(

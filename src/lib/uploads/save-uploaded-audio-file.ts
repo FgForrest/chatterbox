@@ -11,6 +11,7 @@ import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { assertNotOrgAccount } from "@/lib/org/config";
 import { requestArrivalInTx } from "@/lib/pipeline/arrival";
+import { resolveArrivalOrganizationContext } from "@/lib/pipeline/arrival-context";
 import { captureServerEvent } from "@/lib/posthog-server";
 import { buildRecordingStagingPath } from "@/lib/recordings/filename";
 import { enqueueStorageReconciliationJob } from "@/lib/recordings/storage-reconciliation-job";
@@ -74,6 +75,11 @@ export async function saveUploadedAudioFile(input: {
         folderId: input.folderId,
         deferredFolderFallback: input.deferredFolderFallback,
     });
+    const organizationContext = await resolveArrivalOrganizationContext({
+        userId: input.userId,
+        folder,
+        fileId: input.fileId,
+    });
     const storageKey = buildRecordingStagingPath(
         input.userId,
         recordingId,
@@ -107,10 +113,15 @@ export async function saveUploadedAudioFile(input: {
             },
             {
                 pipeline: "arrival",
+                lockOrganizationTree: organizationContext.lockOrganizationTree,
                 initializeInTx: (tx, arrival) =>
                     requestArrivalInTx(tx, {
                         ...arrival,
+                        ...organizationContext,
                         folder,
+                        allowUnavailableFolder: Boolean(
+                            input.deferredFolderFallback,
+                        ),
                         profile: profileResolution?.profile ?? null,
                         manualOnly: profileResolution?.manualOnly ?? false,
                     }),

@@ -13,6 +13,9 @@ import {
 import { useExtracted, useFormatter } from "next-intl";
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { LinkedText } from "@/components/ui/linked-text";
+import { LinkedTextField } from "@/components/ui/linked-text-field";
+import { Textarea } from "@/components/ui/textarea";
 import { ActionTooltip } from "@/components/ui/tooltip";
 import { hasAgendaContributors } from "@/lib/meetings/attribution";
 import type { TreePoint } from "@/lib/meetings/model";
@@ -39,6 +42,38 @@ type PointPatch = {
 };
 export type { PointPatch };
 type PointBindings = Map<string, ReturnType<typeof useAgendaText>>;
+type Insertion = {
+    parentId: string | null;
+    afterId: string | null;
+    offset: number;
+    position: number;
+};
+
+function insertionLocation(points: readonly TreePoint[], insertion: Insertion) {
+    const anchor = points.find((point) => point.id === insertion.afterId);
+    const parentId = anchor
+        ? anchor.parentId
+        : points.some((point) => point.id === insertion.parentId)
+          ? insertion.parentId
+          : null;
+    const siblings = pointSiblings(points, parentId);
+    const siblingIndex = anchor
+        ? Math.min(
+              siblings.length,
+              siblings.indexOf(anchor) + 1 + insertion.offset,
+          )
+        : siblings.length;
+    return {
+        parentId,
+        siblingIndex,
+        position:
+            siblings[siblingIndex]?.position ??
+            Math.max(
+                insertion.position,
+                Math.max(-1, ...points.map((point) => point.position)) + 1,
+            ),
+    };
+}
 
 function PointField({
     point,
@@ -92,26 +127,6 @@ function PointField({
             bindings.delete(key);
         };
     }, [bindings, point.id, textSync]);
-    useEffect(() => {
-        const field = input.current;
-        if (!editable || !field || field.value !== draft) return;
-        const resize = () => {
-            field.style.height = "0px";
-            field.style.height = `${Math.max(32, field.scrollHeight)}px`;
-        };
-        resize();
-        let width = field.clientWidth;
-        const observer =
-            typeof ResizeObserver === "undefined"
-                ? null
-                : new ResizeObserver(() => {
-                      if (width === field.clientWidth) return;
-                      width = field.clientWidth;
-                      resize();
-                  });
-        observer?.observe(field);
-        return () => observer?.disconnect();
-    }, [draft, editable]);
     useEffect(() => {
         if (!focused.current && !dirty.current) setDraft(point.text);
     }, [point.text]);
@@ -171,92 +186,107 @@ function PointField({
                     point.discussedAt && "text-muted-foreground line-through",
                 )}
             >
-                {point.text}
+                <LinkedText text={point.text} />
             </span>
         );
     return (
         <>
-            <textarea
-                {...getPasswordManagerAttributes()}
-                ref={input}
-                data-point-editor
-                rows={1}
-                aria-label={i18n("Discussion point")}
-                maxLength={2000}
-                value={draft}
-                className={cn(
-                    "min-w-0 flex-1 resize-none overflow-hidden rounded border border-transparent bg-transparent px-1 py-1 leading-6 focus:border-input focus:outline-none focus:ring-1 focus:ring-ring",
+            <LinkedTextField
+                text={draft}
+                inputRef={input}
+                className="flex-1"
+                displayClassName={cn(
+                    "min-h-8 border border-transparent px-1 py-1 leading-6",
                     point.discussedAt && "text-muted-foreground line-through",
                 )}
-                onChange={(event) => {
-                    dirty.current = true;
-                    setDraft(event.target.value.replace(/[\r\n]/gu, " "));
-                }}
-                onFocus={() => {
-                    focused.current = true;
-                    editing.current = point;
-                    released.current = false;
-                }}
-                onBlur={() => {
-                    focused.current = false;
-                    if (!textSync.enabled && !draft.trim())
-                        setDraft(point.text);
-                    else save();
-                }}
-                onKeyDown={(event) => {
-                    if (event.nativeEvent.isComposing) return;
-                    if (
-                        event.altKey &&
-                        ["ArrowUp", "ArrowDown"].includes(event.key)
-                    ) {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        if (!pending)
-                            save(undefined, event.key === "ArrowUp" ? -1 : 1);
-                        return;
-                    }
-                    if (["ArrowUp", "ArrowDown"].includes(event.key)) {
-                        const direction = pointArrowDirection(
-                            {
-                                ...event,
-                                isComposing: event.nativeEvent.isComposing,
-                                selectionStart:
-                                    event.currentTarget.selectionStart,
-                                selectionEnd: event.currentTarget.selectionEnd,
-                            },
-                            measureCaretLines(event.currentTarget),
-                        );
+            >
+                <textarea
+                    {...getPasswordManagerAttributes()}
+                    ref={input}
+                    data-point-editor
+                    rows={1}
+                    aria-label={i18n("Discussion point")}
+                    maxLength={2000}
+                    value={draft}
+                    className={cn(
+                        "min-w-0 flex-1 resize-none overflow-hidden rounded border border-transparent bg-transparent px-1 py-1 leading-6 focus:border-input focus:outline-none focus:ring-1 focus:ring-ring",
+                        point.discussedAt &&
+                            "text-muted-foreground line-through",
+                    )}
+                    onChange={(event) => {
+                        dirty.current = true;
+                        setDraft(event.target.value.replace(/[\r\n]/gu, " "));
+                    }}
+                    onFocus={() => {
+                        focused.current = true;
+                        editing.current = point;
+                        released.current = false;
+                    }}
+                    onBlur={() => {
+                        focused.current = false;
+                        if (!textSync.enabled && !draft.trim())
+                            setDraft(point.text);
+                        else save();
+                    }}
+                    onKeyDown={(event) => {
+                        if (event.nativeEvent.isComposing) return;
                         if (
-                            direction &&
-                            onNavigate(direction, event.currentTarget)
+                            event.altKey &&
+                            ["ArrowUp", "ArrowDown"].includes(event.key)
                         ) {
                             event.preventDefault();
+                            event.stopPropagation();
+                            if (!pending)
+                                save(
+                                    undefined,
+                                    event.key === "ArrowUp" ? -1 : 1,
+                                );
                             return;
                         }
-                    }
-                    if (event.key === "Escape") {
-                        event.preventDefault();
-                        released.current = true;
-                        save();
-                        onRelease();
-                        return;
-                    }
-                    if (event.key === "Enter") {
-                        event.preventDefault();
-                        released.current = false;
-                        save();
-                        onEnter();
-                    }
-                    if (event.key === "Tab" && !released.current) {
-                        event.preventDefault();
-                        save(pending ? undefined : event.shiftKey);
-                    }
-                    if (event.key === "Backspace" && !draft) {
-                        event.preventDefault();
-                        onEmpty();
-                    }
-                }}
-            />
+                        if (["ArrowUp", "ArrowDown"].includes(event.key)) {
+                            const direction = pointArrowDirection(
+                                {
+                                    ...event,
+                                    isComposing: event.nativeEvent.isComposing,
+                                    selectionStart:
+                                        event.currentTarget.selectionStart,
+                                    selectionEnd:
+                                        event.currentTarget.selectionEnd,
+                                },
+                                measureCaretLines(event.currentTarget),
+                            );
+                            if (
+                                direction &&
+                                onNavigate(direction, event.currentTarget)
+                            ) {
+                                event.preventDefault();
+                                return;
+                            }
+                        }
+                        if (event.key === "Escape") {
+                            event.preventDefault();
+                            released.current = true;
+                            save();
+                            onRelease();
+                            return;
+                        }
+                        if (event.key === "Enter") {
+                            event.preventDefault();
+                            released.current = false;
+                            save();
+                            onEnter();
+                        }
+                        if (event.key === "Tab" && !released.current) {
+                            event.preventDefault();
+                            save(pending ? undefined : event.shiftKey);
+                        }
+                        if (event.key === "Backspace" && !draft) {
+                            event.preventDefault();
+                            onEmpty();
+                        }
+                    }}
+                />
+            </LinkedTextField>
             {failed && (
                 <span role="alert" className="text-xs text-muted-foreground">
                     {i18n(
@@ -289,7 +319,7 @@ function PointNote({
     const focused = useRef(false);
     const dirty = useRef(false);
     const editing = useRef(point);
-    const input = useRef<HTMLInputElement>(null);
+    const input = useRef<HTMLTextAreaElement>(null);
     const textSync = useAgendaText(
         input,
         point.agendaId,
@@ -319,47 +349,64 @@ function PointNote({
                 </time>
             )}
             {editable ? (
-                <input
-                    {...getPasswordManagerAttributes()}
-                    ref={input}
-                    aria-label={i18n("Point note")}
-                    placeholder={i18n("Note")}
-                    maxLength={2000}
-                    value={draft}
-                    className="min-w-0 flex-1 rounded border border-transparent bg-transparent p-1 focus:border-input focus:outline-none"
-                    onFocus={() => {
-                        focused.current = true;
-                        editing.current = point;
-                    }}
-                    onChange={(event) => {
-                        dirty.current = true;
-                        setDraft(event.target.value);
-                    }}
-                    onBlur={() => {
-                        focused.current = false;
-                        if (textSync.enabled) {
-                            void textSync.flush();
-                            return;
-                        }
-                        if (!dirty.current) return;
-                        const note = draft.trim() || null;
-                        void Promise.resolve(
-                            onSave(note, editing.current.version),
-                        ).then((saved) => {
-                            if (
-                                saved !== false &&
-                                (input.current?.value.trim() || null) === note
-                            )
-                                dirty.current = false;
-                        });
-                    }}
-                    onKeyDown={(event) => {
-                        if (event.nativeEvent.isComposing) return;
-                        if (event.key === "Enter") event.currentTarget.blur();
-                    }}
-                />
+                <LinkedTextField
+                    text={draft}
+                    inputRef={input}
+                    className="flex-1"
+                    displayClassName="min-h-6 p-1"
+                >
+                    <Textarea
+                        rows={1}
+                        ref={input}
+                        aria-label={i18n("Point note")}
+                        placeholder={i18n("Note")}
+                        maxLength={2000}
+                        value={draft}
+                        className="min-h-6 min-w-0 flex-1 resize-none overflow-y-auto rounded border border-transparent bg-transparent p-1 text-xs shadow-none focus:border-input focus:outline-none md:text-xs"
+                        onFocus={() => {
+                            focused.current = true;
+                            editing.current = point;
+                        }}
+                        onChange={(event) => {
+                            dirty.current = true;
+                            setDraft(
+                                event.target.value.replace(/[\r\n]/gu, " "),
+                            );
+                        }}
+                        onBlur={() => {
+                            focused.current = false;
+                            if (textSync.enabled) {
+                                void textSync.flush();
+                                return;
+                            }
+                            if (!dirty.current) return;
+                            const note = draft.trim() || null;
+                            void Promise.resolve(
+                                onSave(note, editing.current.version),
+                            ).then((saved) => {
+                                if (
+                                    saved !== false &&
+                                    (input.current?.value.trim() || null) ===
+                                        note
+                                )
+                                    dirty.current = false;
+                            });
+                        }}
+                        onKeyDown={(event) => {
+                            if (event.nativeEvent.isComposing) return;
+                            if (event.key === "Enter") {
+                                event.preventDefault();
+                                event.currentTarget.blur();
+                            }
+                        }}
+                    />
+                </LinkedTextField>
             ) : (
-                point.note && <span>{point.note}</span>
+                point.note && (
+                    <span>
+                        <LinkedText text={point.note} />
+                    </span>
+                )
             )}
         </div>
     );
@@ -390,7 +437,8 @@ export function OutlineEditor({
         text: string,
         parentId: string | null,
         position: number,
-    ) => Promise<boolean>;
+        siblingIndex?: number,
+    ) => Promise<boolean | string>;
 }) {
     const i18n = useExtracted();
     const format = useFormatter();
@@ -437,13 +485,10 @@ export function OutlineEditor({
         if (!hasBindings(point)) return remove(point);
         return flushPoint(point).then(remove);
     };
-    const [insertion, setInsertion] = useState<{
-        parentId: string | null;
-        position: number;
-    } | null>(null);
+    const [insertion, setInsertion] = useState<Insertion | null>(null);
     const [newText, setNewText] = useState("");
     const newDraft = useRef("");
-    const newInput = useRef<HTMLInputElement>(null);
+    const newInput = useRef<HTMLTextAreaElement>(null);
     const exit = useRef<HTMLParagraphElement>(null);
     const draftReleased = useRef(false);
     useEffect(() => {
@@ -482,17 +527,88 @@ export function OutlineEditor({
         );
         return patchPoint(point, move);
     };
-    const displayRows = outlineRows<TreePoint>([
-        ...detail.points,
-        ...(insertion ? [{ id: "draft", ...insertion }] : []),
-    ]);
     const submitting = useRef(false);
+    const addSequence = useRef(0);
     const [queued, setQueued] = useState<
-        { text: string; parentId: string | null; position: number }[]
+        (Insertion & { id: string; text: string })[]
     >([]);
     const [failedAdds, setFailedAdds] = useState<
-        { text: string; parentId: string | null; position: number }[]
+        (Insertion & { id: string; text: string })[]
     >([]);
+    const aliases = new Map<string, string>();
+    let displayPoints: TreePoint[] = [...detail.points];
+    const resolveInsertion = (entry: Insertion): Insertion => ({
+        ...entry,
+        afterId: aliases.get(entry.afterId ?? "") ?? entry.afterId,
+        parentId: aliases.get(entry.parentId ?? "") ?? entry.parentId,
+    });
+    for (const [index, entry] of queued.entries()) {
+        const resolved = resolveInsertion(entry);
+        const pending =
+            index === 0 &&
+            submitting.current &&
+            detail.points
+                .filter(
+                    (point) =>
+                        point.id.startsWith("pending-") &&
+                        point.text === entry.text &&
+                        point.parentId === resolved.parentId,
+                )
+                .sort(
+                    (a, b) =>
+                        a.createdAt.localeCompare(b.createdAt) ||
+                        a.id.localeCompare(b.id),
+                )[0];
+        if (pending) {
+            aliases.set(entry.id, pending.id);
+            continue;
+        }
+        const target = insertionLocation(displayPoints, resolved);
+        displayPoints =
+            moveAgendaPoint(
+                [
+                    ...displayPoints,
+                    {
+                        id: entry.id,
+                        parentId: target.parentId,
+                        position: target.position,
+                    },
+                ],
+                entry.id,
+                target.parentId,
+                target.siblingIndex,
+            ) ?? displayPoints;
+    }
+    const localId = (id: string | null) =>
+        [...aliases].find(([, pendingId]) => pendingId === id)?.[0] ?? id;
+    const displayOutline = outlineRows(displayPoints);
+    const location =
+        insertion &&
+        insertionLocation(displayPoints, resolveInsertion(insertion));
+    const displayRows: { point: TreePoint; depth: number }[] = [
+        ...displayOutline,
+    ];
+    if (location) {
+        const siblings = pointSiblings(displayPoints, location.parentId);
+        const next = siblings[location.siblingIndex];
+        const parentIndex = displayOutline.findIndex(
+            (row) => row.point.id === location.parentId,
+        );
+        const depth =
+            parentIndex < 0 ? 0 : displayOutline[parentIndex].depth + 1;
+        const following = displayOutline.findIndex(
+            (row, index) => index > parentIndex && row.depth < depth,
+        );
+        const at = next
+            ? displayOutline.findIndex((row) => row.point.id === next.id)
+            : following < 0
+              ? displayOutline.length
+              : following;
+        displayRows.splice(at, 0, {
+            point: { id: "draft", ...location },
+            depth,
+        });
+    }
     const adding = pendingPaths.includes("/points");
     const pointPaths = new Set(pendingPaths.map((path) => path.split("?")[0]));
     const canAdd = !readOnly && detail.permissions.edit;
@@ -500,6 +616,8 @@ export function OutlineEditor({
         draftReleased.current = false;
         setInsertion({
             parentId: point?.parentId ?? null,
+            afterId: point?.id ?? null,
+            offset: 0,
             position: point
                 ? point.position + 1
                 : Math.max(
@@ -532,21 +650,74 @@ export function OutlineEditor({
         return true;
     };
     const submit = () => {
-        if (!newDraft.current.trim() || !insertion) return;
+        if (!newDraft.current.trim() || !insertion || !location) return;
         const text = newDraft.current.trim();
         newDraft.current = "";
         setNewText("");
-        setQueued((value) => [...value, { text, ...insertion }]);
+        const id = `queued-${++addSequence.current}`;
+        setQueued((value) => [
+            ...value,
+            {
+                ...insertion,
+                ...location,
+                parentId: localId(location.parentId),
+                id,
+                text,
+            },
+        ]);
         setInsertion((value) =>
-            value ? { ...value, position: value.position + 1 } : value,
+            value
+                ? {
+                      ...value,
+                      afterId: id,
+                      offset: 0,
+                      position: location.position + 1,
+                  }
+                : value,
         );
     };
     useEffect(() => {
         if (!canAdd || adding || submitting.current || !queued.length) return;
         const next = queued[0];
+        const target = insertionLocation(detail.points, next);
         submitting.current = true;
-        void onAdd(next.text, next.parentId, next.position)
+        const siblings = pointSiblings(detail.points, target.parentId);
+        const tied =
+            target.siblingIndex > 0 &&
+            siblings[target.siblingIndex]?.position ===
+                siblings[target.siblingIndex - 1]?.position;
+        const operation = tied
+            ? onAdd(
+                  next.text,
+                  target.parentId,
+                  target.position,
+                  target.siblingIndex,
+              )
+            : onAdd(next.text, target.parentId, target.position);
+        void operation
             .then((saved) => {
+                const rebase = (entry: Insertion) => ({
+                    ...entry,
+                    parentId:
+                        entry.parentId === next.id
+                            ? typeof saved === "string"
+                                ? saved
+                                : next.parentId
+                            : entry.parentId,
+                    ...(entry.afterId === next.id
+                        ? {
+                              afterId:
+                                  typeof saved === "string"
+                                      ? saved
+                                      : next.afterId,
+                              offset:
+                                  typeof saved === "string"
+                                      ? 0
+                                      : next.offset + (saved ? 1 : 0),
+                          }
+                        : {}),
+                });
+                setInsertion((value) => value && rebase(value));
                 if (!saved) {
                     if (newDraft.current)
                         setFailedAdds((value) => [...value, next]);
@@ -554,39 +725,51 @@ export function OutlineEditor({
                         newDraft.current = next.text;
                         setNewText(next.text);
                         setInsertion({
+                            ...next,
                             parentId: next.parentId,
                             position: next.position,
                         });
                     }
                 }
-                setQueued((value) => value.slice(1));
+                setQueued((value) =>
+                    value
+                        .slice(1)
+                        .map((entry) => ({ ...entry, ...rebase(entry) })),
+                );
             })
             .finally(() => {
                 submitting.current = false;
             });
-    }, [canAdd, adding, queued, onAdd]);
-    const draftRow = insertion && canAdd && (
+    }, [canAdd, adding, queued, onAdd, detail.points]);
+    const draftRow = insertion && location && canAdd && (
         <div
-            className="flex items-center gap-2 py-1"
+            className="flex items-start gap-2 py-1"
             style={{
-                paddingLeft: `${(insertion.parentId ? (rows.find((row) => row.point.id === insertion.parentId)?.depth ?? 0) + 1 : 0) * 20}px`,
+                paddingLeft: `${(location.parentId ? (displayOutline.find((row) => row.point.id === location.parentId)?.depth ?? 0) + 1 : 0) * 20}px`,
             }}
         >
-            <span aria-hidden="true">•</span>
-            <input
-                {...getPasswordManagerAttributes()}
+            <span
+                className="border border-transparent py-1 leading-6"
+                aria-hidden="true"
+            >
+                •
+            </span>
+            <Textarea
+                autoGrow
+                rows={1}
                 ref={newInput}
                 aria-label={i18n("New discussion point")}
                 placeholder={i18n("Add a point…")}
                 value={newText}
                 maxLength={2000}
-                className="min-w-0 flex-1 rounded border bg-background px-2 py-1"
+                className="min-h-8 min-w-0 flex-1 rounded border bg-background px-2 py-1 text-sm leading-6 md:text-sm"
                 onFocus={() => {
                     draftReleased.current = false;
                 }}
                 onChange={(event) => {
-                    newDraft.current = event.target.value;
-                    setNewText(event.target.value);
+                    const value = event.target.value.replace(/[\r\n]/gu, " ");
+                    newDraft.current = value;
+                    setNewText(value);
                 }}
                 onBlur={() => {
                     void submit();
@@ -602,7 +785,7 @@ export function OutlineEditor({
                                     event.currentTarget.selectionStart,
                                 selectionEnd: event.currentTarget.selectionEnd,
                             },
-                            { firstTop: 0, caretTop: 0, lastTop: 0 },
+                            measureCaretLines(event.currentTarget),
                         ) === -1
                     ) {
                         const fields =
@@ -632,19 +815,45 @@ export function OutlineEditor({
                     }
                     if (event.key === "Tab" && !draftReleased.current) {
                         event.preventDefault();
-                        const temporary = { id: "draft", ...insertion };
+                        const siblingPositions = new Map(
+                            pointSiblings(displayPoints, location.parentId).map(
+                                (point, index) => [
+                                    point.id,
+                                    index < location.siblingIndex
+                                        ? index
+                                        : index + 1,
+                                ],
+                            ),
+                        );
+                        const temporary = {
+                            id: "draft",
+                            parentId: location.parentId,
+                            position: location.siblingIndex,
+                        };
                         const move = outlineMove(
-                            [...detail.points, temporary],
+                            [
+                                ...displayPoints.map((point) => ({
+                                    ...point,
+                                    position:
+                                        siblingPositions.get(point.id) ??
+                                        point.position,
+                                })),
+                                temporary,
+                            ],
                             temporary.id,
                             event.shiftKey,
                         );
                         if (move) {
                             const siblings = pointSiblings(
-                                detail.points,
+                                displayPoints,
                                 move.parentId,
                             );
                             setInsertion({
-                                parentId: move.parentId,
+                                parentId: localId(move.parentId),
+                                afterId: localId(
+                                    siblings[move.siblingIndex - 1]?.id ?? null,
+                                ),
+                                offset: 0,
                                 position: Math.min(
                                     100000,
                                     siblings[move.siblingIndex]?.position ??
@@ -681,7 +890,21 @@ export function OutlineEditor({
                 const point = detail.points.find(
                     (entry) => entry.id === treePoint.id,
                 );
-                if (!point) return null;
+                if (!point) {
+                    const entry = queued.find(
+                        (entry) => entry.id === treePoint.id,
+                    );
+                    return entry ? (
+                        <output
+                            key={entry.id}
+                            data-queued-point
+                            className="block py-1 text-muted-foreground"
+                            style={{ paddingLeft: `${depth * 20}px` }}
+                        >
+                            {entry.text}
+                        </output>
+                    ) : null;
+                }
                 const editable =
                     canAdd &&
                     !point.id.startsWith("pending-") &&
@@ -726,7 +949,7 @@ export function OutlineEditor({
                             type="button"
                             draggable={!subtreePending}
                             aria-label={i18n("Drag point")}
-                            className="cursor-grab text-muted-foreground"
+                            className="flex h-6 items-center cursor-grab text-muted-foreground"
                             onDragStart={(event) => {
                                 const row =
                                     event.currentTarget.closest("fieldset");
@@ -878,7 +1101,7 @@ export function OutlineEditor({
                             }}
                         >
                             <div className="flex items-start gap-2">
-                                <span className="flex h-[34px] shrink-0 items-start">
+                                <span className="flex shrink-0 items-start border border-transparent py-1 leading-6">
                                     {editable && (
                                         <span className="mr-1">
                                             {dragHandle}
@@ -1139,26 +1362,6 @@ export function OutlineEditor({
                     </div>
                 );
             })}
-            {canAdd &&
-                queued
-                    .filter(
-                        (entry) =>
-                            !detail.points.some(
-                                (point) =>
-                                    point.id.startsWith("pending-") &&
-                                    point.text === entry.text &&
-                                    point.parentId === entry.parentId &&
-                                    point.position === entry.position,
-                            ),
-                    )
-                    .map((entry) => (
-                        <output
-                            key={`${entry.parentId}:${entry.position}:${entry.text}`}
-                            className="block py-1 text-muted-foreground"
-                        >
-                            {entry.text}
-                        </output>
-                    ))}
             {canAdd &&
                 failedAdds.map((entry) => (
                     <div

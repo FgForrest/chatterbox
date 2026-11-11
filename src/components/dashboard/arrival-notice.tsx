@@ -19,6 +19,7 @@ export function ArrivalNotice({
     invitation = false,
     folderInvitation = false,
     agendaInvitation = false,
+    invitationTitle,
 }: {
     recording: Recording;
     more: number;
@@ -28,6 +29,7 @@ export function ArrivalNotice({
     invitation?: boolean;
     folderInvitation?: boolean;
     agendaInvitation?: boolean;
+    invitationTitle?: string;
 }) {
     const i18n = useExtracted();
     const locale = useLocale();
@@ -64,33 +66,37 @@ export function ArrivalNotice({
                                     : "text-primary",
                             )}
                         >
-                            {invitation
-                                ? folderInvitation
-                                    ? i18n("{owner} shared a folder with you", {
-                                          owner:
-                                              recording.ownerName ??
-                                              i18n("A colleague"),
-                                      })
-                                    : agendaInvitation
-                                      ? i18n(
-                                            "{owner} shared an agenda with you",
-                                            {
-                                                owner:
-                                                    recording.ownerName ??
-                                                    i18n("A colleague"),
-                                            },
-                                        )
-                                      : i18n(
-                                            "{owner} shared an item with you",
-                                            {
-                                                owner:
-                                                    recording.ownerName ??
-                                                    i18n("A colleague"),
-                                            },
-                                        )
-                                : mail
-                                  ? i18n("New email")
-                                  : i18n("New recording")}
+                            {invitationTitle ??
+                                (invitation
+                                    ? folderInvitation
+                                        ? i18n(
+                                              "{owner} shared a folder with you",
+                                              {
+                                                  owner:
+                                                      recording.ownerName ??
+                                                      i18n("A colleague"),
+                                              },
+                                          )
+                                        : agendaInvitation
+                                          ? i18n(
+                                                "{owner} shared an agenda with you",
+                                                {
+                                                    owner:
+                                                        recording.ownerName ??
+                                                        i18n("A colleague"),
+                                                },
+                                            )
+                                          : i18n(
+                                                "{owner} shared an item with you",
+                                                {
+                                                    owner:
+                                                        recording.ownerName ??
+                                                        i18n("A colleague"),
+                                                },
+                                            )
+                                    : mail
+                                      ? i18n("New email")
+                                      : i18n("New recording"))}
                         </strong>
                         {more > 0 && (
                             <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">

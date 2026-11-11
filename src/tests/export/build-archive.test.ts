@@ -27,6 +27,12 @@ vi.mock("@/lib/tasks/archive", () => ({
     taskHomeMovesForArchive: vi.fn(async () => []),
     archivedAssigneeIds: vi.fn(() => []),
 }));
+vi.mock("@/lib/export/restricted-folders", () => ({
+    collectRestrictedFolderArchive: async () => ({
+        folders: [],
+        placements: [],
+    }),
+}));
 vi.mock("@/lib/export/trim-proposal", () => ({
     collectTrimProposals: vi.fn(async () => []),
 }));
@@ -209,6 +215,8 @@ vi.mock("@/db/schema", async (importOriginal) => ({
         userId: "recordingFolderAssignments.userId",
         itemId: "recordingFolderAssignments.itemId",
         folderId: "recordingFolderAssignments.folderId",
+        withheld: "recordingFolderAssignments.withheld",
+        releasedAt: "recordingFolderAssignments.releasedAt",
     },
     personNotes: {
         personId: "personNotes.personId",
@@ -991,6 +999,8 @@ describe("buildAndUploadExportArchive", () => {
                 {
                     recordingId: "rec-1",
                     folderId: "folder-meetings",
+                    withheld: false,
+                    releasedAt: null,
                 },
             ],
         ]);
@@ -1012,7 +1022,12 @@ describe("buildAndUploadExportArchive", () => {
         expect(organization.folders[1].name).toBe("decrypted:enc-Meetings");
         expect(organization.folders[1].sortOrder).toBe(2000);
         expect(organization.assignments).toEqual([
-            { recordingId: "rec-1", folderId: "folder-meetings" },
+            {
+                recordingId: "rec-1",
+                folderId: "folder-meetings",
+                withheld: false,
+                releasedAt: null,
+            },
         ]);
 
         const manifest = JSON.parse(

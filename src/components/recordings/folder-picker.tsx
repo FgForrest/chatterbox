@@ -7,6 +7,7 @@ import { FolderCombobox } from "@/components/recordings/folder-combobox";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useLibraryPreferences } from "@/hooks/use-library-preferences";
 import { joinFolderPath, matchFolders } from "@/lib/folders/navigation";
+import { canCreateSubfolder } from "@/lib/folders/permissions";
 import type { RecordingFolder } from "@/types/folder";
 
 /** Filing rules shared by folder action chips and row menus. */
@@ -61,10 +62,8 @@ export function FolderPicker({
             ),
         [folders, organizationOnly, scope, label],
     );
-    const parents = entries.filter(
-        ({ folder }) =>
-            !folder.receivedFolder &&
-            (folder.scope !== "org" || folder.parentId !== null || canCurate),
+    const parents = entries.filter(({ folder }) =>
+        canCreateSubfolder(folder, canCurate),
     );
     return (
         <FolderCombobox

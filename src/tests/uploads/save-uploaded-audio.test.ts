@@ -18,6 +18,12 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerEvent: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
+vi.mock("@/lib/pipeline/arrival-context", () => ({
+    resolveArrivalOrganizationContext: async () => ({
+        lockOrganizationTree: false,
+        canCurate: false,
+    }),
+}));
 vi.mock("@/lib/pipeline/arrival", () => ({
     requestArrivalInTx: vi
         .fn()
@@ -111,6 +117,8 @@ describe("saveUploadedAudio", () => {
             itemId: "recording-1",
             userId: "user-1",
             folder: null,
+            lockOrganizationTree: false,
+            canCurate: false,
             profile: null,
             manualOnly: false,
             allowUnavailableFolder: false,

@@ -4,6 +4,8 @@
 // paired server URL. Errors surface the server's JSON envelope message when
 // there is one.
 
+import { t } from "./i18n.js";
+
 async function readError(response) {
     try {
         const body = await response.json();
@@ -23,7 +25,10 @@ async function readError(response) {
                           : null,
             };
         }
-    } catch {
+    } catch (error) {
+        if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+            throw error;
+        }
         // fall through
     }
     return { message: `Request failed (${response.status})`, code: null, field: null };
@@ -33,33 +38,59 @@ async function readError(response) {
  * @param {{serverUrl: string, apiKey: string}} auth
  * @param {string} path
  * @param {RequestInit} [init]
+ * @param {number} [timeoutMs]
+ * @param {{connectTimeoutOnly?: boolean}} [options]
  */
-export async function request(auth, path, init = {}) {
+export async function request(auth, path, init = {}, timeoutMs = 30_000, { connectTimeoutOnly = false } = {}) {
     const headers = new Headers(init.headers ?? {});
     headers.set("Authorization", `Bearer ${auth.apiKey}`);
-    const response = await fetch(`${auth.serverUrl}${path}`, {
-        ...init,
-        headers,
-    });
-    if (!response.ok) {
-        const { message, code, field } = await readError(response);
-        const error = new Error(message);
-        error.status = response.status;
-        error.code = code;
-        error.field = field;
-        const retryAfter = response.headers.get("Retry-After");
-        if (retryAfter) {
-            const seconds = Number(retryAfter);
-            const dateSeconds = (Date.parse(retryAfter) - Date.now()) / 1000;
-            error.retryAfterSeconds = Number.isFinite(seconds)
-                ? seconds
-                : Number.isFinite(dateSeconds)
-                  ? Math.max(0, dateSeconds)
-                  : null;
-        }
-        throw error;
+    const controller = connectTimeoutOnly ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(new DOMException("Connection timed out", "TimeoutError")), timeoutMs) : null;
+    const timeout = controller?.signal ?? AbortSignal.timeout(timeoutMs);
+    const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+    function mapRequestError(error) {
+        return timeout.aborted && signal.reason === timeout.reason
+            ? new Error(t("requestTimedOut"))
+            : error;
     }
-    return response;
+    try {
+        const response = await fetch(`${auth.serverUrl}${path}`, {
+            ...init,
+            headers,
+            signal,
+        });
+        if (!response.ok) {
+            const { message, code, field } = await readError(response);
+            const error = new Error(message);
+            error.status = response.status;
+            error.code = code;
+            error.field = field;
+            const retryAfter = response.headers.get("Retry-After");
+            if (retryAfter) {
+                const seconds = Number(retryAfter);
+                const dateSeconds = (Date.parse(retryAfter) - Date.now()) / 1000;
+                error.retryAfterSeconds = Number.isFinite(seconds)
+                    ? seconds
+                    : Number.isFinite(dateSeconds)
+                      ? Math.max(0, dateSeconds)
+                      : null;
+            }
+            throw error;
+        }
+        const readJson = response.json.bind(response);
+        response.json = async () => {
+            try {
+                return await readJson();
+            } catch (error) {
+                throw mapRequestError(error);
+            }
+        };
+        return response;
+    } catch (error) {
+        throw mapRequestError(error);
+    } finally {
+        if (connectTimeoutOnly) clearTimeout(timer);
+    }
 }
 
 /**
@@ -96,6 +127,7 @@ export async function uploadChunk(auth, sessionId, index, blob, sha256) {
             },
             body: blob,
         },
+        120_000,
     );
 }
 

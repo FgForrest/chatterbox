@@ -541,3 +541,31 @@ it("uses Zahodit for Drop and reserves Zrušit for Cancel in Czech", () => {
     expect(translatedSourceMessage("cs-CZ", "Cancel")).toBe("Zrušit");
     expect(translatedSourceMessage("cs-CZ", "Dropped")).toBe("Zahozené");
 });
+
+it.each([
+    true,
+    false,
+])("links task text and notes with editing=%s", async (canEdit) => {
+    const text = "Review https://www.example.com/task";
+    const { onChange } = renderTask(
+        task({ canEdit, text, note: "See www.example.org/note" }),
+    );
+    const link = screen.getByRole("link", { name: "example.com/task" });
+    expect(screen.getByRole("link", { name: "example.org/note" })).toBeTruthy();
+    link.addEventListener("click", (event) => event.preventDefault());
+    fireEvent.click(link);
+    expect(onChange).not.toHaveBeenCalled();
+    if (!canEdit) return;
+    const input = screen.getByLabelText<HTMLTextAreaElement>("Task");
+    expect(document.activeElement).not.toBe(input);
+    fireEvent.click(screen.getByText("Review"));
+    expect(document.activeElement).toBe(input);
+    expect(input.value).toBe(text);
+    fireEvent.change(input, { target: { value: `${text}\nnext step` } });
+    await act(async () => fireEvent.keyDown(input, { key: "Enter" }));
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(
+        { text: `${text}\nnext step` },
+        { text: `${text}\nnext step` },
+    );
+    expect(screen.getByRole("link", { name: "example.com/task" })).toBeTruthy();
+});

@@ -18,6 +18,10 @@ import { z } from "zod";
 import { db } from "@/db";
 import { recordingItemJoin } from "@/db/items";
 import {
+    restrictedItemCondition,
+    withheldItemCondition,
+} from "@/db/queries/restricted-folders";
+import {
     chatterItems,
     knowledgeFactEvidence,
     knowledgeFacts,
@@ -30,9 +34,15 @@ import {
 import { type Keyset, keysetBefore, keysetOrder } from "@/lib/db/keyset";
 import { env } from "@/lib/env";
 import { folderRecordingCondition } from "@/lib/folders/condition";
-import { listFolderOrganization } from "@/lib/folders/folders";
+import {
+    listExportFolderOrganization,
+    listFolderOrganization,
+} from "@/lib/folders/folders";
 import { organizationForDeployment } from "@/lib/folders/hierarchy";
-import { orgOwnedCondition } from "@/lib/knowledge/org-people";
+import {
+    orgOwnedCondition,
+    recordingSharedCondition,
+} from "@/lib/knowledge/org-people";
 import {
     buildOrgResolverMap,
     buildResolverMap,
@@ -226,7 +236,10 @@ export async function resolveRecordingFilters(
 export async function callerFolderOrganization(
     caller: McpCaller,
 ): Promise<FolderOrganization> {
-    const organization = await listFolderOrganization(treeUserId(caller));
+    const organization =
+        caller.kind === "service"
+            ? await listExportFolderOrganization(caller.orgUserId)
+            : await listFolderOrganization(caller.userId);
     return organizationForDeployment(organization, {
         isHosted: env.IS_HOSTED,
         selfHostMode: env.SELF_HOST_MODE,
@@ -298,6 +311,7 @@ export function attendedRecordingCondition(
     emailHash: string,
     firstSsoSignInAt: Date | null,
     filters: RecordingFilters,
+    isCurator = false,
 ): SQL {
     const attended = exists(
         db
@@ -328,6 +342,12 @@ export function attendedRecordingCondition(
     return and(
         isNull(recordings.deletedAt),
         ...recordingDateConditions(filters),
+        or(
+            not(withheldItemCondition(recordings.id)),
+            recordingSharedCondition(recordings.id),
+            eq(recordings.userId, userId),
+            restrictedItemCondition({ userId, isCurator }, recordings.id),
+        ),
         or(
             eq(recordings.userId, userId),
             firstSsoSignInAt
@@ -412,6 +432,8 @@ export async function recordingFilterConditions(
             await callerFolderOrganization(caller),
             treeUserId(caller),
             filters.folderId,
+            undefined,
+            caller.kind === "user" && caller.isCurator === true,
         );
         if (!folder) throw new McpToolError("No such folder", "not_found");
         conditions.push(folder);

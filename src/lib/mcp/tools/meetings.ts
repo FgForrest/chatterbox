@@ -157,11 +157,19 @@ async function detailFor(
     meetingId: string,
     visibility?: ReturnType<typeof agendaEditVisibility>,
 ) {
-    return projectDetail(
-        caller,
-        await getMeeting(actorId(caller), meetingId),
-        visibility,
-    );
+    const detail =
+        caller.kind === "service"
+            ? await getMeeting(
+                  actorId(caller),
+                  meetingId,
+                  undefined,
+                  false,
+                  true,
+              )
+            : await getMeeting(actorId(caller), meetingId);
+    if (caller.kind === "service" && !detail.unchanged && !detail.shared)
+        throw new McpToolError("Agenda not found", "not_found");
+    return projectDetail(caller, detail, visibility);
 }
 
 async function projectDetail(
@@ -275,7 +283,11 @@ const list = defineTool({
     output: { meetings: z.array(z.record(z.string(), z.unknown())) },
     run: async ({ caller, touched }, input) =>
         meetingCall(async () => {
-            const meetings = await listMeetings(actorId(caller), input);
+            const meetings = await listMeetings(actorId(caller), {
+                ...input,
+                organizationOnly: caller.kind === "service",
+                isCurator: caller.kind === "service" ? false : caller.isCurator,
+            });
             touched.push(...meetings.map((meeting) => meeting.id));
             return {
                 meetings: caller.roles.has("tasks:read")

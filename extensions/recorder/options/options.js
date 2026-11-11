@@ -372,6 +372,12 @@ el("reject-pair").addEventListener("click", async () => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
+    const recording = changes.recordingState;
+    if (area === "session" && recording &&
+        (recording.oldValue?.state !== recording.newValue?.state ||
+            recording.oldValue?.bufferId !== recording.newValue?.bufferId)) {
+        void renderPendingBuffers();
+    }
     if (area === "session" && changes[PENDING_PAIR_KEY])
         void renderPendingPair();
     if (area === "session" && changes[SETUP_FLOW_KEY] && setupFlow) {
@@ -444,25 +450,64 @@ el("disconnect").addEventListener("click", async () => {
     }
 });
 
+const pendingBufferRetries = new Set();
+const pendingBufferMessages = new Map();
+let pendingBufferRender = 0;
+
 async function renderPendingBuffers() {
+    const version = ++pendingBufferRender;
     const ids = await listLocalSessions();
+    const metas = await Promise.all(ids.map(readLocalMeta));
+    if (version !== pendingBufferRender) return;
     const list = el("pending-buffer-list");
     list.replaceChildren();
     el("pending-buffers").hidden = ids.length === 0;
     el("manual-recovery-label").hidden = ids.length === 0;
-    for (const id of ids) {
-        const meta = await readLocalMeta(id);
+    for (const [index, id] of ids.entries()) {
+        const meta = metas[index];
         const item = document.createElement("li");
         const label = document.createElement("span");
         label.textContent = `${meta?.serverUrl ?? t("unknown")} · ${meta?.startedAt ?? id} · ${meta?.clientRecordingId ?? ""} · ${meta?.keyExpiresAt ?? ""}`;
         const check = document.createElement("input");
         check.type = "checkbox";
+        check.setAttribute("aria-label", t("discard"));
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.textContent = t("retryUpload");
+        const status = document.createElement("p");
+        status.setAttribute("aria-live", "polite");
+        status.setAttribute("role", "status");
+        const busy = pendingBufferRetries.has(id);
+        retry.disabled = busy;
+        check.disabled = busy;
+        const message = pendingBufferMessages.get(id);
+        setStatus(status, busy ? t("retryBufferRunning") : message?.text ?? "", busy || !message?.error);
         const button = document.createElement("button");
         button.type = "button";
         button.textContent = t("discard");
         button.disabled = true;
         check.addEventListener("change", () => {
-            button.disabled = !check.checked;
+            button.disabled = pendingBufferRetries.has(id) || !check.checked;
+        });
+        retry.addEventListener("click", async () => {
+            if (pendingBufferRetries.has(id)) return;
+            pendingBufferRetries.add(id);
+            retry.disabled = true;
+            button.disabled = true;
+            check.disabled = true;
+            setStatus(status, t("retryBufferRunning"), true);
+            try {
+                const result = await chrome.runtime.sendMessage({ type: "retry-buffer", bufferId: id });
+                pendingBufferMessages.set(id, {
+                    text: result?.ok ? t("retryBufferResumed") : result?.error ?? t("somethingWrong"),
+                    error: !result?.ok,
+                });
+            } catch (error) {
+                pendingBufferMessages.set(id, { text: error?.message ?? t("somethingWrong"), error: true });
+            } finally {
+                pendingBufferRetries.delete(id);
+                await renderPendingBuffers();
+            }
         });
         button.addEventListener("click", async () => {
             const result = await chrome.runtime.sendMessage({
@@ -477,7 +522,10 @@ async function renderPendingBuffers() {
                     false,
                 );
         });
-        item.append(label, check, button);
+        const actions = document.createElement("div");
+        actions.className = "row";
+        actions.append(retry, check, button);
+        item.append(label, actions, status);
         list.append(item);
     }
 }

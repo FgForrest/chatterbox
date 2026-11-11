@@ -600,6 +600,7 @@ suite("meeting planning server (PostgreSQL)", () => {
             view: "private",
             seedProfiles: false,
             executor: db,
+            isCurator: false,
             organizationUserId: "org",
             ignoreItemAssignment: true,
         });

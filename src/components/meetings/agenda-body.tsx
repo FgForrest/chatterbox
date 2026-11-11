@@ -2,6 +2,7 @@
 
 import {
     History,
+    LoaderCircle,
     MessageSquareText,
     PencilLine,
     Play,
@@ -37,6 +38,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EditorActions } from "@/components/ui/editor-actions";
 import { InlineEditorTrigger } from "@/components/ui/inline-editor-trigger";
+import { LinkedText } from "@/components/ui/linked-text";
 import { Textarea } from "@/components/ui/textarea";
 import { ActionTooltip } from "@/components/ui/tooltip";
 import { hasAgendaContributors } from "@/lib/meetings/attribution";
@@ -112,12 +114,109 @@ export function AgendaBody({
         userId,
     });
     const { detail, mutate } = agenda;
+    const readOnly =
+        variant === "recording" ||
+        Boolean(detail?.attachedRecording) ||
+        Boolean(detail?.recordingItemId);
+    const canEdit = Boolean(detail?.permissions.edit) && !readOnly;
     const [tasksCollapsed, toggleTasks] = useAgendaCollapse(id, "tasks");
     const [pointsCollapsed, togglePoints] = useAgendaCollapse(id, "points");
     const [olderOpen, setOlderOpen] = useState(false);
     const [attachOpen, setAttachOpen] = useState(false);
     const [now, setNow] = useState(Date.now());
     const suggestionsReasonId = useId();
+    const suggestionsHeadingId = useId();
+    const suggestionsSection = useRef<HTMLElement>(null);
+    const suggestionsHeading = useRef<HTMLHeadingElement>(null);
+    const revealSuggestions = useRef(false);
+    const [suggestionRequestPending, setSuggestionRequestPending] =
+        useState(false);
+    const suggestionJobKey = canEdit
+        ? JSON.stringify([
+              id,
+              detail?.aiSuggestions.job?.state ?? null,
+              detail?.aiSuggestions.job?.errorCode ?? null,
+              detail?.suggestions
+                  .filter((entry) => entry.kind === "ai")
+                  .map((entry) => [entry.id, entry.state]),
+          ])
+        : null;
+    const [suggestionFailureKey, setSuggestionFailureKey] = useState<
+        string | null
+    >(null);
+    const suggestionRequestFailed =
+        canEdit && suggestionFailureKey === suggestionJobKey;
+    useEffect(() => {
+        if (!canEdit) {
+            setSuggestionFailureKey(null);
+            return;
+        }
+        if (
+            suggestionFailureKey !== null &&
+            suggestionFailureKey !== suggestionJobKey
+        )
+            setSuggestionFailureKey(null);
+    }, [canEdit, suggestionFailureKey, suggestionJobKey]);
+    const [suggestionAnnouncement, setSuggestionAnnouncement] = useState("");
+    const suggestionState = !canEdit
+        ? undefined
+        : suggestionRequestFailed
+          ? "failed"
+          : detail?.aiSuggestions.job?.state;
+    const previousSuggestionJob = useRef({ id, state: suggestionState });
+    const aiSuggestionCount =
+        (canEdit
+            ? detail?.suggestions.filter(
+                  (entry) => entry.kind === "ai" && entry.state === "open",
+              ).length
+            : 0) ?? 0;
+    const readyMessage = i18n("Point suggestions are ready.");
+    const noSuggestionsMessage = i18n("No new points to suggest.");
+    useEffect(() => {
+        if (!canEdit) {
+            setSuggestionAnnouncement("");
+            previousSuggestionJob.current = { id, state: undefined };
+            return;
+        }
+        if (!suggestionState && suggestionRequestPending) return;
+        const previous = previousSuggestionJob.current;
+        if (
+            previous.id === id &&
+            (previous.state === "queued" || previous.state === "running") &&
+            !suggestionState
+        )
+            setSuggestionAnnouncement(
+                aiSuggestionCount ? readyMessage : noSuggestionsMessage,
+            );
+        else if (previous.id !== id || suggestionState)
+            setSuggestionAnnouncement("");
+        previousSuggestionJob.current = { id, state: suggestionState };
+    }, [
+        canEdit,
+        id,
+        suggestionState,
+        suggestionRequestPending,
+        aiSuggestionCount,
+        readyMessage,
+        noSuggestionsMessage,
+    ]);
+    useEffect(() => {
+        if (!canEdit) {
+            revealSuggestions.current = false;
+            return;
+        }
+        if (!suggestionState && !suggestionRequestPending) return;
+        if (!revealSuggestions.current || !suggestionsSection.current) return;
+        revealSuggestions.current = false;
+        suggestionsSection.current.scrollIntoView({
+            behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")
+                .matches
+                ? "instant"
+                : "smooth",
+            block: "nearest",
+        });
+        suggestionsHeading.current?.focus({ preventScroll: true });
+    }, [canEdit, suggestionState, suggestionRequestPending]);
     const sourceRecordings = useMemo(() => {
         const folderIds = new Set(detail?.folderRecordingIds ?? []);
         return [
@@ -133,10 +232,6 @@ export function AgendaBody({
                 a.id.localeCompare(b.id),
         );
     }, [recordings, detail?.folderRecordingIds]);
-    const readOnly =
-        variant === "recording" ||
-        Boolean(detail?.attachedRecording) ||
-        Boolean(detail?.recordingItemId);
     const live = !readOnly && (variant === "live" || detail?.state === "live");
     useEffect(() => {
         if (!live || !active) return;
@@ -172,7 +267,6 @@ export function AgendaBody({
                 </CardContent>
             </Card>
         );
-    const canEdit = detail.permissions.edit && !readOnly;
     const showAttribution = hasAgendaContributors(detail);
     const suggestionsErrorCode =
         "errorCode" in detail.aiSuggestions
@@ -238,12 +332,25 @@ export function AgendaBody({
                 path === `/api/tasks/${encodeURIComponent(taskId)}`,
         );
     const job = detail.aiSuggestions.job;
-    const suggesting = job?.state === "queued" || job?.state === "running";
-    const suggest = () =>
+    const suggesting =
+        suggestionState === "queued" || suggestionState === "running";
+    const completingSuggestions =
+        previousSuggestionJob.current.id === id &&
+        (previousSuggestionJob.current.state === "queued" ||
+            previousSuggestionJob.current.state === "running");
+    const suggest = () => {
+        revealSuggestions.current = true;
+        setSuggestionRequestPending(true);
+        setSuggestionFailureKey(null);
+        setSuggestionAnnouncement("");
         void mutate("/suggestions", "POST", {}, (value) => ({
             ...value,
             aiSuggestions: { ...value.aiSuggestions, job: { state: "queued" } },
-        }));
+        })).then((saved) => {
+            setSuggestionFailureKey(saved ? null : suggestionJobKey);
+            setSuggestionRequestPending(false);
+        });
+    };
     const patchPoint = (point: MeetingPoint, patch: PointPatch) => {
         return mutate(
             `/points/${encodeURIComponent(point.id)}`,
@@ -619,50 +726,12 @@ export function AgendaBody({
                                         </output>
                                     ),
                                 },
-                                {
-                                    key: "job",
-                                    content: canEdit && suggesting && (
-                                        <output>
-                                            {job.state === "queued"
-                                                ? i18n("Suggestions queued…")
-                                                : i18n("Suggesting points…")}
-                                        </output>
-                                    ),
-                                },
                             ]}
                         />
                     ),
                 }}
                 bodyClassName="space-y-3"
             >
-                {canEdit && job?.state === "failed" && (
-                    <div
-                        role="alert"
-                        className="flex items-center gap-2 text-sm"
-                    >
-                        <span>
-                            {job.errorCode === "INVALID_INPUT"
-                                ? i18n(
-                                      "AI suggestions support up to 100 summaries, 200 open tasks and 160,000 characters. Reduce the agenda context.",
-                                  )
-                                : job.errorCode === "AI_PROVIDER_API_ERROR"
-                                  ? i18n(
-                                        "The provider returned invalid agenda suggestions. Try again.",
-                                    )
-                                  : i18n(
-                                        "Could not suggest points. Check the processing profile and try again.",
-                                    )}
-                        </span>
-                        <Button
-                            size="sm"
-                            variant="ghost"
-                            disabled={busy || !detail.aiSuggestions.available}
-                            onClick={suggest}
-                        >
-                            {i18n("Try again")}
-                        </Button>
-                    </div>
-                )}
                 {canEdit && !live && suggestionsReason && (
                     <p
                         id={suggestionsReasonId}
@@ -710,7 +779,7 @@ export function AgendaBody({
                             }),
                         );
                     }}
-                    onAdd={(text, parentId, position) => {
+                    onAdd={async (text, parentId, position, siblingIndex) => {
                         const at = new Date().toISOString();
                         const point: MeetingPoint = {
                             id: `pending-${nanoid()}`,
@@ -732,25 +801,76 @@ export function AgendaBody({
                             createdAt: at,
                             updatedAt: at,
                         };
-                        return mutate(
+                        let savedId: string | undefined;
+                        const saved = await mutate(
                             "/points",
                             "POST",
-                            { text, parentId, position, origin: point.origin },
+                            {
+                                text,
+                                parentId,
+                                ...(siblingIndex === undefined
+                                    ? { position }
+                                    : { siblingIndex }),
+                                origin: point.origin,
+                            },
                             (value) => ({
                                 ...value,
-                                points: [
-                                    ...value.points.map((entry) =>
-                                        entry.position >= position
-                                            ? {
-                                                  ...entry,
-                                                  position: entry.position + 1,
-                                              }
-                                            : entry,
-                                    ),
-                                    point,
-                                ],
+                                points:
+                                    siblingIndex !== undefined
+                                        ? (
+                                              moveAgendaPoint(
+                                                  [...value.points, point],
+                                                  point.id,
+                                                  parentId,
+                                                  Math.min(
+                                                      siblingIndex,
+                                                      value.points.filter(
+                                                          (entry) =>
+                                                              entry.parentId ===
+                                                              parentId,
+                                                      ).length,
+                                                  ),
+                                              ) ?? [...value.points, point]
+                                          ).map((entry) =>
+                                              entry.id !== point.id &&
+                                              entry.position !==
+                                                  value.points.find(
+                                                      (before) =>
+                                                          before.id ===
+                                                          entry.id,
+                                                  )?.position
+                                                  ? {
+                                                        ...entry,
+                                                        version:
+                                                            entry.version + 1,
+                                                    }
+                                                  : entry,
+                                          )
+                                        : [
+                                              ...value.points.map((entry) =>
+                                                  entry.position >= position
+                                                      ? {
+                                                            ...entry,
+                                                            position:
+                                                                entry.position +
+                                                                1,
+                                                        }
+                                                      : entry,
+                                              ),
+                                              point,
+                                          ],
                             }),
+                            (result) => {
+                                if (
+                                    result &&
+                                    typeof result === "object" &&
+                                    "id" in result &&
+                                    typeof result.id === "string"
+                                )
+                                    savedId = result.id;
+                            },
                         );
+                        return savedId && saved ? savedId : saved;
                     }}
                 />
             </AgendaSection>
@@ -1029,25 +1149,97 @@ export function AgendaBody({
                 {pointsCard}
             </div>
             {canEdit &&
-                !live &&
                 (["carry_over", "ai"] as const).map((kind) => {
                     const offered = suggestions.filter(
-                        (suggestion) => suggestion.kind === kind,
+                        (suggestion) => !live && suggestion.kind === kind,
                     );
+                    const ai = kind === "ai";
+                    const failed =
+                        ai &&
+                        (job?.state === "failed" || suggestionRequestFailed);
                     return (
-                        offered.length > 0 && (
+                        (offered.length > 0 ||
+                            (ai &&
+                                (suggesting ||
+                                    completingSuggestions ||
+                                    failed ||
+                                    suggestionAnnouncement))) && (
                             <section
                                 key={kind}
+                                ref={ai ? suggestionsSection : undefined}
+                                aria-labelledby={
+                                    ai ? suggestionsHeadingId : undefined
+                                }
+                                aria-busy={ai ? suggesting : undefined}
                                 className="space-y-3 rounded-lg border bg-muted/20 p-4"
                             >
-                                <h3 className="text-sm font-medium">
+                                <h3
+                                    ref={ai ? suggestionsHeading : undefined}
+                                    id={ai ? suggestionsHeadingId : undefined}
+                                    tabIndex={ai ? -1 : undefined}
+                                    className="text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+                                >
                                     {kind === "carry_over"
                                         ? i18n("Not covered last time")
                                         : i18n(
                                               "Suggestions from activity since the last meeting",
                                           )}
                                 </h3>
-                                {kind === "ai" && (
+                                {ai && suggesting && (
+                                    <output className="flex items-center gap-2 text-sm text-muted-foreground">
+                                        <LoaderCircle
+                                            aria-hidden="true"
+                                            className="size-4 shrink-0 motion-safe:animate-spin"
+                                        />
+                                        {suggestionState === "queued"
+                                            ? i18n("Suggestions queued…")
+                                            : i18n(
+                                                  "Analyzing previous meetings and tasks…",
+                                              )}
+                                    </output>
+                                )}
+                                {failed && (
+                                    <div
+                                        role="alert"
+                                        className="flex items-center gap-2 text-sm"
+                                    >
+                                        <span>
+                                            {job?.errorCode === "INVALID_INPUT"
+                                                ? i18n(
+                                                      "AI suggestions support up to 100 summaries, 200 open tasks and 160,000 characters. Reduce the agenda context.",
+                                                  )
+                                                : job?.errorCode ===
+                                                    "AI_PROVIDER_API_ERROR"
+                                                  ? i18n(
+                                                        "The provider returned invalid agenda suggestions. Try again.",
+                                                    )
+                                                  : i18n(
+                                                        "Could not suggest points. Check the processing profile and try again.",
+                                                    )}
+                                        </span>
+                                        <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            disabled={
+                                                busy ||
+                                                !detail.aiSuggestions.available
+                                            }
+                                            onClick={suggest}
+                                        >
+                                            {i18n("Try again")}
+                                        </Button>
+                                    </div>
+                                )}
+                                {ai &&
+                                    !suggesting &&
+                                    !failed &&
+                                    !offered.length &&
+                                    suggestionAnnouncement && (
+                                        <p className="text-sm text-muted-foreground">
+                                            {suggestionAnnouncement}
+                                        </p>
+                                    )}
+                                {ai && !suggesting && offered.length > 0 && (
                                     <Button
                                         size="sm"
                                         variant="ghost"
@@ -1082,80 +1274,90 @@ export function AgendaBody({
                                         {i18n("Dismiss all")}
                                     </Button>
                                 )}
-                                {offered.map((suggestion) => (
-                                    <div
-                                        key={suggestion.id}
-                                        className="flex flex-wrap items-start gap-2 rounded-md border bg-card p-3 text-sm"
-                                    >
-                                        <div className="min-w-0 flex-1">
-                                            <p>{suggestion.text}</p>
-                                            {suggestion.parentPointId && (
-                                                <p className="text-xs text-muted-foreground">
-                                                    {i18n("Under: {point}", {
-                                                        point:
-                                                            detail.points.find(
-                                                                (point) =>
-                                                                    point.id ===
-                                                                    suggestion.parentPointId,
-                                                            )?.text ?? "",
-                                                    })}
-                                                </p>
-                                            )}
-                                            <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                                                {suggestion.sources?.itemIds?.map(
-                                                    (itemId) => (
-                                                        <Link
-                                                            className="underline"
-                                                            key={itemId}
-                                                            href={`/dashboard?recording=${encodeURIComponent(itemId)}`}
-                                                        >
-                                                            {recordings.find(
-                                                                (recording) =>
-                                                                    recording.id ===
-                                                                    itemId,
-                                                            )?.filename ??
-                                                                i18n(
-                                                                    "Source item",
-                                                                )}
-                                                        </Link>
-                                                    ),
+                                {(!ai || !suggesting) &&
+                                    offered.map((suggestion) => (
+                                        <div
+                                            key={suggestion.id}
+                                            className="flex flex-wrap items-start gap-2 rounded-md border bg-card p-3 text-sm"
+                                        >
+                                            <div className="min-w-0 flex-1">
+                                                <p>{suggestion.text}</p>
+                                                {suggestion.parentPointId && (
+                                                    <p className="text-xs text-muted-foreground">
+                                                        {i18n(
+                                                            "Under: {point}",
+                                                            {
+                                                                point:
+                                                                    detail.points.find(
+                                                                        (
+                                                                            point,
+                                                                        ) =>
+                                                                            point.id ===
+                                                                            suggestion.parentPointId,
+                                                                    )?.text ??
+                                                                    "",
+                                                            },
+                                                        )}
+                                                    </p>
                                                 )}
-                                                {suggestion.sources?.taskIds?.map(
-                                                    (taskId) => {
-                                                        const text =
-                                                            detail.suggestionTasks?.find(
-                                                                (task) =>
-                                                                    task.id ===
-                                                                    taskId,
-                                                            )?.text ??
-                                                            detail.tasks.find(
-                                                                (task) =>
-                                                                    task.id ===
-                                                                    taskId,
-                                                            )?.text;
-                                                        return (
+                                                <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                                                    {suggestion.sources?.itemIds?.map(
+                                                        (itemId) => (
                                                             <Link
-                                                                className="text-tasks underline"
-                                                                key={taskId}
-                                                                href="/tasks"
-                                                                title={text}
+                                                                className="underline"
+                                                                key={itemId}
+                                                                href={`/dashboard?recording=${encodeURIComponent(itemId)}`}
                                                             >
-                                                                {text
-                                                                    ? text.length >
-                                                                      40
-                                                                        ? `${text.slice(0, 40)}…`
-                                                                        : text
-                                                                    : i18n(
-                                                                          "Source task",
-                                                                      )}
+                                                                {recordings.find(
+                                                                    (
+                                                                        recording,
+                                                                    ) =>
+                                                                        recording.id ===
+                                                                        itemId,
+                                                                )?.filename ??
+                                                                    i18n(
+                                                                        "Source item",
+                                                                    )}
                                                             </Link>
-                                                        );
-                                                    },
-                                                )}
+                                                        ),
+                                                    )}
+                                                    {suggestion.sources?.taskIds?.map(
+                                                        (taskId) => {
+                                                            const text =
+                                                                detail.suggestionTasks?.find(
+                                                                    (task) =>
+                                                                        task.id ===
+                                                                        taskId,
+                                                                )?.text ??
+                                                                detail.tasks.find(
+                                                                    (task) =>
+                                                                        task.id ===
+                                                                        taskId,
+                                                                )?.text;
+                                                            return (
+                                                                <Link
+                                                                    className="text-tasks underline"
+                                                                    key={taskId}
+                                                                    href="/tasks"
+                                                                    title={text}
+                                                                >
+                                                                    {text
+                                                                        ? text.length >
+                                                                          40
+                                                                            ? `${text.slice(0, 40)}…`
+                                                                            : text
+                                                                        : i18n(
+                                                                              "Source task",
+                                                                          )}
+                                                                </Link>
+                                                            );
+                                                        },
+                                                    )}
+                                                </div>
                                             </div>
-                                        </div>
-                                        {(["added", "dismissed"] as const).map(
-                                            (state) => (
+                                            {(
+                                                ["added", "dismissed"] as const
+                                            ).map((state) => (
                                                 <Button
                                                     key={state}
                                                     size="sm"
@@ -1189,14 +1391,18 @@ export function AgendaBody({
                                                         ? i18n("Add")
                                                         : i18n("Dismiss")}
                                                 </Button>
-                                            ),
-                                        )}
-                                    </div>
-                                ))}
+                                            ))}
+                                        </div>
+                                    ))}
                             </section>
                         )
                     );
                 })}
+            {canEdit && (
+                <p className="sr-only" aria-live="polite" aria-atomic="true">
+                    {suggestionAnnouncement}
+                </p>
+            )}
             {attachOpen && (
                 <AttachRecordingDialog
                     detail={detail}
@@ -1310,9 +1516,9 @@ function AgendaTaskRow({
                             className="mt-1 size-3 shrink-0"
                             aria-hidden="true"
                         />
-                        <div>
+                        <div className="min-w-0">
                             <p className="whitespace-pre-wrap">
-                                {task.agendaNote}
+                                <LinkedText text={task.agendaNote} />
                             </p>
                             <p className="text-xs text-muted-foreground">
                                 {i18n("Meeting note")}
@@ -1407,7 +1613,9 @@ function AgendaTaskNote({
                 className="min-h-20 max-h-[50vh]"
                 value={draft}
                 maxLength={2000}
-                onChange={(event) => setDraft(event.target.value)}
+                onChange={(event) =>
+                    setDraft(event.target.value.replace(/[\r\n]/gu, " "))
+                }
             />
             <EditorActions
                 cancelLabel={textSync.enabled ? i18n("Close") : i18n("Cancel")}

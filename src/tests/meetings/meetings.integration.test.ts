@@ -181,6 +181,7 @@ import {
     refreshMeetingFolderContext,
 } from "@/lib/meetings/service";
 import { requestArrivalInTx } from "@/lib/pipeline/arrival";
+import { resolveArrivalOrganizationContext } from "@/lib/pipeline/arrival-context";
 import { requestAdvance } from "@/lib/pipeline/trigger";
 import {
     createRecordingSession,
@@ -1027,10 +1028,15 @@ suite("meeting planning server (PostgreSQL)", () => {
                     eq(recordings.userId, "other"),
                 ),
             );
+        const organizationContext = await resolveArrivalOrganizationContext({
+            userId: "other",
+            fileId: "meeting-capture",
+        });
         await db.transaction((tx) =>
             requestArrivalInTx(tx, {
                 userId: "other",
                 itemId: "session-recording",
+                ...organizationContext,
             }),
         );
         expect(
@@ -1041,6 +1047,7 @@ suite("meeting planning server (PostgreSQL)", () => {
             requestArrivalInTx(tx, {
                 userId: "other",
                 itemId: "session-recording",
+                ...organizationContext,
             }),
         );
     });
@@ -1398,7 +1405,7 @@ suite("meeting planning server (PostgreSQL)", () => {
             context,
         );
         expect(publishedLink.headers.get("location")).toBe(
-            "https://example.com/dashboard?recording=rec&view=org",
+            "/dashboard?recording=rec&view=org",
         );
     });
     it.each([
@@ -1894,7 +1901,11 @@ suite("meeting planning server (PostgreSQL)", () => {
             .where(eq(recordings.id, "finalized"));
         expect(await agendaCandidates("owner", "finalized")).toHaveLength(1);
         await db.transaction((tx) =>
-            requestArrivalInTx(tx, { userId: "owner", itemId: "finalized" }),
+            requestArrivalInTx(tx, {
+                userId: "owner",
+                itemId: "finalized",
+                canCurate: false,
+            }),
         );
         expect(
             (await requireMeetingAccess("owner", candidate.id)).agenda
@@ -1902,7 +1913,11 @@ suite("meeting planning server (PostgreSQL)", () => {
         ).toBe(agendaId === null ? null : "finalized");
         await markRecordingSessionCompleted(session.id, "owner", "finalized");
         await db.transaction((tx) =>
-            requestArrivalInTx(tx, { userId: "owner", itemId: "finalized" }),
+            requestArrivalInTx(tx, {
+                userId: "owner",
+                itemId: "finalized",
+                canCurate: false,
+            }),
         );
         expect(
             (await requireMeetingAccess("owner", candidate.id)).agenda

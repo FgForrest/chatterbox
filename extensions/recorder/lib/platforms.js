@@ -15,6 +15,8 @@
  * @property {(url: URL) => boolean} inMeeting
  */
 
+import { meetCode } from "./meet-code.js";
+
 function hostIs(url, host) {
     return url.hostname === host || url.hostname.endsWith(`.${host}`);
 }
@@ -26,11 +28,7 @@ export const PLATFORMS = [
         promptTopOffset: 16,
         promptOrigins: ["https://*.meet.google.com/*"],
         name: "Google Meet",
-        // Rooms are three lowercase groups: xxx-xxxx-xxx. Everything else on
-        // the host (landing, /new redirects, settings) is not a meeting.
-        inMeeting: (url) =>
-            hostIs(url, "meet.google.com") &&
-            /^\/[a-z]{3}-[a-z]{4}-[a-z]{3}(\/|$)/.test(url.pathname),
+        inMeeting: (url) => Boolean(meetCode(url)),
     },
     {
         id: "zoom",

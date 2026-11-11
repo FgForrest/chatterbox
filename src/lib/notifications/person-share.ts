@@ -10,7 +10,7 @@ import { sendEmail } from "@/lib/notifications/email";
 /** Best-effort invitation email, only for recipients who enabled email notifications. */
 export async function sendPersonShareInvitation(
     userId: string,
-    kind?: "meeting",
+    kind?: "meeting" | "access-request" | "access-approved" | "access-declined",
 ): Promise<void> {
     const [recipient] = await db
         .select({
@@ -31,9 +31,15 @@ export async function sendPersonShareInvitation(
     const locale = normalizeLocale(recipient.locale) ?? "en";
     const subject = translatedSourceMessage(
         locale,
-        kind === "meeting"
-            ? "A colleague shared an agenda with you."
-            : "A colleague shared an item with you.",
+        kind === "access-request"
+            ? "A colleague requested access to a restricted folder."
+            : kind === "access-approved"
+              ? "Your request for access to a restricted folder was approved."
+              : kind === "access-declined"
+                ? "Your request for access to a restricted folder was declined."
+                : kind === "meeting"
+                  ? "A colleague shared an agenda with you."
+                  : "A colleague shared an item with you.",
     );
     const label = translatedSourceMessage(locale, "Review invitations");
     const url = new URL("/dashboard?invitations=1", env.APP_URL)
@@ -64,4 +70,7 @@ export async function extractPersonShareEmailMessages(): Promise<void> {
     i18n("A colleague shared an item with you.");
     i18n("A colleague shared an agenda with you.");
     i18n("Review invitations");
+    i18n("A colleague requested access to a restricted folder.");
+    i18n("Your request for access to a restricted folder was approved.");
+    i18n("Your request for access to a restricted folder was declined.");
 }

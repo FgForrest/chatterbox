@@ -106,6 +106,154 @@ const recordings: Recording[] = [
 describe("folder navigation", () => {
     afterEach(cleanup);
 
+    it.each([
+        false,
+        true,
+    ])("marks legacy children as not shared with an explanation (received: %s)", (received) => {
+        render(
+            <ConfirmDialogProvider>
+                <FolderTree
+                    folders={folders.map((folder) => ({
+                        ...folder,
+                        ...(folder.id === "meetings"
+                            ? { sharedWithPeople: true }
+                            : {}),
+                        ...(folder.id === "planning"
+                            ? { insideSharedFolder: true }
+                            : {}),
+                        ...(folder.id === "planning" && received
+                            ? {
+                                  receivedFolder: {
+                                      shareId: "received",
+                                      shareVersion: 1,
+                                      ownerName: "Demo Colleague",
+                                      originalName: "Acme planning",
+                                  },
+                              }
+                            : {}),
+                    }))}
+                    assignments={[]}
+                    recordings={[]}
+                    selectedFolderId="planning"
+                    onSettings={vi.fn()}
+                    onRecent={vi.fn()}
+                    onSelectFolder={vi.fn()}
+                    onMoveFolder={vi.fn()}
+                    onAssignRecording={vi.fn()}
+                />
+            </ConfirmDialogProvider>,
+        );
+        const label = screen.getByText("not shared");
+        expect(label.title).toBe(
+            "Only the shared folder's own items are shared, not its subfolders.",
+        );
+        expect(label.closest("button")?.getAttribute("aria-label")).toBe(
+            "Planning, 0 recordings",
+        );
+    });
+    it("keeps independently shared children's icons and labels only their unshared siblings", () => {
+        render(
+            <ConfirmDialogProvider>
+                <FolderTree
+                    folders={folders.map((folder) => ({
+                        ...folder,
+                        ...(["meetings", "planning"].includes(folder.id)
+                            ? { sharedWithPeople: true }
+                            : {}),
+                        ...(["planning", "archive"].includes(folder.id)
+                            ? { insideSharedFolder: true }
+                            : {}),
+                    }))}
+                    assignments={[]}
+                    recordings={[]}
+                    selectedFolderId="planning"
+                    onSettings={vi.fn()}
+                    onRecent={vi.fn()}
+                    onSelectFolder={vi.fn()}
+                    onMoveFolder={vi.fn()}
+                    onAssignRecording={vi.fn()}
+                />
+            </ConfirmDialogProvider>,
+        );
+        const shared = screen.getByRole("button", {
+            name: "Planning, 0 recordings",
+        });
+        expect(shared.querySelector(".lucide-folder-output")).toBeTruthy();
+        expect(shared.textContent).not.toContain("not shared");
+        const label = screen.getByText("not shared");
+        expect(label.closest("button")?.getAttribute("aria-label")).toBe(
+            "Archive, 0 recordings",
+        );
+        expect(label.title).toBe(
+            "Only the shared folder's own items are shared, not its subfolders.",
+        );
+    });
+    it.each([
+        { dragged: "archive", target: "meetings", y: 20, allowed: false },
+        { dragged: "outside", target: "planning", y: 5, allowed: false },
+        { dragged: "archive", target: "planning", y: 5, allowed: true },
+        { dragged: "outside", target: "meetings", y: 5, allowed: true },
+    ])("checks the actual container for a folder drop: $dragged onto $target at $y", ({
+        dragged,
+        target,
+        y,
+        allowed,
+    }) => {
+        const move = vi.fn().mockResolvedValue(undefined);
+        const treeFolders = [
+            ...folders.map((folder) =>
+                folder.id === "meetings"
+                    ? { ...folder, sharedWithPeople: true }
+                    : folder,
+            ),
+            { ...folders[2], id: "outside", name: "Outside" },
+        ];
+        render(
+            <ConfirmDialogProvider>
+                <FolderTree
+                    folders={treeFolders}
+                    assignments={[]}
+                    recordings={[]}
+                    selectedFolderId="planning"
+                    onSettings={vi.fn()}
+                    onRecent={vi.fn()}
+                    onSelectFolder={vi.fn()}
+                    onMoveFolder={move}
+                    onAssignRecording={vi.fn()}
+                />
+            </ConfirmDialogProvider>,
+        );
+        const source = treeFolders.find((folder) => folder.id === dragged);
+        const destination = treeFolders.find((folder) => folder.id === target);
+        const sourceButton = screen.getByRole("button", {
+            name: `${source?.name}, 0 recordings`,
+        });
+        const targetButton = screen.getByRole("button", {
+            name: `${destination?.name}, 0 recordings`,
+        });
+        targetButton.getBoundingClientRect = () =>
+            ({ top: 0, height: 40 }) as DOMRect;
+        const transfer = {
+            effectAllowed: "move",
+            dropEffect: "move",
+            types: ["application/x-riffado-folder"],
+            setData: vi.fn(),
+            getData: () => dragged,
+        };
+        fireEvent.dragStart(sourceButton, { dataTransfer: transfer });
+        for (const event of [
+            createEvent.dragOver(targetButton),
+            createEvent.drop(targetButton),
+        ]) {
+            Object.defineProperties(event, {
+                clientY: { value: y },
+                dataTransfer: { value: transfer },
+            });
+            fireEvent(targetButton, event);
+        }
+        expect(move.mock.calls.length).toBe(allowed ? 1 : 0);
+        if (!allowed) expect(transfer.dropEffect).toBe("none");
+    });
     it("shows fixed roots and distinct subtree folder counts", () => {
         render(
             <ConfirmDialogProvider>

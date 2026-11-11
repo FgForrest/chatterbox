@@ -36,7 +36,8 @@ type Rule =
     | "mail"
     | "session"
     | "shares"
-    | "meeting";
+    | "meeting"
+    | "restricted";
 
 const CLASSIFIED: Record<string, Record<string, Rule>> = {
     "meetings/route.ts": { GET: "meeting", POST: "meeting" },
@@ -164,8 +165,29 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     // The private view, which is the owner's alone.
     "recordings/[id]/withdraw-preview/route.ts": { GET: "view" },
     "jobs/[id]/route.ts": { GET: "job" },
+    "folders/[id]/access-requests/route.ts": {
+        GET: "restricted",
+        POST: "restricted",
+        DELETE: "restricted",
+    },
+    "folders/[id]/access-requests/[requestId]/route.ts": {
+        PATCH: "restricted",
+    },
+    "folders/[id]/audience/route.ts": {
+        GET: "restricted",
+        POST: "restricted",
+        DELETE: "restricted",
+    },
+    "folders/[id]/restrict/route.ts": { GET: "restricted", POST: "restricted" },
+    "folders/[id]/lift/route.ts": { GET: "restricted", POST: "restricted" },
+    "items/[id]/readers/route.ts": { GET: "restricted" },
+    "folders/restrictions/restore/route.ts": { POST: "restricted" },
     "folders/route.ts": { GET: "folders", POST: "folders" },
-    "folders/[id]/route.ts": { PATCH: "folders", DELETE: "folders" },
+    "folders/[id]/route.ts": {
+        GET: "folders",
+        PATCH: "folders",
+        DELETE: "folders",
+    },
     "folders/[id]/knowledge/route.ts": { GET: "folders" },
     "folders/[id]/default-profiles/route.ts": {
         GET: "folders",
@@ -206,6 +228,7 @@ const GUARDED_DIRECTORIES = [
     "events",
     "meetings",
     "items/[id]/shares",
+    "items/[id]/readers",
     "shares",
     "folder-shares",
     "recordings/[id]",
@@ -252,6 +275,8 @@ describe("recording route classification", () => {
         for (const [file, methods] of Object.entries(CLASSIFIED)) {
             const rules = new Set(Object.values(methods));
             const source = readFileSync(join(API_ROOT, file), "utf8");
+            if (rules.has("restricted"))
+                expect(source, file).toContain("requireApiSession");
             if (rules.has("meeting"))
                 expect(source, file).toMatch(
                     /meetingRoute|requireApiSession|agendaTextRoutes/,

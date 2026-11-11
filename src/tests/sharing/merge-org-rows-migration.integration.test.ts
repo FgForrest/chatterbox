@@ -17,8 +17,6 @@ import {
     aiEnhancements,
     chatterItems,
     people,
-    recordingFolderAssignments,
-    recordingFolders,
     transcriptions,
     transcriptSpeakerRejections,
     transcriptSpeakers,
@@ -42,6 +40,20 @@ const historicalUsers = pgTable("users", {
     id: text("id"),
     email: text("email"),
     role: text("role"),
+});
+
+const historicalFolders = pgTable("recording_folders", {
+    id: text("id")
+        .primaryKey()
+        .$defaultFn(() => nanoid()),
+    userId: text("user_id"),
+    name: text("name"),
+    nameHash: text("name_hash"),
+});
+const historicalAssignments = pgTable("recording_folder_assignments", {
+    userId: text("user_id"),
+    itemId: text("recording_id"),
+    folderId: text("folder_id"),
 });
 
 const historicalRecordings = pgTable("recordings", {
@@ -175,9 +187,9 @@ describeWithDatabase("merging the Organization's rows (PostgreSQL)", () => {
                 { id: ORG, email: "org@example.test", role: "org" },
             ]);
         const [folder] = await db()
-            .insert(recordingFolders)
+            .insert(historicalFolders)
             .values({ userId: ORG, name: "Organization", nameHash: "root" })
-            .returning({ id: recordingFolders.id });
+            .returning({ id: historicalFolders.id });
         await recording("rec-shared");
         await recording("rec-withdrawn");
         // The owner's retention had reaped their rows; the Organization's
@@ -190,7 +202,7 @@ describeWithDatabase("merging the Organization's rows (PostgreSQL)", () => {
             WHERE id = 'rec-shared'
         `);
         await db()
-            .insert(recordingFolderAssignments)
+            .insert(historicalAssignments)
             .values({
                 userId: OWNER,
                 itemId: "rec-shared",

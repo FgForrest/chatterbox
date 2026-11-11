@@ -55,7 +55,11 @@ export type RecipientTarget =
           address: string;
           owner: MailUser;
       }
-    | { kind: "organization"; address: string }
+    | {
+          kind: "organization";
+          address: string;
+          audienceUserIds?: readonly string[];
+      }
     | {
           kind: "secret";
           address: string;
@@ -189,6 +193,11 @@ export function evaluateRecipient(input: {
     if (!senderUser || senderUser.email !== from) {
         return { accept: false, reason: "not_a_user" };
     }
+    if (
+        target.audienceUserIds &&
+        !target.audienceUserIds.includes(senderUser.userId)
+    )
+        return { accept: false, reason: "not_a_user" };
     if (!senderUser.active) return { accept: false, reason: "owner_inactive" };
     const address = target.address.toLowerCase();
     if (

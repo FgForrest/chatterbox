@@ -9,17 +9,17 @@ import {
     sql,
 } from "drizzle-orm";
 import { receivedItemCondition } from "@/db/queries/item-shares";
+import { restrictedItemCondition } from "@/db/queries/restricted-folders";
 import {
     chatterItems,
     people,
-    recordingFolderAssignments,
-    recordingFolders,
     recordings,
     recordingTasks,
     taskFollowers,
     taskMentions,
     taskUnfollows,
 } from "@/db/schema";
+import { sharedItemCondition } from "@/lib/sharing/shared";
 
 /**
  * Who may do what with a task (maintainer, 2026-10-07; person shares 2026-10-22):
@@ -81,14 +81,7 @@ export function taskRecordingShared(
     item: TaskItemColumns = RECORDING_TASK_ITEM,
 ): SQL {
     if (!viewer.orgUserId) return sql`false`;
-    return sql`exists (
-        select 1
-        from ${recordingFolderAssignments}
-        inner join ${recordingFolders}
-            on ${recordingFolders.id} = ${recordingFolderAssignments.folderId}
-        where ${recordingFolderAssignments.itemId} = ${item.id}
-            and ${recordingFolders.userId} = ${viewer.orgUserId}
-    )`;
+    return sharedItemCondition(viewer.orgUserId, item.id);
 }
 
 /** SQL: an own task belongs exclusively to its author. */
@@ -118,7 +111,7 @@ export function taskVisible(
     includePersonal = false,
 ): SQL {
     const shared = taskRecordingShared(viewer, item);
-    if (viewer.isOrg) return shared;
+    if (viewer.isOrg) return or(shared, taskReceived(viewer, item)) as SQL;
     return or(
         eq(item.userId, viewer.userId),
         shared,
@@ -144,7 +137,7 @@ export function taskFollowed(
     viewer: TaskViewer,
     item: TaskItemColumns = ANY_TASK_ITEM,
 ): SQL {
-    if (viewer.isOrg) return taskRecordingShared(viewer, item);
+    if (viewer.isOrg) return taskVisible(viewer, item);
     return and(
         taskVisible(viewer, item, true),
         sql`not exists (select 1 from ${taskUnfollows} where ${taskUnfollows.taskId} = ${recordingTasks.id} and ${taskUnfollows.userId} = ${viewer.userId})`,
@@ -163,11 +156,17 @@ export function taskReceived(
     viewer: TaskViewer,
     item: TaskItemColumns = RECORDING_TASK_ITEM,
 ): SQL {
-    return viewer.isOrg || viewer.includeReceived !== true
+    return viewer.includeReceived !== true
         ? sql`false`
         : (and(
               isNotNull(item.id),
-              receivedItemCondition(viewer.userId, item.id),
+              viewer.isOrg
+                  ? restrictedItemCondition(viewer, item.id)
+                  : receivedItemCondition(
+                        viewer.userId,
+                        item.id,
+                        viewer.isCurator,
+                    ),
               not(taskRecordingShared(viewer, item)),
           ) as SQL);
 }

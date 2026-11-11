@@ -2,12 +2,19 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { lockPipelineTargetsInTx } from "@/db/queries/pipeline-jobs";
 import {
+    dropReleasedAudienceInTx,
+    notifyRestrictedAudienceInTx,
+} from "@/db/queries/restricted-folders";
+import { recordWithheldPlacementInTx } from "@/db/queries/withheld-placement";
+import {
     asyncJobs,
     chatterItems,
     itemProcessing,
     mailPendingShares,
+    recordingFolderAssignments,
     recordingFolders,
 } from "@/db/schema";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { AppError, ErrorCode } from "@/lib/errors";
 import {
@@ -37,12 +44,15 @@ export async function recordIntendedPlacementInTx(
         itemId: string;
         folderId: string;
         requestPipeline?: boolean;
+        canCurate: boolean;
     },
 ): Promise<void> {
+    await lockOrgTree(tx);
     const folder = await assertCategorizableFolder(
         input.ownerUserId,
         input.folderId,
         tx,
+        input.canCurate,
     );
     if (folder.scope !== "org") {
         throw new AppError(
@@ -50,6 +60,23 @@ export async function recordIntendedPlacementInTx(
             "An intended placement must target an Organization folder",
             400,
         );
+    }
+    const [targetFolder] = await tx
+        .select({
+            restrictedAt: recordingFolders.restrictedAt,
+            restrictingAt: recordingFolders.restrictingAt,
+        })
+        .from(recordingFolders)
+        .where(eq(recordingFolders.id, folder.folderId));
+    if (targetFolder?.restrictedAt || targetFolder?.restrictingAt) {
+        await recordWithheldPlacementInTx(
+            tx,
+            input.ownerUserId,
+            input.itemId,
+            folder.folderId,
+            input.canCurate,
+        );
+        return;
     }
     const [item] = await tx
         .select({ id: chatterItems.id })
@@ -111,6 +138,7 @@ export async function executeIntendedSharesWithOutcome(
     claim?: { jobId: string; claimToken: string },
 ): Promise<IntendedShareOutcome> {
     const orgUserId = await getOrgUserId();
+    const canCurate = await userCuratesOrganizationNow(ownerUserId);
     if (!orgUserId || !isOrgScopeEnabled()) {
         const [remaining] = await db
             .select({ folderId: mailPendingShares.folderId })
@@ -296,6 +324,7 @@ export async function executeIntendedSharesWithOutcome(
                         ownerUserId,
                         current.folderId,
                         tx,
+                        canCurate,
                     );
                     if (
                         folder.scope !== "org" ||
@@ -473,6 +502,7 @@ export async function cancelIntendedPlacement(
     folderId: string,
 ): Promise<void> {
     await db.transaction(async (tx) => {
+        await lockOrgTree(tx);
         await lockItemForFolderMutation(tx, itemId, ownerUserId);
         const deleted = await tx
             .delete(mailPendingShares)
@@ -484,6 +514,20 @@ export async function cancelIntendedPlacement(
                 ),
             )
             .returning({ folderId: mailPendingShares.folderId });
+        if (deleted.length) {
+            await notifyRestrictedAudienceInTx(tx, folderId);
+            await tx
+                .delete(recordingFolderAssignments)
+                .where(
+                    and(
+                        eq(recordingFolderAssignments.itemId, itemId),
+                        eq(recordingFolderAssignments.userId, ownerUserId),
+                        eq(recordingFolderAssignments.folderId, folderId),
+                        eq(recordingFolderAssignments.withheld, true),
+                    ),
+                );
+            await dropReleasedAudienceInTx(tx, folderId);
+        }
         const advance = await requestAdvanceInTx(tx, {
             itemId,
             userId: ownerUserId,

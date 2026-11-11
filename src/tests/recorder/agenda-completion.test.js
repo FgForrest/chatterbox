@@ -9,6 +9,7 @@ import {
 } from "../../../extensions/recorder/lib/agendas.js";
 import { STATE } from "../../../extensions/recorder/lib/constants.js";
 import { localizeDocument, t } from "../../../extensions/recorder/lib/i18n.js";
+import { isWaitingForUpload } from "../../../extensions/recorder/lib/upload-state.js";
 import {
     createFolderField,
     createRecordingFolder,
@@ -50,18 +51,19 @@ function load(page, dependencies) {
 
 async function popup() {
     load("popup", {
-        createNextMeetingCard: () => ({ destroy: vi.fn() }),
+        createNextMeetingCard: () => ({ render: vi.fn(), destroy: vi.fn() }),
         createAgendaCard,
         agendaFolder,
         supportsAgendas,
         STATE,
+        isWaitingForUpload,
         localizeDocument,
         t,
         bindMeetingPromptOffer: () => async () => {},
         microphonePermission: async () => "granted",
         originOf: (url) => new URL(url).origin,
         detectMeetingPlatform: () => null,
-        effectiveNoticeText: () => "Inform participants",
+        customNoticeText: () => "",
         effectivePlatformModes: () => ({}),
         getSettings: async () => settings,
         isPaired: async () => true,
@@ -265,6 +267,7 @@ describe.each(["en", "cs"])("localized agenda completion in %s", (locale) => {
             createCaptureHost: () => ({}),
             openSystemAudio: vi.fn(),
             STATE,
+            isWaitingForUpload,
             RECORDER_WINDOW_WIDTH: 360,
             fitWindowToContent: vi.fn(),
             localizeDocument,

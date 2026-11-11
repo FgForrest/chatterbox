@@ -13,8 +13,7 @@
     --meeting: #23766e;
     --organization: #356cac;
     --person-share: #9c5e8f;
-    font-family:
-        system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -105,6 +104,7 @@ button:where(:not([data-recorder-folder] button)):hover:not(:disabled) {
 
 button:focus-visible,
 input:focus-visible,
+textarea:focus-visible,
 select:focus-visible {
     outline: 2px solid var(--primary);
     outline-offset: 2px;
@@ -267,7 +267,9 @@ input[type="checkbox"] {
 }
 
 @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 #view-completed {
@@ -310,11 +312,15 @@ input[type="checkbox"] {
 }
 
 @keyframes draw-ring {
-    to { stroke-dashoffset: 0; }
+    to {
+        stroke-dashoffset: 0;
+    }
 }
 
 @keyframes draw-tick {
-    to { stroke-dashoffset: 0; }
+    to {
+        stroke-dashoffset: 0;
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -397,13 +403,77 @@ input[type="checkbox"] {
     border-radius: 10px;
     background: color-mix(in oklch, var(--primary) 10%, var(--surface));
 }
-.meeting-prompt-offer[hidden] { display: none; }
-#meeting-prompt-news { font-weight: 600; }
-#meeting-prompt-offer-status:empty { display: none; }
+.meeting-prompt-offer[hidden] {
+    display: none;
+}
+#meeting-prompt-news {
+    font-weight: 600;
+}
+#meeting-prompt-offer-status:empty {
+    display: none;
+}
 
-.agenda-card { display: grid; gap: 8px; padding: 12px; margin-bottom: 12px; border: 1px solid color-mix(in srgb, var(--meeting) 45%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--meeting) 8%, var(--surface)); }
-.agenda-card[hidden] { display: none; }
-.agenda-card p { margin: 0; }
-.agenda-card button { justify-self: start; }
+.agenda-card {
+    display: grid;
+    gap: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+    border: 1px solid color-mix(in srgb, var(--meeting) 45%, var(--border));
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--meeting) 8%, var(--surface));
+}
+.agenda-card[hidden] {
+    display: none;
+}
+.agenda-card p {
+    margin: 0;
+}
+.agenda-card button {
+    justify-self: start;
+}
+.agenda-card strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.agenda-card a {
+    color: var(--meeting);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.agenda-card a:hover {
+    text-decoration-thickness: 2px;
+}
 
-[hidden] { display: none !important; }
+[hidden] {
+    /* biome-ignore lint/complexity/noImportantStyles: Hidden recorder views must override component display rules. */
+    display: none !important;
+}
+
+.agenda-card .hint:empty,
+.agenda-card .error:empty {
+    display: none;
+}
+.action-popup #notice-text[hidden] + #folder-row > .hint:empty,
+.action-popup #notice-text[hidden] + #folder-row > .error:empty {
+    display: none;
+}
+.action-popup .agenda-card.agenda-empty {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 0 0;
+    margin: 12px 0 0;
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: transparent;
+}
+.agenda-empty strong {
+    font-size: 11.5px;
+    font-weight: 400;
+    color: var(--muted-foreground);
+}
+.agenda-empty button {
+    flex: none;
+}

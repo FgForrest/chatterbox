@@ -9,6 +9,7 @@ export function canCreateSubfolder(
 ): boolean {
     return (
         !folder.receivedFolder &&
+        !folder.sharedWithPeople &&
         (folder.scope !== "org" ||
             folder.parentId !== null ||
             canManageOrganization(canCurate, isOrgAccount))

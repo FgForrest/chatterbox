@@ -74,6 +74,10 @@ export enum ErrorCode {
      * `ShareGateProblem`s. Served as 409.
      */
     SHARE_REQUIREMENTS_UNMET = "SHARE_REQUIREMENTS_UNMET",
+    /** A pending or accepted person-shared folder cannot gain children (409). */
+    SHARED_FOLDER_HAS_NO_SUBFOLDERS = "SHARED_FOLDER_HAS_NO_SUBFOLDERS",
+    /** Move existing subfolders elsewhere before inviting people (409). */
+    FOLDER_HAS_SUBFOLDERS = "FOLDER_HAS_SUBFOLDERS",
     /**
      * The recording is shared with the Organization, and while it is only
      * the organization account changes it; its owner withdraws it first.
@@ -85,6 +89,16 @@ export enum ErrorCode {
      * request must confirm that (`withdraw: true`). Served as 409.
      */
     WITHDRAW_UNCONFIRMED = "WITHDRAW_UNCONFIRMED",
+    RESTRICTED_FOLDER_NO_ACCESS = "RESTRICTED_FOLDER_NO_ACCESS",
+    RESTRICTED_FOLDER_REQUEST_NOT_PENDING = "RESTRICTED_FOLDER_REQUEST_NOT_PENDING",
+    RESTRICTED_FOLDER_LEAF = "RESTRICTED_FOLDER_LEAF",
+    RESTRICTED_FOLDER_HAS_CHILDREN = "RESTRICTED_FOLDER_HAS_CHILDREN",
+    RESTRICTED_FOLDER_MEMBER_OWNS_ITEMS = "RESTRICTED_FOLDER_MEMBER_OWNS_ITEMS",
+    EXPORT_REVOCATION_PENDING = "EXPORT_REVOCATION_PENDING",
+    EXPORT_REVOCATION_BLOCKED = "EXPORT_REVOCATION_BLOCKED",
+    EXPORT_LOCK_BUSY = "EXPORT_LOCK_BUSY",
+    RESTRICTED_FOLDER_EXPORT = "RESTRICTED_FOLDER_EXPORT",
+    STALE_AGENDA_SUGGESTION = "STALE_AGENDA_SUGGESTION",
 
     EMAIL_SEND_FAILED = "EMAIL_SEND_FAILED",
     SMTP_NOT_CONFIGURED = "SMTP_NOT_CONFIGURED",

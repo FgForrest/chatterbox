@@ -231,7 +231,9 @@ describe("popup agenda card", () => {
         });
         const state = { state: "recording", sessionId: "one", tabId: 7 };
         await render(settings, state);
-        expect(container.hidden).toBe(true);
+        expect(container.hidden).toBe(false);
+        expect(container.textContent).toContain("agendaLoadError");
+        expect(container.querySelector("button:last-child").hidden).toBe(false);
         expect(render.choice()).toEqual({});
         for (let i = 0; i < 10; i++) await render(settings, { ...state });
         await vi.advanceTimersByTimeAsync(999);
@@ -323,7 +325,7 @@ describe("popup agenda card", () => {
         const manifest = JSON.parse(
             readFileSync("extensions/recorder/manifest.json", "utf8"),
         );
-        expect(manifest.version).toBe("0.9.5");
+        expect(manifest.version).toBe("0.9.7");
         expect(manifest.permissions).toEqual([
             "offscreen",
             "storage",
@@ -360,4 +362,22 @@ describe("popup agenda card", () => {
             ),
         ).toBe(true);
     });
+});
+
+it("#386 distinguishes a successful empty match from a failed one and offers Choose agenda", async () => {
+    send.mockResolvedValueOnce({ ok: true, agendas: [] });
+    const render = createAgendaCard(container, {
+        tab: () => ({ id: 7 }),
+        onFolder: vi.fn(),
+    });
+    await render(settings, { state: "idle" });
+    expect(container.hidden).toBe(false);
+    expect(container.textContent).toContain("agendaNoMatch");
+    expect(container.classList.contains("agenda-empty")).toBe(true);
+    const show = container.querySelector("button");
+    expect(show.textContent).toBe("agendaChoose");
+    show.click();
+    expect(send).toHaveBeenLastCalledWith(
+        expect.objectContaining({ type: "open-agenda", choose: true }),
+    );
 });

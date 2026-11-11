@@ -70,6 +70,43 @@ The privacy policy, store listing, permission explanations, and in-extension con
 - The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
 
+## What changed in 0.9.7
+
+- Agenda points, tasks and their notes show clickable HTTP(S) and www. links with compact labels
+  and full-URL tooltips. Links open in a new tab from the side panel and fallback window.
+- Notes expand with soft-wrapped text while editing, keep Enter to finish, and replace pasted
+  newlines with spaces. Unfocused notes show linked text; clicking outside a link edits the note.
+  Stored agenda content remains plain text, with the existing collaborative and legacy save paths.
+- Stopped recordings finish uploading even when Stop arrives as the last upload finishes. The worker,
+  popup, recorder window and browser startup recover a stalled completion automatically.
+- Server requests time out instead of holding an upload forever. Chunk uploads retry with backoff;
+  completion failures keep the encrypted buffer and offer Retry upload.
+- Each pending encrypted recording in Options now offers Retry upload beside Discard, with English
+  and Czech explanations when another capture is active, access is refused or the recording key expired.
+- Recognizes Meet rooms at both /<code> and /meet/<code>, including account-scoped redirects.
+- Join in Meet binds the new tab to its agenda instead of matching it again. Popup and panel Join
+  open its per-tab agenda panel while other tabs keep their own panels. Calendar notification Join
+  opens and binds the meeting tab; the toolbar icon opens its agenda. Bindings expire at meeting end,
+  tab close or navigation out of the room.
+- The panel is a single-column meeting checklist: discussed points, done checkboxes, notes behind
+  Note, recording meters and a read-only upload summary. Preparation, point titles and dropping tasks
+  stay in the web app. One Change agenda link replaces the attachment and navigation controls.
+- Popup and panel hide the default consent sentence, retaining operator/user notices. Next meeting
+  is hidden on its room and during capture/upload. Failed agenda loads show Retry rather than no agendas.
+- Stable agenda links redirect relatively behind reverse proxies. Existing recorder routes remain;
+  task reopening adds open to the existing status field. A released server that refuses it keeps the
+  saved status and shows an error. No new endpoint, response field or manifest permission.
+- Join bindings cache only the tab ID, agenda ID, end and validated room code with pairing identity in
+  session storage. Both privacy policies describe this lifetime; no new external data recipient.
+- Includes the Czech Dropped/Zahozeno wording from 0.9.6, which was never uploaded.
+
+## What changed in 0.9.6
+
+- Czech only: the agenda's task action Drop reads Zahodit and a dropped task Zahozeno, as in the web
+  application, instead of Zrušit and Zrušeno. Zrušit stays reserved for Cancel. The Czech privacy policy
+  uses the same word.
+- No permission, data-use or server-contract change against 0.9.5.
+
 ## What changed in 0.9.5
 
 - Another agenda in the side panel and fallback window adds relevant unrecorded agendas planned within

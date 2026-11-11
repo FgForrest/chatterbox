@@ -33,6 +33,8 @@ Received items stay out of your backups and folder exports. The owner's archive 
 
 Choose **Share folder…** from a private folder's menu, or open **Folder settings** and use its sharing section. Invite colleagues and manage waiting, accepted, declined and removed invitations as for individual items. A folder shared by you carries a plum outgoing-folder arrow.
 
+A folder shared with people has no subfolders: move any subfolders elsewhere before inviting people, and while any invitation is waiting or accepted you cannot create or move subfolders into it. Existing subfolders stay in place and are marked **not shared**; they do not inherit access.
+
 Sharing is live and covers only recordings and emails directly in the folder. Subfolders never inherit access. Adding an item shares it with accepted recipients immediately; removing or moving it out stops that access. An item shared both individually and through a folder appears once in Recent, lists, search and MCP.
 
 To accept a folder invitation, choose **Accept and attach…**. **Attach shared folder** asks for **Name in your tree**, prefilled with the owner's folder name, and **Place in**, limited to your private tree with its root allowed. The incoming-folder arrow and tooltip identify the owner and original name. Renaming the original does not change your chosen name; no other owner folder names become visible.
