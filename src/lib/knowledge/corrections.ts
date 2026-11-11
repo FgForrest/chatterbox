@@ -189,6 +189,7 @@ export async function acceptCorrection(
     return db.transaction(async (tx) => {
         await lockOrgPeopleShared(tx);
         const { id, scopeUserId, recordingId } = await acceptInTx(tx, args);
+        // Private for either scope: only the owner's pipeline regenerates the summary.
         await requestAdvanceInTx(tx, {
             itemId: recordingId,
             userId: args.userId,
@@ -314,6 +315,7 @@ export async function revertCorrection(
             )
             .returning({ id: transcriptCorrections.id });
         if (deleted.length === 0) throw correctionNotFound();
+        // Private for either scope: only the owner's pipeline regenerates the summary.
         await requestAdvanceInTx(tx, {
             itemId: recordingId,
             userId: args.userId,
