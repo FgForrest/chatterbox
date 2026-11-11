@@ -264,7 +264,7 @@ it("hides and ignores the assignee on Mine, retaining it when switching tabs", a
     view.rerender(<TaskList organization={false} />);
     await waitFor(() =>
         expect(fetchMock).toHaveBeenCalledWith(
-            "/api/tasks?tab=mine&state=open&sort=created",
+            "/api/tasks?tab=mine&state=open&sort=created&folders=true",
         ),
     );
     expect(screen.queryByRole("combobox", { name: "Assignee" })).toBeNull();
@@ -365,7 +365,7 @@ it.each([
             .getAttribute("aria-pressed"),
     ).toBe("true");
     expect(fetchMock).toHaveBeenCalledWith(
-        "/api/tasks?tab=all&state=open&sort=created&folder=folder-1&assignee=person-1",
+        "/api/tasks?tab=all&state=open&sort=created&folders=true&folder=folder-1&assignee=person-1",
     );
     expect(fetchMock).toHaveBeenCalledWith("/api/tasks/assignees?tab=all");
     expect(screen.queryByRole("button", { name: "Mine" }) === null).toBe(
@@ -411,7 +411,11 @@ it("chooses and clears the folder filter while retaining other URL filters", asy
                     },
                 ],
             });
-        return Response.json({ tasks: [], assignees: [] });
+        return Response.json({
+            tasks: [],
+            assignees: [],
+            folderIds: ["folder-1"],
+        });
     });
     const view = render(<TaskList organization={false} />);
     await screen.findByText("Nothing here.");

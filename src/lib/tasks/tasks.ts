@@ -20,6 +20,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import { receivedItemSinceCondition } from "@/db/queries/item-shares";
 import { lockPrivateFolderTree } from "@/db/queries/private-folder-tree";
+import { taskTabConditions } from "@/db/queries/task-list";
 import { taskNoteHasMailSource } from "@/db/queries/task-visibility";
 import { reviewableTaskTargetCondition } from "@/db/queries/tasks";
 import {
@@ -3287,34 +3288,6 @@ function addDays(day: string, days: number): string {
     const date = new Date(`${day}T00:00:00Z`);
     date.setUTCDate(date.getUTCDate() + days);
     return date.toISOString().slice(0, 10);
-}
-
-function taskTabConditions(
-    viewer: TaskViewer,
-    tab: TaskTab,
-    organization = false,
-): SQL[] {
-    return [
-        ne(recordingTasks.status, "proposed"),
-        isNull(chatterItems.deletedAt),
-        sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
-        taskVisible(viewer, ANY_TASK_ITEM, true),
-        taskTabScope(viewer, tab, organization),
-    ];
-}
-
-function taskTabScope(
-    viewer: TaskViewer,
-    tab: TaskTab,
-    organization: boolean,
-): SQL {
-    // All narrows nothing: taskTabConditions always applies taskVisible.
-    if (tab === "all") return sql`true`;
-    if (tab === "mine") return assignedToViewer(viewer);
-    if (organization && viewer.isCurator) {
-        return taskRecordingShared(viewer, ANY_TASK_ITEM);
-    }
-    return taskFollowed(viewer);
 }
 
 /** A person a task is assigned to. */

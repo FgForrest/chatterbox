@@ -58,6 +58,7 @@ interface FolderComboboxProps {
     placeholder?: string;
     emptyChoiceLabel?: string;
     className?: string;
+    truncate?: boolean;
 }
 
 /** Shared folder chooser with search, recent folders and optional creation. */
@@ -121,6 +122,7 @@ function FolderComboboxBody({
     placeholder,
     emptyChoiceLabel,
     className = "",
+    truncate = false,
 }: FolderComboboxProps & { environment: FolderPickerEnvironment }) {
     const { labels, label, rememberFolder } = environment;
     const [saving, setSaving] = useState(false);
@@ -160,7 +162,7 @@ function FolderComboboxBody({
                         />
                     )}
                     <span
-                        className={`min-w-0 flex-1 text-left whitespace-normal [overflow-wrap:anywhere] ${selected ? "" : "text-muted-foreground"}`}
+                        className={`min-w-0 flex-1 text-left ${truncate ? "truncate" : "whitespace-normal [overflow-wrap:anywhere]"} ${selected ? "" : "text-muted-foreground"}`}
                     >
                         {(variant === "pill" && selected
                             ? label(selected.folder)

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { listTaskFolderIds } from "@/db/queries/task-list";
 import { apiHandler } from "@/lib/errors";
 import {
     enforceTaskWriteRateLimit,
@@ -30,21 +31,34 @@ export const GET = apiHandler(async (request) => {
     const params = new URL(request.url).searchParams;
     const state = params.get("state") as TaskStateFilter | null;
     const due = params.get("due");
-    const tasks = await listTasks(viewer, {
-        tab: (params.get("tab") === "all"
+    const tab: TaskTab =
+        params.get("tab") === "all"
             ? "all"
             : ["tracked", "followed"].includes(params.get("tab") ?? "")
               ? "followed"
-              : "mine") as TaskTab,
-        organization: params.get("organization") === "true",
-        state: state && STATES.has(state) ? state : "open",
-        folderId: params.get("folder") || null,
-        assignee: params.get("assignee") || null,
-        due: (due && DUES.has(due) ? due : null) as TaskDueFilter,
-        today: isoDateOrNull(params.get("today")),
-        sort: (params.get("sort") === "due" ? "due" : "created") as TaskSort,
-    });
-    return NextResponse.json({ tasks });
+              : "mine";
+    const [tasks, folderIds] = await Promise.all([
+        listTasks(viewer, {
+            tab,
+            organization: params.get("organization") === "true",
+            state: state && STATES.has(state) ? state : "open",
+            folderId: params.get("folder") || null,
+            assignee: params.get("assignee") || null,
+            due: (due && DUES.has(due) ? due : null) as TaskDueFilter,
+            today: isoDateOrNull(params.get("today")),
+            sort: (params.get("sort") === "due"
+                ? "due"
+                : "created") as TaskSort,
+        }),
+        params.get("folders") === "true"
+            ? listTaskFolderIds(
+                  viewer,
+                  tab,
+                  params.get("organization") === "true",
+              )
+            : Promise.resolve(undefined),
+    ]);
+    return NextResponse.json({ tasks, folderIds });
 });
 
 /** Add an own task for the signed-in person. */
