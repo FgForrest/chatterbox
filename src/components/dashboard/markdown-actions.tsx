@@ -11,11 +11,12 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ActionTooltip } from "@/components/ui/tooltip";
 import type { SidecarKind } from "@/lib/export/document-sidecars";
 import { type RecordingView, withRecordingView } from "@/lib/sharing/view";
 
 interface MarkdownActionsProps {
-    kind: SidecarKind | "agenda";
+    kind: SidecarKind | "agenda" | "mail";
     endpoint?: string;
     disabled?: boolean;
     recordingId: string;
@@ -23,7 +24,8 @@ interface MarkdownActionsProps {
     view?: RecordingView;
     /**
      * Collapse copy/download into one menu below 560px. The enclosing card must be a
-     * `@container/transcription` (transcript) or `@container/summary` (summary).
+     * `@container/transcription` (transcript), `@container/summary` (summary),
+     * or `@container/workflow` (mail).
      */
     collapseAtNarrowWidth?: boolean;
 }
@@ -52,15 +54,24 @@ export function MarkdownActions({
             ? i18n("transcript")
             : kind === "agenda"
               ? i18n("agenda")
-              : i18n("summary");
+              : kind === "mail"
+                ? i18n("message")
+                : i18n("summary");
 
-    const narrowContainer = kind === "transcript" ? "transcription" : "summary";
+    const narrowContainer =
+        kind === "transcript"
+            ? "transcription"
+            : kind === "mail"
+              ? "workflow"
+              : "summary";
     const actionsLabel =
         kind === "transcript"
             ? i18n("Transcript actions")
             : kind === "agenda"
               ? i18n("Agenda actions")
-              : i18n("Summary actions");
+              : kind === "mail"
+                ? i18n("Message actions")
+                : i18n("Summary actions");
 
     const copyMarkdown = async () => {
         setCopyState("copying");
@@ -93,7 +104,9 @@ export function MarkdownActions({
                     ? i18n("Transcript Markdown copied")
                     : kind === "agenda"
                       ? i18n("Agenda Markdown copied")
-                      : i18n("Summary Markdown copied"),
+                      : kind === "mail"
+                        ? i18n("Message Markdown copied")
+                        : i18n("Summary Markdown copied"),
             );
             window.setTimeout(() => setCopyState("idle"), 1500);
         } catch {
@@ -113,74 +126,87 @@ export function MarkdownActions({
                     collapseAtNarrowWidth
                         ? narrowContainer === "transcription"
                             ? "hidden items-center gap-1 @min-[560px]/transcription:flex"
-                            : "hidden items-center gap-1 @min-[560px]/summary:flex"
+                            : narrowContainer === "workflow"
+                              ? "hidden items-center gap-1 @min-[560px]/workflow:flex"
+                              : "hidden items-center gap-1 @min-[560px]/summary:flex"
                         : "flex items-center gap-1"
                 }
             >
-                <Button
-                    asChild
-                    size="icon-sm"
-                    variant="ghost"
-                    className={
-                        disabled ? "pointer-events-none opacity-50" : undefined
-                    }
+                <ActionTooltip
+                    label={i18n("Download {document} Markdown", {
+                        document: documentLabel,
+                    })}
                 >
-                    <a
-                        aria-disabled={disabled || undefined}
-                        tabIndex={disabled ? -1 : undefined}
-                        href={disabled ? undefined : endpoint}
-                        aria-label={i18n("Download {document} Markdown", {
-                            document: documentLabel,
-                        })}
-                        title={i18n("Download {document} Markdown", {
+                    <Button
+                        asChild
+                        size="icon-sm"
+                        variant="ghost"
+                        className={
+                            disabled
+                                ? "pointer-events-none opacity-50"
+                                : undefined
+                        }
+                    >
+                        <a
+                            aria-disabled={disabled || undefined}
+                            tabIndex={disabled ? -1 : undefined}
+                            href={disabled ? undefined : endpoint}
+                            aria-label={i18n("Download {document} Markdown", {
+                                document: documentLabel,
+                            })}
+                        >
+                            <Download className="size-4" />
+                        </a>
+                    </Button>
+                </ActionTooltip>
+                <ActionTooltip
+                    label={i18n("Copy {document} Markdown", {
+                        document: documentLabel,
+                    })}
+                >
+                    <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="ghost"
+                        onClick={copyMarkdown}
+                        disabled={disabled || copyState === "copying"}
+                        aria-label={i18n("Copy {document} Markdown", {
                             document: documentLabel,
                         })}
                     >
-                        <Download className="size-4" />
-                    </a>
-                </Button>
-                <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    onClick={copyMarkdown}
-                    disabled={disabled || copyState === "copying"}
-                    aria-label={i18n("Copy {document} Markdown", {
-                        document: documentLabel,
-                    })}
-                    title={i18n("Copy {document} Markdown", {
-                        document: documentLabel,
-                    })}
-                >
-                    {copyState === "copying" ? (
-                        <Loader2 className="size-4 animate-spin" />
-                    ) : copyState === "copied" ? (
-                        <Check className="size-4" />
-                    ) : (
-                        <Copy className="size-4" />
-                    )}
-                </Button>
+                        {copyState === "copying" ? (
+                            <Loader2 className="size-4 animate-spin" />
+                        ) : copyState === "copied" ? (
+                            <Check className="size-4" />
+                        ) : (
+                            <Copy className="size-4" />
+                        )}
+                    </Button>
+                </ActionTooltip>
             </div>
             {collapseAtNarrowWidth && (
                 <div
                     className={
                         narrowContainer === "transcription"
                             ? "@min-[560px]/transcription:hidden"
-                            : "@min-[560px]/summary:hidden"
+                            : narrowContainer === "workflow"
+                              ? "@min-[560px]/workflow:hidden"
+                              : "@min-[560px]/summary:hidden"
                     }
                 >
                     <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button
-                                type="button"
-                                size="icon-sm"
-                                variant="ghost"
-                                aria-label={actionsLabel}
-                                title={actionsLabel}
-                            >
-                                <MoreHorizontal className="size-4" />
-                            </Button>
-                        </DropdownMenuTrigger>
+                        <ActionTooltip label={actionsLabel}>
+                            <DropdownMenuTrigger asChild>
+                                <Button
+                                    type="button"
+                                    size="icon-sm"
+                                    variant="ghost"
+                                    aria-label={actionsLabel}
+                                >
+                                    <MoreHorizontal className="size-4" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                        </ActionTooltip>
                         <DropdownMenuContent align="end">
                             <DropdownMenuItem asChild disabled={disabled}>
                                 <a href={disabled ? undefined : endpoint}>

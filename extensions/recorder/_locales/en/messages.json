@@ -157,6 +157,7 @@
   "foldersLoading": {"message": "Loading folders…"},
   "noFoldersFound": {"message": "No folders found"},
   "folderSearchFailed": {"message": "Could not load folders. Try again."},
+  "folderUnavailable": {"message": "The saved folder is no longer available. Choose another folder or file later."},
   "savedFolder": {"message": "Saved folder"},
   "fileLater": {"message": "File later"},
   "micWarning": {"message": "Your microphone is not allowed. Allow it so your voice is included in recordings."},

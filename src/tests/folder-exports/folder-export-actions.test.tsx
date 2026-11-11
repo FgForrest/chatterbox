@@ -375,4 +375,103 @@ describe("folder export dialog with Google Drive", () => {
         await screen.findByRole("button", { name: "Reconnect" });
         expect(screen.getByText("Google Drive: Team exports")).toBeTruthy();
     });
+    it.each([
+        ["EXPORT_REVOCATION_PENDING", true],
+        ["EXPORT_LOCK_BUSY", true],
+        ["EXPORT_REVOCATION_BLOCKED", false],
+    ])("keeps the configuration and its removal status for %s", async (code, retryable) => {
+        const configuration = {
+            id: "e1",
+            folderId: "f1",
+            provider: "filesystem",
+            targetPath: "team",
+            exportAudio: true,
+            exportTranscript: false,
+            exportSummary: false,
+            exportMail: false,
+            lastError: "Restricted copies still need removal",
+            lastErrorAt: "2026-11-01T00:00:00Z",
+        };
+        const fetchMock = vi.fn(
+            async (_url: RequestInfo | URL, init?: RequestInit) =>
+                init?.method === "DELETE"
+                    ? Response.json(
+                          {
+                              code,
+                              error: "server",
+                              details: { cause: "needs_reconnect" },
+                          },
+                          { status: 409 },
+                      )
+                    : Response.json({
+                          configured: [configuration],
+                          applicableIds: ["e1"],
+                      }),
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        render(
+            <FolderExportActions
+                folder={folder}
+                providers={{
+                    filesystem: true,
+                    googleDrive: false,
+                    mail: false,
+                }}
+                privateTree
+                open
+            />,
+        );
+        expect(
+            await screen.findByText("Restricted copies still need removal"),
+        ).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: /Remove export/ }));
+        await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
+        expect(
+            screen.getByText("Restricted copies still need removal"),
+        ).toBeTruthy();
+        const notice = toastMock.error.mock.lastCall as unknown as [
+            string,
+            { action?: { label: string; onClick: () => void } } | undefined,
+        ];
+        expect(!!notice[1]?.action).toBe(retryable);
+        if (retryable) {
+            expect(notice[1]?.action?.label).toBe("Retry");
+            await act(async () => notice[1]?.action?.onClick());
+            expect(
+                fetchMock.mock.calls.filter(
+                    ([, init]) => init?.method === "DELETE",
+                ),
+            ).toHaveLength(2);
+        } else expect(notice[0]).toBe("The Google account must be reconnected");
+    });
+    it("offers no new export target on a restricted folder", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () =>
+                Response.json({ configured: [], applicableIds: [] }),
+            ),
+        );
+        render(
+            <FolderExportActions
+                folder={{ ...folder, scope: "org", restricted: true }}
+                providers={{ filesystem: true, googleDrive: true, mail: false }}
+                privateTree
+                open
+            />,
+        );
+        await screen.findByText(
+            "No exports are configured directly on this folder.",
+        );
+        expect(
+            screen.queryByRole("button", { name: "Add filesystem export" }),
+        ).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "Add Google Drive export" }),
+        ).toBeNull();
+        expect(
+            screen.getByText(
+                "Restricted folders cannot be exported for the Organization.",
+            ),
+        ).toBeTruthy();
+    });
 });

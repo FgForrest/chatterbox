@@ -1,6 +1,6 @@
 "use client";
 
-import { Folder, Users, X } from "lucide-react";
+import { Folder, FolderLock, Users, X } from "lucide-react";
 import type { AriaAttributes, RefObject } from "react";
 import { cn } from "@/lib/utils";
 
@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 export function ItemFolderChipBody({
     name,
     organization,
+    restricted = false,
     onSelect,
     onRemove,
     disabled = false,
@@ -19,6 +20,7 @@ export function ItemFolderChipBody({
 }: {
     name: string;
     organization: boolean;
+    restricted?: boolean;
     onSelect: () => void;
     onRemove?: () => void;
     disabled?: boolean;
@@ -34,9 +36,11 @@ export function ItemFolderChipBody({
         <span
             className={cn(
                 "inline-flex h-7 items-center overflow-hidden rounded-full border text-xs",
-                organization
-                    ? "border-organization/20 bg-organization/5"
-                    : "border-primary/20 bg-primary/5",
+                restricted
+                    ? "border-restricted/20 bg-restricted/5"
+                    : organization
+                      ? "border-organization/20 bg-organization/5"
+                      : "border-primary/20 bg-primary/5",
             )}
         >
             <button
@@ -48,12 +52,16 @@ export function ItemFolderChipBody({
                 onClick={onSelect}
                 className={cn(
                     "inline-flex h-full items-center gap-1.5 px-2.5 text-foreground",
-                    organization
-                        ? "hover:bg-organization/10"
-                        : "hover:bg-primary/10",
+                    restricted
+                        ? "hover:bg-restricted/10"
+                        : organization
+                          ? "hover:bg-organization/10"
+                          : "hover:bg-primary/10",
                 )}
             >
-                {organization ? (
+                {restricted ? (
+                    <FolderLock className="size-3.5 text-restricted" />
+                ) : organization ? (
                     <Users className="size-3.5 text-organization" />
                 ) : (
                     <Folder className="size-3.5 text-primary" />
@@ -67,9 +75,11 @@ export function ItemFolderChipBody({
                     disabled={disabled}
                     className={cn(
                         "inline-flex h-full items-center border-l px-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50",
-                        organization
-                            ? "border-organization/15"
-                            : "border-primary/15",
+                        restricted
+                            ? "border-restricted/15"
+                            : organization
+                              ? "border-organization/15"
+                              : "border-primary/15",
                     )}
                     aria-label={removeLabel}
                 >

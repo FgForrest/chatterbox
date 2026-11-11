@@ -637,7 +637,7 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
                 .where(eq(transcriptions.recordingId, REC)),
         ).toEqual([]);
     });
-    it("saves the owner's automatic summary when sharing lands during generation", async () => {
+    it("retains the saved summary when an automatic replacement finishes across sharing", async () => {
         await db()
             .insert(apiCredentials)
             .values({
@@ -667,12 +667,12 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
         const result = await generateSummaryForRecording(OWNER, REC, {
             trigger: "auto",
         });
-        expect(result.committed).toBe(true);
+        expect(result.committed).toBe(false);
         const [summary] = await db()
             .select()
             .from(aiEnhancements)
             .where(eq(aiEnhancements.itemId, REC));
-        expect(decryptText(summary?.summary)).toBe("Finished after sharing");
+        expect(decryptText(summary?.summary)).toBe("The owner's summary.");
         expect(summary?.userId).toBe(OWNER);
     });
 
@@ -687,6 +687,7 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
                 actorUserId,
                 recordingId: REC,
                 transcriptionId: transcript?.id ?? "",
+                summaryWriteMode: "regenerate",
                 summary: `by ${actorUserId}`,
                 keyPoints: [],
                 actionItems: [],
@@ -746,6 +747,7 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
             userId: OWNER,
             recordingId: REC,
             transcriptionId: transcript?.id ?? "",
+            summaryWriteMode: "regenerate",
             summary: "Summary started privately",
             keyPoints: [],
             actionItems: [],

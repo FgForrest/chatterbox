@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
 import { aiEnhancements, itemProcessing, recordings } from "@/db/schema";
 import { decryptJsonField } from "@/lib/encryption/fields";
@@ -10,6 +10,7 @@ import type { PhaseRecord, PipelineView } from "@/lib/pipeline/types";
 import { trimHolds } from "@/lib/recordings/trim-proposal";
 import { contentWriterScope, sharingOrgUserId } from "@/lib/sharing/writer";
 import { readPlaudTaskSource } from "@/lib/summary/read-summary";
+import { mayAutomaticallyReplaceSummary } from "@/lib/summary/replacement";
 import { taskViewerById } from "@/lib/tasks/access";
 import { resolveTaskProposals } from "@/lib/tasks/proposals";
 import { writeTaskProposalsInTx } from "@/lib/tasks/store";
@@ -86,6 +87,42 @@ export async function applyPlaudActionItemProposals(input: {
             .limit(1);
         if (trimHolds(processing?.phases.trim))
             throw new JobDeferredError(30_000, "Waiting for trim decision");
+        const previous = processing?.phases.summary?.steps?.summary;
+        const categorize = processing?.phases.categorize;
+        const refreshGeneration = Math.max(
+            categorize?.summaryRefresh?.generation ?? -1,
+            categorize?.reason === "process_again" ? categorize.generation : -1,
+        );
+        if (
+            previous?.state === "done" &&
+            previous?.sourceFingerprint === input.expectedFingerprint &&
+            previous.contentId === input.record.inputs?.contentId &&
+            previous.contentSourceId === input.record.inputs?.contentSourceId &&
+            previous.contentRevision === input.record.inputs?.contentRevision &&
+            refreshGeneration <= previous.generation
+        )
+            return false;
+        const [custom] = await tx
+            .select({ id: aiEnhancements.id })
+            .from(aiEnhancements)
+            .where(
+                and(
+                    eq(aiEnhancements.itemId, input.itemId),
+                    eq(aiEnhancements.userId, input.userId),
+                    eq(aiEnhancements.source, "riffado"),
+                    isNotNull(aiEnhancements.summary),
+                ),
+            )
+            .limit(1);
+        if (
+            custom &&
+            !(await mayAutomaticallyReplaceSummary(
+                input.userId,
+                input.itemId,
+                tx,
+            ))
+        )
+            return false;
         const { scopeUserId } = await contentWriterScope(tx, {
             recordingId: input.itemId,
             ownerUserId: input.userId,

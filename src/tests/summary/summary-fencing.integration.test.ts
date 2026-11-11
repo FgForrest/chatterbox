@@ -222,6 +222,7 @@ describeWithDatabase("summary commit fencing (PostgreSQL)", () => {
                 recordingId: ITEM,
                 transcriptionId: TRANSCRIPT,
                 summary: "Committed result",
+                summaryWriteMode: "regenerate",
                 keyPoints: [],
                 actionItems: [],
                 source: "riffado",

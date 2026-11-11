@@ -696,10 +696,16 @@ export async function listMeetings(
                                     ),
                                     isNull(recordingFolders.restrictedAt),
                                 )
-                              : placementVisibleCondition({
-                                    userId,
-                                    isCurator: viewer.curator,
-                                }),
+                              : or(
+                                    eq(
+                                        recordingFolderAssignments.userId,
+                                        userId,
+                                    ),
+                                    placementVisibleCondition({
+                                        userId,
+                                        isCurator: viewer.curator,
+                                    }),
+                                ),
                           inArray(
                               recordingFolderAssignments.itemId,
                               rows.flatMap(({ agenda }) =>
@@ -1003,10 +1009,12 @@ export async function getMeeting(
                             eq(recordingFolderAssignments.withheld, false),
                             isNull(recordingFolders.restrictedAt),
                         )
-                      : placementVisibleCondition({
-                            userId,
-                            isCurator: access.viewer.curator,
-                        }),
+                      : agenda.userId === userId
+                        ? undefined
+                        : placementVisibleCondition({
+                              userId,
+                              isCurator: access.viewer.curator,
+                          }),
               )
             : [],
         taskViewerById(userId).then((value) => ({

@@ -318,7 +318,14 @@ export function ItemWorkflow({
         useState<CategorizationPanelPresentation | null>(null);
     const foldersSignature = JSON.stringify(
         folders
-            .map(({ id, parentId, name }) => ({ id, parentId, name }))
+            .map(({ id, parentId, name, restricted, restricting, access }) => ({
+                id,
+                parentId,
+                name,
+                restricted,
+                restricting,
+                access,
+            }))
             .sort((left, right) => left.id.localeCompare(right.id)),
     );
     const loadedFoldersSignature = useRef<string | null>(null);
@@ -344,49 +351,57 @@ export function ItemWorkflow({
         panelRequest.current = null;
         loadedFoldersSignature.current = null;
         pendingFilingFocus.current = false;
+        setPendingFilingMode(null);
         return () => {
             panelRequest.current = null;
         };
     }, [itemId]);
 
-    const loadPanel = useCallback(() => {
-        if (
-            !canEdit ||
-            (panelData?.itemId === itemId &&
-                loadedFoldersSignature.current === foldersSignature) ||
-            (panelRequest.current?.itemId === itemId &&
-                panelRequest.current.foldersSignature === foldersSignature)
-        ) {
-            return;
-        }
-        const request = { itemId, foldersSignature };
-        panelRequest.current = request;
-        void fetch(`/api/recordings/${encodeURIComponent(itemId)}/categorize`)
-            .then(async (response) => {
-                if (!response.ok) throw new Error(String(response.status));
-                const body =
-                    (await response.json()) as CategorizationPanelPresentation;
-                if (
-                    panelRequest.current === request &&
-                    body.itemId === itemId
-                ) {
-                    loadedFoldersSignature.current = foldersSignature;
-                    setPanelData(body);
-                }
-            })
-            .catch(() => {
-                if (panelRequest.current === request) {
-                    toast.error(
-                        i18n("The filing options could not be loaded."),
-                    );
-                }
-            })
-            .finally(() => {
-                if (panelRequest.current === request) {
-                    panelRequest.current = null;
-                }
-            });
-    }, [canEdit, foldersSignature, i18n, itemId, panelData]);
+    const loadPanel = useCallback(
+        (force = false) => {
+            if (
+                !canEdit ||
+                (!force &&
+                    panelData?.itemId === itemId &&
+                    loadedFoldersSignature.current === foldersSignature) ||
+                (!force &&
+                    panelRequest.current?.itemId === itemId &&
+                    panelRequest.current.foldersSignature === foldersSignature)
+            ) {
+                return;
+            }
+            const request = { itemId, foldersSignature };
+            panelRequest.current = request;
+            void fetch(
+                `/api/recordings/${encodeURIComponent(itemId)}/categorize`,
+            )
+                .then(async (response) => {
+                    if (!response.ok) throw new Error(String(response.status));
+                    const body =
+                        (await response.json()) as CategorizationPanelPresentation;
+                    if (
+                        panelRequest.current === request &&
+                        body.itemId === itemId
+                    ) {
+                        loadedFoldersSignature.current = foldersSignature;
+                        setPanelData(body);
+                    }
+                })
+                .catch(() => {
+                    if (panelRequest.current === request) {
+                        toast.error(
+                            i18n("The filing options could not be loaded."),
+                        );
+                    }
+                })
+                .finally(() => {
+                    if (panelRequest.current === request) {
+                        panelRequest.current = null;
+                    }
+                });
+        },
+        [canEdit, foldersSignature, i18n, itemId, panelData],
+    );
 
     const categorizeReason = data?.phases.categorize?.reason;
     const profileReason =
@@ -395,8 +410,12 @@ export function ItemWorkflow({
             ? categorizeReason
             : undefined;
     let filingMode: "folder" | "profile" | null = null;
+    const [pendingFilingMode, setPendingFilingMode] = useState<
+        "folder" | "profile" | null
+    >(null);
     if (categorizeReason === "needs_folder") filingMode = "folder";
     else if (profileReason) filingMode = "profile";
+    filingMode = pendingFilingMode ?? filingMode;
 
     useEffect(() => {
         if (filingMode) loadPanel();
@@ -572,6 +591,7 @@ export function ItemWorkflow({
     const optimisticCategorize = useCallback(
         (submission: CategorizeSubmission) => {
             if (!data || !panelData) return () => {};
+            setPendingFilingMode(filingMode);
             const previous = data;
             const selected = submission.folderIds.flatMap((folderId) => {
                 const folder = panelData.folders.find(
@@ -630,9 +650,12 @@ export function ItemWorkflow({
                     },
                 },
             });
-            return () => setData(previous);
+            return () => {
+                setData(previous);
+                setPendingFilingMode(null);
+            };
         },
-        [data, panelData, setData],
+        [data, panelData, setData, filingMode],
     );
 
     const focusFilingControl = useCallback(() => {
@@ -780,7 +803,13 @@ export function ItemWorkflow({
                             onFolderCreated={onFolderCreated}
                             onTranscribe={() => onTranscribe?.(false)}
                             onOptimisticCategorize={optimisticCategorize}
+                            onStale={() => {
+                                loadPanel(true);
+                                invalidate();
+                                onChanged?.();
+                            }}
                             onCategorized={() => {
+                                setPendingFilingMode(null);
                                 invalidate();
                                 onChanged?.();
                             }}
@@ -801,7 +830,7 @@ export function ItemWorkflow({
                     isOwn={isOwn}
                     canWithdraw={canWithdraw}
                     organizationOnly={view === "org"}
-                    onLoadPanel={loadPanel}
+                    onLoadPanel={() => loadPanel()}
                     onProfileChange={(choice) => void changeProfile(choice)}
                     onCancelIntent={(folderId) => void cancelIntent(folderId)}
                     onShareNow={() => void shareNow()}

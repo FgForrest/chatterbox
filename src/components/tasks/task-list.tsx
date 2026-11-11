@@ -87,6 +87,7 @@ export function TaskList({
         onAdded,
         onReconciled,
         folders,
+        filterFolders,
         selectedPrivate,
         sortedAssignees,
     } = useTaskListData({
@@ -99,6 +100,7 @@ export function TaskList({
         allOrganization,
         // Opening the list is seeing what is new.
         markSeen: true,
+        filterFolders: true,
     });
 
     const tabs = [
@@ -196,12 +198,13 @@ export function TaskList({
                     }
                 />
                 <FolderCombobox
-                    entries={matchFolders(folders, "", folderLabel)}
+                    entries={matchFolders(filterFolders, "", folderLabel)}
                     value={folder === ALL ? "" : folder}
                     onValueChange={(value) => setParam("folder", value || ALL)}
                     emptyChoiceLabel={i18n("All folders")}
                     aria-label={i18n("Folder")}
-                    className="h-9 min-h-0 max-w-48 text-xs [&>span]:text-foreground"
+                    truncate
+                    className="h-9 min-h-0 min-w-0 max-w-48 text-xs [&>span]:text-foreground"
                 />
                 {tab !== "mine" && (
                     <TaskAssigneeSelect

@@ -150,13 +150,13 @@ export function deriveWorkflowWidgets(
         data.phases.learn?.state === "done" ||
         data.phases.learn?.state === "skipped";
     const summaryVisible =
-        categorized &&
-        contentReady &&
-        (data.outputs.summary ||
-            (learnCompleted &&
-                (hasReached(summaryStep) ||
-                    summaryManual ||
-                    data.phases.learn?.state === "skipped")));
+        data.outputs.summary ||
+        (categorized &&
+            contentReady &&
+            learnCompleted &&
+            (hasReached(summaryStep) ||
+                summaryManual ||
+                data.phases.learn?.state === "skipped"));
     const taskVisible =
         data.taskReviewWaiting > 0 &&
         (hasReached(taskStep) || data.outputs.summary);

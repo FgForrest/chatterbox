@@ -277,24 +277,31 @@ export function RecordingList({
         return result;
     }, [assignments]);
 
+    const foldersById = useMemo(
+        () => new Map(folders.map((folder) => [folder.id, folder])),
+        [folders],
+    );
     const firstFolders = useMemo(() => {
-        const byId = new Map(folders.map((folder) => [folder.id, folder]));
         const result = new Map<
             string,
             { folder: RecordingFolder; path: string }
         >();
         for (const assignment of assignments) {
             if (result.has(assignment.recordingId)) continue;
-            const assigned = byId.get(assignment.folderId);
-            if (!assigned || (searchView === "org" && assigned.scope !== "org"))
+            const assigned = foldersById.get(assignment.folderId);
+            if (
+                !assigned ||
+                assigned.access === false ||
+                (searchView === "org" && assigned.scope !== "org")
+            )
                 continue;
             result.set(assignment.recordingId, {
                 folder: assigned,
-                path: folderDisplayPath(assigned, byId, folderLabel),
+                path: folderDisplayPath(assigned, foldersById, folderLabel),
             });
         }
         return result;
-    }, [assignments, folders, folderLabel, searchView]);
+    }, [assignments, foldersById, folderLabel, searchView]);
 
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
@@ -668,6 +675,21 @@ export function RecordingList({
                                             <MeetingRow
                                                 key={entry.id}
                                                 meeting={entry.meeting}
+                                                folders={entry.meeting.folders.flatMap(
+                                                    (placement) => {
+                                                        const candidate =
+                                                            foldersById.get(
+                                                                placement.id,
+                                                            );
+                                                        return candidate &&
+                                                            candidate.access !==
+                                                                false &&
+                                                            candidate.id !==
+                                                                folder?.id
+                                                            ? [candidate]
+                                                            : [];
+                                                    },
+                                                )}
                                                 selected={
                                                     currentMeetingId ===
                                                         entry.id ||

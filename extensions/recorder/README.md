@@ -51,6 +51,14 @@ expands the controls. When capture stops, it briefly confirms that upload
 continues in the extension. If a changed folder is unavailable when saving, the
 server uses the start folder instead.
 
+On supporting servers, an accessible restricted Organization folder shows an olive
+folder-lock icon in the target chips and folder choosers in the popup, agenda
+panel (or fallback window), recorder window, full-page picker and in-page
+recording pill. The marker appears after folder results load. Inaccessible folders
+are omitted. If a remembered folder is no longer available, the chooser asks you
+to select another folder or leave the recording unfiled. Older servers without
+the optional marker keep the ordinary folder appearance.
+
 Because uploads are incremental and buffered in the browser's private file
 system, a dropped connection or a closed tab loses seconds, not the meeting.
 The server keeps unfinished capture keys for up to 30 days after activity so

@@ -10,6 +10,9 @@ export function canCreateSubfolder(
     return (
         !folder.receivedFolder &&
         !folder.sharedWithPeople &&
+        !folder.restricted &&
+        !folder.restricting &&
+        folder.access !== false &&
         (folder.scope !== "org" ||
             folder.parentId !== null ||
             canManageOrganization(canCurate, isOrgAccount))

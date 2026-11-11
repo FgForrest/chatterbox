@@ -4,14 +4,19 @@ import { GET as getTasks } from "@/app/api/tasks/route";
 import { AppError, ErrorCode } from "@/lib/errors";
 import type { TaskViewer } from "@/lib/tasks/access";
 
-const { requireTaskViewer, listTasks, listTrackedAssignees } = vi.hoisted(
-    () => ({
-        requireTaskViewer: vi.fn(),
-        listTasks: vi.fn(),
-        listTrackedAssignees: vi.fn(),
-    }),
-);
+const {
+    requireTaskViewer,
+    listTasks,
+    listTrackedAssignees,
+    listTaskFolderIds,
+} = vi.hoisted(() => ({
+    requireTaskViewer: vi.fn(),
+    listTasks: vi.fn(),
+    listTrackedAssignees: vi.fn(),
+    listTaskFolderIds: vi.fn(),
+}));
 
+vi.mock("@/db/queries/task-list", () => ({ listTaskFolderIds }));
 vi.mock("@/lib/tasks/route-helpers", () => ({ requireTaskViewer }));
 vi.mock("@/lib/tasks/tasks", () => ({ listTasks, listTrackedAssignees }));
 vi.mock("@/lib/posthog-server", () => ({ captureServerException: vi.fn() }));
@@ -28,6 +33,7 @@ beforeEach(() => {
     vi.clearAllMocks();
     requireTaskViewer.mockResolvedValue(viewer);
     listTasks.mockResolvedValue([]);
+    listTaskFolderIds.mockResolvedValue([]);
     listTrackedAssignees.mockResolvedValue([]);
 });
 

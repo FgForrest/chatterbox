@@ -206,6 +206,7 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     // A shared mail is read by everyone, read-only; deleting and the raw
     // message (every header unmasked) stay its owner's.
     "mail/[id]/route.ts": { GET: "mail", DELETE: "owner" },
+    "mail/[id]/markdown/route.ts": { GET: "view" },
     "mail/[id]/html/route.ts": { GET: "mail" },
     "mail/[id]/raw/route.ts": { GET: "owner" },
     "mail/[id]/attachments/[index]/route.ts": { GET: "mail" },

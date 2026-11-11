@@ -88,14 +88,14 @@ export async function generateMailSummary(
     });
     if (refusal) throw writerRefusalError(refusal);
 
-    const itemProfileRevisionId =
-        (
-            await readProcessing(
-                itemId,
-                pipelineDriver(ctx.ownerUserId).view,
-                ctx.ownerUserId,
-            )
-        )?.profileRevisionId ?? null;
+    const processing = await readProcessing(
+        itemId,
+        pipelineDriver(ctx.ownerUserId).view,
+        ctx.ownerUserId,
+    );
+    const itemProfileRevisionId = processing?.profileRevisionId ?? null;
+    const summaryRefreshGeneration =
+        processing?.phases?.categorize?.summaryRefresh?.generation ?? 0;
 
     const [mail] = await db
         .select({
@@ -395,6 +395,7 @@ export async function generateMailSummary(
             contentSourceId: "mail",
             contentRevision: stored.revision,
             itemProfileRevisionId,
+            summaryRefreshGeneration,
             ...(tasksContext.scopeFingerprint
                 ? { scopeFingerprint: tasksContext.scopeFingerprint }
                 : {}),

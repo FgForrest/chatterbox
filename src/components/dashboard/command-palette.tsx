@@ -353,8 +353,9 @@ export function CommandPalette({
                                                     ),
                                                 )}
                                             >
-                                                {entry.folder.scope ===
-                                                "org" ? (
+                                                {entry.folder.scope === "org" &&
+                                                !entry.folder.restricted &&
+                                                !entry.folder.restricting ? (
                                                     <Users className="size-4 text-organization" />
                                                 ) : (
                                                     <SharedFolderIcon

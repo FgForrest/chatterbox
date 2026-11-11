@@ -91,6 +91,9 @@ export async function updatePhaseInTx(
             placementProfile: previous?.placementProfile,
             heldProfiles: previous?.heldProfiles,
             ...record,
+            summaryRefresh: previous?.summaryRefresh,
+            arrivalGeneration:
+                previous?.arrivalGeneration ?? record.arrivalGeneration,
         };
     if (
         record.state !== "outdated" &&

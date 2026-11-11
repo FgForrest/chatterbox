@@ -19,8 +19,8 @@
     const root = host.attachShadow({ mode: "closed" });
     const style = document.createElement("style");
     style.textContent = `
-        :host { color-scheme:light dark; --background:#faf9f5; --foreground:#243348; --surface:#fff; --muted:#f1eee8; --muted-foreground:#626b73; --border:#dad9d4; --primary:#c63b50; --primary-foreground:#fff; --error:#b42332; --meeting:#23766e; --organization:#356cac; }
-        @media(prefers-color-scheme:dark) { :host { --background:#3b3a38; --foreground:#d4d0c9; --surface:#444340; --muted:#302f2d; --muted-foreground:#c3bdb3; --border:#62605b; --primary:#f35f6d; --primary-foreground:#14263c; --error:#ff8b94; --meeting:#7bd4c8; --organization:#8ebaf1; } }
+        :host { color-scheme:light dark; --background:#faf9f5; --foreground:#243348; --surface:#fff; --muted:#f1eee8; --muted-foreground:#626b73; --border:#dad9d4; --primary:#c63b50; --primary-foreground:#fff; --error:#b42332; --meeting:#23766e; --organization:#356cac; --restricted:#647119; }
+        @media(prefers-color-scheme:dark) { :host { --background:#3b3a38; --foreground:#d4d0c9; --surface:#444340; --muted:#302f2d; --muted-foreground:#c3bdb3; --border:#62605b; --primary:#f35f6d; --primary-foreground:#14263c; --error:#ff8b94; --meeting:#7bd4c8; --organization:#8ebaf1; --restricted:#b7c86b; } }
         * { box-sizing:border-box; }
         [hidden] { display:none!important; }
         .surface { pointer-events:auto; position:relative; max-width:600px; width:100%; background:var(--surface); color:var(--foreground); border:1px solid var(--border); border-radius:12px; box-shadow:0 12px 32px -12px rgb(20 30 45 / .35),0 2px 6px rgb(20 30 45 / .12); font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; text-align:left; overflow-wrap:anywhere; }
@@ -51,6 +51,7 @@
         .folder-target { display:inline-flex; flex:0 1 auto; min-width:0; max-width:180px; height:28px; align-items:center; border:1px solid var(--border); border-radius:calc(infinity * 1px); overflow:hidden; font-size:12px; line-height:16px; }
         .folder-chip { min-width:69px; --folder-color:var(--primary); border-color:color-mix(in oklab,var(--folder-color) 20%,transparent); background:color-mix(in oklab,var(--folder-color) 5%,transparent); }
         .folder-chip.organization { --folder-color:var(--organization); }
+        .folder-chip.restricted { --folder-color:var(--restricted); }
         .folder-target button { display:inline-flex; align-items:center; height:100%; border:0; border-radius:0; background:transparent; font-size:inherit; line-height:inherit; padding:0; }
         .folder-target .folder-button { gap:6px; padding:0 10px; min-width:0; color:var(--foreground); }
         .folder-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -98,6 +99,7 @@
     let collapsed = false;
     let folderOpen = false;
     let recordingFolder;
+    const folderMetadata = new Map();
     const el = (id) => root.getElementById(id);
 
     function text(id, message) {
@@ -144,6 +146,7 @@
         const paths = {
             folder: ["M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"],
             users: ["M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2", "M16 3.128a4 4 0 0 1 0 7.744", "M22 21v-2a4 4 0 0 0-3-3.87"],
+            "folder-lock": ["M10 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v2.5", "M20 17v-2a2 2 0 1 0-4 0v2"],
             plus: ["M12 10v6", "M9 13h6", "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"],
             x: ["M18 6 6 18", "m6 6 12 12"],
         };
@@ -158,6 +161,10 @@
             const circle = document.createElementNS(icon.namespaceURI, "circle");
             for (const [key, value] of Object.entries({ cx: "9", cy: "7", r: "4" })) circle.setAttribute(key, value);
             icon.append(circle);
+        } else if (kind === "folder-lock") {
+            const lock = document.createElementNS(icon.namespaceURI, "rect");
+            for (const [key, value] of Object.entries({ width: "8", height: "5", x: "14", y: "17", rx: "1" })) lock.setAttribute(key, value);
+            icon.append(lock);
         }
         return icon;
     }
@@ -168,10 +175,11 @@
         const name = path.split(/ › | \/ /).at(-1);
         const readOnly = state.recordingFolderOverride !== true;
         const organization = state.folderScope === "org";
+        const restricted = folderMetadata.get(state.folderId)?.restricted === true;
         surface.classList.toggle("folder-readonly", readOnly);
-        el("folder-target").className = `folder-target ${selected ? `folder-chip${organization ? " organization" : ""}` : "folder-add"}`;
-        const icon = folderIcon(selected ? organization ? "users" : "folder" : "plus");
-        if (selected) icon.classList.add(organization ? "text-organization" : "text-primary");
+        el("folder-target").className = `folder-target ${selected ? `folder-chip${restricted ? " restricted" : organization ? " organization" : ""}` : "folder-add"}`;
+        const icon = folderIcon(selected ? restricted ? "folder-lock" : organization ? "users" : "folder" : "plus");
+        if (selected) icon.classList.add(restricted ? "text-restricted" : organization ? "text-organization" : "text-primary");
         el("folder-toggle").replaceChildren(icon, node("span", { class: "folder-name" }, [selected ? name : t("folderAdd")]));
         el("folder-toggle").title = selected ? path : t("folderAdd");
         el("folder-toggle").disabled = readOnly;
@@ -289,6 +297,7 @@
 
     function renderRecording(state) {
         if (currentView !== "recording") {
+            folderMetadata.clear();
             collapsed = false;
             folderOpen = false;
             surface.className = "surface pill";
@@ -314,7 +323,14 @@
                 container: el("pill-folder"),
                 prefix: "meeting-folder",
                 t,
-                request: (params) => send({ type: "get-folders", ...params }),
+                request: async (params) => {
+                    const response = await send({ type: "get-folders", ...params });
+                    if (response?.ok) {
+                        for (const folder of response.folders ?? []) folderMetadata.set(folder.id, folder);
+                        if (currentView === "recording") renderFolderTarget(currentState);
+                    }
+                    return response;
+                },
                 send,
                 onPick: () => {
                     if (currentView !== "recording") return;

@@ -335,7 +335,7 @@ describeWithDatabase(
                 trigger,
             });
             const [job] = await claimDueJobs(SUMMARY_JOB_KIND, 1);
-            if (!job || job.id !== queued.job.id)
+            if (!queued || !job || job.id !== queued.job.id)
                 throw new Error("summary job was not claimed");
             const result = await summaryJobHandler.run({
                 jobId: job.id,
@@ -433,7 +433,7 @@ describeWithDatabase(
             await addTranscript("riffado");
             const later = await gatherFacts(ITEM, "private", USER);
             expect(later.summary).toMatchObject({
-                current: true,
+                current: false,
                 stale: false,
             });
             expect(planAdvance(later).actions).toContainEqual(

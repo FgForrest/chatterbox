@@ -185,6 +185,7 @@ export function SummaryWidget({
     );
     const hasSummary = Boolean(summaryData?.summary);
     const working = isSummarizing || (pipelineWorking && !hasSummary);
+    const showingProgress = working && !hasSummary;
     const summaryOpen = workflowVisible
         ? !(widget?.collapsed ?? false) || workflowExpanded
         : summaryExpanded;
@@ -192,7 +193,7 @@ export function SummaryWidget({
         workflowVisible,
         collapsed: widget?.collapsed ?? false,
         expanded: workflowExpanded,
-        working,
+        working: showingProgress,
         frame: widget?.frame ?? "inline",
     });
     const tone = widget?.tone ?? "quiet";
@@ -366,7 +367,7 @@ export function SummaryWidget({
     const displayedProfileName =
         (profileHidden ? null : summaryData?.profileName) ??
         (canChange ? (selectedProfileName ?? profileName) : null);
-    const lineFacts = working
+    const lineFacts = showingProgress
         ? i18n("Generating the summary")
         : ((canChange && !profileHidden ? profileName : null) ??
           displayedProfileName ??
@@ -412,10 +413,14 @@ export function SummaryWidget({
         line = (
             <WorkflowWidgetLine
                 {...lineProps}
-                working={working}
-                expanded={working ? undefined : false}
-                onExpand={working ? undefined : () => setWorkflowExpanded(true)}
-                expandLabel={working ? undefined : i18n("View summary")}
+                working={showingProgress}
+                expanded={showingProgress ? undefined : false}
+                onExpand={
+                    showingProgress
+                        ? undefined
+                        : () => setWorkflowExpanded(true)
+                }
+                expandLabel={showingProgress ? undefined : i18n("View summary")}
                 onOpen={() => setWorkflowExpanded(true)}
             />
         );
@@ -572,7 +577,7 @@ export function SummaryWidget({
                 {i18n("Loading…")}
             </p>
         );
-    } else if (working) {
+    } else if (showingProgress) {
         summaryContent = (
             <div className="flex flex-col items-center justify-center py-8">
                 <Loader2 className="mb-4 size-8 animate-spin text-primary motion-reduce:animate-none" />

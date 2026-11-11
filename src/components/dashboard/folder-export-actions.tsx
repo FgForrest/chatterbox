@@ -26,10 +26,12 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { useExportRefusal } from "@/hooks/use-export-refusal";
 import { useFolderExportLabel } from "@/hooks/use-folder-export-label";
 import { useFolderLabel } from "@/hooks/use-folder-label";
+import { useFolderRefusal } from "@/hooks/use-folder-refusal";
 import { useGoogleConnection } from "@/hooks/use-google-connection";
-import { getApiErrorMessage } from "@/lib/api-errors";
+import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
 import {
     type DocumentFormat,
     type ExportProvidersAvailability,
@@ -137,6 +139,8 @@ export function FolderExportActions({
     const folderLabel = useFolderLabel();
     const targetLabel = useFolderExportLabel();
     const name = useProductName();
+    const exportRefusal = useExportRefusal();
+    const folderRefusal = useFolderRefusal();
     const [localOpen, setLocalOpen] = useState(false);
     const open = controlledOpen ?? localOpen;
     const setOpen = useCallback(
@@ -346,11 +350,22 @@ export function FolderExportActions({
                 ),
             });
             if (!response.ok) {
+                const error = await parseApiError(response);
+                const refusal = exportRefusal(error);
                 toast.error(
-                    await getApiErrorMessage(
-                        response,
+                    refusal?.message ??
+                        folderRefusal(error) ??
                         i18n("Could not save export"),
-                    ),
+                    refusal?.retryable
+                        ? {
+                              action: {
+                                  label: i18n("Retry"),
+                                  onClick: () => {
+                                      void save();
+                                  },
+                              },
+                          }
+                        : undefined,
                 );
                 return;
             }
@@ -368,11 +383,22 @@ export function FolderExportActions({
             { method: "DELETE" },
         );
         if (!response.ok) {
+            const error = await parseApiError(response);
+            const refusal = exportRefusal(error);
             toast.error(
-                await getApiErrorMessage(
-                    response,
+                refusal?.message ??
+                    error.error ??
                     i18n("Could not remove export"),
-                ),
+                refusal?.retryable
+                    ? {
+                          action: {
+                              label: i18n("Retry"),
+                              onClick: () => {
+                                  void remove(id);
+                              },
+                          },
+                      }
+                    : undefined,
             );
             return;
         }
@@ -455,6 +481,8 @@ export function FolderExportActions({
     const canSave =
         form !== null &&
         !saving &&
+        !folder.restricted &&
+        !folder.restricting &&
         (form.exportAudio ||
             form.exportTranscript ||
             form.exportSummary ||
@@ -507,6 +535,13 @@ export function FolderExportActions({
                             {i18n("apply to its complete subtree.")}
                         </DialogDescription>
                     </DialogHeader>
+                    {(folder.restricted || folder.restricting) && (
+                        <p className="text-sm text-muted-foreground">
+                            {i18n(
+                                "Restricted folders cannot be exported for the Organization.",
+                            )}
+                        </p>
+                    )}
                     {!available ? (
                         <p className="text-sm text-muted-foreground">
                             {i18n(
@@ -800,29 +835,38 @@ export function FolderExportActions({
                                                 : i18n("Synchronize")}
                                         </Button>
                                     )}
-                                {!readOnly && providers.filesystem && (
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        onClick={() =>
-                                            setForm(emptyForm("filesystem"))
-                                        }
-                                    >
-                                        <Plus /> {i18n("Add filesystem export")}
-                                    </Button>
-                                )}
-                                {!readOnly && providers.googleDrive && (
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        onClick={() =>
-                                            setForm(emptyForm("google-drive"))
-                                        }
-                                    >
-                                        <Plus />{" "}
-                                        {i18n("Add Google Drive export")}
-                                    </Button>
-                                )}
+                                {!readOnly &&
+                                    !folder.restricted &&
+                                    !folder.restricting &&
+                                    providers.filesystem && (
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            onClick={() =>
+                                                setForm(emptyForm("filesystem"))
+                                            }
+                                        >
+                                            <Plus />{" "}
+                                            {i18n("Add filesystem export")}
+                                        </Button>
+                                    )}
+                                {!readOnly &&
+                                    !folder.restricted &&
+                                    !folder.restricting &&
+                                    providers.googleDrive && (
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            onClick={() =>
+                                                setForm(
+                                                    emptyForm("google-drive"),
+                                                )
+                                            }
+                                        >
+                                            <Plus />{" "}
+                                            {i18n("Add Google Drive export")}
+                                        </Button>
+                                    )}
                             </div>
                         </div>
                     )}

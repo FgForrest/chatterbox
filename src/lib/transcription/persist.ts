@@ -39,11 +39,13 @@ import {
     type WriterRefusal,
 } from "@/lib/sharing/writer";
 import { summaryRemarksFingerprint } from "@/lib/summary/remarks-fingerprint";
+import { mayAutomaticallyReplaceSummary } from "@/lib/summary/replacement";
 import {
     dropReplaceableTaskReviewInTx,
     type TaskProposals,
     writeTaskProposalsInTx,
 } from "@/lib/tasks/store";
+import { readPreferredTranscriptInput } from "@/lib/transcription/read-source";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
 /**
@@ -64,6 +66,7 @@ export interface ProcessingRunInputs extends Record<string, unknown> {
     contentSourceId?: string;
     contentRevision: number | string;
     itemProfileRevisionId?: string | null;
+    summaryRefreshGeneration?: number;
 }
 
 export interface UpsertTranscriptionArgs {
@@ -242,6 +245,7 @@ async function currentFenceInput(
                 eq(itemProcessing.view, pipelineDriver(args.userId).view),
             ),
         )
+        .for("update")
         .limit(1);
     if (args.kind === "mail") {
         const [content] = await tx
@@ -264,26 +268,14 @@ async function currentFenceInput(
               }
             : null;
     }
-    const source = args.inputs?.contentSourceId;
-    if (source !== "riffado" && source !== "plaud" && source !== "mixed") {
-        return null;
-    }
-    const [content] = await tx
-        .select({ id: transcriptions.id, revision: transcriptions.revision })
-        .from(transcriptions)
-        .where(
-            and(
-                eq(transcriptions.recordingId, args.recordingId),
-                eq(transcriptions.userId, args.userId),
-                eq(transcriptions.source, source),
-            ),
-        )
-        .limit(1);
+    const content = await readPreferredTranscriptInput(
+        args.recordingId,
+        args.userId,
+        tx,
+    );
     return content
         ? {
-              contentId: content.id,
-              contentSourceId: source,
-              contentRevision: content.revision,
+              ...content,
               profileRevisionId: processing?.profileRevisionId ?? null,
               phases: processing?.phases,
           }
@@ -302,7 +294,11 @@ function fenceMatches(
     const sameProfile =
         !("itemProfileRevisionId" in inputs) ||
         itemProfileFenceMatches(inputs.itemProfileRevisionId, current);
-    return sameContent && sameProfile;
+    const refreshIsCurrent =
+        inputs.summaryRefreshGeneration === undefined ||
+        (current.phases?.categorize?.summaryRefresh?.generation ?? 0) <=
+            inputs.summaryRefreshGeneration;
+    return sameContent && sameProfile && refreshIsCurrent;
 }
 
 /**
@@ -737,6 +733,12 @@ export async function upsertEnhancement(
             ) {
                 return { advance: null, outdated: true };
             }
+            if (
+                source === "riffado" &&
+                !args.summaryWriteMode &&
+                !(await mayAutomaticallyReplaceSummary(userId, recordingId, tx))
+            )
+                return { advance: null, outdated: true };
             // Always written, NULL included -- see `multiPass` on the args.
             const multiPassColumns = {
                 inputFingerprint: args.inputFingerprint ?? null,
