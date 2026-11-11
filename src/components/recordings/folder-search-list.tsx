@@ -116,7 +116,11 @@ function FolderSearchListBody({
     const values = useMemo(() => {
         const result = groups.flatMap(({ prefix, entries }) =>
             entries
-                .filter((entry) => !assignedIds?.has(entry.folder.id))
+                .filter(
+                    (entry) =>
+                        entry.folder.access !== false &&
+                        !assignedIds?.has(entry.folder.id),
+                )
                 .map((entry) => `${prefix}:${entry.folder.id}`),
         );
         if (emptyChoiceLabel) result.unshift("empty");
@@ -186,11 +190,17 @@ function FolderSearchListBody({
                                 ? `${name} ${entry.path}`
                                 : name
                         }
-                        disabled={assignedIds?.has(entry.folder.id) || disabled}
+                        disabled={
+                            entry.folder.access === false ||
+                            assignedIds?.has(entry.folder.id) ||
+                            disabled
+                        }
                         onSelect={select}
                         className="flex cursor-default items-center gap-2 rounded px-3 py-2 text-sm data-[selected=true]:bg-accent data-[disabled=true]:opacity-50"
                     >
-                        {entry.folder.scope === "org" ? (
+                        {entry.folder.scope === "org" &&
+                        !entry.folder.restricted &&
+                        !entry.folder.restricting ? (
                             <Users
                                 className="size-4 shrink-0 text-organization"
                                 aria-hidden

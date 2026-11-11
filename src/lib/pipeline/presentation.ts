@@ -80,6 +80,8 @@ export interface ProcessingFolderSummary {
     name: string;
     path: string;
     scope: "personal" | "org";
+    restricted?: true;
+    access?: boolean;
 }
 
 export type ProcessingJobState = "queued" | "running";
@@ -157,6 +159,8 @@ interface StoredFolder {
     userId: string;
     parentId: string | null;
     name: string;
+    restricted?: boolean;
+    access?: boolean;
 }
 
 /** Describe failed phase and Summary-step records for the status sentence. */
@@ -296,7 +300,14 @@ async function folderPaths(
             ? ("org" as const)
             : ("personal" as const);
     const label = (folder: StoredFolder) =>
-        folderDisplayName({ ...folder, scope: scope(folder) }, labels);
+        folderDisplayName(
+            {
+                ...folder,
+                restricted: folder.restricted ? true : undefined,
+                scope: scope(folder),
+            },
+            labels,
+        );
     return new Map(
         directFolders.map((folder) => {
             const displayFolder = { ...folder, name: decryptText(folder.name) };
@@ -313,6 +324,9 @@ async function folderPaths(
                         " › ",
                     ),
                     scope: scope(folder),
+                    ...(folder.restricted
+                        ? { restricted: true as const, access: folder.access }
+                        : {}),
                 },
             ];
         }),
@@ -407,6 +421,8 @@ export async function loadPrivateItemProcessing(
                 parentId: recordingFolders.parentId,
                 name: recordingFolders.name,
                 kind: recordingFolders.kind,
+                restricted: sql<boolean>`${recordingFolders.restrictedAt} is not null or ${recordingFolders.restrictingAt} is not null`,
+                access: sql<boolean>`${placementVisibleCondition(restrictedViewer)}`,
             })
             .from(recordingFolderAssignments)
             .innerJoin(
@@ -415,7 +431,9 @@ export async function loadPrivateItemProcessing(
             )
             .where(
                 and(
-                    placementVisibleCondition(restrictedViewer),
+                    viewerUserId === ownerUserId
+                        ? undefined
+                        : placementVisibleCondition(restrictedViewer),
                     eq(recordingFolderAssignments.itemId, itemId),
                     eq(recordingFolderAssignments.userId, ownerUserId),
                 ),

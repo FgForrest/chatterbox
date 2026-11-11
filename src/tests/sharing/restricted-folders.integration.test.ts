@@ -1,4 +1,4 @@
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -42,6 +42,11 @@ import { POST as createFolderRoute } from "@/app/api/folders/route";
 import { GET as readersGet } from "@/app/api/items/[id]/readers/route";
 import { PATCH as acceptSuggestion } from "@/app/api/meetings/[id]/suggestions/[sid]/route";
 import { POST as categorizePost } from "@/app/api/recordings/[id]/categorize/route";
+import {
+    PATCH as itemMove,
+    DELETE as itemUnfile,
+} from "@/app/api/recordings/[id]/folders/route";
+import { PATCH as itemRename } from "@/app/api/recordings/[id]/route";
 import { GET as recorderFolders } from "@/app/api/v1/recorder/folders/route";
 import { db } from "@/db";
 import { insertAudioItem } from "@/db/items";
@@ -177,6 +182,7 @@ import {
 } from "@/lib/meetings/service";
 import { sendPersonShareInvitation } from "@/lib/notifications/person-share";
 import { requestArrivalInTx } from "@/lib/pipeline/arrival";
+import { loadPrivateCategorizationPanel } from "@/lib/pipeline/categorization-presentation";
 import { loadPrivateItemProcessing } from "@/lib/pipeline/presentation";
 import {
     executeIntendedSharesWithOutcome,
@@ -197,6 +203,7 @@ import * as storageProviders from "@/lib/storage/factory";
 import type { StorageProvider } from "@/lib/storage/types";
 import { taskClosable, taskEditable, taskViewer } from "@/lib/tasks/access";
 import { countNewTasks, listCallerTasks } from "@/lib/tasks/tasks";
+import { saveUploadedAudioFile } from "@/lib/uploads/save-uploaded-audio-file";
 import { localActor } from "@/tests/helpers/session-actor";
 import {
     createMigratedTestDatabase,
@@ -216,6 +223,7 @@ const { ref, mockEnv, authority } = vi.hoisted(() => ({
     authority: { curator: true },
     mockEnv: {
         IS_HOSTED: false,
+        DEFAULT_STORAGE_TYPE: "local",
         SELF_HOST_MODE: "shared",
         AUTHZ_MODE: "local",
         ORG_ACCOUNT_EMAIL: "org@example.com",
@@ -269,6 +277,15 @@ vi.mock("@/lib/notifications/person-share", () => ({
     sendPersonShareInvitation: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
+vi.mock("@/lib/uploads/audio-duration", () => ({
+    readAudioFileDurationMs: async () => 1000,
+}));
+vi.mock("@/lib/audio/server-waveform", () => ({
+    generateFileWaveform: async () => null,
+}));
+vi.mock("@/lib/recordings/storage-reconciliation-job", () => ({
+    enqueueStorageReconciliationJob: async () => {},
+}));
 vi.mock("@/lib/org/events", () => ({
     notifyOrgChange: vi.fn().mockResolvedValue(undefined),
 }));
@@ -1882,19 +1899,12 @@ suite("restricted Organization folders (PostgreSQL)", () => {
             );
         }
     });
-    it("refuses removing a contributor and exposes audience data to readers", async () => {
+    it("removes a contributor without unfiling and exposes audience data only to readers", async () => {
         expect(
             (await listRestrictedAudience("member", restrictedId)).members.find(
                 (member) => member.userId === "owner",
             ),
         ).toMatchObject({ role: "manager", ownsItems: true });
-        await expect(
-            changeRestrictedAudience("owner", restrictedId, {
-                removeUserId: "owner",
-            }),
-        ).rejects.toMatchObject({
-            code: ErrorCode.RESTRICTED_FOLDER_MEMBER_OWNS_ITEMS,
-        });
         await changeRestrictedAudience("member", restrictedId, {
             addUserIds: ["other"],
         });
@@ -1909,7 +1919,680 @@ suite("restricted Organization folders (PostgreSQL)", () => {
         expect((await resolveRecordingAccess("other", "recording"))?.role).toBe(
             "receiver",
         );
+        const removed = await call(
+            audienceDelete,
+            restrictedId,
+            "owner",
+            { userId: "owner" },
+            "DELETE",
+        );
+        expect(removed.status).toBe(200);
+        expect(
+            await db
+                .select()
+                .from(recordingFolderAssignments)
+                .where(eq(recordingFolderAssignments.itemId, "recording")),
+        ).toMatchObject([
+            { userId: "owner", folderId: restrictedId, withheld: true },
+        ]);
+        expect(
+            await resolveRecordingAccess("member", "recording"),
+        ).toMatchObject({ role: "receiver", shared: false });
+        expect(
+            await resolveRecordingAccess("owner", "recording"),
+        ).toMatchObject({ role: "owner", shared: false });
     });
+    it.each([
+        "manager",
+        "curator",
+    ])("%s removes an owner while preserving owner access and only their public placement", async (manager) => {
+        if (manager === "manager")
+            await db
+                .update(restrictedFolderMembers)
+                .set({ role: "manager" })
+                .where(
+                    and(
+                        eq(restrictedFolderMembers.folderId, restrictedId),
+                        eq(restrictedFolderMembers.userId, "member"),
+                    ),
+                );
+        await insertRecording(database.db, {
+            id: "colleague-item",
+            userId: "member",
+        });
+        await addRecordingToFolder({
+            userId: "member",
+            recordingId: "colleague-item",
+            folderId: restrictedId,
+        });
+        expect(
+            (
+                await call(
+                    audienceDelete,
+                    restrictedId,
+                    manager === "manager" ? "member" : manager,
+                    { userId: "owner" },
+                    "DELETE",
+                )
+            ).status,
+        ).toBe(200);
+        const tree = await listFolderOrganization("owner");
+        const node = tree.folders.find((folder) => folder.id === restrictedId);
+        expect(node).toMatchObject({
+            restricted: true,
+            access: false,
+            accessRequest: "none",
+        });
+        expect(node).not.toHaveProperty("restrictedRole");
+        expect(node).not.toHaveProperty("counts");
+        expect(
+            tree.assignments.filter(
+                (placement) => placement.folderId === restrictedId,
+            ),
+        ).toEqual([{ recordingId: "recording", folderId: restrictedId }]);
+        expect(
+            await ids(
+                folderRecordingCondition(tree, "owner", restrictedId) ??
+                    undefined,
+            ),
+        ).toEqual([]);
+        expect(
+            await ids(
+                folderRecordingCondition(tree, "owner", openId) ?? undefined,
+            ),
+        ).toEqual([]);
+        expect((await call(audienceGet, restrictedId, "owner")).status).toBe(
+            403,
+        );
+        expect(
+            await resolveRecordingAccess("owner", "colleague-item"),
+        ).toBeNull();
+        expect(
+            await requireRecordingView("owner", "recording", "private"),
+        ).toMatchObject({ role: "owner", shared: false });
+        const storageSpy = vi
+            .spyOn(storageProviders, "createUserStorageProvider")
+            .mockResolvedValue(new RestrictedArchiveStorage());
+        try {
+            const renamed = await call(
+                itemRename,
+                "recording",
+                "owner",
+                { filename: "Owner revision" },
+                "PATCH",
+            );
+            expect(renamed.status).toBe(200);
+            expect(await renamed.json()).toMatchObject({
+                filename: "Owner revision",
+            });
+        } finally {
+            storageSpy.mockRestore();
+        }
+        const readers = await call(readersGet, "recording", "owner");
+        expect(readers.status).toBe(200);
+        expect(await readers.json()).toMatchObject({
+            restricted: true,
+            organization: false,
+            curatorsCanRead: true,
+            readers: [{ userId: "owner" }],
+        });
+        const processing = await loadPrivateItemProcessing(
+            "owner",
+            "recording",
+        );
+        expect(processing?.placements).toContainEqual(
+            expect.objectContaining({
+                id: restrictedId,
+                restricted: true,
+                access: false,
+                path: "Organization › Acme › Beta",
+            }),
+        );
+        const picker = await loadPrivateCategorizationPanel(
+            "owner",
+            "recording",
+        );
+        expect(picker?.selectedFolderIds).toContain(restrictedId);
+        expect(picker?.folders).toContainEqual(
+            expect.objectContaining({
+                id: restrictedId,
+                restricted: true,
+                access: false,
+            }),
+        );
+    }, 30000);
+    it("lets a removed owner unfile through HTTP, revokes audience reads and permits another request", async () => {
+        await changeRestrictedAudience("curator", restrictedId, {
+            removeUserId: "owner",
+        });
+        expect(
+            await resolveRecordingAccess("member", "recording"),
+        ).toMatchObject({ role: "receiver" });
+        expect(
+            (
+                await call(
+                    itemUnfile,
+                    "recording",
+                    "owner",
+                    { folderId: restrictedId },
+                    "DELETE",
+                )
+            ).status,
+        ).toBe(200);
+        expect(await resolveRecordingAccess("member", "recording")).toBeNull();
+        expect(
+            await resolveRecordingAccess("owner", "recording"),
+        ).toMatchObject({ role: "owner" });
+        const requested = await requestRestrictedFolderAccess(
+            "owner",
+            restrictedId,
+        );
+        expect(requested.request.state).toBe("pending");
+        await decideRestrictedFolderAccessRequest(
+            "member",
+            restrictedId,
+            requested.request.id,
+            "approved",
+        );
+        expect(
+            (await listRecordingFolderTrees("owner")).find(
+                (folder) => folder.id === restrictedId,
+            )?.access,
+        ).toBe(true);
+    }, 30000);
+    it.each([
+        "personal",
+        "open",
+        "restricted",
+    ])("lets a removed owner move their placement to an accessible %s folder", async (destination) => {
+        await ensureRootFolders("owner");
+        const [root] = await db
+            .select()
+            .from(recordingFolders)
+            .where(
+                and(
+                    eq(recordingFolders.userId, "owner"),
+                    eq(recordingFolders.kind, "private"),
+                ),
+            );
+        const target =
+            destination === "open"
+                ? openId
+                : (
+                      await createFolder({
+                          userId: "owner",
+                          parentId:
+                              destination === "personal" ? root.id : openId,
+                          name: "Destination",
+                          restricted: destination === "restricted",
+                      })
+                  ).id;
+        if (destination === "open") await makeShareable();
+        await changeRestrictedAudience("curator", restrictedId, {
+            removeUserId: "owner",
+        });
+        const moved = await call(
+            itemMove,
+            "recording",
+            "owner",
+            { fromFolderId: restrictedId, toFolderId: target },
+            "PATCH",
+        );
+        expect(moved.status).toBe(200);
+        expect(
+            await db
+                .select()
+                .from(recordingFolderAssignments)
+                .where(eq(recordingFolderAssignments.itemId, "recording")),
+        ).toMatchObject([
+            {
+                userId: "owner",
+                folderId: target,
+                withheld: destination === "restricted",
+            },
+        ]);
+        expect(await resolveRecordingAccess("member", "recording")).toEqual(
+            destination === "open"
+                ? expect.objectContaining({ shared: true })
+                : null,
+        );
+    }, 30000);
+    it("refuses new filings and other owners' exits after removal", async () => {
+        await insertRecording(database.db, {
+            id: "colleague-item",
+            userId: "member",
+        });
+        await addRecordingToFolder({
+            userId: "member",
+            recordingId: "colleague-item",
+            folderId: restrictedId,
+        });
+        await insertRecording(database.db, { id: "new-item", userId: "owner" });
+        await changeRestrictedAudience("curator", restrictedId, {
+            removeUserId: "owner",
+        });
+        for (const itemId of ["recording", "new-item"])
+            await expect(
+                addRecordingToFolder({
+                    userId: "owner",
+                    recordingId: itemId,
+                    folderId: restrictedId,
+                }),
+            ).rejects.toMatchObject({
+                code: ErrorCode.RESTRICTED_FOLDER_NO_ACCESS,
+            });
+        await expect(
+            removeRecordingFromFolder({
+                userId: "owner",
+                recordingId: "colleague-item",
+                folderId: restrictedId,
+            }),
+        ).rejects.toMatchObject({
+            code: ErrorCode.RESTRICTED_FOLDER_NO_ACCESS,
+        });
+        await expect(
+            moveRecordingBetweenFolders({
+                userId: "owner",
+                recordingId: "colleague-item",
+                fromFolderId: restrictedId,
+                toFolderId: openId,
+            }),
+        ).rejects.toMatchObject({
+            code: ErrorCode.RESTRICTED_FOLDER_NO_ACCESS,
+        });
+        for (const actor of ["member", "curator"])
+            await expect(
+                removeRecordingFromFolder({
+                    userId: actor,
+                    recordingId: "recording",
+                    folderId: restrictedId,
+                }),
+            ).rejects.toBeInstanceOf(AppError);
+        expect(
+            await db
+                .select()
+                .from(recordingFolderAssignments)
+                .where(eq(recordingFolderAssignments.folderId, restrictedId)),
+        ).toHaveLength(2);
+    }, 30000);
+    it("retains an existing locked placement through categorization and allows replacing it with a personal folder", async () => {
+        await ensureProfiles("owner");
+        await ensureRootFolders("owner");
+        const [root] = await db
+            .select()
+            .from(recordingFolders)
+            .where(
+                and(
+                    eq(recordingFolders.userId, "owner"),
+                    eq(recordingFolders.kind, "private"),
+                ),
+            );
+        const target = await createFolder({
+            userId: "owner",
+            parentId: root.id,
+            name: "Personal",
+        });
+        await changeRestrictedAudience("curator", restrictedId, {
+            removeUserId: "owner",
+        });
+        expect(
+            (
+                await call(
+                    categorizePost,
+                    "recording",
+                    "owner",
+                    { folderIds: [restrictedId], manualOnly: true },
+                    "POST",
+                )
+            ).status,
+        ).toBe(200);
+        expect((await call(audienceGet, restrictedId, "owner")).status).toBe(
+            403,
+        );
+        expect(
+            (
+                await call(
+                    categorizePost,
+                    "recording",
+                    "owner",
+                    { folderIds: [target.id], manualOnly: true },
+                    "POST",
+                )
+            ).status,
+        ).toBe(200);
+        expect(
+            await db
+                .select()
+                .from(recordingFolderAssignments)
+                .where(eq(recordingFolderAssignments.itemId, "recording")),
+        ).toMatchObject([{ folderId: target.id, userId: "owner" }]);
+        expect(await resolveRecordingAccess("member", "recording")).toBeNull();
+        expect(
+            (
+                await call(
+                    categorizePost,
+                    "recording",
+                    "owner",
+                    { folderIds: [restrictedId], manualOnly: true },
+                    "POST",
+                )
+            ).status,
+        ).toBe(403);
+    }, 30000);
+    it("rechecks the owned source placement under the tree lock", async () => {
+        await changeRestrictedAudience("curator", restrictedId, {
+            removeUserId: "owner",
+        });
+        const outcome = await interleave(
+            () =>
+                removeRecordingFromFolder({
+                    userId: "owner",
+                    recordingId: "recording",
+                    folderId: restrictedId,
+                }),
+            () =>
+                db
+                    .delete(recordingFolderAssignments)
+                    .where(eq(recordingFolderAssignments.itemId, "recording")),
+        );
+        expect(outcome).toMatchObject({
+            error: { code: ErrorCode.RESTRICTED_FOLDER_NO_ACCESS },
+        });
+    }, 30000);
+    it("rechecks removal authority after a manager loses their own audience membership", async () => {
+        const outcome = await interleave(
+            () =>
+                changeRestrictedAudience("owner", restrictedId, {
+                    removeUserId: "member",
+                }),
+            () =>
+                changeRestrictedAudience("curator", restrictedId, {
+                    removeUserId: "owner",
+                }),
+        );
+        expect(outcome).toMatchObject({ error: { statusCode: 403 } });
+        expect(
+            await resolveRecordingAccess("member", "recording"),
+        ).toMatchObject({ role: "receiver" });
+    }, 30000);
+    it.each([
+        false,
+        true,
+    ])("lifts a removed owner's placement using their share gate (ready=%s)", async (ready) => {
+        await changeRestrictedAudience("curator", restrictedId, {
+            removeUserId: "owner",
+        });
+        if (ready) await makeShareable();
+        await changeFolderRestriction("curator", restrictedId, "lift");
+        expect(await isRecordingShared("recording", "org")).toBe(ready);
+        if (!ready) {
+            expect(
+                await resolveRecordingAccess("member", "recording"),
+            ).toMatchObject({ role: "receiver" });
+            await ensureProfiles("owner");
+            expect(
+                (
+                    await call(
+                        categorizePost,
+                        "recording",
+                        "owner",
+                        { folderIds: [restrictedId], manualOnly: true },
+                        "POST",
+                    )
+                ).status,
+            ).toBe(200);
+            expect(
+                await db
+                    .select()
+                    .from(mailPendingShares)
+                    .where(eq(mailPendingShares.itemId, "recording")),
+            ).toMatchObject([
+                { folderId: restrictedId, confirmedAt: expect.any(Date) },
+            ]);
+            await makeShareable();
+            expect(
+                (await executeIntendedSharesWithOutcome("owner", "recording"))
+                    .shared,
+            ).toBe(true);
+        }
+        expect(
+            await resolveRecordingAccess("other", "recording"),
+        ).toMatchObject({ shared: true });
+    }, 30000);
+    it("preserves a confirmed release when a locked categorization selection races with lift", async () => {
+        await ensureProfiles("owner");
+        await changeRestrictedAudience("curator", restrictedId, {
+            removeUserId: "owner",
+        });
+        const outcome = await interleave(
+            async () =>
+                call(
+                    categorizePost,
+                    "recording",
+                    "owner",
+                    { folderIds: [restrictedId], manualOnly: true },
+                    "POST",
+                ),
+            () => changeFolderRestriction("curator", restrictedId, "lift"),
+        );
+        if ("error" in outcome) throw outcome.error;
+        expect(outcome.value.status).toBe(200);
+        expect(
+            await db
+                .select()
+                .from(mailPendingShares)
+                .where(eq(mailPendingShares.itemId, "recording")),
+        ).toMatchObject([{ confirmedAt: expect.any(Date) }]);
+        await makeShareable();
+        expect(
+            (await executeIntendedSharesWithOutcome("owner", "recording"))
+                .shared,
+        ).toBe(true);
+    }, 30000);
+    it("keeps tasks and agenda sources with the audience after removing their owner", async () => {
+        await insertTask(database.db, {
+            recordingId: "recording",
+            userId: "owner",
+        });
+        const meeting = await prepareMeeting("owner", {
+            folderId: restrictedId,
+            title: "Planning",
+        });
+        if (meeting.meeting.unchanged || !meeting.meeting.meetingItemId)
+            throw new Error("Missing agenda");
+        await changeRestrictedAudience("curator", restrictedId, {
+            removeUserId: "owner",
+        });
+        const viewer = await taskViewer({
+            id: "member",
+            email: "member@example.com",
+        });
+        expect(await ids(taskVisible(viewer, ANY_TASK_ITEM))).toContain(
+            "recording",
+        );
+        expect(
+            await ids(agendaInputItemCondition(meeting.meeting.meetingItemId)),
+        ).toContain("recording");
+        expect(await getMeeting("member", meeting.id)).toMatchObject({
+            permissions: { edit: false },
+        });
+        const ownerDetail = await getMeeting("owner", meeting.id);
+        expect(ownerDetail).toMatchObject({
+            folders: [
+                expect.objectContaining({
+                    id: restrictedId,
+                    restricted: true,
+                    access: false,
+                }),
+            ],
+            permissions: { edit: true },
+        });
+        expect(
+            (await listMeetings("owner")).find(
+                (entry) => entry.id === meeting.id,
+            )?.folders,
+        ).toContainEqual(
+            expect.objectContaining({
+                id: restrictedId,
+                restricted: true,
+                access: false,
+            }),
+        );
+        expect(
+            (
+                await call(
+                    itemUnfile,
+                    meeting.meeting.meetingItemId,
+                    "owner",
+                    { folderId: restrictedId },
+                    "DELETE",
+                )
+            ).status,
+        ).toBe(200);
+    }, 30000);
+    it("refuses a removed contributor's folder mail and saves their deferred capture unfiled", async () => {
+        const address = await ensureFolderAddress(restrictedId, "owner");
+        await changeRestrictedAudience("curator", restrictedId, {
+            removeUserId: "owner",
+        });
+        const recipient = `${address?.localPart}@mail.example.com`;
+        const at = new Date();
+        const result = await precheckMail({
+            recipients: [recipient],
+            facts: {
+                fromHeaders: 1,
+                fromAddresses: ["owner@example.com"],
+                receivedAt: at,
+                dkim: [
+                    {
+                        domain: "example.com",
+                        selector: "test",
+                        result: "pass",
+                        comment: "",
+                        signedRecipients: [recipient],
+                        signedAt: at,
+                    },
+                ],
+            },
+        });
+        expect(result.accepted).toEqual([]);
+        const filePath = join(exportRoot, "removed-owner-capture.wav");
+        await writeFile(filePath, "audio");
+        const saved = await saveUploadedAudioFile({
+            userId: "owner",
+            fileId: "capture",
+            basename: "Capture",
+            extension: ".wav",
+            filePath,
+            storage: new RestrictedArchiveStorage(),
+            recordedAt: at,
+            folderId: restrictedId,
+            deferredFolderFallback: {
+                kind: "recording session",
+                id: "session",
+            },
+        });
+        expect(
+            await db
+                .select()
+                .from(recordingFolderAssignments)
+                .where(
+                    eq(recordingFolderAssignments.itemId, saved.recordingId),
+                ),
+        ).toEqual([]);
+        const [processing] = await db
+            .select()
+            .from(itemProcessing)
+            .where(eq(itemProcessing.itemId, saved.recordingId));
+        expect(processing.profileId).toBeNull();
+    }, 30000);
+    it("keeps owner retention and archive content but skips restoring the removed owner's withheld reference", async () => {
+        await db
+            .update(recordings)
+            .set({
+                downloadedAt: new Date("2025-01-01"),
+                storagePath: "owner/recording.mp3",
+            })
+            .where(eq(recordings.id, "recording"));
+        const reap = () =>
+            listReapCandidates(
+                {
+                    userId: "owner",
+                    remoteOriginalDays: null,
+                    audioDays: 1,
+                    transcriptDays: null,
+                    summaryDays: null,
+                    isOrg: false,
+                },
+                new Date(),
+                100,
+                "org",
+            );
+        const before = await reap();
+        await changeRestrictedAudience("curator", restrictedId, {
+            removeUserId: "owner",
+        });
+        expect(await reap()).toEqual(before);
+        expect(before.map((item) => item.id)).toContain("recording");
+        const personal = await collectRestrictedFolderArchive({
+            kind: "personal",
+            userId: "owner",
+        });
+        expect(personal.placements).toContainEqual(
+            expect.objectContaining({
+                itemId: "recording",
+                folderId: restrictedId,
+                withheld: true,
+            }),
+        );
+        expect(
+            await restoreWithheldPlacements("owner", personal.placements, {
+                recording: "recording",
+            }),
+        ).toEqual({ restored: 0, skipped: 1 });
+        expect(
+            await db
+                .select()
+                .from(recordingFolderAssignments)
+                .where(eq(recordingFolderAssignments.itemId, "recording")),
+        ).toHaveLength(1);
+    }, 30000);
+    it("retains contributor membership rows when suspension removes effective access", async () => {
+        const before = await db
+            .select()
+            .from(restrictedFolderMembers)
+            .where(
+                and(
+                    eq(restrictedFolderMembers.folderId, restrictedId),
+                    eq(restrictedFolderMembers.userId, "owner"),
+                ),
+            );
+        await db
+            .update(users)
+            .set({ suspendedAt: new Date() })
+            .where(eq(users.id, "owner"));
+        expect(
+            await db
+                .select()
+                .from(restrictedFolderMembers)
+                .where(
+                    and(
+                        eq(restrictedFolderMembers.folderId, restrictedId),
+                        eq(restrictedFolderMembers.userId, "owner"),
+                    ),
+                ),
+        ).toEqual(before);
+        await expect(
+            resolveReadableFolder("owner", restrictedId),
+        ).rejects.toMatchObject({
+            code: ErrorCode.RESTRICTED_FOLDER_NO_ACCESS,
+        });
+        await db
+            .update(users)
+            .set({ suspendedAt: null })
+            .where(eq(users.id, "owner"));
+        expect(await resolveReadableFolder("owner", restrictedId)).toBeTruthy();
+    }, 30000);
     it("restricts an open folder as a human curator, withdraws and enrolls item owners", async () => {
         await makeShareable();
         await addRecordingToFolder({
@@ -2443,6 +3126,15 @@ suite("restricted Organization folders (PostgreSQL)", () => {
             recordingId: "mail",
             folderId: openId,
         });
+        expect(
+            (await loadMailDetail("other", "mail"))?.folderIds,
+        ).not.toContain(restrictedId);
+        await changeRestrictedAudience("curator", restrictedId, {
+            removeUserId: "owner",
+        });
+        expect((await loadMailDetail("owner", "mail"))?.folderIds).toContain(
+            restrictedId,
+        );
         expect(
             (await loadMailDetail("other", "mail"))?.folderIds,
         ).not.toContain(restrictedId);
@@ -3055,13 +3747,13 @@ suite("restricted Organization folders (PostgreSQL)", () => {
                     "DELETE",
                 )
             ).status,
-        ).toBe(409);
+        ).toBe(200);
         expect(
             (
                 await call(
                     audienceDelete,
                     restrictedId,
-                    "owner",
+                    "curator",
                     { userId: "other" },
                     "DELETE",
                 )
@@ -3072,9 +3764,9 @@ suite("restricted Organization folders (PostgreSQL)", () => {
         );
         expect((await call(readersGet, "recording", "other")).status).toBe(404);
         expect((await call(liftGet, restrictedId, "member")).status).toBe(403);
-        expect((await call(liftGet, restrictedId, "owner")).status).toBe(200);
+        expect((await call(liftGet, restrictedId, "curator")).status).toBe(200);
         expect(
-            (await call(liftPost, restrictedId, "owner", {}, "POST")).status,
+            (await call(liftPost, restrictedId, "curator", {}, "POST")).status,
         ).toBe(200);
         expect((await call(restrictGet, restrictedId, "other")).status).toBe(
             403,

@@ -3,6 +3,7 @@ import { afterAll, expect, it, vi } from "vitest";
 import { sqlClient } from "@/db";
 import type * as CalendarEvents from "@/lib/integrations/google/calendar-events";
 import { getMeeting } from "@/lib/meetings/service";
+import { seedRestrictedFolderDemo } from "./restricted-folders";
 import { demoCalendarEvent, seedUserGuideDemo } from "./seed";
 
 vi.mock(
@@ -28,8 +29,13 @@ it.runIf(confirmed)(
     "seeds the user guide's demo data",
     async () => {
         const result = await seedUserGuideDemo();
+        const restricted = await seedRestrictedFolderDemo(result);
         const out = process.env.USER_GUIDE_SEED_OUT;
-        if (out) writeFileSync(out, JSON.stringify(result, null, 2));
+        if (out)
+            writeFileSync(
+                out,
+                JSON.stringify({ ...result, restricted }, null, 2),
+            );
         expect(result.audio.length).toBeGreaterThan(0);
         const meeting = await getMeeting(result.users.alex, result.meeting);
         expect(meeting.unchanged).toBe(false);

@@ -45,6 +45,8 @@ Organization item headers, Almanac and People badges, Organization provider card
 `border-organization/…`), never `blue-*` or `primary`. Private folders, selection highlights,
 focus rings, calls to action and progress stay `primary`.
 
+Every mark that means "restricted folder" uses the `restricted` token (`text-restricted`, `bg-restricted/…`, `border-restricted/…`) and the `FolderLock` icon.
+
 ## Screenshots
 
 To see a change in a real browser, the disposable E2E stack in `docker-compose.e2e.yml` builds the

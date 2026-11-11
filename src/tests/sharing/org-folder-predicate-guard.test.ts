@@ -57,7 +57,9 @@ const ALLOWED: Record<string, string> = {
     "lib/pipeline/share-intent.ts":
         "Owner-scoped pending publication rechecks folder state at execution.",
     "lib/pipeline/presentation.ts":
-        "Viewer-aware placements omit hidden folders and withheld intents.",
+        "Owners see their own public placement nodes; other viewers retain withheld placement and intent filtering.",
+    "lib/pipeline/categorization.ts":
+        "Owner-scoped existing withheld placements may be retained without filing access; new targets still require filing authority.",
     "lib/tasks/mentions.ts":
         "Task-home withdrawal counts only open, released Organization placements.",
     "lib/tasks/folders.ts":
@@ -65,7 +67,7 @@ const ALLOWED: Record<string, string> = {
     "lib/meetings/service.ts":
         "Display placements and source preparation apply viewer and agenda audience predicates.",
     "lib/meetings/folders.ts":
-        "Folder navigation uses the shared viewer-aware metadata gate.",
+        "Navigation loads public Organization node metadata; item placement projections separately require ownership or audience access.",
     "lib/meetings/suggestions-provider.ts":
         "Provider settings follow authorized item state and visible placement defaults.",
     "lib/meetings/attachment.ts":
@@ -93,7 +95,7 @@ const ALLOWED: Record<string, string> = {
     "lib/sharing/person-shares.ts":
         "Receiver filing and visible private folder aliases follow invitation membership.",
     "lib/mail/detail.ts":
-        "Visible placements use the common viewer-aware withheld filter.",
+        "Owners see their own placement ids; other viewers use the common viewer-aware withheld filter.",
     "lib/mail/addresses.ts":
         "Address allocation walks the namespace owner's tree, separate from address disclosure.",
     "lib/mail/manage.ts":

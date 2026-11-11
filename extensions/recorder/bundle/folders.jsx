@@ -128,6 +128,7 @@ export function createFolderField({
                             name={name}
                             title={fullPath}
                             organization={current.folderScope === "org"}
+                            restricted={entries.find((entry) => entry.folder.id === selected)?.folder.restricted === true}
                             removeLabel={t("folderRemove", name)}
                             selectRef={selectRef}
                             selectDisabled={options.readOnly === true}
@@ -181,6 +182,7 @@ export function createFolderField({
         );
     }
     async function refresh(version) {
+        let unavailable = false;
         try {
             const [response, saved] = await Promise.all([
                 request({}),
@@ -228,6 +230,7 @@ export function createFolderField({
                             (folder) => folder.id === current.folderId,
                         );
                     if (found || lookup?.status === 404) {
+                        unavailable = !found;
                         current = {
                             folderId: found ? found.id : null,
                             folderLabel: found
@@ -242,7 +245,7 @@ export function createFolderField({
                     }
                 }
             }
-            refreshError = "";
+            refreshError = unavailable ? t("folderUnavailable") : "";
             void pending.catch((error) => {
                 refreshError = error?.message || t("folderChangeFailed");
                 paint();

@@ -15,6 +15,7 @@ vi.mock("@/components/help/help-provider", () => ({
 }));
 vi.mock("@/components/footer", () => ({ Footer: () => null }));
 vi.mock("@/components/rebrand-banner", () => ({ RebrandBanner: () => null }));
+vi.mock("@/lib/org/config", () => ({ isOrgScopeEnabled: () => false }));
 vi.mock("@/lib/env", () => ({ env: { IS_HOSTED: false } }));
 vi.mock("@/lib/auth-server", () => ({ getSession: async () => null }));
 vi.mock("@/lib/settings/app-chrome", () => ({

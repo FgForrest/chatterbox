@@ -9,6 +9,7 @@ import {
     useWithdrawPreview,
     WithdrawRetentionWarning,
 } from "@/components/recordings/withdraw-retention-warning";
+import { RestrictedItemAudience } from "@/components/sharing/restricted-item-audience";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -19,6 +20,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { useFolderLabel } from "@/hooks/use-folder-label";
+import { folderDisplayPath } from "@/lib/folders/labels";
 import type {
     RecordingFolder,
     RecordingFolderAssignment,
@@ -108,7 +110,13 @@ export function RecordingFolderTags({
     );
     const assignedOrg = assigned.filter((folder) => folder.scope === "org");
     const moveSource =
-        !isOwn && onMove && assignedOrg.length === 1 ? assignedOrg[0] : null;
+        !isOwn &&
+        onMove &&
+        assignedOrg.length === 1 &&
+        !assignedOrg[0].restricted &&
+        !assignedOrg[0].restricting
+            ? assignedOrg[0]
+            : null;
 
     const hasMoveTarget =
         moveSource &&
@@ -125,7 +133,18 @@ export function RecordingFolderTags({
             {assigned.map((folder) => (
                 <ItemFolderChip
                     key={folder.id}
-                    name={label(folder)}
+                    name={
+                        folder.restricted
+                            ? folderDisplayPath(
+                                  folder,
+                                  new Map(
+                                      folders.map((entry) => [entry.id, entry]),
+                                  ),
+                                  label,
+                              )
+                            : label(folder)
+                    }
+                    restricted={folder.restricted || folder.restricting}
                     organization={folder.scope === "org"}
                     onSelect={() => onSelectFolder(folder)}
                     onRemove={
@@ -139,7 +158,10 @@ export function RecordingFolderTags({
                             ? () => {
                                   if (
                                       folder.scope === "org" &&
-                                      assignedOrg.length === 1 &&
+                                      assignedOrg.filter(
+                                          (entry) => !entry.restricted,
+                                      ).length === 1 &&
+                                      !folder.restricted &&
                                       kind !== "meeting"
                                   ) {
                                       setWithdrawing(folder);
@@ -197,6 +219,9 @@ export function RecordingFolderTags({
                     }
                 />
             )}
+            {assigned.some(
+                (folder) => folder.restricted || folder.restricting,
+            ) && <RestrictedItemAudience itemId={recordingId} />}
             <Dialog
                 open={withdrawing !== null}
                 onOpenChange={(open) => {

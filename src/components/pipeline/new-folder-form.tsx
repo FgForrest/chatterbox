@@ -4,6 +4,11 @@ import { useExtracted } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { FolderCombobox } from "@/components/recordings/folder-combobox";
+import {
+    type AudiencePerson,
+    RestrictedCreationFields,
+} from "@/components/sharing/restricted-audience-picker";
+import { useRestrictedFolders } from "@/components/sharing/restricted-folder-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -37,11 +42,18 @@ export function NewFolderForm({
 }) {
     const i18n = useExtracted();
     const folderRefusal = useFolderRefusal();
+    const { writable } = useRestrictedFolders();
+    const [restricted, setRestricted] = useState(false);
+    const [audience, setAudience] = useState<AudiencePerson[]>([]);
     const parents = useMemo(
         () =>
             availableParents.filter(
                 ({ folder }) =>
-                    !folder?.receivedFolder && !folder?.sharedWithPeople,
+                    !folder?.receivedFolder &&
+                    !folder?.sharedWithPeople &&
+                    !folder?.restricted &&
+                    !folder?.restricting &&
+                    folder?.access !== false,
             ),
         [availableParents],
     );
@@ -49,6 +61,9 @@ export function NewFolderForm({
     const [name, setName] = useState(initialName);
     const [parentId, setParentId] = useState(parents[0]?.id ?? "");
     const [creating, setCreating] = useState(false);
+    const orgParent =
+        parents.find((parent) => parent.id === parentId)?.folder?.scope ===
+        "org";
 
     useEffect(() => {
         setParentId((current) =>
@@ -72,7 +87,18 @@ export function NewFolderForm({
             const response = await fetch("/api/folders", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ parentId, name: trimmedName }),
+                body: JSON.stringify({
+                    parentId,
+                    name: trimmedName,
+                    ...(restricted && writable && orgParent
+                        ? {
+                              restricted: true,
+                              audienceUserIds: audience.map(
+                                  (person) => person.id,
+                              ),
+                          }
+                        : {}),
+                }),
             });
             if (!response.ok) {
                 const error = await parseApiError(response);
@@ -98,7 +124,7 @@ export function NewFolderForm({
     };
 
     return (
-        <div className="space-y-3 border-t pt-3">
+        <div className="flex flex-col gap-3 border-t pt-3">
             <div className="space-y-1.5">
                 <Label htmlFor={`${idPrefix}-new-folder-name`}>
                     {i18n("Folder name")}
@@ -144,6 +170,15 @@ export function NewFolderForm({
                     aria-label={i18n("Parent folder")}
                 />
             </div>
+            {orgParent && (
+                <RestrictedCreationFields
+                    restricted={restricted}
+                    onRestrictedChange={setRestricted}
+                    audience={audience}
+                    onAudienceChange={setAudience}
+                    disabled={creating}
+                />
+            )}
             <div className="flex justify-end gap-2">
                 <Button
                     type="button"

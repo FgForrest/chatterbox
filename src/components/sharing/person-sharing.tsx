@@ -35,6 +35,11 @@ import {
     ReceivedFolderDialog,
 } from "@/components/sharing/folder-sharing";
 import { ReceivedItemDialog } from "@/components/sharing/received-item-dialog";
+import {
+    FolderRequestError,
+    useRestrictedFolderRequest,
+} from "@/components/sharing/restricted-folder-api";
+import { useRestrictedFolders } from "@/components/sharing/restricted-folder-context";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -950,13 +955,21 @@ function InvitationCard({
 }) {
     const i18n = useExtracted();
     const format = useFormatter();
+    const { writable } = useRestrictedFolders();
     if (invitation.kind === "folder-access")
         return (
             <article className="space-y-3 rounded-lg border p-4">
                 <p className="text-xs text-muted-foreground">
                     {i18n("Access request")}
                 </p>
-                <h3 className="font-medium">{invitation.folderName}</h3>
+                <h3 className="font-medium">
+                    <a
+                        className="underline underline-offset-2"
+                        href={`/dashboard?folder=${encodeURIComponent(invitation.folderId)}`}
+                    >
+                        {invitation.folderName}
+                    </a>
+                </h3>
                 <p>
                     {invitation.notice
                         ? invitation.state === "approved"
@@ -973,10 +986,14 @@ function InvitationCard({
                           )}
                 </p>
                 <div className="flex gap-2">
-                    <Button size="sm" onClick={onAccept}>
-                        {invitation.notice ? i18n("Dismiss") : i18n("Approve")}
-                    </Button>
-                    {!invitation.notice && (
+                    {(invitation.notice || writable) && (
+                        <Button size="sm" onClick={onAccept}>
+                            {invitation.notice
+                                ? i18n("Dismiss")
+                                : i18n("Approve")}
+                        </Button>
+                    )}
+                    {!invitation.notice && writable && (
                         <Button size="sm" variant="outline" onClick={onDecline}>
                             {i18n("Decline")}
                         </Button>
@@ -1142,6 +1159,7 @@ export function PersonInvitations({
     notifications?: boolean;
 }) {
     const enabled = usePersonSharing();
+    const restrictedRequest = useRestrictedFolderRequest();
     const i18n = useExtracted();
     const refresh = useDashboardRefresh();
     const [invitations, setInvitations] = useState(initialInvitations);
@@ -1164,13 +1182,33 @@ export function PersonInvitations({
         }
     };
     const known = useRef(new Set(initialInvitations.map((item) => item.id)));
+    const loadGeneration = useRef(0);
+    const noticeInvitationId = useRef<string | null>(null);
     useEffect(() => {
+        loadGeneration.current++;
+        known.current = new Set(initialInvitations.map((item) => item.id));
         setInvitations(initialInvitations);
     }, [initialInvitations]);
-    const openList = useCallback((list: Invitation[]) => {
-        markInvitationNoticesSeen(list);
+    const openList = useCallback(async (list?: Invitation[]) => {
+        noticeInvitationId.current = null;
         closeCornerNotice("invitation");
         setOpen(true);
+        if (list) {
+            markInvitationNoticesSeen(list);
+            return;
+        }
+        const generation = ++loadGeneration.current;
+        try {
+            const response = await fetch("/api/shares");
+            if (!response.ok) return;
+            const data = (await response.json()) as {
+                invitations: Invitation[];
+            };
+            if (generation !== loadGeneration.current) return;
+            markInvitationNoticesSeen(data.invitations);
+            known.current = new Set(data.invitations.map((item) => item.id));
+            setInvitations(data.invitations);
+        } catch {}
     }, []);
     const notify = useCallback(
         (list: Invitation[], newest: Invitation) =>
@@ -1207,8 +1245,9 @@ export function PersonInvitations({
                     agendaInvitation={newest.kind === "meeting"}
                     more={list.length - 1}
                     dateTimeFormat="relative"
-                    onOpen={() => openList(list)}
+                    onOpen={() => void openList()}
                     onClose={() => {
+                        noticeInvitationId.current = null;
                         markInvitationNoticesSeen(list);
                         closeCornerNotice("invitation");
                     }}
@@ -1219,11 +1258,18 @@ export function PersonInvitations({
     useEffect(() => {
         if (!enabled || !notifications) return;
         const seen = invitationNoticesSeen();
-        const newest = initialInvitations
-            .filter((item) => !seen.has(item.id))
-            .at(-1);
-        if (newest) notify(initialInvitations, newest);
-    }, [enabled, notifications, initialInvitations, notify]);
+        const newest =
+            invitations.find(
+                (item) => item.id === noticeInvitationId.current,
+            ) ?? invitations.filter((item) => !seen.has(item.id)).at(-1);
+        if (newest && !open) {
+            noticeInvitationId.current = newest.id;
+            notify(invitations, newest);
+        } else {
+            noticeInvitationId.current = null;
+            closeCornerNotice("invitation");
+        }
+    }, [enabled, notifications, invitations, notify, open]);
     useEffect(() => {
         if (!enabled || !notifications) return;
         return () => closeCornerNotice("invitation");
@@ -1234,13 +1280,14 @@ export function PersonInvitations({
         let pollTimer: ReturnType<typeof setInterval> | undefined;
         let pollInterval = 0;
         const check = async (pushed: boolean) => {
+            const generation = ++loadGeneration.current;
             try {
                 const response = await fetch("/api/shares");
                 if (!response.ok || !active) return;
                 const data = (await response.json()) as {
                     invitations: Invitation[];
                 };
-                if (!active) return;
+                if (!active || generation !== loadGeneration.current) return;
                 const arrived = data.invitations.filter(
                     (item) => !known.current.has(item.id),
                 );
@@ -1250,9 +1297,9 @@ export function PersonInvitations({
                 known.current = new Set(
                     data.invitations.map((item) => item.id),
                 );
-                setInvitations(data.invitations);
                 const newest = arrived.at(-1);
-                if (newest) notify(data.invitations, newest);
+                if (newest) noticeInvitationId.current = newest.id;
+                setInvitations(data.invitations);
                 if (pushed || changed) refresh();
             } catch {}
         };
@@ -1281,39 +1328,30 @@ export function PersonInvitations({
             clearInterval(pollTimer);
             document.removeEventListener("visibilitychange", poll);
         };
-    }, [enabled, notifications, notify, refresh]);
+    }, [enabled, notifications, refresh]);
     const respond = async (
         invitation: Invitation,
         action: "accept" | "decline",
         folderId?: string,
     ) => {
+        loadGeneration.current++;
         const previous = invitations;
         setInvitations((items) =>
             items.filter((item) => item.id !== invitation.id),
         );
         try {
             if (invitation.kind === "folder-access") {
-                const response = await fetch(
+                await restrictedRequest(
                     `/api/folders/${encodeURIComponent(invitation.folderId)}/access-requests/${encodeURIComponent(invitation.id)}`,
+                    "PATCH",
                     {
-                        method: "PATCH",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            state: invitation.notice
-                                ? "dismissed"
-                                : action === "accept"
-                                  ? "approved"
-                                  : "declined",
-                        }),
+                        state: invitation.notice
+                            ? "dismissed"
+                            : action === "accept"
+                              ? "approved"
+                              : "declined",
                     },
                 );
-                if (!response.ok)
-                    throw new Error(
-                        await getApiErrorMessage(
-                            response,
-                            i18n("Could not update sharing"),
-                        ),
-                    );
             } else if (invitation.kind === "folder")
                 await changeFolderShareRequest(
                     invitation.id,
@@ -1333,6 +1371,23 @@ export function PersonInvitations({
             refresh();
         } catch (error) {
             setInvitations(previous);
+            if (error instanceof FolderRequestError && error.status === 409) {
+                const response = await fetch("/api/shares");
+                if (response.ok)
+                    setInvitations(
+                        (
+                            (await response.json()) as {
+                                invitations: Invitation[];
+                            }
+                        ).invitations,
+                    );
+                refresh();
+                if (
+                    response.ok &&
+                    error.code === "RESTRICTED_FOLDER_REQUEST_NOT_PENDING"
+                )
+                    return;
+            }
             toast.error(
                 error instanceof Error
                     ? error.message
@@ -1350,7 +1405,7 @@ export function PersonInvitations({
                     aria-label={i18n("Invitations ({count})", {
                         count: String(invitations.length),
                     })}
-                    onClick={() => openList(invitations)}
+                    onClick={() => void openList(invitations)}
                 >
                     <Inbox className="size-4" />
                     <span>{i18n("Invitations")}</span>

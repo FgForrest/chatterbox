@@ -6,6 +6,8 @@ import {
     ChevronRight,
     FolderPlus,
     History,
+    Lock,
+    LockOpen,
     MoreHorizontal,
     PanelLeftClose,
     Search,
@@ -16,6 +18,8 @@ import {
 } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { type DragEvent, useEffect, useMemo, useState } from "react";
+import { FolderAccessRequest } from "@/components/sharing/folder-access-request";
+import { FolderRestrictionDialog } from "@/components/sharing/folder-restriction-dialog";
 import {
     ReceivedFolderDialog,
     ReceivedFolderMenu,
@@ -24,6 +28,8 @@ import {
     PersonShareDialog,
     usePersonSharing,
 } from "@/components/sharing/person-sharing";
+import { RestrictedAudienceDialog } from "@/components/sharing/restricted-audience-dialog";
+import { useRestrictedFolders } from "@/components/sharing/restricted-folder-context";
 import { SharedFolderIcon } from "@/components/sharing/shared-folder-icon";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -119,6 +125,14 @@ export function FolderTree({
 }: FolderTreeProps) {
     const i18n = useExtracted();
     const sharingEnabled = usePersonSharing();
+    const { writable } = useRestrictedFolders();
+    const [restrictedDialog, setRestrictedDialog] = useState<{
+        folder: RecordingFolder;
+        action: "audience" | "restrict" | "lift";
+    } | null>(null);
+    const dialogFolder = folders.find(
+        (folder) => folder.id === restrictedDialog?.folder.id,
+    );
     const [sharingFolder, setSharingFolder] = useState<RecordingFolder | null>(
         null,
     );
@@ -248,10 +262,16 @@ export function FolderTree({
             !dragged ||
             dragged.receivedFolder ||
             target.receivedFolder ||
+            target.access === false ||
+            dragged.access === false ||
             dragged.scope !== target.scope
         )
             return false;
-        if (placement === "inside" && target.sharedWithPeople) return false;
+        if (
+            placement === "inside" &&
+            (target.sharedWithPeople || target.restricted || target.restricting)
+        )
+            return false;
         const container =
             placement === "inside" ? target : byId.get(target.parentId ?? "");
         if (container?.sharedWithPeople && dragged.parentId !== container.id)
@@ -292,7 +312,8 @@ export function FolderTree({
         const children = childrenByParent.get(folder.id) ?? [];
         const isExpanded = !!query.trim() || expanded.has(folder.id);
         const canExpand = children.length > 0;
-        const canManage = folder.scope !== "org" || canCurate;
+        const canManage =
+            folder.access !== false && (folder.scope !== "org" || canCurate);
         return (
             <div key={folder.id}>
                 {/* biome-ignore lint/a11y/useSemanticElements: Folder row controls are not form inputs. */}
@@ -382,7 +403,10 @@ export function FolderTree({
                                 event.dataTransfer.types ?? [],
                             ).includes(RECORDING_DRAG_TYPE);
                             if (isRecordingDrag) {
-                                if (folder.kind === "private") {
+                                if (
+                                    folder.kind === "private" ||
+                                    folder.access === false
+                                ) {
                                     event.dataTransfer.dropEffect = "none";
                                     setRecordingDropFolderId(null);
                                     return;
@@ -447,6 +471,7 @@ export function FolderTree({
                                     );
                                 if (
                                     folder.kind === "private" ||
+                                    folder.access === false ||
                                     recordingDropEffect(
                                         Array.from(event.dataTransfer.types),
                                         folder.scope,
@@ -519,13 +544,18 @@ export function FolderTree({
                                 setMenuFolderId(folder.id);
                             }
                         }}
-                        aria-label={i18n(
-                            "{folder}, {count, plural, one {# recording} other {# recordings}}",
-                            {
-                                folder: folderLabel(folder),
-                                count: countByFolder.get(folder.id) ?? 0,
-                            },
-                        )}
+                        aria-label={
+                            folder.access === false
+                                ? folderLabel(folder)
+                                : i18n(
+                                      "{folder}, {count, plural, one {# recording} other {# recordings}}",
+                                      {
+                                          folder: folderLabel(folder),
+                                          count:
+                                              countByFolder.get(folder.id) ?? 0,
+                                      },
+                                  )
+                        }
                         aria-current={
                             selectedFolderId === folder.id
                                 ? "location"
@@ -545,11 +575,26 @@ export function FolderTree({
                                 }
                             />
                         )}
-                        <span className="truncate">{folderLabel(folder)}</span>
-                        <UnsharedSubfolderLabel folder={folder} />
-                        <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                            {countByFolder.get(folder.id) ?? 0}
+                        <span
+                            className={cn(
+                                "truncate",
+                                folder.access === false &&
+                                    "text-muted-foreground",
+                            )}
+                        >
+                            {folderLabel(folder)}
                         </span>
+                        {folder.restricting && (
+                            <output className="text-xs text-restricted">
+                                {i18n("Restricting…")}
+                            </output>
+                        )}
+                        <UnsharedSubfolderLabel folder={folder} />
+                        {folder.access !== false && (
+                            <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                                {countByFolder.get(folder.id) ?? 0}
+                            </span>
+                        )}
                     </button>
                     <DropdownMenu
                         open={menuFolderId === folder.id}
@@ -572,7 +617,9 @@ export function FolderTree({
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                            {folder.receivedFolder ? (
+                            {folder.access === false ? (
+                                <FolderAccessRequest folder={folder} menu />
+                            ) : folder.receivedFolder ? (
                                 <ReceivedFolderMenu
                                     folder={folder}
                                     onEdit={(action) =>
@@ -582,13 +629,19 @@ export function FolderTree({
                             ) : (
                                 <>
                                     {(folder.sharedWithPeople ||
+                                        folder.restricted ||
+                                        folder.restricting ||
                                         canCreateSubfolder(
                                             folder,
                                             canCurate,
                                             isOrgAccount,
                                         )) && (
                                         <DropdownMenuItem
-                                            disabled={!!folder.sharedWithPeople}
+                                            disabled={
+                                                !!folder.sharedWithPeople ||
+                                                !!folder.restricted ||
+                                                !!folder.restricting
+                                            }
                                             onSelect={() =>
                                                 onSettings(folder, "create")
                                             }
@@ -596,6 +649,14 @@ export function FolderTree({
                                             <FolderPlus />{" "}
                                             <span>
                                                 {i18n("New subfolder")}
+                                                {(folder.restricted ||
+                                                    folder.restricting) && (
+                                                    <span className="block text-xs text-muted-foreground">
+                                                        {i18n(
+                                                            "A restricted folder has no subfolders.",
+                                                        )}
+                                                    </span>
+                                                )}
                                                 {folder.sharedWithPeople && (
                                                     <span className="block text-xs text-muted-foreground">
                                                         {i18n(
@@ -606,6 +667,61 @@ export function FolderTree({
                                             </span>
                                         </DropdownMenuItem>
                                     )}
+                                    {(folder.restricted ||
+                                        (folder.restricting &&
+                                            folder.restrictedRole)) && (
+                                        <DropdownMenuItem
+                                            onSelect={() =>
+                                                setRestrictedDialog({
+                                                    folder,
+                                                    action: "audience",
+                                                })
+                                            }
+                                        >
+                                            <Users />
+                                            {i18n("Who can see it…")}
+                                        </DropdownMenuItem>
+                                    )}
+                                    {writable &&
+                                        folder.scope === "org" &&
+                                        folder.kind === "custom" &&
+                                        (folder.restricted
+                                            ? (canCurate ||
+                                                  folder.restrictedRole ===
+                                                      "curator" ||
+                                                  folder.restrictedRole ===
+                                                      "manager") && (
+                                                  <DropdownMenuItem
+                                                      onSelect={() =>
+                                                          setRestrictedDialog({
+                                                              folder,
+                                                              action: "lift",
+                                                          })
+                                                      }
+                                                  >
+                                                      <LockOpen />
+                                                      {i18n(
+                                                          "Open to the whole Organization…",
+                                                      )}
+                                                  </DropdownMenuItem>
+                                              )
+                                            : canCurate && (
+                                                  <DropdownMenuItem
+                                                      onSelect={() =>
+                                                          setRestrictedDialog({
+                                                              folder,
+                                                              action: "restrict",
+                                                          })
+                                                      }
+                                                  >
+                                                      <Lock />
+                                                      {folder.restricting
+                                                          ? i18n(
+                                                                "Retry restriction…",
+                                                            )
+                                                          : i18n("Restrict…")}
+                                                  </DropdownMenuItem>
+                                              ))}
                                     {onPrepareMeeting &&
                                         folder.kind !== "private" &&
                                         !folder.receivedFolder && (
@@ -683,6 +799,29 @@ export function FolderTree({
 
     return (
         <>
+            {dialogFolder &&
+                dialogFolder.access !== false &&
+                restrictedDialog?.action === "audience" && (
+                    <RestrictedAudienceDialog
+                        folder={dialogFolder}
+                        onOpenChange={(open) => {
+                            if (!open) setRestrictedDialog(null);
+                        }}
+                    />
+                )}
+            {dialogFolder &&
+                dialogFolder.access !== false &&
+                restrictedDialog &&
+                restrictedDialog.action !== "audience" && (
+                    <FolderRestrictionDialog
+                        folder={dialogFolder}
+                        folders={folders}
+                        action={restrictedDialog.action}
+                        onOpenChange={(open) => {
+                            if (!open) setRestrictedDialog(null);
+                        }}
+                    />
+                )}
             {sharingFolder && (
                 <PersonShareDialog
                     itemId={sharingFolder.id}
@@ -792,7 +931,9 @@ export function FolderTree({
                                         onClick={() => onSelectFolder(folder)}
                                         className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-accent"
                                     >
-                                        {folder.scope === "org" ? (
+                                        {folder.scope === "org" &&
+                                        !folder.restricted &&
+                                        !folder.restricting ? (
                                             <Users className="size-4 text-organization" />
                                         ) : (
                                             <SharedFolderIcon folder={folder} />
@@ -803,9 +944,12 @@ export function FolderTree({
                                         <UnsharedSubfolderLabel
                                             folder={folder}
                                         />
-                                        <span className="ml-auto text-xs text-muted-foreground">
-                                            {countByFolder.get(folder.id) ?? 0}
-                                        </span>
+                                        {folder.access !== false && (
+                                            <span className="ml-auto text-xs text-muted-foreground">
+                                                {countByFolder.get(folder.id) ??
+                                                    0}
+                                            </span>
+                                        )}
                                     </button>
                                 ))}
                             </div>

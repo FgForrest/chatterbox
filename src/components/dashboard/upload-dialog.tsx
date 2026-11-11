@@ -28,6 +28,9 @@ export interface UploadFolderOption {
     path: string;
     scope: FolderScope;
     receivedFolder?: RecordingFolder["receivedFolder"];
+    restricted?: RecordingFolder["restricted"];
+    restricting?: RecordingFolder["restricting"];
+    access?: boolean;
 }
 
 export function uploadFolderParents(
@@ -40,6 +43,9 @@ export function uploadFolderParents(
         .filter(
             (folder) =>
                 !folder.receivedFolder &&
+                !folder.restricted &&
+                !folder.restricting &&
+                folder.access !== false &&
                 ((folder.scope === "personal" && folder.parentId === null) ||
                     (folder.scope === "org" && includeOrganization)),
         )
@@ -108,7 +114,11 @@ export function UploadDialog({
         if (!open) return;
         setFolderId(
             selectedFolderId &&
-                folders.some((folder) => folder.id === selectedFolderId)
+                folders.some(
+                    (folder) =>
+                        folder.id === selectedFolderId &&
+                        folder.access !== false,
+                )
                 ? selectedFolderId
                 : FILE_LATER,
         );
@@ -124,8 +134,7 @@ export function UploadDialog({
         setAvailableFolders((current) => [
             ...current,
             {
-                id: folder.id,
-                name: folder.name,
+                ...folder,
                 path: `${parent.path} / ${folder.name}`,
                 scope: folder.scope,
             },
@@ -208,6 +217,11 @@ export function UploadDialog({
                     </Button>
                     <Button
                         type="button"
+                        disabled={availableFolders.some(
+                            (folder) =>
+                                folder.id === folderId &&
+                                folder.access === false,
+                        )}
                         onClick={() =>
                             onUpload(folderId === FILE_LATER ? null : folderId)
                         }

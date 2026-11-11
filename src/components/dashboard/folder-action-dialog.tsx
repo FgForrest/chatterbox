@@ -3,6 +3,11 @@
 import { useExtracted } from "next-intl";
 import { useState } from "react";
 import { FolderCombobox } from "@/components/recordings/folder-combobox";
+import {
+    type AudiencePerson,
+    RestrictedCreationFields,
+} from "@/components/sharing/restricted-audience-picker";
+import { useRestrictedFolders } from "@/components/sharing/restricted-folder-context";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -38,7 +43,11 @@ export function FolderActionDialog({
     action: "create" | "move";
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    onCreate: (parentId: string, name: string) => Promise<void>;
+    onCreate: (
+        parentId: string,
+        name: string,
+        restriction?: { restricted: true; audienceUserIds: string[] },
+    ) => Promise<void>;
     onMove: (id: string, parentId: string) => Promise<void>;
     returnFocusElement?: HTMLElement | null;
     canCurate?: boolean;
@@ -46,6 +55,9 @@ export function FolderActionDialog({
 }) {
     const i18n = useExtracted();
     const label = useFolderLabel();
+    const { writable } = useRestrictedFolders();
+    const [restricted, setRestricted] = useState(false);
+    const [audience, setAudience] = useState<AudiencePerson[]>([]);
     const [name, setName] = useState("");
     const [parentId, setParentId] = useState(folder.parentId ?? "");
     const [saving, setSaving] = useState(false);
@@ -54,6 +66,9 @@ export function FolderActionDialog({
         (entry) =>
             !entry.folder.receivedFolder &&
             !entry.folder.sharedWithPeople &&
+            !entry.folder.restricted &&
+            !entry.folder.restricting &&
+            entry.folder.access !== false &&
             entry.folder.scope === folder.scope &&
             !subtree.has(entry.folder.id),
     );
@@ -75,7 +90,7 @@ export function FolderActionDialog({
             }}
         >
             <DialogContent
-                className="sm:max-w-sm"
+                className="max-h-[85dvh] overflow-y-auto sm:max-w-lg"
                 onCloseAutoFocus={(event) => {
                     if (returnFocusElement?.isConnected) {
                         event.preventDefault();
@@ -88,7 +103,7 @@ export function FolderActionDialog({
                     <DialogDescription>{label(folder)}</DialogDescription>
                 </DialogHeader>
                 <form
-                    className="space-y-4"
+                    className="flex flex-col gap-4"
                     onSubmit={(event) => {
                         event.preventDefault();
                         if (
@@ -103,7 +118,14 @@ export function FolderActionDialog({
                         setSaving(true);
                         void (
                             action === "create"
-                                ? onCreate(folder.id, name.trim())
+                                ? restricted && writable
+                                    ? onCreate(folder.id, name.trim(), {
+                                          restricted: true,
+                                          audienceUserIds: audience.map(
+                                              (person) => person.id,
+                                          ),
+                                      })
+                                    : onCreate(folder.id, name.trim())
                                 : onMove(folder.id, parentId)
                         )
                             .then(() => onOpenChange(false))
@@ -126,6 +148,15 @@ export function FolderActionDialog({
                             entries={entries}
                             value={parentId}
                             onValueChange={setParentId}
+                            disabled={saving}
+                        />
+                    )}
+                    {action === "create" && folder.scope === "org" && (
+                        <RestrictedCreationFields
+                            restricted={restricted}
+                            onRestrictedChange={setRestricted}
+                            audience={audience}
+                            onAudienceChange={setAudience}
                             disabled={saving}
                         />
                     )}

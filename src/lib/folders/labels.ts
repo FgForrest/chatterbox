@@ -7,6 +7,9 @@ export type LabelledFolder = Pick<
     | "parentId"
     | "kind"
     | "scope"
+    | "restricted"
+    | "restricting"
+    | "access"
     | "sharedWithPeople"
     | "receivedFolder"
 >;

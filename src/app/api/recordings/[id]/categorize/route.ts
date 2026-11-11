@@ -13,6 +13,11 @@ import { db } from "@/db";
 import { notifyFolderReceiversInTx } from "@/db/queries/item-shares";
 import { lockProfileMutation } from "@/db/queries/profile-mutations";
 import {
+    dropReleasedAudienceInTx,
+    notifyRestrictedAudienceInTx,
+} from "@/db/queries/restricted-folders";
+import {
+    chatterItems,
     itemProcessing,
     mailPendingShares,
     processingProfiles,
@@ -124,6 +129,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     const {
         item,
         folders,
+        retainedFolderIds,
         resolution: placementResolution,
     } = await resolveCategorizationSelection({
         ownerUserId,
@@ -169,6 +175,18 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         for (const folderId of [...personalFolderIds].sort())
             await lockCategorizableFolderInTx(tx, ownerUserId, folderId);
         await lockItemForFolderMutation(tx, itemId, ownerUserId);
+        const [ownedItem] = await tx
+            .select({ id: chatterItems.id })
+            .from(chatterItems)
+            .where(
+                and(
+                    eq(chatterItems.id, itemId),
+                    eq(chatterItems.userId, ownerUserId),
+                    isNull(chatterItems.deletedAt),
+                ),
+            );
+        if (!ownedItem)
+            throw new AppError(ErrorCode.NOT_FOUND, "Item not found", 404);
         const [current] = await tx
             .select({
                 profileId: itemProcessing.profileId,
@@ -303,6 +321,20 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                 if (!withheld || restrictedAt || restrictingAt)
                     sharedFolderIds.add(folderId);
             }
+            for (const folderId of retainedFolderIds) {
+                if (
+                    !sharedPlacements.some(
+                        (placement) =>
+                            placement.folderId === folderId &&
+                            placement.withheld,
+                    )
+                )
+                    throw new AppError(
+                        ErrorCode.RESTRICTED_FOLDER_NO_ACCESS,
+                        ErrorCode.RESTRICTED_FOLDER_NO_ACCESS,
+                        403,
+                    );
+            }
             const organizationRoots = await tx
                 .select({ folderId: recordingFolderAssignments.folderId })
                 .from(recordingFolderAssignments)
@@ -328,7 +360,8 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             );
             if (
                 sharedPlacements.some(
-                    ({ folderId }) => !intendedFolderIds.includes(folderId),
+                    ({ folderId, withheld }) =>
+                        !withheld && !intendedFolderIds.includes(folderId),
                 )
             ) {
                 throw new AppError(
@@ -336,6 +369,24 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                     "Unshare it from the Organization folder first",
                     409,
                 );
+            }
+            const removed = sharedPlacements.filter(
+                ({ folderId, withheld }) =>
+                    withheld && !intendedFolderIds.includes(folderId),
+            );
+            for (const { folderId } of removed) {
+                await notifyRestrictedAudienceInTx(tx, folderId);
+                await tx
+                    .delete(recordingFolderAssignments)
+                    .where(
+                        and(
+                            eq(recordingFolderAssignments.itemId, itemId),
+                            eq(recordingFolderAssignments.userId, ownerUserId),
+                            eq(recordingFolderAssignments.folderId, folderId),
+                            eq(recordingFolderAssignments.withheld, true),
+                        ),
+                    );
+                await dropReleasedAudienceInTx(tx, folderId);
             }
         }
         const requestedIntents = new Set(

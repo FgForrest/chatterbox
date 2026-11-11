@@ -22,6 +22,7 @@
     --color-ring: var(--primary);
     --color-organization: var(--organization);
     --color-person-share: var(--person-share);
+    --color-restricted: var(--restricted);
 }
 [data-combobox-popup] { font-family: inherit; border-color: var(--border); }
 [data-combobox-popup], [data-combobox-popup] *, [role="combobox"] { box-sizing: border-box; }
@@ -42,3 +43,6 @@
 .recorder-folder-target > span { max-width: 100%; box-sizing: border-box; }
 .recorder-folder-target > span > button:first-child { min-width: 0; }
 .recorder-folder-target > span > button > svg { flex-shrink: 0; }
+
+:root { --restricted: #647119; }
+@media (prefers-color-scheme: dark) { :root { --restricted: #b7c86b; } }
