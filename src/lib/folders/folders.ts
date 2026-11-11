@@ -678,6 +678,53 @@ async function resolveFilingFolder(
     return { folder, ownerId: target.ownerId, scope: target.scope };
 }
 
+async function resolvePlacementSource(
+    userId: string,
+    itemId: string,
+    folderId: string,
+    executor: Pick<typeof db, "select"> = db,
+    canCurate?: boolean,
+): Promise<AccessibleFolder> {
+    try {
+        return await resolveFilingFolder(userId, folderId, executor, canCurate);
+    } catch (error) {
+        if (
+            !(error instanceof AppError) ||
+            error.code !== ErrorCode.RESTRICTED_FOLDER_NO_ACCESS
+        )
+            throw error;
+        const orgUserId = await getOrgUserId(executor);
+        if (!orgUserId) throw error;
+        const [source] = await executor
+            .select(folderColumns)
+            .from(recordingFolders)
+            .innerJoin(
+                recordingFolderAssignments,
+                eq(recordingFolderAssignments.folderId, recordingFolders.id),
+            )
+            .innerJoin(
+                chatterItems,
+                and(
+                    eq(chatterItems.id, recordingFolderAssignments.itemId),
+                    eq(chatterItems.userId, recordingFolderAssignments.userId),
+                ),
+            )
+            .where(
+                and(
+                    eq(recordingFolders.id, folderId),
+                    eq(recordingFolders.userId, orgUserId),
+                    eq(recordingFolderAssignments.itemId, itemId),
+                    eq(recordingFolderAssignments.userId, userId),
+                    eq(chatterItems.userId, userId),
+                    isNull(chatterItems.deletedAt),
+                ),
+            )
+            .limit(1);
+        if (!source) throw error;
+        return { folder: source, scope: "org", ownerId: orgUserId };
+    }
+}
+
 /** Validate a folder supplied at an external entry path, with a useful 400. */
 export async function assertCategorizableFolderInput(
     ownerUserId: string,
@@ -965,7 +1012,16 @@ async function listTreeOrganization(
                     eq(recordingFolders.userId, ownerId),
                     scope === "org"
                         ? viewer
-                            ? placementVisibleCondition(viewer)
+                            ? or(
+                                  placementVisibleCondition(viewer),
+                                  and(
+                                      eq(chatterItems.userId, viewer.userId),
+                                      eq(
+                                          recordingFolderAssignments.userId,
+                                          viewer.userId,
+                                      ),
+                                  ),
+                              )
                             : and(
                                   eq(
                                       recordingFolderAssignments.withheld,
@@ -2119,8 +2175,9 @@ export async function removeRecordingFromFolder(input: {
     withdraw?: boolean;
 }): Promise<void> {
     const orgUserId = await getOrgUserId();
-    const target = await resolveFilingFolder(
+    const target = await resolvePlacementSource(
         input.userId,
+        input.recordingId,
         input.folderId,
     ).catch((error) => {
         if (error instanceof AppError && error.statusCode === 404) return null;
@@ -2206,8 +2263,9 @@ export async function removeRecordingFromFolder(input: {
     await retryOnDeadlock(() =>
         db.transaction(async (tx) => {
             await lockOrgTree(tx);
-            const currentTarget = await resolveFilingFolder(
+            const currentTarget = await resolvePlacementSource(
                 input.userId,
+                input.recordingId,
                 input.folderId,
                 tx,
                 canCurate,
@@ -2637,15 +2695,22 @@ export async function moveRecordingBetweenFolders(input: {
     const orgUserId = await getOrgUserId();
     const canCurate = await userCuratesOrganizationNow(input.userId);
     const targets = await Promise.all([
-        resolveFilingFolder(input.userId, input.fromFolderId, db, canCurate),
+        resolvePlacementSource(
+            input.userId,
+            input.recordingId,
+            input.fromFolderId,
+            db,
+            canCurate,
+        ),
         resolveFilingFolder(input.userId, input.toFolderId, db, canCurate),
     ]);
     await retryOnDeadlock(() =>
         db.transaction(async (tx) => {
             if (targets.some((target) => target.scope === "org"))
                 await lockOrgTree(tx);
-            const from = await resolveFilingFolder(
+            const from = await resolvePlacementSource(
                 input.userId,
+                input.recordingId,
                 input.fromFolderId,
                 tx,
                 canCurate,

@@ -41,16 +41,19 @@ import { meetingRequest } from "@/components/meetings/api";
 import { CreateMeetingDialog } from "@/components/meetings/create-meeting-dialog";
 import type { MeetingRowData } from "@/components/meetings/types";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
+import { FolderNoAccess } from "@/components/sharing/folder-access-request";
 import {
     type Invitation,
     PersonInvitations,
 } from "@/components/sharing/person-sharing";
 import { FolderTasksPanel } from "@/components/tasks/folder-tasks-panel";
 import { Button } from "@/components/ui/button";
+import { useConfirmOrganizationFiling } from "@/hooks/use-confirm-organization-filing";
 import {
     noteDashboardUrlChange,
     useDashboardRefresh,
 } from "@/hooks/use-dashboard-refresh";
+import { useExportRefusal } from "@/hooks/use-export-refusal";
 import { useFolderLabel } from "@/hooks/use-folder-label";
 import { useFolderRefusal } from "@/hooks/use-folder-refusal";
 import {
@@ -79,6 +82,7 @@ import {
     libraryNavigation,
 } from "@/lib/folders/navigation";
 import { canCreateSubfolder } from "@/lib/folders/permissions";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import {
     applyFilenameOverrides,
     reconcileFilenameOverrides,
@@ -173,14 +177,28 @@ export function Workstation({
     const i18n = useExtracted();
     const folderLabel = useFolderLabel();
     const folderRefusal = useFolderRefusal();
+    const exportRefusal = useExportRefusal();
     const shareRefusal = useShareRefusal();
     const refresh = useDashboardRefresh();
     // A stable empty list: a fresh `[]` per render would re-run every effect
     // that depends on it, and one of them resets optimistic renames.
     const orgRecordings = organizationLibrary?.recordings ?? EMPTY_RECORDINGS;
-    // The organization account has no library of its own; its "recent" list
-    // is the Organization's.
-    const libraryRecordings = isOrgAccount ? orgRecordings : recordings;
+    const libraryRecordings = useMemo(
+        () =>
+            isOrgAccount
+                ? [
+                      ...new Map(
+                          [
+                              ...recordings.filter(
+                                  (item) => item.view === "received",
+                              ),
+                              ...orgRecordings,
+                          ].map((item) => [item.id, item]),
+                      ).values(),
+                  ]
+                : recordings,
+        [isOrgAccount, orgRecordings, recordings],
+    );
     const locationQuery = useSearchParams().toString();
     const initialQuery = locationQuery;
     const [wideLayout, setWideLayout] = useState(false);
@@ -232,7 +250,12 @@ export function Workstation({
             : null) ??
         "recent";
     const [currentRecording, setCurrentRecording] = useState<Recording | null>(
-        () => newest(newcomer ? orgRecordings : libraryRecordings),
+        () =>
+            initialFolderOrganization.folders.find(
+                (folder) => folder.id === initialLocation,
+            )?.access === false
+                ? null
+                : newest(newcomer ? orgRecordings : libraryRecordings),
     );
     const [orgContentRevision, setOrgContentRevision] = useState(0);
     const {
@@ -269,6 +292,10 @@ export function Workstation({
     );
     const [folderOrganization, setFolderOrganization] =
         useState<FolderOrganization>(initialFolderOrganization);
+    const confirmOrganizationFiling = useConfirmOrganizationFiling(
+        folderOrganization.folders,
+        folderOrganization.assignments,
+    );
     const [knowledgeFolderId, setKnowledgeFolderId] = useState<string | null>(
         null,
     );
@@ -301,11 +328,8 @@ export function Workstation({
         [folderOrganization.folders, isOrgAccount],
     );
     const preferenceRecordings = useMemo(
-        () =>
-            (isOrgAccount ? orgRecordings : recordings).filter(
-                (item) => !hiddenIds.has(item.id),
-            ),
-        [recordings, orgRecordings, isOrgAccount, hiddenIds],
+        () => libraryRecordings.filter((item) => !hiddenIds.has(item.id)),
+        [libraryRecordings, hiddenIds],
     );
     const libraryPreferences = useLibraryPreferencesState(
         userId,
@@ -483,8 +507,23 @@ export function Workstation({
             setTasksFolderId(null);
             setSelectedFolderId(folder.id);
             rememberFolder(folder.id);
+            if (folder.access === false) {
+                setCurrentRecording(null);
+                setCurrentMeetingId(null);
+                setMobileView("list");
+                writeSelection(null, folder.id, "push", "list");
+                return;
+            }
             const pool =
-                folder.scope === "org" ? orgRecordings : libraryRecordings;
+                folder.scope === "org"
+                    ? [
+                          ...new Map(
+                              [...libraryRecordings, ...orgRecordings].map(
+                                  (item) => [item.id, item],
+                              ),
+                          ).values(),
+                      ]
+                    : libraryRecordings;
             const ids = recordingIdsVisibleInFolder(
                 folderOrganization.folders,
                 folderOrganization.assignments,
@@ -605,6 +644,15 @@ export function Workstation({
             const locationFolder = folder ?? firstFolder;
             setSelectedFolderId(locationFolder?.id ?? null);
             if (locationFolder) rememberFolder(locationFolder.id);
+            if (locationFolder?.access === false) {
+                setCurrentRecording(null);
+                setCurrentMeetingId(null);
+                setKnowledgeFolderId(null);
+                setTasksFolderId(null);
+                setMobileView("list");
+                writeSelection(null, locationFolder.id, "replace", "list");
+                return;
+            }
             const previewingKnowledge = Boolean(
                 locationFolder && params.get("knowledge") === "1",
             );
@@ -666,7 +714,13 @@ export function Workstation({
             setItemLinkQuery("");
             const pool =
                 locationFolder?.scope === "org"
-                    ? orgRecordings
+                    ? [
+                          ...new Map(
+                              [...libraryRecordings, ...orgRecordings].map(
+                                  (item) => [item.id, item],
+                              ),
+                          ).values(),
+                      ]
                     : libraryRecordings;
             const ids = locationFolder
                 ? recordingIdsVisibleInFolder(
@@ -774,11 +828,15 @@ export function Workstation({
     // Everything the folder tree counts: own recordings for Private, shared
     // ones for the Organization tree.
     const treeRecordings = useMemo(
-        () =>
-            isOrgAccount
-                ? visibleOrgRecordings
-                : [...visibleRecordings, ...visibleOrgRecordings],
-        [isOrgAccount, visibleOrgRecordings, visibleRecordings],
+        () => [
+            ...new Map(
+                [...visibleRecordings, ...visibleOrgRecordings].map((item) => [
+                    item.id,
+                    item,
+                ]),
+            ).values(),
+        ],
+        [visibleOrgRecordings, visibleRecordings],
     );
 
     const currentIsOrgView = currentRecording?.view === "org";
@@ -805,10 +863,23 @@ export function Workstation({
               (folder) => folder.id === selectedFolderId,
           ) ?? null)
         : null;
+    useEffect(() => {
+        if (!folderOrganization.folders.some((folder) => folder.restricting))
+            return;
+        const timer = setInterval(refresh, 2000);
+        return () => clearInterval(timer);
+    }, [folderOrganization.folders, refresh]);
     const locationRecordings = useMemo(() => {
+        if (selectedFolder?.access === false) return [];
         const pool =
             selectedFolder?.scope === "org"
-                ? visibleOrgRecordings
+                ? [
+                      ...new Map(
+                          [...visibleRecordings, ...visibleOrgRecordings].map(
+                              (item) => [item.id, item],
+                          ),
+                      ).values(),
+                  ]
                 : visibleRecordings;
         if (!selectedFolder) return pool;
         const ids = recordingIdsVisibleInFolder(
@@ -852,8 +923,16 @@ export function Workstation({
         [folderOrganization, selectedFolder],
     );
     const locationIsOrg = selectedFolder?.scope === "org" || isOrgAccount;
+    const organizationTranscriptions = useMemo(
+        () =>
+            new Map([
+                ...transcriptions,
+                ...(organizationLibrary?.transcriptions ?? []),
+            ]),
+        [organizationLibrary?.transcriptions, transcriptions],
+    );
     const locationTranscriptions = locationIsOrg
-        ? (organizationLibrary?.transcriptions ?? transcriptions)
+        ? organizationTranscriptions
         : transcriptions;
     // A shared recording is changed for the Organization, by its curators
     // (or the organization account), on the Organization view; read-only
@@ -917,13 +996,10 @@ export function Workstation({
             return next.size === prev.size ? prev : next;
         });
         setFilenameOverrides((prev) =>
-            reconcileFilenameOverrides(
-                isOrgAccount ? orgRecordings : recordings,
-                prev,
-            ),
+            reconcileFilenameOverrides(libraryRecordings, prev),
         );
     }, [
-        isOrgAccount,
+        libraryRecordings,
         recordings,
         orgRecordings,
         currentRecording,
@@ -1230,7 +1306,7 @@ export function Workstation({
     // The organization account's library is the Organization view: its
     // transcripts, and its in-flight work keyed by the Organization subject.
     const libraryTranscriptions = isOrgAccount
-        ? (organizationLibrary?.transcriptions ?? transcriptions)
+        ? organizationTranscriptions
         : transcriptions;
     const orgInFlightActions = useMemo(() => {
         const prefix = recordingJobSubject("", "org");
@@ -1353,11 +1429,15 @@ export function Workstation({
     );
 
     const handleCreateFolder = useCallback(
-        async (parentId: string, name: string) => {
+        async (
+            parentId: string,
+            name: string,
+            restriction?: { restricted: true; audienceUserIds: string[] },
+        ) => {
             const response = await fetch("/api/folders", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ parentId, name }),
+                body: JSON.stringify({ parentId, name, ...restriction }),
             });
             if (!response.ok) {
                 const error = await parseApiError(response);
@@ -1550,13 +1630,28 @@ export function Workstation({
                 method: "DELETE",
             });
             if (!response.ok) {
+                const error = await parseApiError(response);
+                const refusal = exportRefusal(error);
+                const message =
+                    refusal?.message ??
+                    folderRefusal(error) ??
+                    i18n("Could not delete folder");
                 toast.error(
-                    await getApiErrorMessage(
-                        response,
-                        i18n("Could not delete folder"),
-                    ),
+                    message,
+                    refusal?.retryable
+                        ? {
+                              action: {
+                                  label: i18n("Retry"),
+                                  onClick: () => {
+                                      void handleDeleteFolder(folderId).catch(
+                                          () => {},
+                                      );
+                                  },
+                              },
+                          }
+                        : undefined,
                 );
-                throw new Error(i18n("Could not delete folder"));
+                throw new Error(message);
             }
             const removeDeleted = (
                 current: FolderOrganization,
@@ -1645,6 +1740,8 @@ export function Workstation({
         [
             folderOrganization,
             currentRecording,
+            exportRefusal,
+            folderRefusal,
             visibleRecordings,
             visibleOrgRecordings,
             i18n,
@@ -1661,6 +1758,13 @@ export function Workstation({
             assigned: boolean,
             withdraw = false,
         ) => {
+            if (assigned) {
+                const confirmation = confirmOrganizationFiling(
+                    recordingId,
+                    folderId,
+                );
+                if (confirmation) await confirmation;
+            }
             const assignment = { recordingId, folderId };
             const previous = folderOrganization.assignments;
             setFolderOrganization((current) => ({
@@ -1679,61 +1783,72 @@ export function Workstation({
                               item.folderId !== folderId,
                       ),
             }));
-            const response = await fetch(
-                `/api/recordings/${recordingId}/folders`,
-                {
-                    method: assigned ? "POST" : "DELETE",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(
-                        withdraw ? { folderId, withdraw } : { folderId },
-                    ),
-                },
-            );
-            if (!response.ok) {
+            let response: Response | undefined;
+            try {
+                response = await fetch(
+                    `/api/recordings/${recordingId}/folders`,
+                    {
+                        method: assigned ? "POST" : "DELETE",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(
+                            withdraw ? { folderId, withdraw } : { folderId },
+                        ),
+                    },
+                );
+                if (!response.ok) {
+                    const error = await parseApiError(response);
+                    // The last Organization folder after all: the caller asks
+                    // the owner to confirm the withdrawal.
+                    if (error.code === "WITHDRAW_UNCONFIRMED") {
+                        throw Object.assign(new Error(error.error), {
+                            code: error.code,
+                        });
+                    }
+                    const refusal = folderRefusal(error) ?? shareRefusal(error);
+                    if (refusal) {
+                        const recording = recordings.find(
+                            (candidate) => candidate.id === recordingId,
+                        );
+                        toast.error(refusal, {
+                            action: recording
+                                ? {
+                                      label: i18n("Open recording"),
+                                      onClick: () => {
+                                          selectRecordingByUser(recording);
+                                          setSelectedFolderId(null);
+                                          writeSelection(
+                                              recording,
+                                              null,
+                                              "replace",
+                                          );
+                                      },
+                                  }
+                                : undefined,
+                        });
+                    } else {
+                        toast.error(
+                            error.error ||
+                                (assigned
+                                    ? i18n("Could not add recording to folder")
+                                    : i18n(
+                                          "Could not remove recording from folder",
+                                      )),
+                        );
+                    }
+                    throw new Error(i18n("Could not update folder assignment"));
+                }
+            } catch (error) {
                 setFolderOrganization((current) => ({
                     ...current,
                     assignments: previous,
                 }));
-                const error = await parseApiError(response);
-                // The last Organization folder after all: the caller asks
-                // the owner to confirm the withdrawal.
-                if (error.code === "WITHDRAW_UNCONFIRMED") {
-                    throw Object.assign(new Error(error.error), {
-                        code: error.code,
-                    });
+                if (response?.status === 403 || response?.status === 409) {
+                    invalidateItemProcessing(recordingId);
+                    refresh();
                 }
-                const refusal = shareRefusal(error);
-                if (refusal) {
-                    const recording = recordings.find(
-                        (candidate) => candidate.id === recordingId,
-                    );
-                    toast.error(refusal, {
-                        action: recording
-                            ? {
-                                  label: i18n("Open recording"),
-                                  onClick: () => {
-                                      selectRecordingByUser(recording);
-                                      setSelectedFolderId(null);
-                                      writeSelection(
-                                          recording,
-                                          null,
-                                          "replace",
-                                      );
-                                  },
-                              }
-                            : undefined,
-                    });
-                } else {
-                    toast.error(
-                        error.error ||
-                            (assigned
-                                ? i18n("Could not add recording to folder")
-                                : i18n(
-                                      "Could not remove recording from folder",
-                                  )),
-                    );
-                }
-                throw new Error(i18n("Could not update folder assignment"));
+                if (!response)
+                    toast.error(i18n("Could not update folder assignment"));
+                throw error;
             }
             if (assigned) rememberFolder(folderId);
             if (
@@ -1755,6 +1870,8 @@ export function Workstation({
         },
         [
             rememberFolder,
+            confirmOrganizationFiling,
+            folderRefusal,
             setSelectedFolderId,
             folderOrganization.assignments,
             folderOrganization.folders,
@@ -1773,38 +1890,86 @@ export function Workstation({
             fromFolderId: string,
             toFolderId: string,
         ) => {
+            if (
+                treeRecordings.find((item) => item.id === recordingId)
+                    ?.isOwn === false &&
+                folderOrganization.folders.some(
+                    (folder) =>
+                        (folder.id === fromFolderId ||
+                            folder.id === toFolderId) &&
+                        (folder.restricted || folder.restricting),
+                )
+            ) {
+                const message = i18n(
+                    "Only the item's owner can move it into or out of a restricted folder.",
+                );
+                toast.error(message);
+                throw new Error(message);
+            }
+            const confirmation = confirmOrganizationFiling(
+                recordingId,
+                toFolderId,
+            );
+            if (confirmation) await confirmation;
+            const source = folderOrganization.folders.find(
+                (folder) => folder.id === fromFolderId,
+            );
+            const destination = folderOrganization.folders.find(
+                (folder) => folder.id === toFolderId,
+            );
+            const keepRestrictedSource = Boolean(
+                (source?.restricted || source?.restricting) &&
+                    destination?.scope === "org" &&
+                    !destination.restricted &&
+                    !destination.restricting,
+            );
             const previous = folderOrganization.assignments;
             setFolderOrganization((current) => ({
                 ...current,
                 assignments: [
                     ...current.assignments.filter(
                         (item) =>
+                            keepRestrictedSource ||
                             item.recordingId !== recordingId ||
                             item.folderId !== fromFolderId,
                     ),
                     { recordingId, folderId: toFolderId },
                 ],
             }));
-            const response = await fetch(
-                `/api/recordings/${recordingId}/folders`,
-                {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ fromFolderId, toFolderId }),
-                },
-            );
-            if (!response.ok) {
+            let response: Response | undefined;
+            try {
+                response = await fetch(
+                    `/api/recordings/${recordingId}/folders`,
+                    {
+                        method: keepRestrictedSource ? "POST" : "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(
+                            keepRestrictedSource
+                                ? { folderId: toFolderId }
+                                : { fromFolderId, toFolderId },
+                        ),
+                    },
+                );
+                if (!response.ok) {
+                    const error = await parseApiError(response);
+                    toast.error(
+                        folderRefusal(error) ??
+                            shareRefusal(error) ??
+                            i18n("Could not move recording"),
+                    );
+                    throw new Error(i18n("Could not move recording"));
+                }
+            } catch (error) {
                 setFolderOrganization((current) => ({
                     ...current,
                     assignments: previous,
                 }));
-                toast.error(
-                    await getApiErrorMessage(
-                        response,
-                        i18n("Could not move recording"),
-                    ),
-                );
-                throw new Error(i18n("Could not move recording"));
+                if (response?.status === 403 || response?.status === 409) {
+                    invalidateItemProcessing(recordingId);
+                    refresh();
+                }
+                if (!response) toast.error(i18n("Could not move recording"));
+                throw error;
             }
             rememberFolder(toFolderId);
             if (
@@ -1827,6 +1992,10 @@ export function Workstation({
         [
             folderOrganization.assignments,
             folderOrganization.folders,
+            confirmOrganizationFiling,
+            treeRecordings,
+            folderRefusal,
+            shareRefusal,
             i18n,
             rememberFolder,
             refresh,
@@ -1834,7 +2003,10 @@ export function Workstation({
     );
 
     const settingsFolder = folderOrganization.folders.find(
-        (folder) => folder.id === settingsFolderId && !folder.receivedFolder,
+        (folder) =>
+            folder.id === settingsFolderId &&
+            folder.access !== false &&
+            !folder.receivedFolder,
     );
     // Derived like settingsFolder: a folder deleted or moved away by
     // someone else closes its dialog and frees the shortcuts.
@@ -2082,204 +2254,225 @@ export function Workstation({
                             className={cn(
                                 "min-h-0 min-w-0 lg:h-[calc(100dvh-7rem)] lg:sticky lg:top-20 lg:block",
                                 mobileView === "detail" && "hidden",
+                                selectedFolder?.access === false &&
+                                    "lg:col-span-2",
                             )}
                         >
-                            <RecordingList
-                                ref={listRef}
-                                searchView={locationIsOrg ? "org" : "private"}
-                                isOrgAccount={isOrgAccount}
-                                meetings={locationMeetings}
-                                currentMeetingId={currentMeetingId}
-                                onSelectMeeting={openMeeting}
-                                recordings={locationRecordings}
-                                mailEnabled={mailEnabled}
-                                transcriptions={locationTranscriptions}
-                                currentRecording={currentRecording}
-                                pendingUploads={pendingUploads}
-                                inFlightActions={
-                                    locationIsOrg
-                                        ? orgInFlightActions
-                                        : inFlightActions
-                                }
-                                sharedItemIds={sharedIds}
-                                onSelect={selectRecordingByUser}
-                                onDelete={handleDelete}
-                                initialDateTimeFormat={
-                                    initialSettings.dateTimeFormat
-                                }
-                                initialSortOrder={
-                                    initialSettings.recordingListSortOrder
-                                }
-                                initialKindFilter={
-                                    initialSettings.chatterKindFilter
-                                }
-                                initialChunkSize={initialSettings.itemsPerPage}
-                                resetToRecentKey={resetToRecentKey}
-                                locationKey={location}
-                                folder={selectedFolder}
-                                folders={folderOrganization.folders}
-                                rowLocations={rowLocations}
-                                assignments={folderOrganization.assignments}
-                                onAssignRecording={assignRecording}
-                                onMoveRecording={handleMoveBetweenFolders}
-                                canCurate={canCurate}
-                                onFolderCreated={handleFolderCreated}
-                                header={(shownCount) => (
-                                    <>
-                                        <div className="xl:hidden">
-                                            <PersonInvitations
-                                                initialInvitations={
-                                                    initialInvitations
-                                                }
-                                                folders={navigationFolders}
-                                                onFolderCreated={
-                                                    handleFolderCreated
-                                                }
-                                                notifications={false}
-                                            />
-                                        </div>
-                                        <div
-                                            className={
-                                                railCollapsed
-                                                    ? "hidden"
-                                                    : "hidden xl:block"
-                                            }
-                                        >
-                                            <LibraryLocationHeader
-                                                {...headerProps}
-                                                variant="rail"
-                                                part="header"
-                                                shownCount={shownCount}
-                                            />
-                                        </div>
-                                        <div
-                                            className={
-                                                railCollapsed
-                                                    ? "block"
-                                                    : "xl:hidden"
-                                            }
-                                        >
-                                            <LibraryLocationHeader
-                                                {...headerProps}
-                                                variant="walk"
-                                                part="header"
-                                                shownCount={shownCount}
-                                                onShowRail={
+                            {selectedFolder?.access === false ? (
+                                <FolderNoAccess
+                                    folder={selectedFolder}
+                                    onBack={navigateRecent}
+                                />
+                            ) : (
+                                <RecordingList
+                                    ref={listRef}
+                                    searchView={
+                                        locationIsOrg ? "org" : "private"
+                                    }
+                                    isOrgAccount={isOrgAccount}
+                                    meetings={locationMeetings}
+                                    currentMeetingId={currentMeetingId}
+                                    onSelectMeeting={openMeeting}
+                                    recordings={locationRecordings}
+                                    mailEnabled={mailEnabled}
+                                    transcriptions={locationTranscriptions}
+                                    currentRecording={currentRecording}
+                                    pendingUploads={pendingUploads}
+                                    inFlightActions={
+                                        locationIsOrg
+                                            ? orgInFlightActions
+                                            : inFlightActions
+                                    }
+                                    sharedItemIds={sharedIds}
+                                    onSelect={selectRecordingByUser}
+                                    onDelete={handleDelete}
+                                    initialDateTimeFormat={
+                                        initialSettings.dateTimeFormat
+                                    }
+                                    initialSortOrder={
+                                        initialSettings.recordingListSortOrder
+                                    }
+                                    initialKindFilter={
+                                        initialSettings.chatterKindFilter
+                                    }
+                                    initialChunkSize={
+                                        initialSettings.itemsPerPage
+                                    }
+                                    resetToRecentKey={resetToRecentKey}
+                                    locationKey={location}
+                                    folder={selectedFolder}
+                                    folders={folderOrganization.folders}
+                                    rowLocations={rowLocations}
+                                    assignments={folderOrganization.assignments}
+                                    onAssignRecording={assignRecording}
+                                    onMoveRecording={handleMoveBetweenFolders}
+                                    canCurate={canCurate}
+                                    onFolderCreated={handleFolderCreated}
+                                    header={(shownCount) => (
+                                        <>
+                                            <div className="xl:hidden">
+                                                <PersonInvitations
+                                                    initialInvitations={
+                                                        initialInvitations
+                                                    }
+                                                    folders={navigationFolders}
+                                                    onFolderCreated={
+                                                        handleFolderCreated
+                                                    }
+                                                    notifications={false}
+                                                />
+                                            </div>
+                                            <div
+                                                className={
                                                     railCollapsed
-                                                        ? () =>
-                                                              libraryPreferences.setPreferences(
-                                                                  (value) => ({
-                                                                      ...value,
-                                                                      collapsed: false,
-                                                                  }),
-                                                              )
-                                                        : undefined
+                                                        ? "hidden"
+                                                        : "hidden xl:block"
                                                 }
-                                            />
-                                        </div>
-                                    </>
-                                )}
-                                navigationContent={
-                                    <>
-                                        <div
-                                            className={
-                                                railCollapsed
-                                                    ? "hidden"
-                                                    : "hidden xl:block"
-                                            }
-                                        >
-                                            <LibraryLocationHeader
-                                                {...headerProps}
-                                                variant="rail"
-                                                part="tiles"
-                                            />
-                                        </div>
-                                        <div
-                                            className={
-                                                railCollapsed
-                                                    ? "block"
-                                                    : "xl:hidden"
-                                            }
-                                        >
-                                            <LibraryLocationHeader
-                                                {...headerProps}
-                                                variant="walk"
-                                                part="tiles"
-                                                onShowRail={
+                                            >
+                                                <LibraryLocationHeader
+                                                    {...headerProps}
+                                                    variant="rail"
+                                                    part="header"
+                                                    shownCount={shownCount}
+                                                />
+                                            </div>
+                                            <div
+                                                className={
                                                     railCollapsed
-                                                        ? () =>
-                                                              libraryPreferences.setPreferences(
-                                                                  (value) => ({
-                                                                      ...value,
-                                                                      collapsed: false,
-                                                                  }),
-                                                              )
-                                                        : undefined
+                                                        ? "block"
+                                                        : "xl:hidden"
                                                 }
-                                            />
-                                        </div>
-                                        {newcomer &&
-                                            selectedFolder?.scope === "org" && (
-                                                <div className="m-3 rounded-lg border border-organization/30 bg-organization/10 p-3 text-xs">
-                                                    <p>
-                                                        {i18n(
-                                                            "You have no items of your own yet, so you start in the Organization. Your items will appear in Recent.",
-                                                        )}
-                                                    </p>
-                                                    <div className="mt-2 flex gap-2">
-                                                        <Button
-                                                            variant="outline"
-                                                            size="sm"
-                                                            disabled={
-                                                                isAutoSyncing
-                                                            }
-                                                            onClick={handleSync}
-                                                        >
+                                            >
+                                                <LibraryLocationHeader
+                                                    {...headerProps}
+                                                    variant="walk"
+                                                    part="header"
+                                                    shownCount={shownCount}
+                                                    onShowRail={
+                                                        railCollapsed
+                                                            ? () =>
+                                                                  libraryPreferences.setPreferences(
+                                                                      (
+                                                                          value,
+                                                                      ) => ({
+                                                                          ...value,
+                                                                          collapsed: false,
+                                                                      }),
+                                                                  )
+                                                            : undefined
+                                                    }
+                                                />
+                                            </div>
+                                        </>
+                                    )}
+                                    navigationContent={
+                                        <>
+                                            <div
+                                                className={
+                                                    railCollapsed
+                                                        ? "hidden"
+                                                        : "hidden xl:block"
+                                                }
+                                            >
+                                                <LibraryLocationHeader
+                                                    {...headerProps}
+                                                    variant="rail"
+                                                    part="tiles"
+                                                />
+                                            </div>
+                                            <div
+                                                className={
+                                                    railCollapsed
+                                                        ? "block"
+                                                        : "xl:hidden"
+                                                }
+                                            >
+                                                <LibraryLocationHeader
+                                                    {...headerProps}
+                                                    variant="walk"
+                                                    part="tiles"
+                                                    onShowRail={
+                                                        railCollapsed
+                                                            ? () =>
+                                                                  libraryPreferences.setPreferences(
+                                                                      (
+                                                                          value,
+                                                                      ) => ({
+                                                                          ...value,
+                                                                          collapsed: false,
+                                                                      }),
+                                                                  )
+                                                            : undefined
+                                                    }
+                                                />
+                                            </div>
+                                            {newcomer &&
+                                                selectedFolder?.scope ===
+                                                    "org" && (
+                                                    <div className="m-3 rounded-lg border border-organization/30 bg-organization/10 p-3 text-xs">
+                                                        <p>
                                                             {i18n(
-                                                                "Sync Device",
+                                                                "You have no items of your own yet, so you start in the Organization. Your items will appear in Recent.",
                                                             )}
-                                                        </Button>
-                                                        <Button
-                                                            variant="outline"
-                                                            size="sm"
-                                                            onClick={
-                                                                triggerUpload
-                                                            }
-                                                        >
-                                                            {i18n("Upload")}
-                                                        </Button>
+                                                        </p>
+                                                        <div className="mt-2 flex gap-2">
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                disabled={
+                                                                    isAutoSyncing
+                                                                }
+                                                                onClick={
+                                                                    handleSync
+                                                                }
+                                                            >
+                                                                {i18n(
+                                                                    "Sync Device",
+                                                                )}
+                                                            </Button>
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={
+                                                                    triggerUpload
+                                                                }
+                                                            >
+                                                                {i18n("Upload")}
+                                                            </Button>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            )}
-                                    </>
-                                }
-                                emptyState={
-                                    visibleRecordings.length === 0 &&
-                                    visibleOrgRecordings.length === 0 &&
-                                    meetings.length === 0 &&
-                                    pendingUploads.length === 0 ? (
-                                        <div className="mt-4 lg:hidden">
-                                            <WorkstationEmptyState
-                                                compact
-                                                isSyncing={isAutoSyncing}
-                                                onSync={handleSync}
-                                                onUpload={triggerUpload}
-                                                hasFilingFolder={
-                                                    hasFilingFolder
-                                                }
-                                                onNewFolder={() =>
-                                                    setFirstLevelFolderOpen(
-                                                        true,
-                                                    )
-                                                }
-                                            />
-                                        </div>
-                                    ) : undefined
-                                }
-                            />
+                                                )}
+                                        </>
+                                    }
+                                    emptyState={
+                                        visibleRecordings.length === 0 &&
+                                        visibleOrgRecordings.length === 0 &&
+                                        meetings.length === 0 &&
+                                        pendingUploads.length === 0 ? (
+                                            <div className="mt-4 lg:hidden">
+                                                <WorkstationEmptyState
+                                                    compact
+                                                    isSyncing={isAutoSyncing}
+                                                    onSync={handleSync}
+                                                    onUpload={triggerUpload}
+                                                    hasFilingFolder={
+                                                        hasFilingFolder
+                                                    }
+                                                    onNewFolder={() =>
+                                                        setFirstLevelFolderOpen(
+                                                            true,
+                                                        )
+                                                    }
+                                                />
+                                            </div>
+                                        ) : undefined
+                                    }
+                                />
+                            )}
                         </div>
-                        {tasksFolderId &&
-                        selectedFolder?.id === tasksFolderId ? (
+                        {selectedFolder?.access ===
+                        false ? null : tasksFolderId &&
+                          selectedFolder?.id === tasksFolderId ? (
                             <FolderTasksPanel
                                 key={tasksFolderId}
                                 folder={selectedFolder}

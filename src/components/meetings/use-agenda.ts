@@ -3,6 +3,8 @@
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useFolderRefusal } from "@/hooks/use-folder-refusal";
+import { useShareRefusal } from "@/hooks/use-share-refusal";
 import { subscribeEvents } from "@/lib/events/client";
 import { hasColleagueAgendaChange } from "./agenda-changes";
 import { meetingRequest, meetingUrl, takePrewarmedAgenda } from "./api";
@@ -18,6 +20,8 @@ export function useAgenda(
     }: { active?: boolean; pollEnabled?: boolean; userId?: string } = {},
 ) {
     const i18n = useExtracted();
+    const folderRefusal = useFolderRefusal();
+    const shareRefusal = useShareRefusal();
     const [detail, setDetail] = useState<MeetingDetail | null>(initial ?? null);
     const [error, setError] = useState<string | null>(null);
     const [pending, setPending] = useState(0);
@@ -187,6 +191,7 @@ export function useAgenda(
             setDetail((value) => (value ? optimistic(value) : value));
             const operation = queue.current.then(async () => {
                 let saved = false;
+                let staleSuggestion = false;
                 try {
                     const payload =
                         typeof body === "function" && base.current
@@ -206,13 +211,39 @@ export function useAgenda(
                             err instanceof Error &&
                             "status" in err &&
                             err.status === 409;
-                        setConflict(conflicted);
+                        staleSuggestion =
+                            err instanceof Error &&
+                            "code" in err &&
+                            err.code === "STALE_AGENDA_SUGGESTION";
+                        const failure =
+                            err instanceof Error && "code" in err
+                                ? {
+                                      code: String(err.code),
+                                      error: err.message,
+                                      details:
+                                          "details" in err
+                                              ? (err.details as Record<
+                                                    string,
+                                                    unknown
+                                                >)
+                                              : undefined,
+                                  }
+                                : null;
+                        const refusal = failure
+                            ? (folderRefusal(failure) ?? shareRefusal(failure))
+                            : null;
+                        setConflict(conflicted && !staleSuggestion && !refusal);
                         toast.error(
-                            conflicted
-                                ? i18n(
-                                      "Someone else changed this agenda. Your input is kept. Review their changes and try again.",
-                                  )
-                                : i18n("Could not save the agenda"),
+                            refusal ??
+                                (staleSuggestion
+                                    ? i18n(
+                                          "This suggestion is no longer available. Suggestions have been refreshed.",
+                                      )
+                                    : conflicted
+                                      ? i18n(
+                                            "Someone else changed this agenda. Your input is kept. Review their changes and try again.",
+                                        )
+                                      : i18n("Could not save the agenda")),
                         );
                     }
                 }
@@ -222,7 +253,7 @@ export function useAgenda(
                     >(
                         meetingUrl(
                             id,
-                            base.current
+                            base.current && !staleSuggestion
                                 ? `?since=${encodeURIComponent(base.current.cursor ?? String(base.current.version))}`
                                 : "",
                         ),
@@ -266,7 +297,7 @@ export function useAgenda(
             );
             return operation;
         },
-        [id, i18n],
+        [id, i18n, folderRefusal, shareRefusal],
     );
     return {
         detail,

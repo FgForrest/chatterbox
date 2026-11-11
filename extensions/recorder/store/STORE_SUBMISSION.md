@@ -70,6 +70,17 @@ The privacy policy, store listing, permission explanations, and in-extension con
 - The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
 
+## What changed in 0.9.8
+
+- Includes the 0.9.7 changes below; its ZIP was not uploaded to the Store. Use the 0.9.8 package instead.
+- Supporting servers mark accessible restricted Organization folders with an olive folder-lock icon in the
+  target chips and folder choosers in the popup, agenda panel (or fallback window), recorder window,
+  full-page picker and in-page recording pill, after folder results load.
+  Inaccessible folders are absent from recorder results. If a saved target
+  becomes unavailable, the chooser explains that it must be selected again or left unfiled.
+- Older server responses without the optional restricted marker keep the ordinary folder appearance.
+  No new request parameter, permission or data collection.
+
 ## What changed in 0.9.7
 
 - Agenda points, tasks and their notes show clickable HTTP(S) and www. links with compact labels

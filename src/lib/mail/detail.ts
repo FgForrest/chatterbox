@@ -164,7 +164,7 @@ export async function loadMailDetail(
                   )
                   .where(
                       and(
-                          placementVisibleCondition(viewer),
+                          isOwn ? undefined : placementVisibleCondition(viewer),
                           eq(recordingFolderAssignments.itemId, itemId),
                           eq(recordingFolderAssignments.userId, ownerUserId),
                           // The owner's private folders are theirs alone.

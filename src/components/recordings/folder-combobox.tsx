@@ -148,19 +148,24 @@ function FolderComboboxBody({
             className={className}
             valueLabel={
                 <>
-                    {selected?.folder.receivedFolder ? (
+                    {selected &&
+                    (selected.folder.receivedFolder ||
+                        selected.folder.restricted ||
+                        selected.folder.restricting) ? (
                         <SharedFolderIcon folder={selected.folder} />
                     ) : (
                         variant === "pill" && (
                             <Folder className="size-3 shrink-0" aria-hidden />
                         )
                     )}
-                    {selected?.folder.scope === "org" && (
-                        <Users
-                            className="size-4 shrink-0 text-organization"
-                            aria-hidden
-                        />
-                    )}
+                    {selected?.folder.scope === "org" &&
+                        !selected.folder.restricted &&
+                        !selected.folder.restricting && (
+                            <Users
+                                className="size-4 shrink-0 text-organization"
+                                aria-hidden
+                            />
+                        )}
                     <span
                         className={`min-w-0 flex-1 text-left ${truncate ? "truncate" : "whitespace-normal [overflow-wrap:anywhere]"} ${selected ? "" : "text-muted-foreground"}`}
                     >

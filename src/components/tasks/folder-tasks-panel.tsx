@@ -44,7 +44,11 @@ export function FolderTasksPanel({
     const folders = organization.folders;
     const ordered: RecordingFolder[] = [];
     const visit = (entry: RecordingFolder) => {
-        if (ordered.some((previous) => previous.id === entry.id)) return;
+        if (
+            entry.access === false ||
+            ordered.some((previous) => previous.id === entry.id)
+        )
+            return;
         ordered.push(entry);
         for (const child of folders
             .filter((child) => child.parentId === entry.id)

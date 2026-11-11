@@ -79,7 +79,7 @@
                         String(option.id === (remembered?.id ?? null)),
                     );
                     node.setAttribute("data-active", String(index === active));
-                    if (option.sharedWithPeople) {
+                    if (option.restricted === true || option.sharedWithPeople) {
                         const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
                         icon.setAttribute("viewBox", "0 0 24 24");
                         icon.setAttribute("width", "16");
@@ -88,9 +88,19 @@
                         icon.setAttribute("stroke", "currentColor");
                         icon.setAttribute("stroke-width", "2");
                         icon.setAttribute("aria-hidden", "true");
-                        icon.style.cssText = "color:#9c5e8f;vertical-align:middle;margin-right:6px";
+                        icon.style.cssText = `color:${option.restricted === true ? "var(--restricted, #647119)" : "#9c5e8f"};vertical-align:middle;margin-right:6px`;
                         const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-                        path.setAttribute("d", "M2 9V5a1 1 0 0 1 1-1h5l2 2h11a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-1 M2 13h10 M9 10l3 3-3 3");
+                        path.setAttribute("d", option.restricted === true
+                            ? "M10 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v2.5 M20 17v-2a2 2 0 1 0-4 0v2"
+                            : "M2 9V5a1 1 0 0 1 1-1h5l2 2h11a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-1 M2 13h10 M9 10l3 3-3 3");
+                        if (option.restricted === true) {
+                            icon.setAttribute("class", "lucide lucide-folder-lock");
+                            icon.setAttribute("stroke-linecap", "round");
+                            icon.setAttribute("stroke-linejoin", "round");
+                            const lock = document.createElementNS(icon.namespaceURI, "rect");
+                            for (const [key, value] of Object.entries({ width: "8", height: "5", x: "14", y: "17", rx: "1" })) lock.setAttribute(key, value);
+                            icon.append(lock);
+                        }
                         icon.append(path);
                         node.append(icon, document.createTextNode(option.label));
                     } else {

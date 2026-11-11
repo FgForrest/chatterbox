@@ -162,6 +162,7 @@ export function folderActivity(
         const date = dates.get(assignment.recordingId);
         if (date === undefined) continue;
         let folder = byId.get(assignment.folderId);
+        if (folder?.access === false) continue;
         const seen = new Set<string>();
         while (folder && !seen.has(folder.id)) {
             seen.add(folder.id);
@@ -207,7 +208,8 @@ export function folderRowLocations(
     const result = new Map<string, RecordingFolder[]>();
     for (const assignment of assignments) {
         const assigned = byId.get(assignment.folderId);
-        if (!assigned || !subtree.has(assigned.id)) continue;
+        if (!assigned || assigned.access === false || !subtree.has(assigned.id))
+            continue;
         result.set(assignment.recordingId, [
             ...(result.get(assignment.recordingId) ?? []),
             assigned,

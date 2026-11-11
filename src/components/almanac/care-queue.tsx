@@ -28,6 +28,13 @@ export function CareQueue({
     const [section, setSection] = useState<
         "duplicates" | "shares" | CareProblemKind
     >("duplicates");
+    useEffect(() => {
+        if (
+            new URLSearchParams(window.location.search).get("section") ===
+            "shares"
+        )
+            setSection("shares");
+    }, []);
     const [page, setPage] = useState<DuplicatePage>(
         initial ?? { candidates: [], nextCursor: null, limited: false },
     );

@@ -1,6 +1,8 @@
+import { eq, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { meetingFolderVisibility } from "@/db/queries/meeting-folder-visibility";
 import { receivedMeetingFolderNodes } from "@/db/queries/received-meeting-folders";
+import { restrictedFolderVisibleCondition } from "@/db/queries/restricted-folders";
 import { recordingFolders } from "@/db/schema";
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { decryptText } from "@/lib/encryption/fields";
@@ -18,19 +20,29 @@ export async function meetingFolderNavigation(
                 name: recordingFolders.name,
                 userId: recordingFolders.userId,
                 parentId: recordingFolders.parentId,
+                restricted: sql<boolean>`${recordingFolders.restrictedAt} is not null`,
+                access: sql<boolean>`${restrictedFolderVisibleCondition({ userId, isCurator })}`,
             })
             .from(recordingFolders)
-            .where(meetingFolderVisibility(userId, orgUserId, isCurator)),
+            .where(
+                or(
+                    meetingFolderVisibility(userId, orgUserId, isCurator),
+                    orgUserId
+                        ? eq(recordingFolders.userId, orgUserId)
+                        : undefined,
+                ),
+            ),
         receivedMeetingFolderNodes(db, userId),
     ]);
     const aliases = new Map(
         received.map((folder) => [folder.sourceId, folder]),
     );
-    const visible = folders.map((folder) => {
+    const visible = folders.map(({ restricted, access, ...folder }) => {
         const received =
             folder.userId !== userId ? aliases.get(folder.id) : undefined;
         return {
             ...folder,
+            ...(restricted ? { restricted: true as const, access } : {}),
             id: received?.id ?? folder.id,
             name: decryptText(received?.name ?? folder.name),
             parentId: received
