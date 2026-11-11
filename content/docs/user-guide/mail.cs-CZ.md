@@ -45,7 +45,7 @@ Automatické přeposílání zachovává původního odesílatele, proto potřeb
 
 ## Čtení pošty
 
-E-mail ukazuje odesílatele, s označením **Ověřeno**, když ho podepsala doména odesílatele, dále příjemce a datum. Citované a přeposlané zprávy jsou sbalené pod svým autorem. **Zobrazit formátovaně** ukáže e-mail tak, jak byl navržen, aniž by se cokoli načítalo z internetu. Přílohy jdou jen stáhnout.
+E-mail ukazuje odesílatele, s označením **Ověřeno**, když ho podepsala doména odesílatele, dále příjemce a datum. Citované a přeposlané zprávy jsou sbalené pod svým autorem. Šipka vedle názvu **Zpráva** sbalí a rozbalí její text. Ikona formátovaného zobrazení (**Zobrazit formátovaně** / **Zobrazit text**) přepíná mezi prostým textem a e-mailem tak, jak byl navržen, aniž by se cokoli načítalo z internetu. Ikony stažení a kopírování poskytují každému čtenáři zprávu jako Markdown (předmět, odesílatel, příjemci, datum a text včetně citovaných zpráv), i při formátovaném zobrazení. V úzkém zobrazení jsou tyto dvě akce v nabídce **Akce zprávy** (⋯). Samostatná ikona **Stáhnout původní zprávu** stáhne původní soubor `.eml` a je dostupná jen vám, vlastníkovi. Přílohy jdou jen stáhnout.
 
 Vyhledávání v Klepech najde slova i v přeposlaných a citovaných zprávách. Podpisy a doložky o důvěrnosti se neprohledávají.
 

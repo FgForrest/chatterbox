@@ -3,8 +3,9 @@
 import {
     ArrowLeft,
     BadgeCheck,
-    Download,
     FileCode2,
+    FileDown,
+    FileText,
     Loader2,
     Paperclip,
     ShieldAlert,
@@ -14,6 +15,7 @@ import { useExtracted, useLocale } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { KnowledgePanel } from "@/components/dashboard/folder-knowledge-panel";
+import { MarkdownActions } from "@/components/dashboard/markdown-actions";
 import { ItemHeader } from "@/components/items/item-header";
 import { MailLearnCard } from "@/components/mail/mail-learn-card";
 import { MailSummaryCard } from "@/components/mail/mail-summary-card";
@@ -28,11 +30,7 @@ import { RecordingFolderTags } from "@/components/recordings/recording-folder-ta
 import { ReceivedItemBanner } from "@/components/sharing/person-sharing";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-    Tooltip,
-    TooltipContent,
-    TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { ActionTooltip } from "@/components/ui/tooltip";
 import { useDateTimeFormatter } from "@/hooks/use-date-time-formatter";
 import { formatBytes } from "@/lib/format-bytes";
 import type { MailDetail, MailParticipantView } from "@/lib/mail/detail";
@@ -154,6 +152,7 @@ export function MailDetailPane({
     const [failed, setFailed] = useState(false);
     const [formatted, setFormatted] = useState<string | null>(null);
     const [showFormatted, setShowFormatted] = useState(false);
+    const [messageCollapsed, setMessageCollapsed] = useState(false);
     const [title, setTitle] = useState(mail.filename);
     const highlightQuery = itemLinkQuery ?? searchParams.toString();
     const highlight = useMemo(() => {
@@ -168,11 +167,18 @@ export function MailDetailPane({
     }, [mail.filename]);
 
     useEffect(() => {
-        if (!detail || !highlight) return;
+        if (!highlight) return;
+        setKnowledgeItem(null);
+        setMessageCollapsed(false);
+        setShowFormatted(false);
+    }, [highlight]);
+
+    useEffect(() => {
+        if (!detail || !highlight || messageCollapsed || showFormatted) return;
         document
             .getElementById("mail-evidence-highlight")
             ?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, [detail, highlight]);
+    }, [detail, highlight, messageCollapsed, showFormatted]);
 
     useEffect(() => {
         const controller = new AbortController();
@@ -181,6 +187,7 @@ export function MailDetailPane({
         setFailed(false);
         setFormatted(null);
         setShowFormatted(false);
+        setMessageCollapsed(false);
         fetch(
             withRecordingView(
                 `/api/mail/${encodeURIComponent(mail.id)}`,
@@ -312,7 +319,7 @@ export function MailDetailPane({
     return (
         <div
             className={cn(
-                "min-w-0 space-y-6 lg:block lg:self-start",
+                "flex min-w-0 flex-col gap-6 lg:flex lg:self-start",
                 hiddenOnMobile && "hidden",
             )}
         >
@@ -440,7 +447,7 @@ export function MailDetailPane({
                         onFolderCreated={onFolderCreated}
                     />
                 )}
-                <div className="space-y-3 border-y px-4 py-3 sm:px-6">
+                <div className="flex flex-col gap-3 border-y px-4 py-3 sm:px-6">
                     {failed && (
                         <p className="text-sm text-destructive">
                             {i18n("The mail could not be loaded.")}
@@ -523,7 +530,7 @@ export function MailDetailPane({
                     {detail?.unreadable && !detail.rawReapedAt && (
                         <p className="text-sm text-muted-foreground">
                             {i18n(
-                                "This mail's content is not readable here (encrypted or packed). Download the message to open it.",
+                                "This mail's content is not readable here (encrypted or packed). Download the original message to open it.",
                             )}
                         </p>
                     )}
@@ -537,56 +544,90 @@ export function MailDetailPane({
                             frame="inline"
                             tone={widgets?.message.active ? "next" : "quiet"}
                             title={i18n("Message")}
+                            collapsed={messageCollapsed}
+                            onOpenChange={(open) => {
+                                if (!open) return;
+                                setKnowledgeItem(null);
+                                setMessageCollapsed(false);
+                            }}
+                            onCollapse={() =>
+                                setMessageCollapsed((value) => !value)
+                            }
+                            collapseLabel={i18n("Collapse message")}
+                            expandLabel={i18n("Expand message")}
                             headerAction={
                                 <div className="flex items-center gap-1">
                                     {isOwn && detail.hasRaw && (
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon-sm"
-                                                    asChild
+                                        <ActionTooltip
+                                            label={i18n(
+                                                "Download the original message",
+                                            )}
+                                        >
+                                            <Button
+                                                variant="ghost"
+                                                size="icon-sm"
+                                                asChild
+                                            >
+                                                <a
+                                                    href={`/api/mail/${encodeURIComponent(mail.id)}/raw`}
+                                                    download
+                                                    rel="nofollow noreferrer"
+                                                    aria-label={i18n(
+                                                        "Download the original message",
+                                                    )}
                                                 >
-                                                    <a
-                                                        href={`/api/mail/${encodeURIComponent(mail.id)}/raw`}
-                                                        download
-                                                        rel="nofollow noreferrer"
-                                                        aria-label={i18n(
-                                                            "Download the message",
-                                                        )}
-                                                    >
-                                                        <Download className="size-4" />
-                                                    </a>
-                                                </Button>
-                                            </TooltipTrigger>
-                                            <TooltipContent side="bottom">
-                                                {i18n("Download the message")}
-                                            </TooltipContent>
-                                        </Tooltip>
+                                                    <FileDown className="size-4" />
+                                                </a>
+                                            </Button>
+                                        </ActionTooltip>
                                     )}
                                     {!detail.rawReapedAt && (
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className={cn(
-                                                "h-7 gap-1 px-2 text-xs",
-                                                showFormatted && "bg-accent",
-                                            )}
-                                            aria-pressed={showFormatted}
-                                            onClick={() =>
-                                                void toggleFormatted()
+                                        <ActionTooltip
+                                            label={
+                                                showFormatted
+                                                    ? i18n("Show text")
+                                                    : i18n("Show formatted")
                                             }
                                         >
-                                            <FileCode2 className="size-3.5" />
-                                            {showFormatted
-                                                ? i18n("Show text")
-                                                : i18n("Show formatted")}
-                                        </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon-sm"
+                                                className={cn(
+                                                    showFormatted &&
+                                                        "bg-accent",
+                                                )}
+                                                aria-pressed={showFormatted}
+                                                aria-label={
+                                                    showFormatted
+                                                        ? i18n("Show text")
+                                                        : i18n("Show formatted")
+                                                }
+                                                onClick={() =>
+                                                    void toggleFormatted()
+                                                }
+                                            >
+                                                {showFormatted ? (
+                                                    <FileText className="size-4" />
+                                                ) : (
+                                                    <FileCode2 className="size-4" />
+                                                )}
+                                            </Button>
+                                        </ActionTooltip>
                                     )}
+                                    <MarkdownActions
+                                        kind="mail"
+                                        recordingId={mail.id}
+                                        source="mail"
+                                        endpoint={withRecordingView(
+                                            `/api/mail/${encodeURIComponent(mail.id)}/markdown`,
+                                            mail.view,
+                                        )}
+                                        collapseAtNarrowWidth
+                                    />
                                 </div>
                             }
                         >
-                            <div className="space-y-3">
+                            <div className="flex flex-col gap-3">
                                 {showFormatted && formatted ? (
                                     <iframe
                                         title={i18n("Formatted mail")}

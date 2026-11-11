@@ -314,8 +314,10 @@ describe("mail detail layout", () => {
         expect(
             screen.getByRole("heading", { name: "Message" }).closest("header")
                 ?.textContent,
-        ).toContain("Show formatted");
-        expect(container.firstElementChild?.className).toContain("space-y-6");
+        ).not.toContain("Show formatted");
+        expect(container.firstElementChild?.className).toContain(
+            "flex-col gap-6",
+        );
         expect(
             screen
                 .getByRole("button", { name: "Show formatted" })
@@ -323,7 +325,7 @@ describe("mail detail layout", () => {
         ).toBe("false");
         expect(
             screen
-                .getByRole("link", { name: "Download the message" })
+                .getByRole("link", { name: "Download the original message" })
                 .closest("header")?.textContent,
         ).toContain("Message");
         const erase = screen.getByRole("button", {
@@ -556,7 +558,9 @@ describe("mail detail layout", () => {
             expect(screen.queryByRole("button", { name })).toBeNull();
         }
         expect(
-            screen.queryByRole("link", { name: "Download the message" }),
+            screen.queryByRole("link", {
+                name: "Download the original message",
+            }),
         ).toBeNull();
     });
 
