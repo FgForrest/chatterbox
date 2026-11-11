@@ -251,6 +251,7 @@ suite("meeting processing pipeline (PostgreSQL)", () => {
             source: "riffado",
             provider: "test",
             model: "test",
+            summaryWriteMode: "regenerate",
             pipeline: "legacy",
             agenda: {
                 id: "agenda",

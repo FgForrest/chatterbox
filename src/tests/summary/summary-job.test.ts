@@ -10,6 +10,15 @@
 
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
+vi.mock("@/db", () => ({
+    db: { transaction: (queue: (tx: object) => Promise<unknown>) => queue({}) },
+}));
+vi.mock("@/db/queries/trim-state", () => ({
+    lockTrimRecording: vi.fn().mockResolvedValue({ id: "recording" }),
+}));
+vi.mock("@/lib/summary/replacement", () => ({
+    mayAutomaticallyReplaceSummary: vi.fn().mockResolvedValue(true),
+}));
 vi.mock("@/db/queries/async-jobs", () => ({ enqueueJob: vi.fn() }));
 vi.mock("@/db/queries/profile-revision-guard", () => ({
     withProfileRevisionGuard: (

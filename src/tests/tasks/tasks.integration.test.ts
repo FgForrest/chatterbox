@@ -338,6 +338,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         const result = await upsertEnhancement({
             userId: ALICE,
             recordingId,
+            summaryWriteMode: "regenerate",
             kind: recordingId.startsWith("mail-") ? "mail" : "audio",
             transcriptionId: recordingId.startsWith("mail-")
                 ? null
@@ -1133,6 +1134,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         const result = await upsertEnhancement({
             userId: ALICE,
             recordingId: REC,
+            summaryWriteMode: "regenerate",
             transcriptionId: transcriptId,
             summary: "Summary without tasks.",
             keyPoints: [],

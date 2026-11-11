@@ -381,6 +381,7 @@ suite("meeting planning server (PostgreSQL)", () => {
             source: "riffado",
             provider: "test",
             model: "test",
+            summaryWriteMode: "regenerate",
             pipeline: "legacy",
             view,
             agenda: { ...agenda, outcome },

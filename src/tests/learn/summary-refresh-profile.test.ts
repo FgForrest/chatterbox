@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => ({
     select: vi.fn(),
 }));
 
+vi.mock("@/lib/summary/replacement", () => ({
+    mayAutomaticallyReplaceSummary: vi.fn().mockResolvedValue(true),
+}));
 vi.mock("@/db", () => ({ db: { select: mocks.select } }));
 vi.mock("@/lib/env", () => ({
     env: { AUTO_SUMMARY_RATE_LIMIT_PER_HOUR: 20 },
