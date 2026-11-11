@@ -1,11 +1,11 @@
 ---
 title: Remove restricted-folder contributors without unfiling their items and preserve owner exit
 date: 2026-11-11
-updated: 2026-11-11 09:33
-status: proposed
+updated: 2026-11-11 13:17
+status: accepted
 kind: fix
 issues: [381]
-prs: []
+prs: [396]
 areas: [src/lib/folders, src/lib/pipeline, src/lib/mail/detail.ts, src/lib/meetings, src/app/api/recordings, src/components/sharing]
 supersedes: [2026-11-10-restricted-organization-folders]
 superseded-by: []
@@ -61,4 +61,4 @@ Shared self-host users may manage an audience while retaining prior contribution
 
 ## Timeline
 
-- **2026-11-11**: maintainer reverses contributor protection and requires owner exit as part of issue #381 part 3. Implementation remains uncommitted pending review.
+- **2026-11-11**: maintainer reverses contributor protection and requires owner exit as part of issue #381 part 3. Implemented in PR #396.

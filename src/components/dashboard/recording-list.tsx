@@ -289,7 +289,11 @@ export function RecordingList({
         for (const assignment of assignments) {
             if (result.has(assignment.recordingId)) continue;
             const assigned = foldersById.get(assignment.folderId);
-            if (!assigned || (searchView === "org" && assigned.scope !== "org"))
+            if (
+                !assigned ||
+                assigned.access === false ||
+                (searchView === "org" && assigned.scope !== "org")
+            )
                 continue;
             result.set(assignment.recordingId, {
                 folder: assigned,
@@ -678,6 +682,8 @@ export function RecordingList({
                                                                 placement.id,
                                                             );
                                                         return candidate &&
+                                                            candidate.access !==
+                                                                false &&
                                                             candidate.id !==
                                                                 folder?.id
                                                             ? [candidate]

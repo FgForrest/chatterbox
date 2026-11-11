@@ -106,7 +106,10 @@ export function RecordingFolderTags({
     const inScope = (folder: RecordingFolder) =>
         !organizationOnly || folder.scope === "org";
     const assigned = folders.filter(
-        (folder) => assignedIds.has(folder.id) && inScope(folder),
+        (folder) =>
+            assignedIds.has(folder.id) &&
+            inScope(folder) &&
+            (isOwn || folder.access !== false),
     );
     const assignedOrg = assigned.filter((folder) => folder.scope === "org");
     const moveSource =
@@ -149,7 +152,10 @@ export function RecordingFolderTags({
                     onSelect={() => onSelectFolder(folder)}
                     onRemove={
                         isOwn ||
-                        (canWithdraw && folder.scope === "org") ||
+                        (canWithdraw &&
+                            folder.scope === "org" &&
+                            !folder.restricted &&
+                            !folder.restricting) ||
                         ((typeof canUnfilePersonal === "function"
                             ? canUnfilePersonal(folder)
                             : canUnfilePersonal) &&

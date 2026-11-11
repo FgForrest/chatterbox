@@ -114,23 +114,27 @@ export function RecordingRow({
     const remainingFolders = (recording.receivedFolderIds ?? []).flatMap(
         (id) => {
             const folder = folders.find((folder) => folder.id === id);
-            return folder ? [folder.name] : [];
+            return folder && folder.access !== false ? [folder.name] : [];
         },
     );
     const label = useFolderLabel();
     const [pickerOpen, setPickerOpen] = useState(false);
     const actionsRef = useRef<HTMLButtonElement>(null);
+    const accessibleLocations = folderLocations.filter(
+        (folder) => folder.access !== false,
+    );
     const source =
         sourceFolder?.kind === "custom"
-            ? (folderLocations.find(
+            ? (accessibleLocations.find(
                   (folder) => folder.id === sourceFolder?.id,
-              ) ?? folderLocations[0])
+              ) ?? accessibleLocations[0])
             : null;
-    const subfolders = folderLocations.filter(
+    const subfolders = accessibleLocations.filter(
         (folder) => folder.id !== sourceFolder?.id && folder.kind === "custom",
     );
     const showFirstFolder =
         firstFolder &&
+        firstFolder.folder.access !== false &&
         firstFolder.folder.id !== sourceFolder?.id &&
         !subfolders.some((folder) => folder.id === firstFolder.folder.id);
     const sharedBy =

@@ -1,11 +1,11 @@
 ---
 title: Restricted Organization folders withhold placements until normal publication succeeds
 date: 2026-11-10
-updated: 2026-11-11 09:00
+updated: 2026-11-11 13:17
 status: superseded
 kind: feature
 issues: [381]
-prs: []
+prs: [382, 393, 396]
 areas: [src/lib/folders, src/lib/sharing, src/db/queries, src/lib/export, src/lib/meetings, src/lib/mail, src/lib/mcp, src/db/schema.ts]
 supersedes: [2026-10-07-backup-scope, 2026-10-06-export-ownership-ledger, 2026-09-23-shared-organization-scope]
 superseded-by: [2026-11-11-removing-contributors-from-restricted-folders]
