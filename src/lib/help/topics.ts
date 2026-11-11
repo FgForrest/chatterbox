@@ -45,6 +45,7 @@ const SETTINGS_TOPICS: Record<SettingsSection, HelpTarget> = {
 export const HELP_TOPICS = {
     guide: { page: "index" },
     recordings: { page: "recordings" },
+    "folders.restricted": { page: "restricted-folders" },
     "recordings.folders": { page: "recordings", anchor: "folders" },
     transcripts: { page: "transcripts", anchor: "reading-a-transcript" },
     summaries: { page: "summaries-and-tasks", anchor: "summaries" },

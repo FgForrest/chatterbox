@@ -157,6 +157,7 @@
   "foldersLoading": {"message": "Načítání složek…"},
   "noFoldersFound": {"message": "Žádné složky nenalezeny"},
   "folderSearchFailed": {"message": "Složky nelze načíst. Zkuste to znovu."},
+  "folderUnavailable": {"message": "Uložená složka už není dostupná. Vyberte jinou složku nebo položku zařaďte později."},
   "savedFolder": {"message": "Uložená složka"},
   "fileLater": {"message": "Zařadit později"},
   "micWarning": {"message": "Mikrofon není povolen. Povolte ho, aby nahrávky obsahovaly i váš hlas."},

@@ -23,6 +23,7 @@ export async function meetingRequest<T>(
             status: response.status,
             code: error.code,
             reason: error.details?.reason,
+            details: error.details,
         });
     }
     return response.status === 204

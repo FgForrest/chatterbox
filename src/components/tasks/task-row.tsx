@@ -33,6 +33,11 @@ import {
 } from "@/components/tasks/assignee-picker";
 import { MergeTaskPicker } from "@/components/tasks/merge-task-picker";
 import {
+    type RestrictedTaskAssignment,
+    RestrictedTaskWarning,
+    restrictedTaskAssignment,
+} from "@/components/tasks/restricted-task-warning";
+import {
     announceTasksChanged,
     setTaskFollow,
     type TaskMergeOptions,
@@ -131,6 +136,18 @@ export function TaskRow({
             : suppliedTask;
     const i18n = useExtracted();
     const format = useFormatter();
+    const [assignmentWarning, setAssignmentWarning] =
+        useState<RestrictedTaskAssignment | null>(null);
+    const assignmentRevision = useRef(0);
+    const saveAssignee = (
+        person: { personId: string; name: string } | null,
+    ) => {
+        setAssignmentWarning(null);
+        onChange(
+            { assigneePersonId: person?.personId ?? null },
+            { assignee: person, assigneeHint: null, assigneeCheck: false },
+        );
+    };
     const [noteOpen, setNoteOpen] = useState(false);
     // The permission, not the pending-adjusted copy: ticking done opens the editor while that save is in flight.
     const canNote = suppliedTask.canClose && !readOnly && !notesReadOnly;
@@ -404,6 +421,16 @@ export function TaskRow({
                         />
                     </div>
                 )}
+                {assignmentWarning && (
+                    <RestrictedTaskWarning
+                        assignment={assignmentWarning}
+                        onAssign={() => saveAssignee(assignmentWarning.person)}
+                        onCancel={() => {
+                            ++assignmentRevision.current;
+                            setAssignmentWarning(null);
+                        }}
+                    />
+                )}
                 {extraNotes}
                 <div className="task-row-pills flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     {own ? (
@@ -420,19 +447,38 @@ export function TaskRow({
                                 speakers={speakers}
                                 organizationOnly={organizationOnly}
                                 disabled={!editable}
-                                onChange={(person) =>
-                                    onChange(
-                                        {
-                                            assigneePersonId:
-                                                person?.personId ?? null,
-                                        },
-                                        {
-                                            assignee: person,
-                                            assigneeHint: null,
-                                            assigneeCheck: false,
-                                        },
+                                onChange={(person) => {
+                                    setAssignmentWarning(null);
+                                    const revision =
+                                        ++assignmentRevision.current;
+                                    const itemId =
+                                        task.recordingId ?? currentItemId;
+                                    if (!person || !itemId) {
+                                        saveAssignee(person);
+                                        return;
+                                    }
+                                    void restrictedTaskAssignment(
+                                        itemId,
+                                        person,
                                     )
-                                }
+                                        .then((warning) => {
+                                            if (
+                                                revision !==
+                                                assignmentRevision.current
+                                            )
+                                                return;
+                                            if (warning)
+                                                setAssignmentWarning(warning);
+                                            else saveAssignee(person);
+                                        })
+                                        .catch(() => {
+                                            if (
+                                                revision ===
+                                                assignmentRevision.current
+                                            )
+                                                saveAssignee(person);
+                                        });
+                                }}
                             />
                         )
                     )}

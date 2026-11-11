@@ -2,7 +2,6 @@
 
 import {
     Download,
-    Folder,
     FolderInput,
     FolderOutput,
     FolderPlus,
@@ -18,6 +17,7 @@ import {
 import { useExtracted, useLocale } from "next-intl";
 import { type ReactNode, useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm-dialog";
+import { FolderRowLabels } from "@/components/dashboard/folder-row-labels";
 import { MailDeleteDialog } from "@/components/recordings/erase-recording-menu";
 import { FolderPicker } from "@/components/recordings/folder-picker";
 import {
@@ -26,6 +26,7 @@ import {
     usePersonSharing,
     usePersonSharingRefresh,
 } from "@/components/sharing/person-sharing";
+import { SharedFolderIcon } from "@/components/sharing/shared-folder-icon";
 import { Button } from "@/components/ui/button";
 import {
     DropdownMenu,
@@ -48,10 +49,6 @@ import { cn } from "@/lib/utils";
 import type { DateTimeFormat } from "@/types/common";
 import type { RecordingFolder } from "@/types/folder";
 import type { Recording } from "@/types/recording";
-
-function folderTone(folder: RecordingFolder): string {
-    return folder.scope === "org" ? "text-organization" : "text-primary";
-}
 
 export function RecordingRow({
     recording,
@@ -117,23 +114,27 @@ export function RecordingRow({
     const remainingFolders = (recording.receivedFolderIds ?? []).flatMap(
         (id) => {
             const folder = folders.find((folder) => folder.id === id);
-            return folder ? [folder.name] : [];
+            return folder && folder.access !== false ? [folder.name] : [];
         },
     );
     const label = useFolderLabel();
     const [pickerOpen, setPickerOpen] = useState(false);
     const actionsRef = useRef<HTMLButtonElement>(null);
+    const accessibleLocations = folderLocations.filter(
+        (folder) => folder.access !== false,
+    );
     const source =
         sourceFolder?.kind === "custom"
-            ? (folderLocations.find(
+            ? (accessibleLocations.find(
                   (folder) => folder.id === sourceFolder?.id,
-              ) ?? folderLocations[0])
+              ) ?? accessibleLocations[0])
             : null;
-    const subfolders = folderLocations.filter(
+    const subfolders = accessibleLocations.filter(
         (folder) => folder.id !== sourceFolder?.id && folder.kind === "custom",
     );
     const showFirstFolder =
         firstFolder &&
+        firstFolder.folder.access !== false &&
         firstFolder.folder.id !== sourceFolder?.id &&
         !subfolders.some((folder) => folder.id === firstFolder.folder.id);
     const sharedBy =
@@ -156,12 +157,9 @@ export function RecordingRow({
                 className="flex min-w-0 flex-1 items-center gap-1"
                 title={firstFolder.path}
             >
-                <Folder
-                    className={cn(
-                        "size-3 shrink-0",
-                        folderTone(firstFolder.folder),
-                    )}
-                    aria-hidden="true"
+                <SharedFolderIcon
+                    folder={firstFolder.folder}
+                    className="size-3"
                 />
                 <span className="truncate">{label(firstFolder.folder)}</span>
             </span>
@@ -262,17 +260,7 @@ export function RecordingRow({
                     {(subfolders.length > 0 || sharedBy) && (
                         <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
                             {subfolders.length > 0 && (
-                                <>
-                                    <Folder
-                                        className={cn(
-                                            "size-3 shrink-0",
-                                            folderTone(subfolders[0]),
-                                        )}
-                                    />
-                                    <span className="truncate">
-                                        {subfolders.map(label).join(", ")}
-                                    </span>
-                                </>
+                                <FolderRowLabels folders={subfolders} />
                             )}
                             {subfolders.length > 0 && sharedBy && (
                                 <span>·</span>

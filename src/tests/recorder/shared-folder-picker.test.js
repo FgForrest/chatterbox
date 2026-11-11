@@ -23,6 +23,19 @@ it("renders additive shared-folder marks while keeping options from released ser
             path: "Private / Acme calls",
             scope: "personal",
         },
+        {
+            id: "restricted",
+            name: "Acme pilot",
+            path: "Organization / Acme pilot",
+            scope: "org",
+            restricted: true,
+        },
+        {
+            id: "organization",
+            name: "Acme team",
+            path: "Organization / Acme team",
+            scope: "org",
+        },
     ];
     const container = document.createElement("div");
     document.body.append(container);
@@ -51,6 +64,17 @@ it("renders additive shared-folder marks while keeping options from released ser
     );
     expect(shared.querySelector("svg")).toBeTruthy();
     expect(own.querySelector("svg")).toBeNull();
+    const restricted = options.find(
+        (option) => option.textContent === "Organization / Acme pilot",
+    );
+    const organization = options.find(
+        (option) => option.textContent === "Organization / Acme team",
+    );
+    const lock = restricted.querySelector(".lucide-folder-lock");
+    expect(lock).toBeTruthy();
+    expect(lock.style.color).toBe("var(--restricted, #647119)");
+    expect(lock.getAttribute("aria-hidden")).toBe("true");
+    expect(organization.querySelector("svg")).toBeNull();
     shared.click();
     await vi.advanceTimersByTimeAsync(0);
     expect(save).toHaveBeenCalledWith({

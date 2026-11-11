@@ -1,4 +1,4 @@
-import { Folder, FolderInput, FolderOutput } from "lucide-react";
+import { Folder, FolderInput, FolderLock, FolderOutput } from "lucide-react";
 import type { LabelledFolder } from "@/lib/folders/labels";
 import { cn } from "@/lib/utils";
 
@@ -10,21 +10,26 @@ export function SharedFolderIcon({
     folder: LabelledFolder;
     className?: string;
 }) {
-    const Icon = folder.receivedFolder
-        ? FolderInput
-        : folder.sharedWithPeople
-          ? FolderOutput
-          : Folder;
+    const Icon =
+        folder.restricted || folder.restricting
+            ? FolderLock
+            : folder.receivedFolder
+              ? FolderInput
+              : folder.sharedWithPeople
+                ? FolderOutput
+                : Folder;
     return (
         <Icon
             aria-hidden
             className={cn(
                 "size-4 shrink-0",
-                folder.receivedFolder || folder.sharedWithPeople
-                    ? "text-person-share"
-                    : folder.scope === "org"
-                      ? "text-organization"
-                      : "text-primary",
+                folder.restricted || folder.restricting
+                    ? "text-restricted"
+                    : folder.receivedFolder || folder.sharedWithPeople
+                      ? "text-person-share"
+                      : folder.scope === "org"
+                        ? "text-organization"
+                        : "text-primary",
                 className,
             )}
         />

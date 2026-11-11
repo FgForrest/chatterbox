@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
+import { useConfirmOrganizationFiling } from "@/hooks/use-confirm-organization-filing";
 import type { RecordingFolder } from "@/types/folder";
 import type { MeetingDetail } from "./types";
 import type { AgendaController } from "./use-agenda";
@@ -30,7 +31,7 @@ export function AgendaFolderTags({
     const sourceId = (id: string) =>
         folders.find((folder) => folder.id === id)?.receivedFolder
             ?.sourceFolderId ?? id;
-    const available = [
+    const available: RecordingFolder[] = [
         ...folders,
         ...detail.folders
             .filter(
@@ -49,6 +50,13 @@ export function AgendaFolderTags({
                 version: 0,
             })),
     ];
+    const confirmFiling = useConfirmOrganizationFiling(
+        available,
+        detail.folders.map((folder) => ({
+            recordingId: itemId,
+            folderId: navigationId(folder.id),
+        })),
+    );
     const path = `/api/recordings/${encodeURIComponent(itemId)}/folders`;
     const change = async (
         method: string,
@@ -110,12 +118,14 @@ export function AgendaFolderTags({
                         `/dashboard?folder=${encodeURIComponent(folder.id)}`,
                     )
                 }
-                onAdd={async (_, folderId) =>
-                    change("POST", { folderId }, (value) => ({
+                onAdd={async (_, folderId) => {
+                    const confirmation = confirmFiling(itemId, folderId);
+                    if (confirmation) await confirmation;
+                    return change("POST", { folderId }, (value) => ({
                         ...value,
                         folders: addFolder(value, folderId),
-                    }))
-                }
+                    }));
+                }}
                 onRemove={async (_, folderId, withdraw) =>
                     change("DELETE", { folderId, withdraw }, (value) => ({
                         ...value,
@@ -126,10 +136,33 @@ export function AgendaFolderTags({
                 }
                 onMove={
                     !disabled
-                        ? async (_, fromFolderId, toFolderId) =>
-                              change(
-                                  "PATCH",
-                                  { fromFolderId, toFolderId, withdraw: true },
+                        ? async (_, fromFolderId, toFolderId) => {
+                              const confirmation = confirmFiling(
+                                  itemId,
+                                  toFolderId,
+                              );
+                              if (confirmation) await confirmation;
+                              const source = available.find(
+                                  (folder) => folder.id === fromFolderId,
+                              );
+                              const destination = available.find(
+                                  (folder) => folder.id === toFolderId,
+                              );
+                              const keepSource = Boolean(
+                                  (source?.restricted || source?.restricting) &&
+                                      destination?.scope === "org" &&
+                                      !destination.restricted &&
+                                      !destination.restricting,
+                              );
+                              return change(
+                                  keepSource ? "POST" : "PATCH",
+                                  keepSource
+                                      ? { folderId: toFolderId }
+                                      : {
+                                            fromFolderId,
+                                            toFolderId,
+                                            withdraw: true,
+                                        },
                                   (value) => ({
                                       ...value,
                                       folders: addFolder(
@@ -137,14 +170,18 @@ export function AgendaFolderTags({
                                               ...value,
                                               folders: value.folders.filter(
                                                   (folder) =>
+                                                      keepSource ||
                                                       folder.id !==
-                                                      sourceId(fromFolderId),
+                                                          sourceId(
+                                                              fromFolderId,
+                                                          ),
                                               ),
                                           },
                                           toFolderId,
                                       ),
                                   }),
-                              )
+                              );
+                          }
                         : undefined
                 }
             />

@@ -168,7 +168,7 @@ describe.skipIf(!url)("#253 own tasks in private folders", () => {
             "own_task_folders",
         );
         ref.current = database.db as unknown as Record<PropertyKey, unknown>;
-    }, 120_000);
+    });
     afterAll(async () => {
         ref.current = null;
         await database?.dispose();

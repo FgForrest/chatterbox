@@ -7,12 +7,14 @@ import { ItemFolderChipBody } from "@/components/items/item-folder-chip-body";
 export function ItemFolderChip({
     name,
     organization,
+    restricted,
     onSelect,
     onRemove,
     disabled = false,
 }: {
     name: string;
     organization: boolean;
+    restricted?: boolean;
     onSelect: () => void;
     onRemove?: () => void;
     disabled?: boolean;
@@ -22,6 +24,7 @@ export function ItemFolderChip({
         <ItemFolderChipBody
             name={name}
             organization={organization}
+            restricted={restricted}
             onSelect={onSelect}
             onRemove={onRemove}
             disabled={disabled}

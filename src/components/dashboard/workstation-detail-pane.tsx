@@ -338,9 +338,12 @@ export function WorkstationDetailPane({
                                             kind="audio"
                                             folders={folders.filter(
                                                 (folder) =>
-                                                    folder.scope ===
+                                                    (folder.scope ===
                                                         "personal" &&
-                                                    !folder.receivedFolder,
+                                                        !folder.receivedFolder) ||
+                                                    (folder.scope === "org" &&
+                                                        folder.access !==
+                                                            false),
                                             )}
                                             assignments={folderAssignments}
                                             isOwn={false}

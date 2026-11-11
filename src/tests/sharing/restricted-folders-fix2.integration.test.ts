@@ -47,7 +47,6 @@ import {
     encryptJsonField,
     encryptText,
 } from "@/lib/encryption/fields";
-import { AppError } from "@/lib/errors";
 import type { ArchiveScope } from "@/lib/export/archive-scope";
 import { buildAndUploadExportArchive } from "@/lib/export/build-archive";
 import { archivedMeetingSchema } from "@/lib/export/meetings";
@@ -94,6 +93,7 @@ import { executeIntendedSharesWithOutcome } from "@/lib/pipeline/share-intent";
 import { resolveChannelDefaultProfile } from "@/lib/profiles/resolve-for-placement";
 import { ensureProfiles } from "@/lib/profiles/seed";
 import type { ProfileRecord } from "@/lib/profiles/store";
+import { resolveRecordingAccess } from "@/lib/sharing/access";
 import { isRecordingShared } from "@/lib/sharing/shared";
 import type { StorageProvider } from "@/lib/storage/types";
 import { saveUploadedAudio } from "@/lib/uploads/save-uploaded-audio";
@@ -694,9 +694,7 @@ suite("restricted folders review 2 (PostgreSQL)", () => {
             await expect.poll(treeWaiters).toBe(1);
             resume.release();
             await arriving;
-            if (transition === "remove audience")
-                await expect(changing).rejects.toBeInstanceOf(AppError);
-            else await changing;
+            await changing;
         } finally {
             resume.release();
             spy.mockRestore();
@@ -707,7 +705,26 @@ suite("restricted folders review 2 (PostgreSQL)", () => {
                 .from(recordingFolderAssignments)
                 .where(eq(recordingFolderAssignments.itemId, "state-arrival")),
         ).toHaveLength(transition === "restrict" ? 0 : 1);
-    });
+        if (transition === "remove audience") {
+            expect(
+                await db
+                    .select()
+                    .from(restrictedFolderMembers)
+                    .where(
+                        and(
+                            eq(restrictedFolderMembers.folderId, folder.id),
+                            eq(restrictedFolderMembers.userId, "member"),
+                        ),
+                    ),
+            ).toEqual([]);
+            expect(
+                await resolveRecordingAccess("member", "state-arrival"),
+            ).toMatchObject({ role: "owner" });
+            expect(
+                await resolveRecordingAccess("owner", "state-arrival"),
+            ).toMatchObject({ role: "receiver" });
+        }
+    }, 30000);
     it.each([
         "unfiled",
         "private",

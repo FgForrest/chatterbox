@@ -78,8 +78,12 @@ export function recordingIdsVisibleInFolder(
     folder: RecordingFolder,
     privateRecordingIds: Iterable<string>,
 ): Set<string> {
+    if (folder.access === false) return new Set();
     if (folder.kind === "private") return new Set(privateRecordingIds);
-    const subtree = descendantFolderIds(folders, folder.id);
+    const subtree = descendantFolderIds(
+        folders.filter((entry) => entry.access !== false),
+        folder.id,
+    );
     return new Set(
         assignments.flatMap((assignment) =>
             subtree.has(assignment.folderId) ? [assignment.recordingId] : [],
@@ -99,7 +103,11 @@ export function effectiveRecordingCounts(
     const countByFolder = new Map(folders.map((folder) => [folder.id, 0]));
     const assignmentsByRecording = new Map<string, string[]>();
     for (const assignment of assignments) {
-        if (!recordingIds.has(assignment.recordingId)) continue;
+        if (
+            !recordingIds.has(assignment.recordingId) ||
+            byId.get(assignment.folderId)?.access === false
+        )
+            continue;
         const placed = assignmentsByRecording.get(assignment.recordingId) ?? [];
         placed.push(assignment.folderId);
         assignmentsByRecording.set(assignment.recordingId, placed);
@@ -211,7 +219,12 @@ export function sharedRecordingIds(
 ): Set<string> {
     const orgFolderIds = new Set(
         organization.folders
-            .filter((folder) => folder.scope === "org")
+            .filter(
+                (folder) =>
+                    folder.scope === "org" &&
+                    folder.access !== false &&
+                    !folder.restricted,
+            )
             .map((folder) => folder.id),
     );
     return new Set(

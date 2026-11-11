@@ -7,6 +7,11 @@ import { toast } from "sonner";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import { FolderCombobox } from "@/components/recordings/folder-combobox";
 import type { FolderSearchEntry } from "@/components/recordings/folder-search-list";
+import {
+    type AudiencePerson,
+    RestrictedCreationFields,
+} from "@/components/sharing/restricted-audience-picker";
+import { useRestrictedFolders } from "@/components/sharing/restricted-folder-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -16,7 +21,10 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { getApiErrorMessage } from "@/lib/api-errors";
+import { useConfirmOrganizationFiling } from "@/hooks/use-confirm-organization-filing";
+import { useFolderRefusal } from "@/hooks/use-folder-refusal";
+import { useShareRefusal } from "@/hooks/use-share-refusal";
+import { parseApiError } from "@/lib/api-errors";
 import type {
     CategorizationPanelPresentation,
     ProcessingFolderSummary,
@@ -51,6 +59,7 @@ interface CategorizePanelProps {
     profileDetails?: Partial<Record<string, ProfileAutomationDetails>>;
     onFolderCreated?: (folder: CreatedFolder) => void;
     onCategorized?: (folderIds: string[]) => void;
+    onStale?: () => void;
     onOptimisticCategorize?: (submission: CategorizeSubmission) => () => void;
     onTranscribe?: () => void;
 }
@@ -133,11 +142,29 @@ export function CategorizePanel({
     profileDetails,
     onFolderCreated,
     onCategorized,
+    onStale,
     onOptimisticCategorize,
     onTranscribe,
 }: CategorizePanelProps) {
     const i18n = useExtracted();
     const locale = useLocale();
+    const { writable } = useRestrictedFolders();
+    const folderRefusal = useFolderRefusal();
+    const shareRefusal = useShareRefusal();
+    const [restricted, setRestricted] = useState(false);
+    const [audience, setAudience] = useState<AudiencePerson[]>([]);
+    const confirmFiling = useConfirmOrganizationFiling(
+        data.folders.map((folder) => ({
+            ...folder,
+            kind: "custom",
+            sortOrder: 0,
+            version: 0,
+        })),
+        data.selectedFolderIds.map((folderId) => ({
+            recordingId: data.itemId,
+            folderId,
+        })),
+    );
     const profileTrigger = useRef<HTMLButtonElement>(null);
     const [folders, setFolders] = useState(data.folders);
     const previousServerFolders = useRef(data.folders);
@@ -311,14 +338,27 @@ export function CategorizePanel({
             const response = await fetch("/api/folders", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ parentId: newFolderRootId, name }),
+                body: JSON.stringify({
+                    parentId: newFolderRootId,
+                    name,
+                    ...(restricted &&
+                    writable &&
+                    roots.find((root) => root.id === newFolderRootId)?.scope ===
+                        "org"
+                        ? {
+                              restricted: true,
+                              audienceUserIds: audience.map(
+                                  (person) => person.id,
+                              ),
+                          }
+                        : {}),
+                }),
             });
             if (!response.ok) {
+                const error = await parseApiError(response);
                 toast.error(
-                    await getApiErrorMessage(
-                        response,
+                    folderRefusal(error) ??
                         i18n("The folder could not be created."),
-                    ),
                 );
                 return;
             }
@@ -334,6 +374,13 @@ export function CategorizePanel({
                 name: folder.name,
                 path: root ? `${root.path} › ${folder.name}` : folder.name,
                 scope: folder.scope === "org" ? "org" : "personal",
+                ...(folder.restricted
+                    ? {
+                          restricted: true as const,
+                          access: true,
+                          restrictedRole: "manager" as const,
+                      }
+                    : {}),
             };
             setFolders((current) => [...current, presented]);
             await selectFolder(folder.id);
@@ -357,8 +404,35 @@ export function CategorizePanel({
             submitting
         )
             return;
-        const folderIds =
+        let folderIds =
             mode === "profile" ? data.selectedFolderIds : [folderId];
+        if (mode === "folder") {
+            try {
+                const confirmation = confirmFiling(data.itemId, folderId);
+                if (confirmation) await confirmation;
+                const target = folders.find((folder) => folder.id === folderId);
+                if (
+                    target?.scope === "org" &&
+                    !target.restricted &&
+                    !target.restricting
+                )
+                    folderIds = [
+                        ...new Set([
+                            ...folderIds,
+                            ...data.selectedFolderIds.filter((id) =>
+                                folders.some(
+                                    (folder) =>
+                                        folder.id === id &&
+                                        (folder.restricted ||
+                                            folder.restricting),
+                                ),
+                            ),
+                        ]),
+                    ];
+            } catch {
+                return;
+            }
+        }
         const submission: CategorizeSubmission = { folderIds };
         if (
             profileChoice === MANUAL_ONLY &&
@@ -385,11 +459,13 @@ export function CategorizePanel({
             );
             if (!response.ok) {
                 rollback?.();
+                if (response.status === 403 || response.status === 409)
+                    onStale?.();
+                const error = await parseApiError(response);
                 toast.error(
-                    await getApiErrorMessage(
-                        response,
+                    folderRefusal(error) ??
+                        shareRefusal(error) ??
                         i18n("The item could not be filed."),
-                    ),
                 );
                 return;
             }
@@ -437,7 +513,11 @@ export function CategorizePanel({
         );
     }
     let folderHint: string;
-    if (selectedFolder?.scope !== "org") {
+    if (selectedFolder?.restricted || selectedFolder?.restricting) {
+        folderHint = i18n(
+            "The Organization Almanac does not learn from this item while its folder is restricted. Speaker names are the owner's.",
+        );
+    } else if (selectedFolder?.scope !== "org") {
         folderHint = i18n("Learn will use this folder as context.");
     } else if (profileChoice === MANUAL_ONLY) {
         folderHint = i18n("The item is shared when you say so.");
@@ -481,7 +561,7 @@ export function CategorizePanel({
                             {i18n("Folder")}
                         </legend>
                         {newFolderOpen ? (
-                            <div className="space-y-2">
+                            <div className="flex flex-col gap-2">
                                 <Input
                                     aria-label={i18n("Folder name")}
                                     value={newFolderName}
@@ -514,6 +594,17 @@ export function CategorizePanel({
                                             ))}
                                         </SelectContent>
                                     </Select>
+                                )}
+                                {roots.find(
+                                    (root) => root.id === newFolderRootId,
+                                )?.scope === "org" && (
+                                    <RestrictedCreationFields
+                                        restricted={restricted}
+                                        onRestrictedChange={setRestricted}
+                                        audience={audience}
+                                        onAudienceChange={setAudience}
+                                        disabled={creating}
+                                    />
                                 )}
                                 <div className="flex justify-end gap-2">
                                     <Button

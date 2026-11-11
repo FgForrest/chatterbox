@@ -17,6 +17,7 @@ import {
     ReceivedFolderDialog,
     ReceivedFolderMenu,
 } from "@/components/sharing/folder-sharing";
+import { RestrictedFolderControls } from "@/components/sharing/restricted-folder-controls";
 import { SharedFolderIcon } from "@/components/sharing/shared-folder-icon";
 import { Button } from "@/components/ui/button";
 import {
@@ -142,7 +143,11 @@ export function LibraryLocationHeader({
             onDragOver={(event) => {
                 const types = Array.from(event.dataTransfer.types);
                 if (types.includes(RECORDING_DRAG_TYPE)) {
-                    if (item.kind === "private" || item.receivedFolder) {
+                    if (
+                        item.kind === "private" ||
+                        item.receivedFolder ||
+                        item.access === false
+                    ) {
                         event.dataTransfer.dropEffect = "none";
                         return;
                     }
@@ -153,7 +158,12 @@ export function LibraryLocationHeader({
                 }
             }}
             onDrop={(event) => {
-                if (item.kind === "private" || item.receivedFolder) return;
+                if (
+                    item.kind === "private" ||
+                    item.receivedFolder ||
+                    item.access === false
+                )
+                    return;
                 const id = event.dataTransfer.getData(RECORDING_DRAG_TYPE);
                 if (!id) return;
                 const recording =
@@ -191,14 +201,22 @@ export function LibraryLocationHeader({
                 ) : (
                     <SharedFolderIcon folder={item} />
                 )}
-                <span className="truncate">{label(item)}</span>
-                {folder && (
+                <span
+                    className={
+                        item.access === false
+                            ? "truncate text-muted-foreground"
+                            : "truncate"
+                    }
+                >
+                    {label(item)}
+                </span>
+                {folder && item.access !== false && (
                     <span className="ml-auto text-xs tabular-nums text-muted-foreground">
                         {data.counts.get(item.id) ?? 0}
                     </span>
                 )}
             </span>
-            {!folder && (
+            {!folder && item.access !== false && (
                 <span className="mt-1 block text-[11px] text-muted-foreground">
                     {i18n(
                         "{items, plural, one {# item} other {# items}}, {folders, plural, one {# folder} other {# folders}}",
@@ -506,6 +524,13 @@ export function LibraryLocationHeader({
                                     </Button>
                                 </ActionTooltip>
                             )}
+                            {folder && (
+                                <RestrictedFolderControls
+                                    folder={folder}
+                                    folders={folders}
+                                    canCurate={canCurate || isOrgAccount}
+                                />
+                            )}
                             <span className="ml-auto" />
                             {folder?.receivedFolder && (
                                 <>
@@ -624,9 +649,11 @@ export function LibraryLocationHeader({
                                         <span className="truncate">
                                             {label(item)}
                                         </span>
-                                        <span className="text-muted-foreground">
-                                            {data.counts.get(item.id) ?? 0}
-                                        </span>
+                                        {item.access !== false && (
+                                            <span className="text-muted-foreground">
+                                                {data.counts.get(item.id) ?? 0}
+                                            </span>
+                                        )}
                                     </Button>
                                 ))}
                             </div>

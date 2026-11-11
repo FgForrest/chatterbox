@@ -3,8 +3,10 @@ import { SessionWatcher } from "@/components/auth/session-watcher";
 import { Footer } from "@/components/footer";
 import { HelpProvider } from "@/components/help/help-provider";
 import { RebrandBanner } from "@/components/rebrand-banner";
+import { RestrictedFolderProvider } from "@/components/sharing/restricted-folder-context";
 import { getSession } from "@/lib/auth-server";
 import { env } from "@/lib/env";
+import { isOrgScopeEnabled } from "@/lib/org/config";
 import { appChromeConfig } from "@/lib/settings/app-chrome";
 
 export default async function AppLayout({
@@ -32,7 +34,14 @@ export default async function AppLayout({
                     self-host operators (who already know via GitHub) from
                     seeing chrome that doesn't apply to them. */}
                     {env.IS_HOSTED ? <RebrandBanner /> : null}
-                    <main className="flex-1 flex flex-col">{children}</main>
+                    <main className="flex-1 flex flex-col">
+                        <RestrictedFolderProvider
+                            writable={isOrgScopeEnabled()}
+                            userId={session?.user.id ?? ""}
+                        >
+                            {children}
+                        </RestrictedFolderProvider>
+                    </main>
                     <Footer />
                 </div>
             </AppChromeProvider>

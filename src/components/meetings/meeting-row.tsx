@@ -3,7 +3,9 @@
 import { CalendarClock, FolderInput } from "lucide-react";
 import { useExtracted, useFormatter } from "next-intl";
 import { useEffect, useState } from "react";
+import { FolderRowLabels } from "@/components/dashboard/folder-row-labels";
 import { cn } from "@/lib/utils";
+import type { RecordingFolder } from "@/types/folder";
 import { prewarmAgenda } from "./api";
 import type { MeetingRowData } from "./types";
 
@@ -12,11 +14,13 @@ export function MeetingRow({
     selected,
     onSelect,
     registerRef,
+    folders = [],
 }: {
     meeting: MeetingRowData;
     selected: boolean;
     onSelect: (id: string) => void;
     registerRef?: (id: string, node: HTMLButtonElement | null) => void;
+    folders?: RecordingFolder[];
 }) {
     const i18n = useExtracted();
     const format = useFormatter();
@@ -52,6 +56,11 @@ export function MeetingRow({
                 <span className="block truncate text-sm font-medium">
                     {meeting.title}
                 </span>
+                {folders.length > 0 && (
+                    <span className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
+                        <FolderRowLabels folders={folders} />
+                    </span>
+                )}
                 <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <span>
                         {meeting.timeSet && meeting.start

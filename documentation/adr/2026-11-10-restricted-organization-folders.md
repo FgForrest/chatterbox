@@ -1,20 +1,22 @@
 ---
 title: Restricted Organization folders withhold placements until normal publication succeeds
 date: 2026-11-10
-updated: 2026-11-11 02:32
-status: partially-implemented
+updated: 2026-11-11 13:17
+status: superseded
 kind: feature
 issues: [381]
-prs: []
+prs: [382, 393, 396]
 areas: [src/lib/folders, src/lib/sharing, src/db/queries, src/lib/export, src/lib/meetings, src/lib/mail, src/lib/mcp, src/db/schema.ts]
 supersedes: [2026-10-07-backup-scope, 2026-10-06-export-ownership-ledger, 2026-09-23-shared-organization-scope]
-superseded-by: []
+superseded-by: [2026-11-11-removing-contributors-from-restricted-folders]
 relates: [2026-10-22-person-to-person-sharing]
 ---
 
 # Restricted Organization folders withhold placements until normal publication succeeds
 
 An Organization folder can have a restricted audience. Its placements do not publish content to the Organization: items retain their owners, processing, knowledge and receiver rights until the normal share gate releases a placement. Server APIs and additive schema changes support a separate UI change. This record covers the server implementation of issue #381; the UI and the independent person-shared-folder leaf change are separate parts of that issue.
+
+**Superseded in part.** [Removing contributors from restricted folders](2026-11-11-removing-contributors-from-restricted-folders.md) reverses rule 3's contributor-removal refusal. Managers and curators may remove item owners without unfiling their items. It also narrows rule 1's placement privacy: an owner outside the audience sees their own placement through the public node and may remove or move it out without folder access. The remaining rules still hold.
 
 ## Why
 

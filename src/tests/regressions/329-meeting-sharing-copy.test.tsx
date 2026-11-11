@@ -55,8 +55,9 @@ beforeEach(() => {
         ),
     );
 });
-afterEach(() => {
+afterEach(async () => {
     cleanup();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     vi.unstubAllGlobals();
 });
 

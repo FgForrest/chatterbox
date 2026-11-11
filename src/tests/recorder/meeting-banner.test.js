@@ -603,6 +603,105 @@ describe("Chrome-check banner fixes", () => {
 
 describe("in-page folder chip", () => {
     it.each([
+        ["restricted", { restricted: true }, "folder-lock", "restricted"],
+        ["released server", {}, "users", "organization"],
+    ])("renders the %s target from folder lookup metadata", async (_label, marker, icon, color) => {
+        send.mockImplementation(async (message) =>
+            message.type === "get-folders"
+                ? {
+                      ok: true,
+                      folders: [
+                          {
+                              id: "start",
+                              label: "Organization / Planning",
+                              scope: "org",
+                              ...marker,
+                          },
+                      ],
+                  }
+                : { ok: true },
+        );
+        const recording = {
+            ...state,
+            folderLabel: "Organization / Planning",
+            folderScope: "org",
+        };
+        render("recording", { state: recording });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(send).toHaveBeenCalledWith({ type: "get-folders", id: "start" });
+        expect(
+            el("folder-toggle").querySelector(`.lucide-${icon}.text-${color}`),
+        ).toBeTruthy();
+        expect(el("folder-target").classList.contains(color)).toBe(true);
+        expect(el("folder-toggle").textContent).toBe("Planning");
+        expect(el("folder-toggle").title).toBe("Organization / Planning");
+        if (!marker.restricted)
+            expect(
+                el("folder-toggle").querySelector(".lucide-folder-lock"),
+            ).toBeNull();
+        render("recording", { state: recording });
+        expect(
+            el("folder-toggle").querySelector(`.lucide-${icon}`),
+        ).toBeTruthy();
+        render("recording", { state: { ...recording, folderId: "ordinary" } });
+        expect(
+            el("folder-toggle").querySelector(".lucide-folder-lock"),
+        ).toBeNull();
+        expect(el("folder-target").classList.contains("restricted")).toBe(
+            false,
+        );
+    });
+
+    it("shows the restricted search result and keeps its marker on the selected target", async () => {
+        const folder = {
+            id: "restricted",
+            label: "Organization / Pilot",
+            scope: "org",
+            restricted: true,
+        };
+        send.mockImplementation(async (message) =>
+            message.type === "get-folders"
+                ? {
+                      ok: true,
+                      folders:
+                          message.q || message.id === folder.id ? [folder] : [],
+                  }
+                : { ok: true },
+        );
+        render("recording", { state });
+        el("folder-toggle").click();
+        const input = el("meeting-folder-picker");
+        input.value = "Pilot";
+        input.dispatchEvent(new Event("input"));
+        await vi.advanceTimersByTimeAsync(200);
+        const option = el("meeting-folder-listbox").children[1];
+        expect(option.querySelector(".lucide-folder-lock")).toBeTruthy();
+        option.click();
+        await vi.advanceTimersByTimeAsync(0);
+        render("recording", {
+            state: {
+                ...state,
+                folderId: folder.id,
+                folderLabel: folder.label,
+                folderScope: folder.scope,
+            },
+        });
+        expect(
+            el("folder-toggle").querySelector(
+                ".lucide-folder-lock.text-restricted",
+            ),
+        ).toBeTruthy();
+        expect(el("pill-folder").hidden).toBe(true);
+        render("recording", { state: { ...state, folderId: null } });
+        expect(
+            el("folder-toggle").querySelector(".lucide-folder-plus"),
+        ).toBeTruthy();
+        expect(el("folder-target").classList.contains("restricted")).toBe(
+            false,
+        );
+    });
+
+    it.each([
         true,
         false,
     ])("keeps focus on the reused toggle after remove (accepted=%s)", async (accepted) => {

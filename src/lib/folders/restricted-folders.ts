@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, exists, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     approvePendingFolderRequests,
@@ -103,7 +103,7 @@ async function requireAudienceAccess(
     };
 }
 
-/** Current audience and which people cannot be removed while they own direct contents. */
+/** Current audience and which people own direct contents, for removal confirmation. */
 export async function listRestrictedAudience(userId: string, folderId: string) {
     const access = await requireAudienceAccess(userId, folderId);
     const members = await db
@@ -112,7 +112,31 @@ export async function listRestrictedAudience(userId: string, folderId: string) {
             name: users.name,
             email: users.email,
             role: restrictedFolderMembers.role,
-            ownsItems: sql<boolean>`exists (select 1 from ${recordingFolderAssignments} where ${recordingFolderAssignments.folderId} = ${folderId} and ${recordingFolderAssignments.userId} = ${users.id})`,
+            ownsItems: exists(
+                db
+                    .select({ id: recordingFolderAssignments.itemId })
+                    .from(recordingFolderAssignments)
+                    .innerJoin(
+                        chatterItems,
+                        and(
+                            eq(
+                                chatterItems.id,
+                                recordingFolderAssignments.itemId,
+                            ),
+                            eq(
+                                chatterItems.userId,
+                                recordingFolderAssignments.userId,
+                            ),
+                        ),
+                    )
+                    .where(
+                        and(
+                            eq(recordingFolderAssignments.folderId, folderId),
+                            eq(recordingFolderAssignments.userId, users.id),
+                            isNull(chatterItems.deletedAt),
+                        ),
+                    ),
+            ).mapWith(Boolean),
         })
         .from(restrictedFolderMembers)
         .innerJoin(users, eq(users.id, restrictedFolderMembers.userId))
@@ -125,7 +149,7 @@ export async function listRestrictedAudience(userId: string, folderId: string) {
     return { members, role: access.role, curatorsCanRead: true as const };
 }
 
-/** Audience members add people; managers and curators remove non-contributors. */
+/** Audience members add people; managers and curators remove anyone without unfiling items. */
 export async function changeRestrictedAudience(
     userId: string,
     folderId: string,
@@ -158,25 +182,6 @@ export async function changeRestrictedAudience(
             !!input.removeUserId,
         );
         if (input.removeUserId) {
-            const [item] = await tx
-                .select({ id: recordingFolderAssignments.itemId })
-                .from(recordingFolderAssignments)
-                .where(
-                    and(
-                        eq(recordingFolderAssignments.folderId, folderId),
-                        eq(
-                            recordingFolderAssignments.userId,
-                            input.removeUserId,
-                        ),
-                    ),
-                )
-                .limit(1);
-            if (item)
-                throw new AppError(
-                    ErrorCode.RESTRICTED_FOLDER_MEMBER_OWNS_ITEMS,
-                    ErrorCode.RESTRICTED_FOLDER_MEMBER_OWNS_ITEMS,
-                    409,
-                );
             await notifyRestrictedAudienceInTx(tx, folderId);
             await tx
                 .delete(restrictedFolderMembers)
