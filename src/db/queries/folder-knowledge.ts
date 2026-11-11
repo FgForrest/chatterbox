@@ -1,6 +1,7 @@
 import { and, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { confirmedLearnRecordsInTx } from "@/db/queries/learn-confirmed-records";
+import { restrictedMemberCondition } from "@/db/queries/restricted-folders";
 import { learnReviewItems, learnRuns } from "@/db/schema";
 import type { RecordTarget } from "@/lib/learn/new-refs";
 
@@ -26,7 +27,7 @@ function folderItems(input: FolderKnowledgeScope) {
             where assignment.recording_id = ${input.itemId}
               and assignment.user_id = ${input.ownerId}
               and folder.user_id = any(${sql.param(input.scopes)}::text[])
-              and (not assignment.withheld or ${input.isCurator === true} or exists (select 1 from restricted_folder_members member where member.folder_id = folder.id and member.user_id = ${input.viewerId}))
+              and (not assignment.withheld or ${input.isCurator === true} or ${restrictedMemberCondition(input.viewerId, sql`folder.id`)})
         ), visible_items as (
             select item.id, item.user_id, item.title, item.occurred_at from chatter_items item
             where item.id = ${input.itemId} and item.user_id = ${input.ownerId}
@@ -46,18 +47,18 @@ function folderItems(input: FolderKnowledgeScope) {
             join chatter_items item on item.id = assignment.recording_id and item.user_id = assignment.user_id
             where item.deleted_at is null and item.kind in ('audio', 'mail')
               and (${input.shared} or ${input.restricted === true} or assignment.user_id = ${input.viewerId})
-              and (not assignment.withheld or ${input.isCurator === true} or exists (select 1 from restricted_folder_members member where member.folder_id = folder.id and member.user_id = ${input.viewerId}))
+              and (not assignment.withheld or ${input.isCurator === true} or ${restrictedMemberCondition(input.viewerId, sql`folder.id`)})
         `;
     return sql`
         with recursive folders as (
             select id, parent_id, kind from recording_folders
             where id = ${input.folderId} and user_id = ${input.ownerId}
-              and (restricted_at is null or ${input.isCurator === true} or exists (select 1 from restricted_folder_members member where member.folder_id = recording_folders.id and member.user_id = ${input.viewerId}))
+              and (restricted_at is null or ${input.isCurator === true} or ${restrictedMemberCondition(input.viewerId, sql`recording_folders.id`)})
             union
             select child.id, child.parent_id, child.kind
             from recording_folders child join folders parent on child.parent_id = parent.id
             where child.user_id = ${input.ownerId}
-              and (child.restricted_at is null or ${input.isCurator === true} or exists (select 1 from restricted_folder_members member where member.folder_id = child.id and member.user_id = ${input.viewerId}))
+              and (child.restricted_at is null or ${input.isCurator === true} or ${restrictedMemberCondition(input.viewerId, sql`child.id`)})
         ), visible_items as (${items})
     `;
 }

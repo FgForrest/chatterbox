@@ -14,6 +14,7 @@
 import { and, count, eq, gte } from "drizzle-orm";
 import type { DNSResolver } from "mailauth";
 import { db } from "@/db";
+import { activeShareRecipientExistsCondition } from "@/db/queries/share-recipients";
 import {
     mailAddresses,
     mailDeliveryLog,
@@ -24,6 +25,7 @@ import {
 } from "@/db/schema";
 import { encryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { enqueueExportPlansForUser } from "@/lib/folder-exports/jobs";
 import {
     type MailAddressRow,
@@ -146,9 +148,14 @@ async function resolveRecipient(
                       .select({ userId: restrictedFolderMembers.userId })
                       .from(restrictedFolderMembers)
                       .where(
-                          eq(
-                              restrictedFolderMembers.folderId,
-                              address.folderId,
+                          and(
+                              eq(
+                                  restrictedFolderMembers.folderId,
+                                  address.folderId,
+                              ),
+                              activeShareRecipientExistsCondition(
+                                  restrictedFolderMembers.userId,
+                              ),
                           ),
                       )
                 : null;
@@ -363,36 +370,67 @@ export async function ingestMail(input: IngestInput): Promise<IngestResult> {
     }
 
     let overQuota = false;
+    const failures: unknown[] = [];
     if (byOwner.size > 0) {
         const parsed = await parseMessage(input.raw);
         for (const delivery of byOwner.values()) {
-            if (
-                (await receivedToday(delivery.ownerUserId, now)) >=
-                env.MAIL_DAILY_LIMIT
-            ) {
-                overQuota = true;
-                for (const recipient of delivery.recipients) {
-                    outcomeOf.set(recipient, "quota");
+            try {
+                if (
+                    (await receivedToday(delivery.ownerUserId, now)) >=
+                    env.MAIL_DAILY_LIMIT
+                ) {
+                    overQuota = true;
+                    for (const recipient of delivery.recipients) {
+                        outcomeOf.set(recipient, "quota");
+                    }
+                    continue;
                 }
-                continue;
+                const stored = await storeMailForOwner({
+                    delivery,
+                    raw: input.raw,
+                    parsed,
+                    facts,
+                    spf: input.spf,
+                    receivedAt: now,
+                });
+                for (const recipient of delivery.recipients) {
+                    outcomeOf.set(
+                        recipient,
+                        stored.duplicate ? "duplicate" : "accepted",
+                    );
+                }
+                // A duplicate may have been filed into another folder.
+                await scheduleOwnerExports(delivery.ownerUserId);
+            } catch (error) {
+                if (
+                    error instanceof AppError &&
+                    [
+                        ErrorCode.RESTRICTED_FOLDER_NO_ACCESS,
+                        ErrorCode.FORBIDDEN,
+                        ErrorCode.NOT_FOUND,
+                    ].includes(error.code)
+                ) {
+                    for (const recipient of delivery.recipients) {
+                        outcomeOf.set(recipient, "refused");
+                        await logRefusal({
+                            resolved: {
+                                recipient,
+                                address: null,
+                                target: null,
+                                logUserId: delivery.ownerUserId,
+                            },
+                            reason: "not_a_user",
+                            senderUser,
+                            facts,
+                            at: now,
+                        }).catch((logError: unknown) => {
+                            failures.push(logError);
+                        });
+                    }
+                } else failures.push(error);
             }
-            const stored = await storeMailForOwner({
-                delivery,
-                raw: input.raw,
-                parsed,
-                facts,
-                spf: input.spf,
-                receivedAt: now,
-            });
-            for (const recipient of delivery.recipients) {
-                outcomeOf.set(
-                    recipient,
-                    stored.duplicate ? "duplicate" : "accepted",
-                );
-            }
-            // A duplicate may have been filed into another folder.
-            await scheduleOwnerExports(delivery.ownerUserId);
         }
+        if (failures.length) throw failures[0];
     }
     for (const entry of outcomes) {
         entry.outcome = outcomeOf.get(entry.recipient) ?? entry.outcome;

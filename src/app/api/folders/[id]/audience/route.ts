@@ -7,6 +7,8 @@ import {
     listRestrictedAudience,
 } from "@/lib/folders/restricted-folders";
 
+import { consumePersonShareRateLimit } from "@/lib/sharing/person-share-routes";
+
 type Context = { params: Promise<{ id: string }> };
 const add = z.object({ userIds: z.array(z.string().min(1)).max(20) });
 const remove = z.object({ userId: z.string().min(1) });
@@ -19,6 +21,7 @@ export const GET = apiHandler<Context>(async (request, context) => {
 
 export const POST = apiHandler<Context>(async (request, context) => {
     const session = await requireApiSession(request);
+    await consumePersonShareRateLimit(request, session.user.id);
     const { id } = await (context as Context).params;
     const input = add.safeParse(await request.json().catch(() => null));
     if (!input.success)

@@ -317,7 +317,7 @@ describe("Google Drive export provider", () => {
         expect(drive.contentAt(ROOT, "Team/audio.mp3")).toBe("two");
     });
 
-    it("trashes only empty folders it created, never the root", async () => {
+    it("retains directories when drive.file cannot prove their subtrees empty", async () => {
         const p = provider();
         await p.reconcileDirectory(null, `${ROOT}/Empty`);
         await p.materialize(
@@ -326,7 +326,7 @@ describe("Google Drive export provider", () => {
             file(),
         );
         await expect(p.removeEmptyDirectory(`${ROOT}/Empty`)).resolves.toBe(
-            true,
+            false,
         );
         await expect(p.removeEmptyDirectory(`${ROOT}/Kept`)).resolves.toBe(
             false,
@@ -335,8 +335,8 @@ describe("Google Drive export provider", () => {
         await expect(p.removeEmptyDirectory(`${ROOT}/Unknown`)).resolves.toBe(
             false,
         );
-        expect(drive.tree(ROOT)).toEqual(["Kept/", "Kept/audio.mp3"]);
-        expect(nodes.nodes.has(`${ROOT}/Empty`)).toBe(false);
+        expect(drive.tree(ROOT)).toEqual(["Empty/", "Kept/", "Kept/audio.mp3"]);
+        expect(nodes.nodes.has(`${ROOT}/Empty`)).toBe(true);
     });
 
     it("preserves a person's file and its managed parent during pruning", async () => {
@@ -351,6 +351,30 @@ describe("Google Drive export provider", () => {
         );
         expect(drive.items.has(mine)).toBe(true);
         expect(drive.isTrashed(mine)).toBe(false);
+    });
+
+    it("preserves a hidden foreign file three levels deep through repeated bottom-up pruning", async () => {
+        const p = provider();
+        const paths = ["Team", "Team/Weekly", "Team/Weekly/Recording"];
+        await p.reconcileDirectory(null, `${ROOT}/${paths[2]}`);
+        const mine = drive.userAddFile(
+            drive.idAt(ROOT, paths[2]) ?? "",
+            "notes.txt",
+        );
+        const children = vi
+            .spyOn(drive, "hasChildren")
+            .mockResolvedValue(false);
+        for (let attempt = 0; attempt < 2; attempt++) {
+            for (const directory of [...paths].reverse())
+                expect(
+                    await provider().removeEmptyDirectory(
+                        `${ROOT}/${directory}`,
+                    ),
+                ).toBe(false);
+        }
+        expect(drive.isTrashed(mine)).toBe(false);
+        expect(drive.contentAt(ROOT, `${paths[2]}/notes.txt`)).toBe("mine");
+        expect(children).not.toHaveBeenCalled();
     });
 
     it("leaves a folder it did not tag alone", async () => {

@@ -1822,6 +1822,10 @@ export async function shareItemToOrganizationFolderInTx(
                 and(
                     eq(restrictedFolderMembers.folderId, folder.id),
                     eq(restrictedFolderMembers.userId, input.ownerUserId),
+                    restrictedMemberCondition(
+                        input.ownerUserId,
+                        restrictedFolderMembers.folderId,
+                    ),
                 ),
             );
         if (
@@ -2632,9 +2636,14 @@ export async function moveRecordingBetweenFolders(input: {
 }): Promise<void> {
     const orgUserId = await getOrgUserId();
     const canCurate = await userCuratesOrganizationNow(input.userId);
+    const targets = await Promise.all([
+        resolveFilingFolder(input.userId, input.fromFolderId, db, canCurate),
+        resolveFilingFolder(input.userId, input.toFolderId, db, canCurate),
+    ]);
     await retryOnDeadlock(() =>
         db.transaction(async (tx) => {
-            if (orgUserId) await lockOrgTree(tx);
+            if (targets.some((target) => target.scope === "org"))
+                await lockOrgTree(tx);
             const from = await resolveFilingFolder(
                 input.userId,
                 input.fromFolderId,

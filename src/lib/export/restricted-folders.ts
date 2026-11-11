@@ -1,5 +1,6 @@
 import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { activeShareRecipientCondition } from "@/db/queries/share-recipients";
 import {
     chatterItems,
     meetingAgendas,
@@ -46,7 +47,12 @@ export async function collectRestrictedFolderArchive(scope: ArchiveScope) {
                 recordingFolders,
                 eq(recordingFolders.id, restrictedFolderMembers.folderId),
             )
-            .where(eq(recordingFolders.userId, scope.orgUserId));
+            .where(
+                and(
+                    eq(recordingFolders.userId, scope.orgUserId),
+                    activeShareRecipientCondition(),
+                ),
+            );
         foldersMetadata = folders
             .filter(
                 (folder) =>

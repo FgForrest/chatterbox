@@ -51,7 +51,9 @@ export async function readFolderKnowledge(
         viewerId,
         shared,
         restricted: !!folder.restrictedAt,
-        isCurator: await userCuratesOrganizationNow(viewerId),
+        isCurator:
+            !!folder.restrictedAt &&
+            (await userCuratesOrganizationNow(viewerId)),
         allOwnedItems: !shared && folder.kind === "private",
         scopes: readableScopes(
             { kind: "recording", ownerUserId: viewerId, shared },

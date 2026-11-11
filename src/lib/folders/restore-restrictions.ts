@@ -138,6 +138,7 @@ export async function restoreWithheldPlacements(
                             eq(recordingFolderAssignments.itemId, itemId),
                             eq(recordingFolderAssignments.userId, userId),
                             eq(recordingFolderAssignments.folderId, folder.id),
+                            eq(recordingFolderAssignments.withheld, false),
                         ),
                     );
                 return true;
@@ -150,9 +151,7 @@ export async function restoreWithheldPlacements(
                     itemId,
                     folderId: folder.id,
                     withheld: true,
-                    releasedAt: entry.releasedAt
-                        ? new Date(entry.releasedAt)
-                        : null,
+                    releasedAt: null,
                 })
                 .onConflictDoNothing();
             return true;

@@ -97,9 +97,8 @@ export interface DriveExportProviderOptions {
  * Drive addresses items by id and allows duplicate names, so every item the
  * export creates is recorded in the node store and tagged with the export's
  * id, which also lets a retry find what a crashed attempt already created.
- * It trashes folders it created only while they hold none of its files, and
- * files it wrote when duplicated elsewhere or revoked by restriction: under
- * `drive.file` it cannot see what users put there.
+ * It retains directories because `drive.file` cannot prove their subtrees empty.
+ * Tagged files are trashed when duplicated elsewhere or revoked by restriction.
  */
 export class DriveExportProvider implements ExportProvider {
     private readonly exportId: string;
@@ -463,12 +462,8 @@ export class DriveExportProvider implements ExportProvider {
             await this.nodes.removeSubtree(relativePath);
             return false;
         }
-        if (await this.client.hasChildren(item.id)) return false;
-        await this.client.updateItem(item.id, { trashed: true });
-        this.snapshot?.delete(item.id);
-        await this.nodes.removeSubtree(relativePath);
-        this.folderIds.clear();
-        return true;
+        // drive.file can hide foreign descendants, so a child listing cannot authorize directory trashing.
+        return false;
     }
 
     async materialize(

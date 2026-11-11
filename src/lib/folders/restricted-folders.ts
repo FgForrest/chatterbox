@@ -9,6 +9,7 @@ import {
     notifyRestrictedAudienceInTx,
     placementVisibleCondition,
     restrictedItemCondition,
+    restrictedMemberCondition,
     revokePlacementExportsInTx,
     withheldItemCondition,
 } from "@/db/queries/restricted-folders";
@@ -77,6 +78,10 @@ async function requireAudienceAccess(
             and(
                 eq(restrictedFolderMembers.folderId, folderId),
                 eq(restrictedFolderMembers.userId, userId),
+                restrictedMemberCondition(
+                    userId,
+                    restrictedFolderMembers.folderId,
+                ),
             ),
         );
     if (
@@ -111,7 +116,12 @@ export async function listRestrictedAudience(userId: string, folderId: string) {
         })
         .from(restrictedFolderMembers)
         .innerJoin(users, eq(users.id, restrictedFolderMembers.userId))
-        .where(eq(restrictedFolderMembers.folderId, folderId));
+        .where(
+            and(
+                eq(restrictedFolderMembers.folderId, folderId),
+                activeShareRecipientCondition(),
+            ),
+        );
     return { members, role: access.role, curatorsCanRead: true as const };
 }
 
@@ -796,7 +806,7 @@ export async function restrictedItemReaders(userId: string, itemId: string) {
         })
         .from(users)
         .where(
-            sql`${users.id} = ${item.ownerUserId} or ${users.id} in (select ${restrictedFolderMembers.userId} from ${restrictedFolderMembers} inner join ${recordingFolderAssignments} on ${recordingFolderAssignments.folderId} = ${restrictedFolderMembers.folderId} inner join ${recordingFolders} on ${recordingFolders.id} = ${recordingFolderAssignments.folderId} where ${recordingFolderAssignments.itemId} = ${itemId} and ${recordingFolderAssignments.withheld} and ${placementVisibleCondition({ userId, isCurator })})`,
+            sql`${users.id} = ${item.ownerUserId} or ${users.id} in (select ${restrictedFolderMembers.userId} from ${restrictedFolderMembers} inner join ${recordingFolderAssignments} on ${recordingFolderAssignments.folderId} = ${restrictedFolderMembers.folderId} inner join ${recordingFolders} on ${recordingFolders.id} = ${recordingFolderAssignments.folderId} where ${recordingFolderAssignments.itemId} = ${itemId} and ${recordingFolderAssignments.withheld} and ${restrictedMemberCondition(users.id, restrictedFolderMembers.folderId)} and ${placementVisibleCondition({ userId, isCurator })})`,
         );
     return {
         ownerUserId: item.ownerUserId,

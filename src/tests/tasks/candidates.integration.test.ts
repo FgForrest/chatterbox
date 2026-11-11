@@ -70,6 +70,7 @@ vi.mock("@/lib/env", () => ({
 }));
 vi.mock("@/lib/org/config", () => ({
     getOrgUserId: async () => "candidate-org",
+    isOrgScopeVisible: () => true,
 }));
 vi.mock("@/lib/knowledge/embeddings", () => ({
     embeddingClient: embeddingClientMock,

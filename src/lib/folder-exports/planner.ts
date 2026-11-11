@@ -244,6 +244,7 @@ async function planLocked(
     const configuration = await loadExportTarget(userId, exportId);
     if (!configuration) return 0;
 
+    // listExportFolderOrganization excludes restricted folders upstream.
     const { contentUserId, isOrganization: isOrg } =
         await resolveFolderExportScope(userId, configuration.folderId, {
             cleanupRestricted: true,

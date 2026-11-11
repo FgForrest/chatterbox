@@ -39,9 +39,7 @@ export function folderRecordingCondition(
         id: recordings.id,
         userId: recordings.userId,
     },
-    isCurator = organization.folders.some(
-        (folder) => folder.restrictedRole === "curator",
-    ),
+    isCurator = false,
 ): SQL | null {
     const folder = organization.folders.find((entry) => entry.id === folderId);
     if (!folder) return null;

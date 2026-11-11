@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
+import { restrictedMemberCondition } from "@/db/queries/restricted-folders";
 
 /** Folder ids in an owner's item scope, including descendants and excluding roots. */
 export async function queryItemScopeFolderIds(input: {
@@ -37,7 +38,7 @@ export async function queryItemScopeFolderIds(input: {
                 (${input.view} = 'private' and (
                     folder.user_id = ${input.ownerUserId}
                     or folder.user_id = ${input.orgUserId}
-                ) and (folder.restricted_at is null or exists (select 1 from restricted_folder_members member where member.folder_id = folder.id and member.user_id = ${input.ownerUserId})))
+                ) and (folder.restricted_at is null or ${restrictedMemberCondition(input.ownerUserId, sql`folder.id`)}))
                 or (${input.view} = 'org' and folder.user_id = ${input.orgUserId} and folder.restricted_at is null)
               )
             union
@@ -46,7 +47,7 @@ export async function queryItemScopeFolderIds(input: {
             join scope_folders parent
               on child.parent_id = parent.id
              and child.user_id = parent.user_id
-            where child.restricted_at is null or (${input.view} = 'private' and exists (select 1 from restricted_folder_members member where member.folder_id = child.id and member.user_id = ${input.ownerUserId}))
+            where child.restricted_at is null or (${input.view} = 'private' and ${restrictedMemberCondition(input.ownerUserId, sql`child.id`)})
         )
         select distinct id
         from scope_folders

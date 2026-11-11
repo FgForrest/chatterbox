@@ -1,8 +1,12 @@
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { folderParticipantCondition } from "@/db/queries/folder-participants";
 import { meetingItemAudienceInTx } from "@/db/queries/meeting-audience";
 import type { MeetingTx } from "@/db/queries/meetings";
-import { activeShareRecipientCondition } from "@/db/queries/share-recipients";
+import { restrictedFolderVisibleCondition } from "@/db/queries/restricted-folders";
+import {
+    activeShareRecipientCondition,
+    activeShareRecipientExistsCondition,
+} from "@/db/queries/share-recipients";
 import {
     folderShares,
     recordingFolders,
@@ -17,6 +21,7 @@ export async function meetingAttachmentAudienceInTx(
         itemId: string;
         ownerUserId: string;
         actorUserId: string;
+        isCurator?: boolean;
         orgUserId: string | null;
         folderIds: string[];
     },
@@ -33,6 +38,7 @@ export async function meetingAttachmentAudienceInTx(
                   id: recordingFolders.id,
                   userId: recordingFolders.userId,
                   restrictedAt: recordingFolders.restrictedAt,
+                  readable: sql<boolean>`${restrictedFolderVisibleCondition({ userId: input.actorUserId, isCurator: input.isCurator === true })}`,
               })
               .from(recordingFolders)
               .where(
@@ -53,7 +59,10 @@ export async function meetingAttachmentAudienceInTx(
         : [];
     const shares = folders.length
         ? await tx
-              .select({ userId: folderShares.receiverUserId })
+              .select({
+                  userId: folderShares.receiverUserId,
+                  folderId: folderShares.folderId,
+              })
               .from(folderShares)
               .innerJoin(
                   recordingFolders,
@@ -79,9 +88,19 @@ export async function meetingAttachmentAudienceInTx(
         .map((folder) => folder.id);
     const audience = restrictedIds.length
         ? await tx
-              .select({ userId: restrictedFolderMembers.userId })
+              .select({
+                  userId: restrictedFolderMembers.userId,
+                  folderId: restrictedFolderMembers.folderId,
+              })
               .from(restrictedFolderMembers)
-              .where(inArray(restrictedFolderMembers.folderId, restrictedIds))
+              .where(
+                  and(
+                      inArray(restrictedFolderMembers.folderId, restrictedIds),
+                      activeShareRecipientExistsCondition(
+                          restrictedFolderMembers.userId,
+                      ),
+                  ),
+              )
         : [];
     const intended = {
         organization: folders.some(
@@ -95,12 +114,27 @@ export async function meetingAttachmentAudienceInTx(
             ...shares.map((share) => share.userId),
         ]),
     };
+    const readableIds = new Set(
+        folders.filter((folder) => folder.readable).map((folder) => folder.id),
+    );
+    const disclosedUserIds = new Set([
+        input.actorUserId,
+        ...folders
+            .filter((folder) => folder.readable)
+            .map((folder) => folder.userId),
+        ...audience
+            .filter((member) => readableIds.has(member.folderId))
+            .map((member) => member.userId),
+        ...shares
+            .filter((share) => readableIds.has(share.folderId))
+            .map((share) => share.userId),
+    ]);
     const audienceUsers = intended.organization
         ? []
         : await tx
               .select({ id: users.id, name: users.name })
               .from(users)
-              .where(inArray(users.id, [...intended.userIds]))
+              .where(inArray(users.id, [...disclosedUserIds]))
               .orderBy(users.id);
     return {
         current,
@@ -110,7 +144,7 @@ export async function meetingAttachmentAudienceInTx(
             organization: intended.organization,
             userIds: intended.organization
                 ? []
-                : [...intended.userIds]
+                : [...disclosedUserIds]
                       .filter((id) => id !== input.actorUserId)
                       .sort(),
             users: audienceUsers.filter(

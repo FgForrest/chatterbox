@@ -449,12 +449,13 @@ describeWithDatabase("Google Drive folder export (PostgreSQL)", () => {
             "Sub/Weekly sync/audio.mp3",
             "Sub/Weekly sync/riffado.summary.md",
             "Sub/Weekly sync/riffado.transcript [doc]",
+            "Weekly sync/",
         ]);
         expect(drive.isTrashed(oldAudioId)).toBe(true);
         expect(drive.items.has(oldAudioId)).toBe(true);
     });
 
-    it("trashes the folder of a recording that left before anything was written", async () => {
+    it("retains the folder of a recording that left before anything was written", async () => {
         const configuration = await createExport();
         await planFolderExport(OWNER, configuration.id);
         const folderId = drive.idAt(ROOT, "Weekly sync") ?? "";
@@ -464,8 +465,8 @@ describeWithDatabase("Google Drive folder export (PostgreSQL)", () => {
             .where(eq(recordings.id, RECORDING));
         await planFolderExport(OWNER, configuration.id);
 
-        expect(drive.tree(ROOT)).toEqual([]);
-        expect(drive.isTrashed(folderId)).toBe(true);
+        expect(drive.tree(ROOT)).toEqual(["Weekly sync/"]);
+        expect(drive.isTrashed(folderId)).toBe(false);
     });
 
     it("keeps the folder of a recording that left once files are in it", async () => {

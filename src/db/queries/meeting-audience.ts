@@ -1,7 +1,10 @@
 import { and, eq, inArray, or } from "drizzle-orm";
 import { folderParticipantCondition } from "@/db/queries/folder-participants";
 import type { MeetingTx } from "@/db/queries/meetings";
-import { activeShareRecipientCondition } from "@/db/queries/share-recipients";
+import {
+    activeShareRecipientCondition,
+    activeShareRecipientExistsCondition,
+} from "@/db/queries/share-recipients";
 import {
     folderShares,
     itemShares,
@@ -97,9 +100,14 @@ export async function meetingItemAudienceInTx(
               .select({ userId: restrictedFolderMembers.userId })
               .from(restrictedFolderMembers)
               .where(
-                  inArray(
-                      restrictedFolderMembers.folderId,
-                      restricted.map((folder) => folder.id),
+                  and(
+                      inArray(
+                          restrictedFolderMembers.folderId,
+                          restricted.map((folder) => folder.id),
+                      ),
+                      activeShareRecipientExistsCondition(
+                          restrictedFolderMembers.userId,
+                      ),
                   ),
               )
         : [];

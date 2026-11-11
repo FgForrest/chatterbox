@@ -1,5 +1,6 @@
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { restrictedMemberCondition } from "@/db/queries/restricted-folders";
 import { activeShareRecipientCondition } from "@/db/queries/share-recipients";
 import {
     restrictedFolderAccessRequests,
@@ -82,7 +83,15 @@ export async function restrictedFolderRoles(viewerUserId: string) {
             role: restrictedFolderMembers.role,
         })
         .from(restrictedFolderMembers)
-        .where(eq(restrictedFolderMembers.userId, viewerUserId));
+        .where(
+            and(
+                eq(restrictedFolderMembers.userId, viewerUserId),
+                restrictedMemberCondition(
+                    viewerUserId,
+                    restrictedFolderMembers.folderId,
+                ),
+            ),
+        );
     return new Map(rows.map((row) => [row.folderId, row.role]));
 }
 
@@ -108,7 +117,7 @@ export async function restrictedFolderNodes(
                 and(
                     inArray(restrictedFolderMembers.folderId, ids),
                     eq(restrictedFolderMembers.role, "manager"),
-                    or(eq(users.role, "org"), activeShareRecipientCondition()),
+                    activeShareRecipientCondition(),
                 ),
             ),
         db

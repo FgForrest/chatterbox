@@ -940,7 +940,7 @@ suite("restricted folders review 2 (PostgreSQL)", () => {
                 .from(recordingFolderAssignments)
                 .where(eq(recordingFolderAssignments.itemId, agendaId)),
         ).toMatchObject([
-            { folderId: restrictedId, withheld: true, releasedAt },
+            { folderId: restrictedId, withheld: true, releasedAt: null },
         ]);
         const audience = await db.transaction((tx) =>
             meetingItemAudienceInTx(tx, agendaId, "owner", "org"),

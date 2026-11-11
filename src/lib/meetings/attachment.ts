@@ -77,6 +77,7 @@ async function candidatesInTx(
     userId: string,
     itemId: string,
     orgUserId: string | null,
+    isCurator: boolean,
 ) {
     const recording = await ownedRecording(tx, userId, itemId);
     const rows = await listMeetingRows(
@@ -84,6 +85,7 @@ async function candidatesInTx(
         orgUserId,
         {
             includePast: true,
+            isCurator,
             limit: 1000,
             overlapWith: {
                 start: recording.item.occurredAt,
@@ -158,6 +160,7 @@ async function candidatesInTx(
             candidate.agenda.id,
             tx,
             true,
+            isCurator,
         );
         if (!locked || locked.agenda.recordingItemId) continue;
         const row = { ...candidate, ...locked };
@@ -195,6 +198,7 @@ async function candidatesInTx(
             itemId: row.agenda.meetingItemId,
             ownerUserId: row.agenda.userId,
             actorUserId: userId,
+            isCurator,
             orgUserId,
             folderIds: [...folderIds],
         });
@@ -578,6 +582,7 @@ async function attachArrivalInSavepoint(
         userId,
         itemId,
         orgUserId,
+        canCurate,
     );
     if (
         overlappingCount === 1 &&
@@ -601,7 +606,13 @@ export async function agendaCandidates(userId: string, itemId: string) {
     const [result, navigation] = await Promise.all([
         retryOnDeadlock(() =>
             db.transaction((tx) =>
-                candidatesInTx(tx, userId, itemId, viewer.orgUserId),
+                candidatesInTx(
+                    tx,
+                    userId,
+                    itemId,
+                    viewer.orgUserId,
+                    viewer.curator,
+                ),
             ),
         ),
         meetingFolderNavigation(userId, viewer.orgUserId),

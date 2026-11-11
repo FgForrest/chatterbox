@@ -1201,6 +1201,7 @@ export async function getMeeting(
                                   itemId: standaloneItemId,
                                   ownerUserId: agenda.userId,
                                   actorUserId: userId,
+                                  isCurator: access.viewer.curator,
                                   orgUserId: access.viewer.orgUserId,
                                   folderIds: folders.map((folder) => folder.id),
                               })

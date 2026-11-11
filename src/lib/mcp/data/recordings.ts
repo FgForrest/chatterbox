@@ -432,6 +432,8 @@ export async function recordingFilterConditions(
             await callerFolderOrganization(caller),
             treeUserId(caller),
             filters.folderId,
+            undefined,
+            caller.kind === "user" && caller.isCurator === true,
         );
         if (!folder) throw new McpToolError("No such folder", "not_found");
         conditions.push(folder);

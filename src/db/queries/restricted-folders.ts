@@ -1,4 +1,13 @@
-import { type AnyColumn, and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import {
+    type AnyColumn,
+    and,
+    eq,
+    inArray,
+    isNull,
+    or,
+    type SQL,
+    sql,
+} from "drizzle-orm";
 import { db } from "@/db";
 import { activeShareRecipientExistsCondition } from "@/db/queries/share-recipients";
 import {
@@ -19,7 +28,7 @@ export interface RestrictedViewer {
 /** Live audience membership, retained for withheld placements after a lift. */
 export function restrictedMemberCondition(
     userId: string | AnyColumn,
-    folderId: AnyColumn | string = recordingFolders.id,
+    folderId: AnyColumn | SQL | string = recordingFolders.id,
 ) {
     if (!isOrgScopeVisible()) return sql`false`;
     return sql`exists (select 1 from ${restrictedFolderMembers} restricted_member
@@ -98,7 +107,7 @@ export async function notifyRestrictedAudienceInTx(
     const ids = typeof folderId === "string" ? [folderId] : [...folderId];
     if (!ids.length) return;
     await tx.execute(sql`select pg_notify(${"riffado_personal"}, json_build_object('type', 'share', 'userId', ${restrictedFolderMembers.userId})::text)
-        from ${restrictedFolderMembers} where ${inArray(restrictedFolderMembers.folderId, ids)}`);
+        from ${restrictedFolderMembers} where ${inArray(restrictedFolderMembers.folderId, ids)} and ${activeShareRecipientExistsCondition(restrictedFolderMembers.userId)}`);
 }
 
 /** Clear former audience rows only once every placement in an open folder is released. */
@@ -166,6 +175,7 @@ export function restrictedItemSinceCondition(
     return sql`exists (select 1 from ${recordingFolderAssignments} inner join ${restrictedFolderMembers} on ${restrictedFolderMembers.folderId} = ${recordingFolderAssignments.folderId}
         where ${recordingFolderAssignments.itemId} = ${itemId} and ${recordingFolderAssignments.withheld}
         and ${restrictedFolderMembers.userId} = ${userId}
+        and ${activeShareRecipientExistsCondition(userId)}
         and (${restrictedFolderMembers.createdAt} > ${seen.toISOString()}::timestamp or ${recordingFolderAssignments.createdAt} > ${seen.toISOString()}::timestamp))`;
 }
 
