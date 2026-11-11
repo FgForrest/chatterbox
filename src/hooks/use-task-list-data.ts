@@ -16,6 +16,7 @@ import { useOrgEvents } from "@/hooks/use-org-events";
 import { useTaskFolderTree } from "@/hooks/use-task-folder-tree";
 import { descendantFolderIds } from "@/lib/folders/hierarchy";
 import { privateTreeFolders } from "@/lib/folders/private-tree";
+import { taskFilterFolders } from "@/lib/tasks/folder-filter";
 import type {
     TaskAssignee,
     TaskChange,
@@ -40,6 +41,7 @@ export function useTaskListData({
     countOpen = false,
     revision,
     markSeen = false,
+    filterFolders = false,
 }: {
     tab: TaskTab;
     state: string;
@@ -52,12 +54,16 @@ export function useTaskListData({
     countOpen?: boolean;
     revision?: string;
     markSeen?: boolean;
+    filterFolders?: boolean;
 }) {
     const i18n = useExtracted();
     const locale = useLocale();
     const showMergeFailure = useTaskMergeFailure();
     const [openCount, setOpenCount] = useState<number | null>(null);
     const [error, setError] = useState(false);
+    const folderScope = `${tab}:${allOrganization}`;
+    const [taskFolders, setTaskFolders] = useState(new Map<string, string[]>());
+    const folderCache = useRef(taskFolders);
     const [tasks, setTasks] = useState<TaskListItem[] | null>(null);
     const ownInserts = useRef(
         new Map<
@@ -90,6 +96,7 @@ export function useTaskListData({
     const query = useMemo(() => {
         const search = new URLSearchParams({ tab, state, sort });
         if (allOrganization) search.set("organization", "true");
+        if (filterFolders) search.set("folders", "true");
         if (folder !== ALL) search.set("folder", folder);
         if (assignee !== ALL) search.set("assignee", assignee);
         if (due !== ALL) {
@@ -97,7 +104,16 @@ export function useTaskListData({
             search.set("today", localToday());
         }
         return search.toString();
-    }, [tab, state, sort, folder, assignee, due, allOrganization]);
+    }, [
+        tab,
+        state,
+        sort,
+        folder,
+        assignee,
+        due,
+        allOrganization,
+        filterFolders,
+    ]);
 
     const currentQuery = useRef(query);
     currentQuery.current = query;
@@ -154,53 +170,83 @@ export function useTaskListData({
         };
     }, [loadAssignees]);
 
-    const load = useCallback(async () => {
-        const request = ++loadRequest.current;
-        setError(false);
-        const reconciled = [...ownInserts.current]
-            .filter(([, entry]) => entry.reconciled)
-            .map(([id]) => id);
-        const insertedRows = () =>
-            [...ownInserts.current.values()]
-                .filter((entry) => entry.query === query)
-                .map((entry) => entry.task);
-        try {
-            const openQuery = new URLSearchParams(query);
-            openQuery.set("state", "open");
-            const [response, openResponse] = await Promise.all([
-                fetch(`/api/tasks?${query}`),
-                countOpen && state !== "open" && state !== "all"
-                    ? fetch(`/api/tasks?${openQuery}`)
-                    : Promise.resolve(null),
-            ]);
-            if (!response.ok || (openResponse && !openResponse.ok))
-                throw new Error();
-            const body = (await response.json()) as { tasks: TaskListItem[] };
-            const openBody = openResponse
-                ? ((await openResponse.json()) as { tasks: TaskListItem[] })
-                : body;
-            if (request !== loadRequest.current) return;
-            for (const id of reconciled) ownInserts.current.delete(id);
-            const inserts = insertedRows();
-            const insertedIds = new Set(inserts.map((task) => task.id));
-            const rows = [
-                ...inserts,
-                ...body.tasks.filter((task) => !insertedIds.has(task.id)),
-            ];
-            versions.current = new Map(
-                rows.map((task) => [task.id, task.version]),
-            );
-            setTasks(rows);
-            setOpenCount(
-                openBody.tasks.filter((task) => task.status === "open").length,
-            );
-        } catch {
-            if (request !== loadRequest.current) return;
-            setError(true);
-            setTasks(insertedRows());
-            toast.error(i18n("Could not load your tasks"));
-        }
-    }, [query, i18n, state, countOpen]);
+    const load = useCallback(
+        async (options?: { preserveOwnInserts?: boolean }) => {
+            if (query !== currentQuery.current) return;
+            const request = ++loadRequest.current;
+            setError(false);
+            const reconciled = options?.preserveOwnInserts
+                ? []
+                : [...ownInserts.current]
+                      .filter(([, entry]) => entry.reconciled)
+                      .map(([id]) => id);
+            const insertedRows = () =>
+                [...ownInserts.current.values()]
+                    .filter((entry) => entry.query === query)
+                    .map((entry) => entry.task);
+            try {
+                const taskQuery = new URLSearchParams(query);
+                const needsFolders =
+                    filterFolders && !folderCache.current.has(folderScope);
+                if (!needsFolders) taskQuery.delete("folders");
+                const openQuery = new URLSearchParams(query);
+                openQuery.delete("folders");
+                openQuery.set("state", "open");
+                const [response, openResponse] = await Promise.all([
+                    fetch(`/api/tasks?${taskQuery}`),
+                    countOpen && state !== "open" && state !== "all"
+                        ? fetch(`/api/tasks?${openQuery}`)
+                        : Promise.resolve(null),
+                ]);
+                if (!response.ok || (openResponse && !openResponse.ok))
+                    throw new Error();
+                const body = (await response.json()) as {
+                    tasks: TaskListItem[];
+                    folderIds?: string[];
+                };
+                const openBody = openResponse
+                    ? ((await openResponse.json()) as { tasks: TaskListItem[] })
+                    : body;
+                if (
+                    query !== currentQuery.current ||
+                    request !== loadRequest.current
+                )
+                    return;
+                for (const id of reconciled) ownInserts.current.delete(id);
+                const inserts = insertedRows();
+                const insertedIds = new Set(inserts.map((task) => task.id));
+                const rows = [
+                    ...inserts,
+                    ...body.tasks.filter((task) => !insertedIds.has(task.id)),
+                ];
+                versions.current = new Map(
+                    rows.map((task) => [task.id, task.version]),
+                );
+                setTasks(rows);
+                if (needsFolders) {
+                    folderCache.current = new Map(folderCache.current).set(
+                        folderScope,
+                        body.folderIds ?? [],
+                    );
+                    setTaskFolders(folderCache.current);
+                }
+                setOpenCount(
+                    openBody.tasks.filter((task) => task.status === "open")
+                        .length,
+                );
+            } catch {
+                if (
+                    query !== currentQuery.current ||
+                    request !== loadRequest.current
+                )
+                    return;
+                setError(true);
+                setTasks(insertedRows());
+                toast.error(i18n("Could not load your tasks"));
+            }
+        },
+        [query, i18n, state, countOpen, filterFolders, folderScope],
+    );
 
     useEffect(() => {
         void revision;
@@ -220,9 +266,16 @@ export function useTaskListData({
     }, [markSeen]);
 
     const reload = useCallback(
-        () => Promise.all([load(), loadAssignees()]),
-        [load, loadAssignees],
+        (options?: { preserveOwnInserts?: boolean }) => {
+            if (query !== currentQuery.current) return Promise.resolve([]);
+            folderCache.current = new Map();
+            setTaskFolders(folderCache.current);
+            return Promise.all([load(options), loadAssignees()]);
+        },
+        [query, load, loadAssignees],
     );
+    const latestReload = useRef(reload);
+    latestReload.current = reload;
 
     useOrgEvents(true, () => void reload());
 
@@ -257,7 +310,11 @@ export function useTaskListData({
                             ) ?? null,
                     );
                 }
-                if (change.assigneePersonId !== undefined) await reload();
+                if (
+                    change.assigneePersonId !== undefined ||
+                    change.folderId !== undefined
+                )
+                    await latestReload.current();
             })
             .catch(async (error: unknown) => {
                 toast.error(
@@ -268,7 +325,7 @@ export function useTaskListData({
                           : i18n("Could not save the task"),
                 );
                 versions.current.clear();
-                await reload();
+                await latestReload.current();
             })
             .finally(() => {
                 if (pending.current.get(task.id) === run) {
@@ -294,10 +351,11 @@ export function useTaskListData({
                 options,
             );
             announceTasksChanged();
-            await reload();
+            await latestReload.current();
             return { ownerNotified: result.mergeOwnerNotified };
         } catch (error) {
-            setTasks(snapshot);
+            if (query === currentQuery.current) setTasks(snapshot);
+            else await latestReload.current();
             showMergeFailure(error);
             return false;
         }
@@ -324,6 +382,8 @@ export function useTaskListData({
                 ? [task, ...remaining]
                 : remaining;
         });
+        if (task && filterFolders)
+            void latestReload.current({ preserveOwnInserts: true });
     };
     const onAdded = (task: TaskListItem) => {
         ownInserts.current.set(task.id, {
@@ -351,6 +411,28 @@ export function useTaskListData({
         onAdded,
         onReconciled,
         folders,
+        filterFolders: filterFolders
+            ? taskFilterFolders(
+                  folders,
+                  [
+                      ...(taskFolders.get(folderScope) ?? []),
+                      ...(tab === "mine" || tab === "all"
+                          ? [...ownInserts.current.values()].flatMap(
+                                ({ task }) =>
+                                    task.folder
+                                        ? [task.folder.id]
+                                        : privateFolders
+                                              .filter(
+                                                  (entry) =>
+                                                      entry.kind === "private",
+                                              )
+                                              .map((entry) => entry.id),
+                            )
+                          : []),
+                  ],
+                  folder === ALL ? undefined : folder,
+              )
+            : [],
         selectedPrivate,
         sortedAssignees,
     };

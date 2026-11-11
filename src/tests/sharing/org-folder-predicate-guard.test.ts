@@ -4,6 +4,8 @@ import { expect, it } from "vitest";
 
 const ROOT = join(__dirname, "../..");
 const ALLOWED: Record<string, string> = {
+    "db/queries/task-list.ts":
+        "Task folder options intersect current task visibility with readable placements, private-folder participation and receiver aliases.",
     "lib/events/visibility.ts":
         "Structural tree events are public; scoped placement and item events retain live audience checks.",
     "lib/folders/access-requests.ts":

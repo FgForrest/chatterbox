@@ -41,7 +41,12 @@ vi.mock("@/components/tasks/routed-proposals-inbox", () => ({
     RoutedProposalsInbox: () => null,
 }));
 vi.mock("@/hooks/use-task-list-data", () => ({
-    useTaskListData: () => ({ tasks: [], folders: [], sortedAssignees: [] }),
+    useTaskListData: () => ({
+        tasks: [],
+        folders: [],
+        filterFolders: [],
+        sortedAssignees: [],
+    }),
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), info: vi.fn() } }));
 
