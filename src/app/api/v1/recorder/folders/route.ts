@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
+import { holderAccess } from "@/lib/authz/access-state";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import {
     createFolderCategorizationCheck,
     listRecordingFolderTrees,
 } from "@/lib/folders/folders";
+import { isIdpAuthorization } from "@/lib/identity/factory";
 import { gateRecordingSessionRequest } from "@/lib/recording-sessions/route-gate";
 import type { RecordingFolder } from "@/types/folder";
 
@@ -52,8 +55,17 @@ export const GET = apiHandler(async (request: Request) => {
             400,
         );
     }
-    const folders = await listRecordingFolderTrees(gate.authn.user.id);
-    const check = createFolderCategorizationCheck(gate.authn.user.id);
+    const authorization = isIdpAuthorization()
+        ? await holderAccess(gate.authn.user.id)
+        : undefined;
+    const curator = authorization
+        ? authorization.ok && authorization.capabilities.has("org.curate")
+        : await userCuratesOrganizationNow(gate.authn.user.id);
+    const folders = await listRecordingFolderTrees(gate.authn.user.id, curator);
+    const check = createFolderCategorizationCheck(
+        gate.authn.user.id,
+        authorization,
+    );
     const allowed = await Promise.all(
         folders.map(async (folder) => {
             try {
@@ -78,6 +90,7 @@ export const GET = apiHandler(async (request: Request) => {
             name: folder.name,
             path: folderPath(folder, byId),
             scope: folder.scope,
+            ...(folder.restricted ? { restricted: true as const } : {}),
             ...(folder.receivedFolder ? { sharedWithPeople: true } : {}),
         }));
 

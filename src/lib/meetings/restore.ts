@@ -11,6 +11,7 @@ import {
     chatterItems,
     meetingAgendas,
     recordingFolderAssignments,
+    recordingFolders,
     recordings,
     recordingTasks,
 } from "@/db/schema";
@@ -19,7 +20,7 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { archivedItemCondition } from "@/lib/export/archive-scope";
 import { archivedMeetingSchema } from "@/lib/export/meetings";
 import { resolveArchiveScope } from "@/lib/export/resolve-archive-scope";
-import { assertCategorizableFolder } from "@/lib/folders/folders";
+import { assertCategorizableFolder, lockOrgTree } from "@/lib/folders/folders";
 import { validatePointTree } from "@/lib/meetings/model";
 
 const id = z.string().min(1).max(255);
@@ -95,6 +96,7 @@ export async function restoreMeetings(
         const skippedTasks: { id: string; reason: string }[] = [];
         try {
             const restoredMeeting = await db.transaction(async (tx) => {
+                await lockOrgTree(tx);
                 validatePointTree(meeting.points);
                 for (const folderId of folders) {
                     const folder = await assertCategorizableFolder(
@@ -274,14 +276,38 @@ export async function restoreMeetings(
                     createdAt: new Date(meeting.createdAt),
                     updatedAt: new Date(meeting.updatedAt),
                 });
-                if (folders.length)
-                    await tx.insert(recordingFolderAssignments).values(
-                        folders.map((folderId) => ({
-                            itemId: meetingItemId,
-                            userId,
-                            folderId,
-                        })),
+                for (const folderId of folders) {
+                    const [folder] = await tx
+                        .select({
+                            restrictedAt: recordingFolders.restrictedAt,
+                            restrictingAt: recordingFolders.restrictingAt,
+                        })
+                        .from(recordingFolders)
+                        .where(eq(recordingFolders.id, folderId));
+                    if (!folder)
+                        throw new AppError(
+                            ErrorCode.NOT_FOUND,
+                            "Mapped folder no longer exists",
+                            404,
+                        );
+                    const placement = meeting.folderPlacements.find(
+                        (placement) =>
+                            input.folderIdMap[placement.folderId] === folderId,
                     );
+                    await tx.insert(recordingFolderAssignments).values({
+                        itemId: meetingItemId,
+                        userId,
+                        folderId,
+                        withheld: !!(
+                            folder.restrictedAt ||
+                            folder.restrictingAt ||
+                            placement?.withheld
+                        ),
+                        releasedAt: placement?.releasedAt
+                            ? new Date(placement.releasedAt)
+                            : null,
+                    });
+                }
                 const pointIds = new Map(
                     meeting.points.map((point) => [point.id, nanoid()]),
                 );

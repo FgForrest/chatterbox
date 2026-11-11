@@ -120,13 +120,13 @@ describeLive("Google Drive export provider (live Drive)", () => {
         ).toBe(true);
     }, 120_000);
 
-    it("trashes an empty folder it created", async () => {
+    it("retains an empty folder when child visibility cannot prove its subtree empty", async () => {
         await provider().reconcileDirectory(null, `${root}/Empty`);
         const empty = await nodes.get(`${root}/Empty`);
         await expect(
             provider().removeEmptyDirectory(`${root}/Empty`),
-        ).resolves.toBe(true);
+        ).resolves.toBe(false);
         const item = await client.getItem(empty?.driveFileId ?? "");
-        expect(item?.trashed).toBe(true);
+        expect(item?.trashed).toBe(false);
     }, 120_000);
 });

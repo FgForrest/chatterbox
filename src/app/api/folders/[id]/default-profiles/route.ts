@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { lockProfileMutation } from "@/db/queries/profile-mutations";
+import { restrictedFolderVisibleCondition } from "@/db/queries/restricted-folders";
 import {
     folderDefaultProfiles,
     processingProfiles,
@@ -79,6 +80,7 @@ async function accessibleFolder(
                 id: recordingFolders.id,
                 ownerUserId: recordingFolders.userId,
                 parentId: recordingFolders.parentId,
+                restrictedAt: recordingFolders.restrictedAt,
             })
             .from(recordingFolders)
             .where(
@@ -92,15 +94,39 @@ async function accessibleFolder(
         const scope =
             organizationUserId === folder.ownerUserId ? "org" : "personal";
         if (scope === "org" && !isOrgScopeEnabled()) throw folderNotFound();
+        let curator = actorUserId === organizationUserId;
         if (scope === "org" && isIdpAuthorization()) {
             const access = await holderAccess(actorUserId);
             if (!access.ok || !access.capabilities.has("use")) {
+                if (folder.restrictedAt) throw folderNotFound();
                 throw new AppError(
                     ErrorCode.FORBIDDEN,
                     "You can no longer use the Organization",
                     403,
                 );
             }
+            curator = access.capabilities.has("org.curate");
+        }
+        if (scope === "org" && folder.restrictedAt) {
+            const [visible] = await db
+                .select({ id: recordingFolders.id })
+                .from(recordingFolders)
+                .where(
+                    and(
+                        eq(recordingFolders.id, folder.id),
+                        restrictedFolderVisibleCondition({
+                            userId: actorUserId,
+                            isCurator: curator,
+                        }),
+                    ),
+                )
+                .limit(1);
+            if (!visible)
+                throw new AppError(
+                    ErrorCode.RESTRICTED_FOLDER_NO_ACCESS,
+                    ErrorCode.RESTRICTED_FOLDER_NO_ACCESS,
+                    403,
+                );
         }
         return { ...folder, scope };
     }

@@ -317,7 +317,10 @@ describeWithDatabase(
             ).rejects.toThrow();
         });
 
-        it("takes the recording and everything on it when its item goes", async () => {
+        it("deletes the recording and content children while retaining durable export cleanup when its item goes", async () => {
+            await db().execute(
+                sql`UPDATE folder_export_materializations SET revocation_pending = true WHERE id = 'm1' AND user_id = 'u1'`,
+            );
             await db().execute(sql`DELETE FROM chatter_items WHERE id = 'r1'`);
             const rows = await db().execute<{ n: number }>(
                 sql`SELECT count(*)::int AS n FROM recordings WHERE id = 'r1'`,
@@ -327,8 +330,19 @@ describeWithDatabase(
                 const left = await db().execute<{ n: number }>(
                     sql`SELECT count(*)::int AS n FROM ${sql.identifier(table)} WHERE recording_id = 'r1'`,
                 );
-                expect(left[0]?.n, table).toBe(0);
+                expect(left[0]?.n, table).toBe(
+                    table === "folder_export_materializations" ? 1 : 0,
+                );
             }
+            const cleanup = await db().execute<{
+                recording_id: string;
+                revocation_pending: boolean;
+            }>(
+                sql`SELECT recording_id, revocation_pending FROM folder_export_materializations WHERE id = 'm1' AND user_id = 'u1'`,
+            );
+            expect(cleanup).toMatchObject([
+                { recording_id: "r1", revocation_pending: true },
+            ]);
         });
     },
 );

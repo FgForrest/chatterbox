@@ -873,6 +873,8 @@ export const recordingFolders = pgTable(
             .notNull()
             .default("custom"),
         sortOrder: integer("sort_order").notNull().default(0),
+        restrictedAt: timestamp("restricted_at"),
+        restrictingAt: timestamp("restricting_at"),
         // Optimistic lock for Organization folders, which several people
         // edit at once. Bumped on every rename and move.
         version: integer("version").notNull().default(0),
@@ -898,6 +900,79 @@ export const recordingFolders = pgTable(
         rootKindUnique: uniqueIndex("recording_folders_user_root_kind_unique")
             .on(table.userId, table.kind)
             .where(sql`${table.kind} in ('private', 'public')`),
+    }),
+);
+
+export const restrictedFolderMembers = pgTable(
+    "restricted_folder_members",
+    {
+        folderId: text("folder_id")
+            .notNull()
+            .references(() => recordingFolders.id, { onDelete: "cascade" }),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        role: text("role")
+            .$type<"manager" | "member">()
+            .notNull()
+            .default("member"),
+        addedByUserId: text("added_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        pk: primaryKey({ columns: [table.folderId, table.userId] }),
+        userIdx: index("restricted_folder_members_user_idx").on(table.userId),
+        roleCheck: check(
+            "restricted_folder_members_role_check",
+            sql`${table.role} in ('manager', 'member')`,
+        ),
+    }),
+);
+
+export const restrictedFolderAccessRequests = pgTable(
+    "restricted_folder_access_requests",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        folderId: text("folder_id")
+            .notNull()
+            .references(() => recordingFolders.id, { onDelete: "cascade" }),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        state: text("state")
+            .$type<"pending" | "approved" | "declined" | "cancelled">()
+            .notNull()
+            .default("pending"),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        decidedByUserId: text("decided_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        decidedAt: timestamp("decided_at"),
+        noticeReadAt: timestamp("notice_read_at"),
+    },
+    (table) => ({
+        pendingUnique: uniqueIndex(
+            "restricted_folder_access_requests_pending_unique",
+        )
+            .on(table.folderId, table.userId)
+            .where(sql`${table.state} = 'pending'`),
+        pendingFolderIdx: index(
+            "restricted_folder_access_requests_pending_folder_idx",
+        )
+            .on(table.folderId, table.createdAt)
+            .where(sql`${table.state} = 'pending'`),
+        userIdx: index("restricted_folder_access_requests_user_idx").on(
+            table.userId,
+            table.createdAt,
+        ),
+        stateCheck: check(
+            "restricted_folder_access_requests_state_check",
+            sql`${table.state} in ('pending', 'approved', 'declined', 'cancelled')`,
+        ),
     }),
 );
 
@@ -1108,6 +1183,8 @@ export const recordingFolderAssignments = pgTable(
         folderId: text("folder_id")
             .notNull()
             .references(() => recordingFolders.id, { onDelete: "cascade" }),
+        withheld: boolean("withheld").notNull().default(false),
+        releasedAt: timestamp("released_at"),
         createdAt: timestamp("created_at").notNull().defaultNow(),
     },
     (table) => ({
@@ -1393,12 +1470,9 @@ export const folderExportMaterializations = pgTable(
             .references(() => folderExportConfigurations.id, {
                 onDelete: "cascade",
             }),
-        itemId: text("recording_id")
-            .notNull()
-            .references(() => chatterItems.id, { onDelete: "cascade" }),
-        placementFolderId: text("placement_folder_id")
-            .notNull()
-            .references(() => recordingFolders.id, { onDelete: "cascade" }),
+        // Revocation obligations must survive deletion of the original item or folder.
+        itemId: text("recording_id").notNull(),
+        placementFolderId: text("placement_folder_id").notNull(),
         // A mail is two artifacts: its message as it arrived (`mail`) and
         // a Markdown document of it rendered when written (`mail_document`).
         artifactType: varchar("artifact_type", { length: 16 })
@@ -1416,6 +1490,9 @@ export const folderExportMaterializations = pgTable(
         logicalPath: text("logical_path").notNull(),
         expectedSize: bigint("expected_size", { mode: "number" }).notNull(),
         expected: boolean("expected").notNull().default(true),
+        revocationPending: boolean("revocation_pending")
+            .notNull()
+            .default(false),
         status: varchar("status", { length: 16 })
             .$type<"pending" | "in_progress" | "exported" | "failed">()
             .notNull()

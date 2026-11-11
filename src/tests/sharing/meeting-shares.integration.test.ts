@@ -120,7 +120,8 @@ vi.mock("@/db/queries/meetings", async (original) => {
         findMeeting: async (...args: Parameters<typeof actual.findMeeting>) => {
             if (arrivalPause.run && args[4] && ++arrivalPause.calls === 2)
                 await arrivalPause.run();
-            return actual.findMeeting(...args);
+            const [userId, orgUserId, id, ...options] = args;
+            return actual.findMeeting(userId, orgUserId, id, ...options);
         },
     };
 });

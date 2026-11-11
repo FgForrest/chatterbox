@@ -1121,6 +1121,13 @@
       "when": 1794246524183,
       "tag": "0159_agenda_task_group_order",
       "breakpoints": true
+    },
+    {
+      "idx": 160,
+      "version": "7",
+      "when": 1794340699564,
+      "tag": "0160_restricted_folders",
+      "breakpoints": true
     }
   ]
 }

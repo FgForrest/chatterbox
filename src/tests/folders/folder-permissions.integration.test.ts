@@ -101,6 +101,7 @@ vi.mock("@/lib/auth-server", () => ({
     },
 }));
 vi.mock("@/lib/authz/curator", () => ({
+    userCuratesOrganizationNow: async (userId: string) => userId === "curator",
     actsForOrganization: async (actor: ActorContext) =>
         actor.kind === "user" && actor.capabilities.has("org.curate"),
 }));

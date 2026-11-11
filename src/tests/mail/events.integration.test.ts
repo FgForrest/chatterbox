@@ -56,6 +56,7 @@ vi.mock("@/lib/mail/raw-storage", () => ({
 }));
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
 vi.mock("@/lib/pipeline/arrival", () => ({
+    lockArrivalOrganizationTree: vi.fn().mockResolvedValue(undefined),
     requestArrivalInTx: refs.arrival,
     resolveArrivalProfile: vi.fn().mockResolvedValue(null),
 }));

@@ -1,5 +1,6 @@
 import { and, eq, type SQL } from "drizzle-orm";
 import { db } from "@/db";
+import { restrictedFolderVisibleCondition } from "@/db/queries/restricted-folders";
 import {
     filesystemExportSettings,
     folderExportConfigurations,
@@ -7,6 +8,8 @@ import {
     recordingFolders,
     users,
 } from "@/db/schema";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { resolveReadableFolder } from "@/lib/folders/folders";
 import type {
     FolderExportConfigurationDto,
@@ -180,6 +183,16 @@ export async function listOrganizationExportTargets(
     folderId: string,
 ): Promise<ExportTarget[]> {
     const access = await resolveReadableFolder(userId, folderId);
-    if (access?.scope !== "org") return [];
-    return selectTargets(eq(recordingFolders.userId, access.ownerId));
+    if (!access)
+        throw new AppError(ErrorCode.NOT_FOUND, ErrorCode.NOT_FOUND, 404);
+    if (access.scope !== "org") return [];
+    return selectTargets(
+        and(
+            eq(recordingFolders.userId, access.ownerId),
+            restrictedFolderVisibleCondition({
+                userId,
+                isCurator: await userCuratesOrganizationNow(userId),
+            }),
+        ),
+    );
 }

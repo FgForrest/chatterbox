@@ -1,5 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import type { db } from "@/db";
+import {
+    dropReleasedAudienceInTx,
+    notifyRestrictedAudienceInTx,
+    placementReleaseTimeInTx,
+} from "@/db/queries/restricted-folders";
 import { mailPendingShares, recordingFolderAssignments } from "@/db/schema";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { publishKnowledgeInTx } from "@/lib/knowledge/share-knowledge";
@@ -41,14 +46,30 @@ export async function shareMailInTx(
         input.orgUserId,
         tx,
     );
+    const releasedAt = await placementReleaseTimeInTx(
+        tx,
+        input.ownerUserId,
+        input.itemId,
+        input.orgUserId,
+    );
     await tx
         .insert(recordingFolderAssignments)
         .values({
             userId: input.ownerUserId,
             itemId: input.itemId,
             folderId: input.folderId,
+            releasedAt,
         })
-        .onConflictDoNothing();
+        .onConflictDoUpdate({
+            target: [
+                recordingFolderAssignments.itemId,
+                recordingFolderAssignments.folderId,
+            ],
+            set: { withheld: false, releasedAt },
+            setWhere: eq(recordingFolderAssignments.withheld, true),
+        });
+    await notifyRestrictedAudienceInTx(tx, input.folderId);
+    await dropReleasedAudienceInTx(tx, input.folderId);
     await tx
         .delete(mailPendingShares)
         .where(

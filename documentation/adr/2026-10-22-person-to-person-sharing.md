@@ -1,7 +1,7 @@
 ---
 title: Private recordings and mail reach colleagues only through accepted invitations, separately from Organization sharing
 date: 2026-10-22
-updated: 2026-11-10 10:20
+updated: 2026-11-10 11:00
 status: superseded
 kind: feature
 issues: [260]
@@ -9,7 +9,7 @@ prs: [262, 265]
 areas: [src/lib/sharing, src/db/queries/item-shares.ts, src/db/queries/task-visibility.ts, src/components/sharing, src/lib/mcp, src/lib/export, src/db/schema.ts]
 supersedes: [2026-10-07-tasks-from-summaries]
 superseded-by: [2026-10-27-shared-folders-are-two-way, 2026-11-10-shared-folders-have-no-subfolders]
-relates: [2026-09-23-shared-organization-scope, 2026-10-07-backup-scope, 2026-10-31-share-acceptance-with-existing-folder-access, 2026-11-08-meeting-agendas-shared-with-people]
+relates: [2026-09-23-shared-organization-scope, 2026-10-07-backup-scope, 2026-10-31-share-acceptance-with-existing-folder-access, 2026-11-08-meeting-agendas-shared-with-people, 2026-11-10-restricted-organization-folders]
 ---
 
 # Private recordings and mail reach colleagues only through accepted invitations, separately from Organization sharing
@@ -86,6 +86,9 @@ Use versioned direct invitations with pending, accepted, declined and removed st
 - General archive import remains separate work. The item and folder share restore endpoints are available for importers and report skipped entries rather than creating accounts or silently granting access.
 
 ## Related work
+
+- [Shared folders have no subfolders](2026-11-10-shared-folders-have-no-subfolders.md): supersedes allowing children beneath person-shared folders; direct-only access remains.
+- [Restricted Organization folders](2026-11-10-restricted-organization-folders.md): Organization-owned antechambers reuse receiver rights without publishing withheld content.
 
 - [Agendas shared with people](2026-11-08-meeting-agendas-shared-with-people.md) extends accepted direct invitations to agendas, preserving independent access paths and receiver filing.
 

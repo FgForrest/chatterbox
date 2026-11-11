@@ -1,7 +1,9 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { isItemReceived } from "@/db/queries/item-shares";
+import { withheldItemCondition } from "@/db/queries/restricted-folders";
 import { type ContentItemKind, chatterItems, recordings } from "@/db/schema";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { getOrgUserId } from "@/lib/org/config";
 import { isRecordingShared } from "@/lib/sharing/shared";
@@ -59,17 +61,35 @@ export interface AccessOptions {
 async function findItem(
     itemId: string,
     kinds: readonly ContentItemKind[] | undefined,
-): Promise<{ userId: string; kind: ContentItemKind } | null> {
+): Promise<{
+    userId: string;
+    kind: ContentItemKind;
+    restricted?: boolean;
+} | null> {
     if (!kinds || (kinds.length === 1 && kinds[0] === "audio")) {
         const [recording] = await db
-            .select({ id: recordings.id, userId: recordings.userId })
+            .select({
+                id: recordings.id,
+                userId: recordings.userId,
+                restricted: sql<boolean>`${withheldItemCondition(recordings.id)}`,
+            })
             .from(recordings)
             .where(and(eq(recordings.id, itemId), isNull(recordings.deletedAt)))
             .limit(1);
-        return recording ? { userId: recording.userId, kind: "audio" } : null;
+        return recording
+            ? {
+                  userId: recording.userId,
+                  kind: "audio",
+                  restricted: recording.restricted,
+              }
+            : null;
     }
     const [item] = await db
-        .select({ userId: chatterItems.userId, kind: chatterItems.kind })
+        .select({
+            userId: chatterItems.userId,
+            kind: chatterItems.kind,
+            restricted: sql<boolean>`${withheldItemCondition()}`,
+        })
         .from(chatterItems)
         .where(
             and(
@@ -113,7 +133,13 @@ export async function resolveRecordingAccess(
             orgUserId,
         };
     }
-    const received = await isItemReceived(userId, recordingId);
+    const received = await isItemReceived(
+        userId,
+        recordingId,
+        !shared && recording.restricted === true
+            ? await userCuratesOrganizationNow(userId)
+            : false,
+    );
     if (!shared && !received) return null;
     return {
         recordingId,

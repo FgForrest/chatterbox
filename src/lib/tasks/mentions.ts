@@ -96,7 +96,7 @@ export function taskMentionVisible(
         eq(item.userId, mention.userId),
         isNull(item.deletedAt),
         viewer.isOrg
-            ? organization
+            ? or(organization, taskReceived(viewer, item))
             : or(own, organization, taskReceived(viewer, item)),
     ) as SQL;
 }
@@ -612,6 +612,8 @@ async function moveItemTaskHomesInTx(tx: Tx, input: MoveInput): Promise<void> {
             .where(
                 and(
                     eq(recordingFolders.userId, input.orgUserId),
+                    eq(recordingFolderAssignments.withheld, false),
+                    isNull(recordingFolders.restrictedAt),
                     inArray(recordingFolderAssignments.itemId, itemIds),
                 ),
             );

@@ -13,11 +13,14 @@ import {
     receivedItemCondition,
     receivedThroughFolderCondition,
 } from "@/db/queries/item-shares";
+import { placementVisibleCondition } from "@/db/queries/restricted-folders";
 import {
     itemShares,
     recordingFolderAssignments,
+    recordingFolders,
     recordings,
 } from "@/db/schema";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { listFolderOrganization } from "@/lib/folders/folders";
 import { descendantFolderIds } from "@/lib/folders/hierarchy";
 import type { FolderOrganization } from "@/types/folder";
@@ -36,6 +39,7 @@ export function folderRecordingCondition(
         id: recordings.id,
         userId: recordings.userId,
     },
+    isCurator = false,
 ): SQL | null {
     const folder = organization.folders.find((entry) => entry.id === folderId);
     if (!folder) return null;
@@ -72,17 +76,24 @@ export function folderRecordingCondition(
     if (folder.kind === "private")
         return or(
             eq(item.userId, userId),
-            receivedItemCondition(userId, item.id),
+            receivedItemCondition(userId, item.id, isCurator),
         ) as SQL;
     const ids = [...descendantFolderIds(organization.folders, folderId)];
     const owned = exists(
         db
             .select({ one: sql`1` })
             .from(recordingFolderAssignments)
+            .innerJoin(
+                recordingFolders,
+                eq(recordingFolders.id, recordingFolderAssignments.folderId),
+            )
             .where(
                 and(
                     eq(recordingFolderAssignments.itemId, item.id),
                     inArray(recordingFolderAssignments.folderId, ids),
+                    folder.scope === "org"
+                        ? placementVisibleCondition({ userId, isCurator })
+                        : undefined,
                 ),
             ),
     );
@@ -96,7 +107,7 @@ export function folderRecordingCondition(
             receivedThroughFolderCondition(userId, item.id, entry.id),
         ),
         and(
-            receivedItemCondition(userId, item.id),
+            receivedItemCondition(userId, item.id, isCurator),
             exists(
                 db
                     .select({ one: sql`1` })
@@ -125,7 +136,12 @@ export async function folderCondition(
 ): Promise<SQL> {
     const organization = await listFolderOrganization(userId);
     return (
-        folderRecordingCondition(organization, userId, folderId, item) ??
-        sql`false`
+        folderRecordingCondition(
+            organization,
+            userId,
+            folderId,
+            item,
+            await userCuratesOrganizationNow(userId),
+        ) ?? sql`false`
     );
 }

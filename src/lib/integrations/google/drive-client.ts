@@ -56,6 +56,8 @@ export interface DriveItemPatch {
 export interface DriveClient {
     /** The item, or null when it does not exist or is not visible. */
     getItem(id: string): Promise<DriveItem | null>;
+    /** Whether a visible non-trashed child remains, including files without the export tag. */
+    hasChildren(parentId: string): Promise<boolean>;
     /** Every non-trashed item visible to the app carrying the property. */
     listByAppProperty(property: DriveAppProperty): Promise<DriveItem[]>;
     /** A non-trashed child of `parentId` named `name` carrying the property. */
@@ -241,6 +243,15 @@ export class FetchDriveClient implements DriveClient {
         if (response.status === 404) return null;
         if (!response.ok) throw await driveError(response);
         return toItem((await response.json()) as RawDriveItem);
+    }
+
+    async hasChildren(parentId: string): Promise<boolean> {
+        const children = await this.list(
+            `${driveQueryString(parentId)} in parents and trashed = false`,
+            1,
+            false,
+        );
+        return children.length > 0;
     }
 
     listByAppProperty(property: DriveAppProperty): Promise<DriveItem[]> {

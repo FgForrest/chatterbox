@@ -18,8 +18,15 @@ import {
     bumpAgendaInTx,
     publishAgendaEventInTx,
 } from "@/db/queries/agenda-events";
-import { hasVisibleAgendaSources } from "@/db/queries/agenda-source-visibility";
+import {
+    hasVisibleAgendaSources,
+    loadAgendaSourceVisibility,
+} from "@/db/queries/agenda-source-visibility";
 import { notifyFolderReceiversInTx } from "@/db/queries/item-shares";
+import {
+    meetingAudienceWithin,
+    meetingItemAudienceInTx,
+} from "@/db/queries/meeting-audience";
 import {
     receivedMeetingFilings,
     receivedMeetingShares,
@@ -31,6 +38,11 @@ import {
     meetingFolders,
     meetingVisibility,
 } from "@/db/queries/meetings";
+import { agendaInputItemCondition } from "@/db/queries/restricted-agenda-sources";
+import {
+    placementVisibleCondition,
+    withheldItemCondition,
+} from "@/db/queries/restricted-folders";
 import {
     ANY_TASK_ITEM,
     type TaskViewer,
@@ -62,6 +74,7 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import {
     assertCategorizableFolder,
     lockCategorizableFolderInTx,
+    lockOrgTree,
     removeRecordingFromFolder,
     shareItemToOrganizationFolderInTx,
 } from "@/lib/folders/folders";
@@ -110,6 +123,7 @@ import {
     replaceAgendaTextInTx,
 } from "@/lib/meetings/text-documents";
 import { listVisibleItemFolders } from "@/lib/sharing/person-shares";
+import { sharedItemCondition } from "@/lib/sharing/shared";
 import { taskViewerById } from "@/lib/tasks/access";
 import { getVisibleTasks } from "@/lib/tasks/tasks";
 
@@ -154,9 +168,11 @@ async function editMeeting<T>(
     mode: "edit" | "manage",
     run: (tx: MeetingTx, access: Access) => Promise<T>,
     participant = false,
+    serializeSources = false,
 ): Promise<T> {
     const viewer = await meetingViewer(userId);
     return db.transaction(async (tx) => {
+        if (serializeSources) await lockOrgTree(tx);
         const access = await requireMeetingAccess(userId, id, mode, {
             viewer,
             executor: tx,
@@ -199,7 +215,15 @@ async function snapshotTasks(
                 and(
                     eq(chatterItems.id, sourceId),
                     eq(chatterItems.kind, "audio"),
-                    meetingVisibility(viewer.userId, viewer.orgUserId),
+                    meetingVisibility(
+                        viewer.userId,
+                        viewer.orgUserId,
+                        chatterItems,
+                        viewer.isCurator,
+                    ),
+                    agendaInputItemCondition(
+                        agenda.meetingItemId ?? agenda.recordingItemId ?? "",
+                    ),
                 ),
             );
         if (!source) invalid("Task source is not a visible recording");
@@ -210,7 +234,15 @@ async function snapshotTasks(
             .innerJoin(recordings, eq(recordings.id, chatterItems.id))
             .where(
                 and(
-                    meetingVisibility(viewer.userId, viewer.orgUserId),
+                    meetingVisibility(
+                        viewer.userId,
+                        viewer.orgUserId,
+                        chatterItems,
+                        viewer.isCurator,
+                    ),
+                    agendaInputItemCondition(
+                        agenda.meetingItemId ?? agenda.recordingItemId ?? "",
+                    ),
                     agenda.plannedStart
                         ? sql`${chatterItems.occurredAt} < ${agenda.plannedStart.toISOString()}::timestamp`
                         : undefined,
@@ -241,6 +273,9 @@ async function snapshotTasks(
             and(
                 inArray(recordingTasks.status, ["open", "done"]),
                 taskVisible(viewer, ANY_TASK_ITEM, true),
+                agendaInputItemCondition(
+                    agenda.meetingItemId ?? agenda.recordingItemId ?? "",
+                ),
                 or(
                     sourceId ? eq(recordingTasks.itemId, sourceId) : sql`false`,
                     sourceId
@@ -344,6 +379,7 @@ async function carryOverInFolders(
         .where(
             and(
                 meetingVisibility(userId, orgUserId),
+                agendaInputItemCondition(access.item.id),
                 ne(meetingAgendas.id, access.agenda.id),
                 or(
                     eq(meetingAgendas.state, "held"),
@@ -389,8 +425,52 @@ async function carryOverInFolders(
                 eq(agendaSuggestions.userId, access.agenda.userId),
             ),
         );
+    const referencedItems = [
+        ...new Set(points.flatMap((point) => point.sources?.itemIds ?? [])),
+    ];
+    const referencedTasks = [
+        ...new Set(points.flatMap((point) => point.sources?.taskIds ?? [])),
+    ];
+    const taskSources = referencedTasks.length
+        ? await tx
+              .select({ id: recordingTasks.id, itemId: recordingTasks.itemId })
+              .from(recordingTasks)
+              .where(inArray(recordingTasks.id, referencedTasks))
+        : [];
+    const sourceIds = [
+        ...new Set([
+            ...referencedItems,
+            ...taskSources.flatMap((task) =>
+                task.itemId ? [task.itemId] : [],
+            ),
+        ]),
+    ];
+    const allowedSources = new Set(
+        sourceIds.length
+            ? (
+                  await tx
+                      .select({ id: chatterItems.id })
+                      .from(chatterItems)
+                      .where(
+                          and(
+                              inArray(chatterItems.id, sourceIds),
+                              agendaInputItemCondition(access.item.id),
+                          ),
+                      )
+              ).map((item) => item.id)
+            : [],
+    );
     const offered = points.filter(
         (point) =>
+            (point.sources?.itemIds ?? []).every((id) =>
+                allowedSources.has(id),
+            ) &&
+            (point.sources?.taskIds ?? []).every((id) => {
+                const task = taskSources.find((task) => task.id === id);
+                return (
+                    task && (!task.itemId || allowedSources.has(task.itemId))
+                );
+            }) &&
             !existing.some(
                 (suggestion) => suggestion.originPointId === point.id,
             ),
@@ -498,6 +578,7 @@ export async function prepareMeeting(
     if (end && (!start || end <= start))
         invalid("Meeting end must follow its start");
     const result = await db.transaction(async (tx) => {
+        if (viewer.orgUserId) await lockOrgTree(tx);
         if (event) {
             await lockMeetingEvent(tx, event.id);
             const [existing] = await listMeetingRows(
@@ -507,6 +588,7 @@ export async function prepareMeeting(
                     calendarEventId: event.id,
                     includePast: true,
                     includeAbsorbed: true,
+                    isCurator: viewer.curator,
                 },
                 tx,
             );
@@ -543,6 +625,7 @@ export async function prepareMeeting(
                 itemId,
                 folderId: folder.folderId,
                 orgUserId: folder.ownerId,
+                canReadRestricted: viewer.curator,
             });
         else
             await tx
@@ -568,8 +651,12 @@ export async function listMeetings(
     input: Parameters<typeof listMeetingRows>[2] = {},
 ) {
     const viewer = await meetingViewer(userId);
+    if (input?.isCurator !== undefined) viewer.curator = input.isCurator;
     const [rows, navigation] = await Promise.all([
-        listMeetingRows(userId, viewer.orgUserId, input),
+        listMeetingRows(userId, viewer.orgUserId, {
+            ...input,
+            isCurator: input?.isCurator ?? viewer.curator,
+        }),
         meetingFolderNavigation(userId, viewer.orgUserId),
     ]);
     const attachedIds = rows.flatMap(({ agenda }) =>
@@ -595,6 +682,24 @@ export async function listMeetings(
                   )
                   .where(
                       and(
+                          input?.organizationOnly
+                              ? and(
+                                    viewer.orgUserId
+                                        ? eq(
+                                              recordingFolders.userId,
+                                              viewer.orgUserId,
+                                          )
+                                        : sql`false`,
+                                    eq(
+                                        recordingFolderAssignments.withheld,
+                                        false,
+                                    ),
+                                    isNull(recordingFolders.restrictedAt),
+                                )
+                              : placementVisibleCondition({
+                                    userId,
+                                    isCurator: viewer.curator,
+                                }),
                           inArray(
                               recordingFolderAssignments.itemId,
                               rows.flatMap(({ agenda }) =>
@@ -651,7 +756,16 @@ export async function listMeetings(
                   .where(
                       and(
                           inArray(chatterItems.id, attachedIds),
-                          meetingVisibility(userId, viewer.orgUserId),
+                          input?.organizationOnly
+                              ? viewer.orgUserId
+                                  ? sharedItemCondition(viewer.orgUserId)
+                                  : sql`false`
+                              : meetingVisibility(
+                                    userId,
+                                    viewer.orgUserId,
+                                    chatterItems,
+                                    viewer.curator,
+                                ),
                       ),
                   )
             : [],
@@ -661,12 +775,19 @@ export async function listMeetings(
         agenda.meetingItemId ? [agenda.meetingItemId] : [],
     );
     const [filings, receipts] = await Promise.all([
-        receivedMeetingFilings(userId, itemIds),
-        receivedMeetingShares(userId, itemIds),
+        input?.organizationOnly ? [] : receivedMeetingFilings(userId, itemIds),
+        input?.organizationOnly ? [] : receivedMeetingShares(userId, itemIds),
     ]);
+    const publishedOriginalIds = new Set(
+        folders.map((folder) => folder.itemId),
+    );
     return rows.map(({ agenda, item, counts, authorName }) => ({
         id: agenda.id,
-        meetingItemId: agenda.meetingItemId,
+        meetingItemId:
+            input?.organizationOnly &&
+            !publishedOriginalIds.has(agenda.meetingItemId ?? "")
+                ? null
+                : agenda.meetingItemId,
         recordingItemId:
             agenda.recordingItemId &&
             visibleRecordingIds.has(agenda.recordingItemId)
@@ -731,8 +852,22 @@ export async function getMeeting(
     id: string,
     since?: number | string,
     webContext = false,
+    serviceAccount = false,
 ) {
-    const access = await requireMeetingAccess(userId, id);
+    const meetingPrincipal = await meetingViewer(userId);
+    if (serviceAccount) meetingPrincipal.curator = false;
+    const access = await requireMeetingAccess(userId, id, "view", {
+        viewer: meetingPrincipal,
+        organizationOnly: serviceAccount,
+    });
+    if (serviceAccount && !access.shared)
+        throw new AppError(ErrorCode.NOT_FOUND, ErrorCode.NOT_FOUND, 404);
+    if (serviceAccount) {
+        since = undefined;
+        access.permissions.edit = false;
+        access.permissions.manage = false;
+    }
+
     let { agenda } = access;
     const { item } = access;
     const presence = await agendaRecordingBy(userId, agenda.id);
@@ -853,23 +988,47 @@ export async function getMeeting(
             )
             .orderBy(asc(agendaSuggestions.createdAt)),
         agenda.meetingItemId
-            ? meetingFolders(db, agenda.meetingItemId, agenda.userId)
+            ? meetingFolders(
+                  db,
+                  agenda.meetingItemId,
+                  agenda.userId,
+                  serviceAccount
+                      ? and(
+                            access.viewer.orgUserId
+                                ? eq(
+                                      recordingFolders.userId,
+                                      access.viewer.orgUserId,
+                                  )
+                                : sql`false`,
+                            eq(recordingFolderAssignments.withheld, false),
+                            isNull(recordingFolders.restrictedAt),
+                        )
+                      : placementVisibleCondition({
+                            userId,
+                            isCurator: access.viewer.curator,
+                        }),
+              )
             : [],
         taskViewerById(userId).then((value) => ({
             ...value,
-            includeReceived: true,
+            includeReceived: !serviceAccount,
+            ...(serviceAccount ? { isCurator: false, isOrg: true } : {}),
         })),
         readMeetingCalendarSnapshot(agenda),
         meetingFolderNavigation(userId, access.viewer.orgUserId),
-        receivedMeetingShares(
-            userId,
-            agenda.meetingItemId ? [agenda.meetingItemId] : [],
-        ),
-        receivedMeetingFilings(
-            userId,
-            agenda.meetingItemId ? [agenda.meetingItemId] : [],
-        ),
-        agenda.userId !== userId
+        serviceAccount
+            ? []
+            : receivedMeetingShares(
+                  userId,
+                  agenda.meetingItemId ? [agenda.meetingItemId] : [],
+              ),
+        serviceAccount
+            ? []
+            : receivedMeetingFilings(
+                  userId,
+                  agenda.meetingItemId ? [agenda.meetingItemId] : [],
+              ),
+        !serviceAccount && agenda.userId !== userId
             ? listVisibleItemFolders(
                   userId,
                   agenda.meetingItemId ? [agenda.meetingItemId] : [],
@@ -883,21 +1042,26 @@ export async function getMeeting(
                       and(
                           eq(chatterItems.id, agenda.meetingItemId),
                           eq(chatterItems.userId, agenda.userId),
+                          serviceAccount
+                              ? access.viewer.orgUserId
+                                  ? sharedItemCondition(access.viewer.orgUserId)
+                                  : sql`false`
+                              : undefined,
                       ),
                   )
             : [],
     ]);
     const suggestionTaskIds = [
         ...new Set(
-            suggestions.flatMap(
-                (suggestion) => suggestion.sources?.taskIds ?? [],
+            [...suggestions, ...points].flatMap(
+                (entry) => entry.sources?.taskIds ?? [],
             ),
         ),
     ];
     const sourceItemIds = [
         ...new Set([
-            ...suggestions.flatMap(
-                (suggestion) => suggestion.sources?.itemIds ?? [],
+            ...[...suggestions, ...points].flatMap(
+                (entry) => entry.sources?.itemIds ?? [],
             ),
             ...[agenda.taskSourceItemId, agenda.snapshotSourceItemId].filter(
                 (id): id is string => id !== null,
@@ -916,7 +1080,13 @@ export async function getMeeting(
                   .where(
                       and(
                           inArray(chatterItems.id, sourceItemIds),
-                          meetingVisibility(userId, access.viewer.orgUserId),
+                          meetingVisibility(
+                              userId,
+                              access.viewer.orgUserId,
+                              chatterItems,
+                              access.viewer.curator,
+                              serviceAccount,
+                          ),
                       ),
                   )
             : [],
@@ -1013,7 +1183,13 @@ export async function getMeeting(
                               folders.map((folder) => folder.id),
                           ),
                           eq(chatterItems.kind, "audio"),
-                          meetingVisibility(userId, access.viewer.orgUserId),
+                          meetingVisibility(
+                              userId,
+                              access.viewer.orgUserId,
+                              chatterItems,
+                              access.viewer.curator,
+                              serviceAccount,
+                          ),
                       ),
                   )
             : [],
@@ -1026,6 +1202,7 @@ export async function getMeeting(
                                   itemId: standaloneItemId,
                                   ownerUserId: agenda.userId,
                                   actorUserId: userId,
+                                  isCurator: access.viewer.curator,
                                   orgUserId: access.viewer.orgUserId,
                                   folderIds: folders.map((folder) => folder.id),
                               })
@@ -1037,6 +1214,16 @@ export async function getMeeting(
     const tree = points
         .map((point) => ({
             ...readPoint(point),
+            originPointId:
+                serviceAccount &&
+                (!point.sources ||
+                    !hasVisibleAgendaSources(
+                        point.sources,
+                        visibleItems,
+                        visibleTasks,
+                    ))
+                    ? null
+                    : point.originPointId,
             summaryOutcome:
                 agenda.recordingItemId && !access.recordingVisible
                     ? null
@@ -1060,6 +1247,12 @@ export async function getMeeting(
     return {
         unchanged: false as const,
         ...publicAgenda,
+        meetingItemId:
+            serviceAccount &&
+            agenda.meetingItemId !== item.id &&
+            !originalItems.length
+                ? null
+                : agenda.meetingItemId,
         taskGroupOrder: projectAgendaTaskGroupOrder(
             storedGroupOrder,
             taskGroups,
@@ -1412,6 +1605,7 @@ export async function patchMeeting(
                         calendarEventId: event.id,
                         includePast: true,
                         includeAbsorbed: true,
+                        isCurator: access.viewer.curator,
                     },
                     tx,
                 );
@@ -1928,6 +2122,11 @@ export async function addAgendaTasks(
                   .where(
                       and(
                           inArray(recordingTasks.id, taskIds),
+                          agendaInputItemCondition(
+                              agenda.meetingItemId ??
+                                  agenda.recordingItemId ??
+                                  "",
+                          ),
                           olderTaskCondition(
                               viewer,
                               folders.map((folder) => folder.id),
@@ -2119,66 +2318,157 @@ export async function decideSuggestion(
     suggestionId: string,
     state: "added" | "dismissed",
 ) {
-    await editMeeting(userId, id, "edit", async (tx, { agenda }) => {
-        const [suggestion] = await tx
-            .select()
-            .from(agendaSuggestions)
-            .where(
-                and(
-                    eq(agendaSuggestions.id, suggestionId),
-                    eq(agendaSuggestions.agendaId, agenda.id),
-                    eq(agendaSuggestions.userId, agenda.userId),
-                ),
-            );
-        if (!suggestion)
-            throw new AppError(
-                ErrorCode.NOT_FOUND,
-                "Suggestion not found",
-                404,
-            );
-        if (suggestion.state !== "open") return;
-        if (state === "added") {
-            const points = await tx
+    const viewer = { ...(await taskViewerById(userId)), includeReceived: true };
+    await editMeeting(
+        userId,
+        id,
+        "edit",
+        async (tx, { agenda, item }) => {
+            const [suggestion] = await tx
                 .select()
-                .from(agendaPoints)
-                .where(pointWhere(agenda));
-            const point = {
-                id: nanoid(),
-                parentId: points.some(
-                    (entry) => entry.id === suggestion.parentPointId,
-                )
-                    ? suggestion.parentPointId
-                    : null,
-                position: points.length,
-            };
-            try {
-                validatePointTree([...points, point]);
-            } catch {
-                point.parentId = null;
+                .from(agendaSuggestions)
+                .where(
+                    and(
+                        eq(agendaSuggestions.id, suggestionId),
+                        eq(agendaSuggestions.agendaId, agenda.id),
+                        eq(agendaSuggestions.userId, agenda.userId),
+                    ),
+                );
+            if (!suggestion)
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "Suggestion not found",
+                    404,
+                );
+            if (suggestion.state !== "open") return;
+            if (state === "added") {
+                const visible = await loadAgendaSourceVisibility(
+                    viewer,
+                    [suggestion.sources],
+                    item.id,
+                    tx,
+                );
+                if (!visible(suggestion.sources))
+                    throw new AppError(
+                        ErrorCode.STALE_AGENDA_SUGGESTION,
+                        "Suggestion sources changed",
+                        409,
+                        { reason: "stale_suggestion_sources" },
+                    );
+                const taskIds = suggestion.sources?.taskIds ?? [];
+                const taskSources = taskIds.length
+                    ? await tx
+                          .select({ itemId: recordingTasks.itemId })
+                          .from(recordingTasks)
+                          .leftJoin(
+                              chatterItems,
+                              eq(chatterItems.id, recordingTasks.itemId),
+                          )
+                          .where(
+                              and(
+                                  inArray(recordingTasks.id, taskIds),
+                                  taskVisible(viewer, ANY_TASK_ITEM, true),
+                              ),
+                          )
+                    : [];
+                const sourceIds = [
+                    ...new Set([
+                        ...(suggestion.sources?.itemIds ?? []),
+                        ...taskSources.flatMap((task) =>
+                            task.itemId ? [task.itemId] : [],
+                        ),
+                    ]),
+                ];
+                const withheldSources = sourceIds.length
+                    ? await tx
+                          .select({
+                              id: chatterItems.id,
+                              ownerId: chatterItems.userId,
+                          })
+                          .from(chatterItems)
+                          .where(
+                              and(
+                                  inArray(chatterItems.id, sourceIds),
+                                  meetingVisibility(
+                                      userId,
+                                      viewer.orgUserId,
+                                      chatterItems,
+                                      viewer.isCurator,
+                                  ),
+                                  withheldItemCondition(),
+                                  viewer.orgUserId
+                                      ? sql`not (${sharedItemCondition(viewer.orgUserId)})`
+                                      : undefined,
+                              ),
+                          )
+                    : [];
+                if (withheldSources.length) {
+                    const audience = await meetingItemAudienceInTx(
+                        tx,
+                        item.id,
+                        agenda.userId,
+                        viewer.orgUserId,
+                    );
+                    for (const source of withheldSources) {
+                        const sourceAudience = await meetingItemAudienceInTx(
+                            tx,
+                            source.id,
+                            source.ownerId,
+                            viewer.orgUserId,
+                        );
+                        if (!meetingAudienceWithin(audience, sourceAudience))
+                            throw new AppError(
+                                ErrorCode.STALE_AGENDA_SUGGESTION,
+                                "Suggestion sources changed",
+                                409,
+                                { reason: "stale_suggestion_sources" },
+                            );
+                    }
+                }
+                const points = await tx
+                    .select()
+                    .from(agendaPoints)
+                    .where(pointWhere(agenda));
+                const point = {
+                    id: nanoid(),
+                    parentId: points.some(
+                        (entry) => entry.id === suggestion.parentPointId,
+                    )
+                        ? suggestion.parentPointId
+                        : null,
+                    position: points.length,
+                };
+                try {
+                    validatePointTree([...points, point]);
+                } catch {
+                    point.parentId = null;
+                }
+                await tx.insert(agendaPoints).values({
+                    ...point,
+                    userId: agenda.userId,
+                    agendaId: agenda.id,
+                    text: suggestion.text,
+                    sources: suggestion.sources,
+                    authorUserId: userId,
+                    updatedByUserId: userId,
+                    origin: suggestion.kind,
+                    originPointId: suggestion.originPointId,
+                });
             }
-            await tx.insert(agendaPoints).values({
-                ...point,
-                userId: agenda.userId,
-                agendaId: agenda.id,
-                text: suggestion.text,
-                sources: suggestion.sources,
-                authorUserId: userId,
-                updatedByUserId: userId,
-                origin: suggestion.kind,
-                originPointId: suggestion.originPointId,
-            });
-        }
-        await tx
-            .update(agendaSuggestions)
-            .set({ state, updatedAt: new Date() })
-            .where(
-                and(
-                    eq(agendaSuggestions.id, suggestionId),
-                    eq(agendaSuggestions.userId, agenda.userId),
-                    eq(agendaSuggestions.agendaId, agenda.id),
-                ),
-            );
-    });
+            await tx
+                .update(agendaSuggestions)
+                .set({ state, updatedAt: new Date() })
+                .where(
+                    and(
+                        eq(agendaSuggestions.id, suggestionId),
+                        eq(agendaSuggestions.userId, agenda.userId),
+                        eq(agendaSuggestions.agendaId, agenda.id),
+                    ),
+                );
+        },
+        false,
+        true,
+    );
 }
 
 function olderTaskCondition(viewer: TaskViewer, folderIds: string[]) {
@@ -2216,7 +2506,12 @@ export async function olderTasks(
         .select({ id: recordingTasks.id })
         .from(recordingTasks)
         .leftJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
-        .where(olderTaskCondition(viewer, folderIds))
+        .where(
+            and(
+                olderTaskCondition(viewer, folderIds),
+                agendaInputItemCondition(detail.meetingItemId ?? detail.id),
+            ),
+        )
         .limit(500);
     const current = new Set(
         detail.tasks.filter((task) => !task.removedAt).map((task) => task.id),
@@ -2264,7 +2559,10 @@ export async function reminderMeetings(
 ) {
     const viewer = await meetingViewer(userId);
     const [rows, connection] = await Promise.all([
-        listMeetingRows(userId, viewer.orgUserId, input),
+        listMeetingRows(userId, viewer.orgUserId, {
+            ...input,
+            isCurator: input?.isCurator ?? viewer.curator,
+        }),
         getGoogleConnectionStatus(userId),
     ]);
     const email =

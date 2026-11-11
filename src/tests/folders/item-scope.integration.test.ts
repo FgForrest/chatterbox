@@ -57,6 +57,7 @@ vi.mock("@/lib/env", () => ({
 }));
 vi.mock("@/lib/org/config", () => ({
     getOrgUserId: async () => "scope-org",
+    isOrgScopeVisible: () => true,
 }));
 
 import { itemScopeFolderIds } from "@/lib/folders/item-scope";

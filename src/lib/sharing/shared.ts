@@ -1,4 +1,4 @@
-import { type AnyColumn, and, eq, sql } from "drizzle-orm";
+import { type AnyColumn, and, eq, type SQL, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     chatterItems,
@@ -15,7 +15,7 @@ type Executor = Pick<typeof db, "select">;
  */
 export function sharedItemCondition(
     orgUserId: string,
-    itemId: AnyColumn = chatterItems.id,
+    itemId: AnyColumn | SQL = chatterItems.id,
 ) {
     return sql`exists (
         select 1
@@ -24,6 +24,8 @@ export function sharedItemCondition(
             on ${recordingFolders.id} = ${recordingFolderAssignments.folderId}
         where ${recordingFolderAssignments.itemId} = ${itemId}
             and ${recordingFolders.userId} = ${orgUserId}
+            and not ${recordingFolderAssignments.withheld}
+            and ${recordingFolders.restrictedAt} is null
     )`;
 }
 
@@ -49,6 +51,8 @@ export async function isRecordingShared(
             and(
                 eq(recordingFolderAssignments.itemId, recordingId),
                 eq(recordingFolders.userId, orgUserId),
+                eq(recordingFolderAssignments.withheld, false),
+                sql`${recordingFolders.restrictedAt} is null`,
             ),
         )
         .limit(1);

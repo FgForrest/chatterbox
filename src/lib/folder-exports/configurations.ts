@@ -1,5 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
+import { lockOrgTree } from "@/db/queries/organization-tree";
 import {
     filesystemExportSettings,
     folderExportConfigurations,
@@ -16,6 +17,10 @@ import { isMailEnabled } from "@/lib/mail/config";
 import { assertOrgScopeWritable } from "@/lib/org/config";
 import { validateRelativeExportPath } from "./filesystem-provider";
 import { enqueueExportPlan } from "./jobs";
+import {
+    assertNoPendingExportRevocations,
+    withExportRevocationCleanup,
+} from "./revocations";
 import { mayWriteOrganizationExport } from "./scope";
 import {
     type ExportTarget,
@@ -160,6 +165,12 @@ export async function assertOwnedFolder(
 /** Require an owned Private folder or an Organization folder the caller curates. */
 export async function assertExportableFolder(userId: string, folderId: string) {
     const access = await requireExportFolder(userId, folderId);
+    if (access.folder.restrictedAt || access.folder.restrictingAt)
+        throw new AppError(
+            ErrorCode.RESTRICTED_FOLDER_EXPORT,
+            ErrorCode.RESTRICTED_FOLDER_EXPORT,
+            409,
+        );
     if (access.scope === "org") {
         assertOrgScopeWritable();
         if (!(await mayWriteOrganizationExport(userId))) {
@@ -437,28 +448,66 @@ export async function deleteFolderExport(
 ): Promise<void> {
     assertFolderExportsAvailable();
     const access = await requireExportFolder(userId, folderId);
-    if (access.scope === "org") await assertExportableFolder(userId, folderId);
-    const deleted = await db
-        .delete(folderExportConfigurations)
+    if (access.scope === "org") {
+        assertOrgScopeWritable();
+        if (!(await mayWriteOrganizationExport(userId)))
+            throw new AppError(
+                ErrorCode.FORBIDDEN,
+                "Only curators may manage Organization folder exports",
+                403,
+            );
+    }
+    const [configuration] = await db
+        .select({
+            id: folderExportConfigurations.id,
+            userId: folderExportConfigurations.userId,
+        })
+        .from(folderExportConfigurations)
         .where(
             and(
                 eq(folderExportConfigurations.id, exportId),
-                access.scope === "org"
-                    ? inArray(
-                          folderExportConfigurations.folderId,
-                          db
-                              .select({ id: recordingFolders.id })
-                              .from(recordingFolders)
-                              .where(
-                                  eq(recordingFolders.userId, access.ownerId),
-                              ),
-                      )
-                    : eq(folderExportConfigurations.userId, userId),
                 eq(folderExportConfigurations.folderId, folderId),
+                access.scope === "org"
+                    ? undefined
+                    : eq(folderExportConfigurations.userId, userId),
             ),
-        )
-        .returning({ id: folderExportConfigurations.id });
-    if (deleted.length === 0) {
+        );
+    if (!configuration)
         throw new AppError(ErrorCode.NOT_FOUND, "Export not found", 404);
-    }
+    await withExportRevocationCleanup([configuration], () =>
+        db.transaction(async (tx) => {
+            await lockOrgTree(tx);
+            await assertNoPendingExportRevocations(tx, [configuration]);
+            const deleted = await tx
+                .delete(folderExportConfigurations)
+                .where(
+                    and(
+                        eq(folderExportConfigurations.id, exportId),
+                        access.scope === "org"
+                            ? inArray(
+                                  folderExportConfigurations.folderId,
+                                  tx
+                                      .select({ id: recordingFolders.id })
+                                      .from(recordingFolders)
+                                      .where(
+                                          eq(
+                                              recordingFolders.userId,
+                                              access.ownerId,
+                                          ),
+                                      ),
+                              )
+                            : eq(folderExportConfigurations.userId, userId),
+                        eq(folderExportConfigurations.folderId, folderId),
+                    ),
+                )
+                .returning({ id: folderExportConfigurations.id });
+            if (deleted.length === 0) {
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "Export not found",
+                    404,
+                );
+            }
+        }),
+    );
 }

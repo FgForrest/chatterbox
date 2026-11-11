@@ -3,12 +3,11 @@ import { db } from "@/db";
 import {
     chatterItems,
     mailMessages,
-    recordingFolderAssignments,
-    recordingFolders,
     recordings,
     storageDailySnapshots,
     users,
 } from "@/db/schema";
+import { recordingSharedCondition } from "@/lib/knowledge/org-people";
 
 const SNAPSHOT_LOCK = "housekeeping.storage-snapshot";
 
@@ -42,12 +41,7 @@ async function measureStorageSnapshots(
     now: Date,
 ): Promise<number> {
     const at = now.toISOString();
-    const shared = sql`exists (
-        select 1 from ${recordingFolderAssignments}
-        join ${recordingFolders} on ${recordingFolders.id} = ${recordingFolderAssignments.folderId}
-        join ${users} org on org.id = ${recordingFolders.userId} and org.role = 'org'
-        where ${recordingFolderAssignments.itemId} = ${chatterItems.id}
-    )`;
+    const shared = recordingSharedCondition(chatterItems.id);
     const rows = await executor.execute(sql`
         with sizes as (
             select ${recordings.userId} as user_id, ${recordings.filesize}::bigint as audio,

@@ -2,6 +2,7 @@ import { and, eq, getTableColumns } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { db } from "@/db";
 import { deleteRecordingAgendaInTx } from "@/db/queries/meeting-lifecycle";
+import { lockOrgTree } from "@/db/queries/organization-tree";
 import { chatterItems, itemShares, recordings } from "@/db/schema";
 import { nudge } from "@/lib/jobs/nudge";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
@@ -88,6 +89,8 @@ export async function insertAudioItem(
     options:
         | {
               pipeline: "arrival";
+              /** Required only when initialization can change an Organization placement. */
+              lockOrganizationTree?: boolean;
               initializeInTx?: (
                   tx: Tx,
                   input: { itemId: string; userId: string },
@@ -100,6 +103,11 @@ export async function insertAudioItem(
     const createdAt = recording.createdAt ?? new Date();
     const updatedAt = recording.updatedAt ?? createdAt;
     const insert = async (tx: Tx) => {
+        if (
+            options.pipeline === "arrival" &&
+            options.lockOrganizationTree === true
+        )
+            await lockOrgTree(tx);
         await tx.insert(chatterItems).values({
             id,
             userId: recording.userId,

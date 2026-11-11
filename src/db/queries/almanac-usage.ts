@@ -128,7 +128,8 @@ export async function almanacScopeUsage(input: {
                    ))
                   or
                   (${input.view} = 'org'
-                   and folder.user_id = ${input.orgUserId})
+                   and folder.user_id = ${input.orgUserId}
+                   and not assignment.withheld and folder.restricted_at is null)
               )
         ), uses as (
             select speaker.person_id, null::text as entity_id,

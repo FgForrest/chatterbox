@@ -1,8 +1,9 @@
-import { and, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { meetingFolderVisibility } from "@/db/queries/meeting-folder-visibility";
 import { meetingFolders } from "@/db/queries/meetings";
-import { recordingFolders } from "@/db/schema";
+import { placementVisibleCondition } from "@/db/queries/restricted-folders";
+import { recordingFolderAssignments, recordingFolders } from "@/db/schema";
 import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { requireMeetingAccess } from "@/lib/meetings/access";
@@ -29,15 +30,37 @@ export async function agendaSuggestionsProvider(userId: string, id: string) {
                       userId: recordingFolders.userId,
                   })
                   .from(recordingFolders)
+                  .innerJoin(
+                      recordingFolderAssignments,
+                      and(
+                          eq(
+                              recordingFolderAssignments.folderId,
+                              recordingFolders.id,
+                          ),
+                          eq(
+                              recordingFolderAssignments.itemId,
+                              access.agenda.meetingItemId ?? id,
+                          ),
+                          eq(
+                              recordingFolderAssignments.userId,
+                              access.agenda.userId,
+                          ),
+                      ),
+                  )
                   .where(
                       and(
                           inArray(
                               recordingFolders.id,
                               folders.map((folder) => folder.id),
                           ),
+                          placementVisibleCondition({
+                              userId,
+                              isCurator: access.viewer.curator,
+                          }),
                           meetingFolderVisibility(
                               userId,
                               access.viewer.orgUserId,
+                              access.viewer.curator,
                           ),
                       ),
                   );
@@ -46,13 +69,10 @@ export async function agendaSuggestionsProvider(userId: string, id: string) {
         itemId: access.agenda.meetingItemId ?? id,
         channel: "audio",
         folderIds: visibleFolders.map((folder) => folder.id),
-        view: visibleFolders.some(
-            (folder) => folder.userId === access.viewer.orgUserId,
-        )
-            ? "org"
-            : "private",
+        view: access.shared ? "org" : "private",
         seedProfiles: false,
         executor: db,
+        isCurator: access.viewer.curator,
         organizationUserId: access.viewer.orgUserId,
         ignoreItemAssignment: true,
     });

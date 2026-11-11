@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import type { db } from "@/db";
 import { lockProfileRevisionInTx } from "@/db/queries/profile-revision-guard";
 import {
@@ -83,6 +83,13 @@ export async function bindPlacementProfileInTx(
             and(
                 eq(recordingFolderAssignments.itemId, input.itemId),
                 eq(recordingFolderAssignments.userId, input.ownerUserId),
+                or(
+                    eq(recordingFolders.userId, input.ownerUserId),
+                    and(
+                        eq(recordingFolderAssignments.withheld, false),
+                        isNull(recordingFolders.restrictedAt),
+                    ),
+                ),
                 inArray(recordingFolders.userId, [
                     input.ownerUserId,
                     input.orgUserId,
@@ -99,6 +106,8 @@ export async function bindPlacementProfileInTx(
                 .map((row) => row.folderId),
             view: "private",
             executor: tx,
+            // These placements are owned or open; restricted Organization defaults never apply.
+            isCurator: false,
             organizationUserId: input.orgUserId,
             ignoreItemAssignment: true,
             seedProfiles: false,
@@ -125,6 +134,7 @@ export async function bindPlacementProfileInTx(
             .map((row) => row.folderId),
         view: shared ? "org" : "private",
         executor: tx,
+        isCurator: false,
         organizationUserId: input.orgUserId,
         ignoreItemAssignment: true,
         seedProfiles: false,

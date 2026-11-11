@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/errors";
+import { listMyRestrictedAccessInvitations } from "@/lib/folders/access-requests";
 import { listMyFolderInvitations } from "@/lib/sharing/folder-shares";
 import { requirePersonShareSession } from "@/lib/sharing/person-share-routes";
 import { listMyInvitations } from "@/lib/sharing/person-shares";
@@ -11,6 +12,7 @@ export const GET = apiHandler(async (request) => {
             await Promise.all([
                 listMyInvitations(session.user.id),
                 listMyFolderInvitations(session.user.id),
+                listMyRestrictedAccessInvitations(session.user.id),
             ])
         )
             .flat()

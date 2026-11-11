@@ -528,6 +528,7 @@ export async function claimDueJobs(
         kind === "pipeline.advance" ||
         kind === "pipeline.action" ||
         kind === "agenda.suggestions" ||
+        kind === "folder.restriction" ||
         kind === "recording.cut"
             ? await db.execute(sql`
         with eligible_users as (

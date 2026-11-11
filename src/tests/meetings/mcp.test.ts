@@ -128,7 +128,10 @@ describe("meeting MCP tools", () => {
                 roles: new Set(["tasks:read"]),
             },
         );
-        expect(service.list).toHaveBeenCalledWith("org", {});
+        expect(service.list).toHaveBeenCalledWith("org", {
+            isCurator: false,
+            organizationOnly: true,
+        });
     });
     it("returns an existing agenda on prepare", async () => {
         service.prepare.mockResolvedValue({ id: "agenda", existing: true });

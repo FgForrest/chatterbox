@@ -10,10 +10,14 @@ const mocks = vi.hoisted(() => ({
     orgListeners: new Set<(event: OrgEvent) => void>(),
     payload: null as ((payload: string) => void) | null,
     session: vi.fn(),
+    canReadEvent: vi.fn(),
 }));
 vi.mock("@/db", () => ({ sqlClient: { listen: mocks.listen } }));
 vi.mock("@/db/queries/events", () => ({ publishEvent: mocks.publish }));
 vi.mock("@/lib/mail/config", () => ({ isMailEnabled: () => mocks.enabled }));
+vi.mock("@/lib/events/visibility", () => ({
+    mayReceiveOrganizationEvent: mocks.canReadEvent,
+}));
 vi.mock("@/lib/auth-server", () => ({ requireApiSession: mocks.session }));
 vi.mock("@/lib/org/config", () => ({
     getOrgUserId: async () => mocks.org,
@@ -43,6 +47,7 @@ const unsubscribes: (() => void)[] = [];
 beforeEach(() => {
     vi.useFakeTimers();
     mocks.enabled = true;
+    mocks.canReadEvent.mockReset().mockResolvedValue(true);
     mocks.sharing = true;
     mocks.org = "org";
     mocks.publish.mockReset().mockResolvedValue(undefined);
@@ -209,6 +214,31 @@ describe("GET /api/events", () => {
         );
         expect(a.response.headers.get("Connection")).toBe("keep-alive");
         expect(a.response.headers.get("X-Accel-Buffering")).toBe("no");
+    });
+    it("filters recording ids independently for each authenticated stream", async () => {
+        mocks.canReadEvent.mockImplementation(
+            async (userId: string, event: OrgEvent) =>
+                event.type === "tree" || userId === "a",
+        );
+        const a = await open("a");
+        const b = await open("b");
+        for (const listener of mocks.orgListeners)
+            listener({ type: "recording", recordingId: "restricted" });
+        expect(await read(a.reader)).toBe(
+            'data: {"type":"recording","recordingId":"restricted"}\n\n',
+        );
+        for (const listener of mocks.orgListeners) listener({ type: "tree" });
+        expect(await read(b.reader)).toBe('data: {"type":"tree"}\n\n');
+    });
+    it("strips internal folder routing from an authorized tree event", async () => {
+        const a = await open("a");
+        for (const listener of mocks.orgListeners)
+            listener({
+                type: "tree",
+                folderId: "restricted",
+                structural: true,
+            });
+        expect(await read(a.reader)).toBe('data: {"type":"tree"}\n\n');
     });
     it("ignores mail while disabled and still delivers org changes", async () => {
         mocks.enabled = false;

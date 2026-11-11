@@ -67,7 +67,7 @@ export interface ExportProvider {
      */
     removeFile(
         relativePath: string,
-        options: { duplicate: boolean },
+        options: { duplicate: boolean; revoked?: boolean },
     ): Promise<boolean>;
     /**
      * Removes a directory the export created and no longer places anything

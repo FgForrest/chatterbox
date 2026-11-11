@@ -1,6 +1,9 @@
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { isItemReceived } from "@/db/queries/item-shares";
 import { findMeeting, type MeetingExecutor } from "@/db/queries/meetings";
+import { restrictedItemCondition } from "@/db/queries/restricted-folders";
+import { chatterItems } from "@/db/schema";
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { assertOrgScopeWritable, getOrgUserId } from "@/lib/org/config";
@@ -30,6 +33,7 @@ export async function requireMeetingAccess(
         viewer?: MeetingViewer;
         executor?: MeetingExecutor;
         lock?: boolean;
+        organizationOnly?: boolean;
     } = {},
 ) {
     const viewer = options.viewer ?? (await meetingViewer(userId));
@@ -40,12 +44,33 @@ export async function requireMeetingAccess(
         id,
         executor,
         options.lock,
+        viewer.curator,
+        options.organizationOnly,
     );
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "Meeting not found", 404);
     const shared = viewer.orgUserId
         ? await isRecordingShared(row.item.id, viewer.orgUserId, executor)
         : false;
     const manage = row.agenda.userId === userId || (shared && viewer.curator);
+    const [restrictedReceiver] =
+        shared || row.agenda.userId === userId
+            ? []
+            : await executor
+                  .select({ id: chatterItems.id })
+                  .from(chatterItems)
+                  .where(
+                      and(
+                          eq(chatterItems.id, row.item.id),
+                          restrictedItemCondition({
+                              userId,
+                              isCurator: viewer.curator,
+                          }),
+                      ),
+                  );
+    const editable = !row.agenda.recordingItemId && !restrictedReceiver;
+    if (mode !== "view" && restrictedReceiver)
+        throw new AppError(ErrorCode.FORBIDDEN, ErrorCode.FORBIDDEN, 403);
+
     if (mode !== "view") {
         if (row.agenda.recordingItemId)
             throw new AppError(
@@ -67,7 +92,7 @@ export async function requireMeetingAccess(
         shared,
         permissions: {
             view: true,
-            edit: !row.agenda.recordingItemId,
+            edit: Boolean(editable),
             manage: manage && !row.agenda.recordingItemId,
         },
     };
@@ -79,7 +104,11 @@ export async function meetingRecordingRedirect(
     access: Awaited<ReturnType<typeof requireMeetingAccess>>,
 ) {
     if (!access.agenda.recordingItemId || !access.recordingVisible) return null;
-    const received = await isItemReceived(userId, access.item.id);
+    const received = await isItemReceived(
+        userId,
+        access.item.id,
+        access.viewer.curator,
+    );
     const view = received
         ? "received"
         : access.item.userId !== userId ||

@@ -1002,6 +1002,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
             });
         await db().transaction((tx) =>
             recordIntendedPlacementInTx(tx, {
+                canCurate: false,
                 ownerUserId: OWNER,
                 itemId: REC,
                 folderId,

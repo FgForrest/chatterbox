@@ -1,5 +1,7 @@
 import { and, eq, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { lockOrgTree } from "@/db/queries/organization-tree";
+import { cancelUserFolderRequests } from "@/db/queries/restricted-folder-access-requests";
 import { accounts, userAccessStates } from "@/db/schema";
 import { type Capability, isCapability } from "@/lib/authz/catalog";
 import { expandGrants, orderedCapabilities } from "@/lib/authz/policy";
@@ -9,9 +11,10 @@ import {
     type AccessVerification,
     IdentityProviderError,
 } from "@/lib/identity/ports";
+import { isOrgScopeVisible } from "@/lib/org/config";
 import { SSO_PROVIDER_ID } from "@/lib/sso/constants";
 
-type Executor = Pick<typeof db, "insert">;
+type Executor = Pick<typeof db, "insert" | "update" | "execute">;
 
 export type AccessStateSource =
     | "login"
@@ -43,6 +46,17 @@ export async function recordAccessState(
         source: input.source,
         updatedAt: now,
     };
+    const cancelRequests =
+        isOrgScopeVisible() &&
+        (values.status !== "active" || !values.capabilities.includes("use"));
+    if (cancelRequests && executor === db)
+        return db.transaction((tx) =>
+            recordAccessState(
+                { ...input, capabilities: values.capabilities },
+                tx,
+            ),
+        );
+    if (cancelRequests) await lockOrgTree(executor);
     const insert = executor
         .insert(userAccessStates)
         .values({ userId: input.userId, ...values });
@@ -64,6 +78,8 @@ export async function recordAccessState(
                     : undefined,
           })
     ).returning({ userId: userAccessStates.userId });
+    if (written.length && cancelRequests)
+        await cancelUserFolderRequests(executor, input.userId);
     return written.length > 0;
 }
 
@@ -154,12 +170,17 @@ async function providerIdentity(
  */
 export async function holderAccess(
     userId: string,
-    options: { readOnly?: boolean; executor?: Pick<typeof db, "select"> } = {},
+    options: {
+        readOnly?: boolean;
+        executor?: Pick<typeof db, "select">;
+        verify?: boolean;
+    } = {},
 ): Promise<HolderAccess> {
     const state = await storedAccessState(userId, options.executor);
     const fresh = freshStoredAccess(state);
     if (fresh) return fresh;
 
+    if (options.verify === false) return { ok: false, reason: "unverifiable" };
     const verifier = getAccessVerifier();
     const identity = await providerIdentity(userId, options.executor);
     if (!verifier || !identity) return { ok: false, reason: "unverifiable" };

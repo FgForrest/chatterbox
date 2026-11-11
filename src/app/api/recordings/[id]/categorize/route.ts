@@ -1,4 +1,12 @@
-import { and, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
+import {
+    and,
+    eq,
+    inArray,
+    isNotNull,
+    isNull,
+    ne,
+    notInArray,
+} from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
@@ -12,10 +20,12 @@ import {
     recordingFolders,
 } from "@/db/schema";
 import { requireApiSession } from "@/lib/auth-server";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import {
     lockCategorizableFolderInTx,
     lockItemForFolderMutation,
+    lockOrgTree,
     pruneRedundantAssignmentsInTx,
     scheduleFolderExportProjection,
 } from "@/lib/folders/folders";
@@ -153,7 +163,9 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     }
 
     const orgUserId = await getOrgUserId();
+    const canCurate = await userCuratesOrganizationNow(ownerUserId);
     const result = await db.transaction(async (tx) => {
+        if (orgUserId) await lockOrgTree(tx);
         for (const folderId of [...personalFolderIds].sort())
             await lockCategorizableFolderInTx(tx, ownerUserId, folderId);
         await lockItemForFolderMutation(tx, itemId, ownerUserId);
@@ -258,7 +270,12 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         const organizationRootPlacementIds: string[] = [];
         if (orgUserId) {
             const sharedPlacements = await tx
-                .select({ folderId: recordingFolderAssignments.folderId })
+                .select({
+                    folderId: recordingFolderAssignments.folderId,
+                    withheld: recordingFolderAssignments.withheld,
+                    restrictedAt: recordingFolders.restrictedAt,
+                    restrictingAt: recordingFolders.restrictingAt,
+                })
                 .from(recordingFolderAssignments)
                 .innerJoin(
                     recordingFolders,
@@ -277,8 +294,14 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                         eq(recordingFolderAssignments.userId, ownerUserId),
                     ),
                 );
-            for (const { folderId } of sharedPlacements) {
-                sharedFolderIds.add(folderId);
+            for (const {
+                folderId,
+                withheld,
+                restrictedAt,
+                restrictingAt,
+            } of sharedPlacements) {
+                if (!withheld || restrictedAt || restrictingAt)
+                    sharedFolderIds.add(folderId);
             }
             const organizationRoots = await tx
                 .select({ folderId: recordingFolderAssignments.folderId })
@@ -392,6 +415,11 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                 and(
                     eq(mailPendingShares.itemId, itemId),
                     eq(mailPendingShares.userId, ownerUserId),
+                    requestedIntents.size
+                        ? notInArray(mailPendingShares.folderId, [
+                              ...requestedIntents,
+                          ])
+                        : undefined,
                 ),
             );
         if (personalFolderIds.length > 0) {
@@ -427,6 +455,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                 itemId,
                 folderId,
                 requestPipeline: false,
+                canCurate,
             });
         }
         if (orgUserId) {

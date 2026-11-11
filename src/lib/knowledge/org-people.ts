@@ -60,6 +60,8 @@ export function recordingSharedCondition(recordingId: Column | SQL) {
             on ${recordingFolders.id} = ${recordingFolderAssignments.folderId}
         where ${recordingFolderAssignments.itemId} = ${recordingId}
             and ${orgOwnedCondition(recordingFolders.userId)}
+            and not ${recordingFolderAssignments.withheld}
+            and ${recordingFolders.restrictedAt} is null
     )`;
 }
 

@@ -12,6 +12,12 @@ export interface RecordingFolder {
     scope: FolderScope;
     /** Optimistic-lock version; sent back on rename and move. */
     version: number;
+    restricted?: true;
+    access?: boolean;
+    managers?: { name: string | null }[];
+    accessRequest?: "none" | "pending" | "declined";
+    restricting?: true;
+    restrictedRole?: "manager" | "member" | "curator";
     sharedWithPeople?: boolean;
     insideSharedFolder?: boolean;
     receivedFolder?: {

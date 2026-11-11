@@ -1292,6 +1292,10 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
             kind: "entity",
             label: "place",
         });
+        await db()
+            .update(knowledgeEntityTypes)
+            .set({ id: "1111111111111111111" })
+            .where(eq(knowledgeEntityTypes.key, second));
         // Rewritten, the first row goes last in the table and first by id:
         // a scan meets the second first.
         await db()
@@ -1304,38 +1308,44 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
         const released = new Promise<void>((resolve) => {
             release = resolve;
         });
+        let ready = () => {};
+        const acquired = new Promise<void>((resolve) => {
+            ready = resolve;
+        });
         const blocker = db().transaction(async (tx) => {
             await tx.execute(
                 sql`select 1 from knowledge_entity_types where key = ${second} for key share`,
             );
+            ready();
             await released;
         });
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        const merge = mergeOwnTypes(orgUserId, "entity", first, second, 0);
-        await untilWaiting(1);
-        const made = createPrivateType(BOB, {
-            kind: "relation",
-            label: "visits",
-            subjectTypes: ["person"],
-            objectTypes: [second, first],
-            objectKind: "entity",
-            cardinality: "many",
-        });
-        await untilWaiting(2);
-        release();
-        await blocker;
-        const outcomes = await Promise.allSettled([merge, made]);
-        expect(
-            outcomes.map((outcome) =>
-                outcome.status === "rejected"
-                    ? ((outcome.reason as { statusCode?: number }).statusCode ??
-                      String(
-                          (outcome.reason as { cause?: unknown }).cause ??
-                              outcome.reason,
-                      ))
-                    : "done",
-            ),
-        ).toEqual(["done", 400]);
+        await acquired;
+        const merge = refusal(
+            mergeOwnTypes(orgUserId, "entity", first, second, 0),
+        );
+        let made: ReturnType<typeof refusal> | undefined;
+        try {
+            await untilWaiting(1);
+            made = refusal(
+                createPrivateType(BOB, {
+                    kind: "relation",
+                    label: "visits",
+                    subjectTypes: ["person"],
+                    objectTypes: [second, first],
+                    objectKind: "entity",
+                    cardinality: "many",
+                }),
+            );
+            await untilWaiting(2);
+        } finally {
+            release();
+            await blocker;
+            await Promise.all([merge, made]);
+        }
+        expect(await Promise.all([merge, made])).toEqual([
+            null,
+            expect.objectContaining({ statusCode: 400 }),
+        ]);
     }, 30_000);
 
     it("creates two types in one finish while the curator renames the one the second relates, deadlocking nothing", async () => {

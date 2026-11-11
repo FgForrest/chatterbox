@@ -42,6 +42,9 @@ function forward(key: "db" | "sql") {
 
 vi.mock("@/db", () => ({ db: forward("db"), sqlClient: forward("sql") }));
 
+vi.mock("@/lib/events/visibility", () => ({
+    mayReceiveOrganizationEvent: async () => true,
+}));
 vi.mock("@/lib/auth-server", () => ({
     requireApiSession: async (request: Request) => ({
         user: { id: request.headers.get("test-user") },
@@ -135,7 +138,11 @@ describeWithDatabase("Organization events (PostgreSQL)", () => {
                     new TextDecoder().decode((await reader.read()).value),
                 ).toBe(": connected\n\n");
             }
-            await notifyOrgChange({ type: "tree" });
+            await notifyOrgChange({
+                type: "tree",
+                folderId: "restricted",
+                structural: true,
+            });
             for (const reader of readers) {
                 expect(
                     new TextDecoder().decode((await reader.read()).value),
@@ -146,11 +153,19 @@ describeWithDatabase("Organization events (PostgreSQL)", () => {
         }
     });
 
-    it("carries tree changes", async () => {
+    it.each([
+        false,
+        true,
+    ])("carries tree changes (structural=%s)", async (structural) => {
         const event = nextEvent();
         await new Promise((resolve) => setTimeout(resolve, 100));
-        await notifyOrgChange({ type: "tree" });
-        await expect(event).resolves.toEqual({ type: "tree" });
+        const payload: OrgEvent = {
+            type: "tree",
+            folderId: "restricted",
+            ...(structural ? { structural: true } : {}),
+        };
+        await notifyOrgChange(payload);
+        await expect(event).resolves.toEqual(payload);
     });
     it("preserves a tab origin through PostgreSQL and both SSE streams", async () => {
         const aborts = [new AbortController(), new AbortController()];

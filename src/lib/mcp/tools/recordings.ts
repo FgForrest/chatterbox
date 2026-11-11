@@ -55,6 +55,11 @@ const folderItem = z.object({
     shared: z.boolean(),
     read_only: z.boolean(),
     can_file_own_items: z.boolean(),
+    restricted: z.literal(true).optional(),
+    access: z.boolean().optional(),
+    managers: z.array(z.object({ name: z.string().nullable() })).optional(),
+    access_request: z.enum(["none", "pending", "declined"]).optional(),
+    restricted_role: z.enum(["manager", "member", "curator"]).optional(),
 });
 
 const listFolders = defineTool({
@@ -106,6 +111,17 @@ const listFolders = defineTool({
                 ),
                 read_only: Boolean(folder.receivedFolder),
                 can_file_own_items: canFile[index],
+                ...(folder.restricted
+                    ? {
+                          restricted: true as const,
+                          access: folder.access,
+                          managers: folder.managers,
+                          access_request: folder.accessRequest,
+                          ...(folder.restrictedRole
+                              ? { restricted_role: folder.restrictedRole }
+                              : {}),
+                      }
+                    : {}),
             })),
         };
     },
@@ -325,6 +341,7 @@ const listAttendedRecordings = defineTool({
                 lookupHash(user.email),
                 user.firstSsoSignInAt,
                 filters,
+                caller.isCurator === true,
             ),
             { before: null, limit: ATTENDED_RECORDING_LIMIT + 1 },
         );

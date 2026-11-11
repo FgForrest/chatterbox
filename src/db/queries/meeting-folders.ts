@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, type SQL } from "drizzle-orm";
 import type { MeetingExecutor } from "@/db/queries/meetings";
 import { recordingFolderAssignments, recordingFolders } from "@/db/schema";
 
@@ -7,6 +7,7 @@ export async function meetingFolders(
     executor: MeetingExecutor,
     meetingItemId: string,
     ownerUserId: string,
+    visibility?: SQL,
 ) {
     return executor
         .select({
@@ -24,6 +25,7 @@ export async function meetingFolders(
             and(
                 eq(recordingFolderAssignments.itemId, meetingItemId),
                 eq(recordingFolderAssignments.userId, ownerUserId),
+                visibility,
             ),
         )
         .orderBy(

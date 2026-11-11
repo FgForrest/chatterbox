@@ -53,6 +53,11 @@ export interface ProcessingFolderSummary {
     path: string;
     scope: "personal" | "org";
     receivedFolder?: RecordingFolder["receivedFolder"];
+    restricted?: true;
+    access?: boolean;
+    managers?: RecordingFolder["managers"];
+    accessRequest?: RecordingFolder["accessRequest"];
+    restrictedRole?: RecordingFolder["restrictedRole"];
 }
 
 export interface CategorizationPanelPresentation {
@@ -204,13 +209,24 @@ export async function loadPrivateCategorizationPanel(
             name: label(folder),
             path: folderDisplayPath(folder, byId, label, " › "),
             scope: folder.scope,
+            ...(folder.restricted
+                ? {
+                      restricted: true as const,
+                      access: folder.access,
+                      managers: folder.managers,
+                      accessRequest: folder.accessRequest,
+                      restrictedRole: folder.restrictedRole,
+                  }
+                : {}),
             ...(folder.receivedFolder
                 ? { receivedFolder: folder.receivedFolder }
                 : {}),
         }));
     const selectableFolderIds = new Set(
         folders
-            .filter((folder) => folder.parentId !== null)
+            .filter(
+                (folder) => folder.parentId !== null && folder.access !== false,
+            )
             .map((folder) => folder.id),
     );
     const selectedFolderIds = [

@@ -77,6 +77,7 @@ async function candidatesInTx(
     userId: string,
     itemId: string,
     orgUserId: string | null,
+    isCurator: boolean,
 ) {
     const recording = await ownedRecording(tx, userId, itemId);
     const rows = await listMeetingRows(
@@ -84,6 +85,7 @@ async function candidatesInTx(
         orgUserId,
         {
             includePast: true,
+            isCurator,
             limit: 1000,
             overlapWith: {
                 start: recording.item.occurredAt,
@@ -158,6 +160,7 @@ async function candidatesInTx(
             candidate.agenda.id,
             tx,
             true,
+            isCurator,
         );
         if (!locked || locked.agenda.recordingItemId) continue;
         const row = { ...candidate, ...locked };
@@ -195,6 +198,7 @@ async function candidatesInTx(
             itemId: row.agenda.meetingItemId,
             ownerUserId: row.agenda.userId,
             actorUserId: userId,
+            isCurator,
             orgUserId,
             folderIds: [...folderIds],
         });
@@ -259,15 +263,31 @@ async function absorbInTx(
     orgUserId: string | null,
     explicit: boolean,
     arriving = false,
+    canCurate = false,
+    organizationTreeLocked = true,
 ) {
     await ownedRecording(tx, userId, recordingItemId);
-    const row = await findMeeting(userId, orgUserId, agendaId, tx, true);
+    const row = await findMeeting(
+        userId,
+        orgUserId,
+        agendaId,
+        tx,
+        true,
+        canCurate,
+    );
     if (!row) throw new AppError(ErrorCode.NOT_FOUND, "Meeting not found", 404);
     const { agenda } = row;
     if (agenda.recordingItemId === recordingItemId) return;
     if (agenda.recordingItemId)
         throw new AppError(ErrorCode.CONFLICT, "Agenda already attached", 409);
-    const existing = await findMeeting(userId, orgUserId, recordingItemId, tx);
+    const existing = await findMeeting(
+        userId,
+        orgUserId,
+        recordingItemId,
+        tx,
+        false,
+        canCurate,
+    );
     if (existing)
         throw new AppError(
             ErrorCode.CONFLICT,
@@ -285,6 +305,17 @@ async function absorbInTx(
         agenda.meetingItemId,
         agenda.userId,
     );
+    if (
+        arriving &&
+        explicit &&
+        !organizationTreeLocked &&
+        folders.some((folder) => folder.userId === orgUserId)
+    )
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            "Agenda filing changed during arrival",
+            409,
+        );
     if (explicit && agenda.userId !== userId) {
         const recordingAudience = await meetingItemAudienceInTx(
             tx,
@@ -324,6 +355,7 @@ async function absorbInTx(
                 itemId: recordingItemId,
                 folderId: folder.id,
                 requestPipeline: !arriving,
+                canCurate,
             });
         } else {
             try {
@@ -418,6 +450,7 @@ export async function attachAgenda(
     await requireMeetingAccess(userId, id, "edit", { viewer });
     await retryOnDeadlock(() =>
         db.transaction(async (tx) => {
+            if (viewer.orgUserId) await lockOrgTree(tx);
             await requireMeetingAccess(userId, id, "edit", {
                 viewer,
                 executor: tx,
@@ -429,6 +462,8 @@ export async function attachAgenda(
                 recordingItemId,
                 viewer.orgUserId,
                 true,
+                false,
+                viewer.curator,
             );
         }),
     );
@@ -469,6 +504,8 @@ export async function attachArrivingRecordingInTx(
     itemId: string,
     fileId: string,
     agendaId?: string,
+    canCurate = false,
+    organizationTreeLocked = false,
 ) {
     try {
         await tx.transaction((savepoint) =>
@@ -478,6 +515,8 @@ export async function attachArrivingRecordingInTx(
                 itemId,
                 fileId,
                 agendaId,
+                canCurate,
+                organizationTreeLocked,
             ),
         );
     } catch (error) {
@@ -496,8 +535,10 @@ async function attachArrivalInSavepoint(
     itemId: string,
     fileId: string,
     agendaId?: string,
+    canCurate = false,
+    organizationTreeLocked = false,
 ) {
-    const orgUserId = await getOrgUserId();
+    const orgUserId = await getOrgUserId(tx);
     const [session] = fileId.startsWith("meeting-")
         ? await tx
               .select({ metadata: recordingSessions.metadata })
@@ -531,13 +572,30 @@ async function attachArrivalInSavepoint(
             ? session.metadata.agendaId
             : null);
     if (explicitId) {
-        const attached = await findMeeting(userId, orgUserId, explicitId, tx);
+        const attached = await findMeeting(
+            userId,
+            orgUserId,
+            explicitId,
+            tx,
+            false,
+            canCurate,
+        );
         if (attached?.agenda.recordingItemId === itemId) return;
         await requireMeetingAccess(userId, explicitId, "edit", {
-            viewer: { userId, orgUserId, curator: false },
+            viewer: { userId, orgUserId, curator: canCurate },
             executor: tx,
         });
-        await absorbInTx(tx, userId, explicitId, itemId, orgUserId, true, true);
+        await absorbInTx(
+            tx,
+            userId,
+            explicitId,
+            itemId,
+            orgUserId,
+            true,
+            true,
+            canCurate,
+            organizationTreeLocked,
+        );
         return;
     }
     const { candidates, overlappingCount } = await candidatesInTx(
@@ -545,6 +603,7 @@ async function attachArrivalInSavepoint(
         userId,
         itemId,
         orgUserId,
+        canCurate,
     );
     if (
         overlappingCount === 1 &&
@@ -558,6 +617,9 @@ async function attachArrivalInSavepoint(
             itemId,
             orgUserId,
             false,
+            true,
+            canCurate,
+            organizationTreeLocked,
         );
     }
 }
@@ -568,7 +630,13 @@ export async function agendaCandidates(userId: string, itemId: string) {
     const [result, navigation] = await Promise.all([
         retryOnDeadlock(() =>
             db.transaction((tx) =>
-                candidatesInTx(tx, userId, itemId, viewer.orgUserId),
+                candidatesInTx(
+                    tx,
+                    userId,
+                    itemId,
+                    viewer.orgUserId,
+                    viewer.curator,
+                ),
             ),
         ),
         meetingFolderNavigation(userId, viewer.orgUserId),
@@ -627,6 +695,7 @@ export async function detachAgenda(userId: string, recordingItemId: string) {
                 recordingItemId,
                 tx,
                 true,
+                viewer.curator,
             );
             if (
                 !row ||

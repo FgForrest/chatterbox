@@ -6,11 +6,10 @@ import { publishEvent } from "@/db/queries/events";
  * Invalidation events for the Organization scope.
  *
  * Ids only. Every client that receives one refetches through the normal,
- * access-checked routes, so an event never carries content and never needs
- * to be filtered per viewer.
+ * access-checked routes. Recording ids and scoped tree changes are filtered per viewer before streaming.
  */
 export type OrgEvent =
-    | { type: "tree" }
+    | { type: "tree"; folderId?: string; structural?: true }
     | { type: "recording"; recordingId: string; origin?: string };
 
 const CHANNEL = "riffado_org";
@@ -23,7 +22,16 @@ let listening: Promise<unknown> | null = null;
 function parseEvent(payload: string): OrgEvent | null {
     try {
         const value = JSON.parse(payload) as Record<string, unknown>;
-        if (value.type === "tree") return { type: "tree" };
+        if (value.type === "tree")
+            return {
+                type: "tree",
+                ...(value.structural === true
+                    ? { structural: true as const }
+                    : {}),
+                ...(typeof value.folderId === "string"
+                    ? { folderId: value.folderId }
+                    : {}),
+            };
         if (
             value.type === "recording" &&
             typeof value.recordingId === "string"

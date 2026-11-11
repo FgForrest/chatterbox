@@ -16,7 +16,13 @@ export async function mayWriteOrganizationExport(userId: string) {
 export async function resolveFolderExportScope(
     userId: string,
     folderId: string,
-): Promise<{ contentUserId: string; isOrganization: boolean }> {
+    options: { cleanupRestricted?: boolean } = {},
+): Promise<{
+    contentUserId: string;
+    isOrganization: boolean;
+    restricted?: boolean;
+    parentId?: string | null;
+}> {
     const access = await resolveReadableFolder(userId, folderId);
     if (!access) {
         throw new AppError(
@@ -25,6 +31,15 @@ export async function resolveFolderExportScope(
             403,
         );
     }
+    const restricted = !!(
+        access.folder.restrictedAt || access.folder.restrictingAt
+    );
+    if (restricted && !options.cleanupRestricted)
+        throw new AppError(
+            ErrorCode.RESTRICTED_FOLDER_EXPORT,
+            ErrorCode.RESTRICTED_FOLDER_EXPORT,
+            409,
+        );
     if (access.scope === "org") {
         if (!(await mayWriteOrganizationExport(userId))) {
             throw new AppError(
@@ -33,7 +48,13 @@ export async function resolveFolderExportScope(
                 403,
             );
         }
-        return { contentUserId: access.ownerId, isOrganization: true };
+        return {
+            contentUserId: access.ownerId,
+            isOrganization: true,
+            ...(restricted
+                ? { restricted: true, parentId: access.folder.parentId }
+                : {}),
+        };
     }
     return { contentUserId: userId, isOrganization: false };
 }

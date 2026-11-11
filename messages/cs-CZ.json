@@ -3215,6 +3215,11 @@
   "1Y3muV": "Toto je soukromý odkaz. Přístup závisí na nastavení sdílení položky.",
   "QZ8BP-": "Nejprve položku nasdílejte, aby kolega mohl odkaz otevřít.",
   "FN_v9a": "Zkopírovat i tak",
+  "5tXFwb": "Žádost o přístup",
+  "M8En8v": "Vaše žádost o přístup byla schválena.",
+  "jpzNQt": "Vaše žádost o přístup byla zamítnuta. Můžete požádat znovu.",
+  "oX6uqU": "{person} žádá o přístup do této uzavřené složky.",
+  "WCaf5C": "Schválit",
   "vN9Hoo": "Už ve vaší složce",
   "GqiFUr": "Agenda už má nahrávku. Její body a poznámky jsou jen ke čtení. Nahrávky a jejich úkoly si zachovávají vlastní sdílení.",
   "hZb4fn": "Agendu můžete společně upravovat. Nahrávky a jejich úkoly si zachovávají vlastní sdílení.",
@@ -3229,7 +3234,7 @@
   "u_9yWS": "Zařadit i jinam…",
   "eCzP2A": "Pozvánky ({count})",
   "HyiDcy": "Pozvánky",
-  "Xk1EZm": "Kolegové s vámi sdílí své soukromé složky, agendy, nahrávky a e-maily. Obsah uvidíte po přijetí pozvánky. Organizace ho nevidí.",
+  "1xLGUo": "Prohlédněte si pozvánky ke sdílení, žádosti o přístup do uzavřených složek a rozhodnutí o svých žádostech.",
   "7P-N8t": "{owner} s vámi sdílí zaznamenanou agendu. Její body a poznámky jsou jen ke čtení. Nahrávky a úkoly mají vlastní sdílení.",
   "a9R-Ud": "{owner} s vámi sdílí tuto agendu. Můžete společně upravovat její body a poznámky. Nahrávky a úkoly si zachovávají vlastní sdílení.",
   "2jgppe": "{owner} s vámi sdílí tuto položku. Vidí ji také Organizace. Můžete ji číst a plnit úkoly přidělené vám.",
@@ -3820,5 +3825,8 @@
   "wOF4ZI": "„Emailová podpora“ zde není fronta tiketů. Odpovězte na tento e-mail, pokud něco není v pořádku nebo máte otázku. Dostane se to přímo ke mně.",
   "41a7gc": "Kolega s vámi sdílí položku.",
   "rIqi4Z": "Kolega s vámi sdílí agendu.",
-  "YKi7kr": "Zobrazit pozvánky"
+  "YKi7kr": "Zobrazit pozvánky",
+  "F9APJ-": "Kolega požádal o přístup do uzavřené složky.",
+  "c1Rofw": "Vaše žádost o přístup do uzavřené složky byla schválena.",
+  "zq_cPC": "Vaše žádost o přístup do uzavřené složky byla zamítnuta."
 }

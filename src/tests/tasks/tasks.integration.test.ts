@@ -67,6 +67,7 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
             IS_HOSTED: false,
             SELF_HOST_MODE: "shared",
             AUTHZ_MODE: "local" as "local" | "idp",
+            AUTHZ_VERIFICATION_MAX_AGE: 300,
             ORG_ACCOUNT_EMAIL: "org@example.test",
             ORG_ACCOUNT_PASSWORD: "organization-password",
             ENCRYPTION_KEY:
@@ -103,6 +104,7 @@ vi.mock("@/lib/storage/factory", () => ({
 
 import { markRecordingDeleted } from "@/db/items";
 import { deleteSummaryForRecording } from "@/db/queries/retention";
+import { recordAccessState } from "@/lib/authz/access-state";
 import type { ActorContext } from "@/lib/authz/model";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
@@ -292,6 +294,13 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         await db()
             .insert(userSettings)
             .values([{ userId: ALICE }, { userId: BOB }, { userId: CAROL }]);
+        await recordAccessState({
+            userId: ALICE,
+            issuer: "https://idp.example.test/realms/chatterbox",
+            subject: "alice-subject",
+            capabilities: ["use"],
+            source: "login",
+        });
         orgUserId = (await ensureOrgAccount()) ?? "";
         transcriptId = await addRecording(REC, "2026-10-06T10:00:00Z");
         await addRecording(LATER, "2026-10-08T10:00:00Z");

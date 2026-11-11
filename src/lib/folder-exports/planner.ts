@@ -3,6 +3,7 @@ import path from "node:path";
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { audioItemColumns, recordingItemJoin } from "@/db/items";
+import { withheldExportPlacements } from "@/db/queries/restricted-folders";
 import {
     aiEnhancements,
     chatterItems,
@@ -46,6 +47,7 @@ import {
     sourceFilename,
 } from "./naming";
 import { createExportProvider } from "./provider-factory";
+import { exportRevocationPending } from "./revocations";
 import { resolveFolderExportScope } from "./scope";
 import { clearExportFailure, recordExportFailure } from "./status";
 import { type ExportTarget, loadExportTarget } from "./target";
@@ -87,6 +89,7 @@ interface ExistingState {
     expectedSize: number;
     status: "pending" | "in_progress" | "exported" | "failed";
     exportedAt: Date | null;
+    revocationPending: boolean;
 }
 
 interface PlannedState {
@@ -241,8 +244,11 @@ async function planLocked(
     const configuration = await loadExportTarget(userId, exportId);
     if (!configuration) return 0;
 
+    // listExportFolderOrganization excludes restricted folders upstream.
     const { contentUserId, isOrganization: isOrg } =
-        await resolveFolderExportScope(userId, configuration.folderId);
+        await resolveFolderExportScope(userId, configuration.folderId, {
+            cleanupRestricted: true,
+        });
     const organization = await listExportFolderOrganization(contentUserId);
     const configSubtree = descendantFolderIds(
         organization.folders,
@@ -345,6 +351,8 @@ async function planLocked(
                 expectedSize: folderExportMaterializations.expectedSize,
                 status: folderExportMaterializations.status,
                 exportedAt: folderExportMaterializations.exportedAt,
+                revocationPending:
+                    folderExportMaterializations.revocationPending,
             })
             .from(folderExportMaterializations)
             .where(
@@ -577,6 +585,13 @@ async function planLocked(
             : null;
     };
 
+    const pendingRevocations = new Set(
+        existingStates
+            .filter((state) => state.revocationPending)
+            .map((state) =>
+                placementKey(state.recordingId, state.placementFolderId),
+            ),
+    );
     const plannedPlacements: Array<{
         itemId: string;
         placementFolderId: string;
@@ -676,6 +691,12 @@ async function planLocked(
             }
         }
         for (const placementFolderId of placements) {
+            if (
+                pendingRevocations.has(
+                    placementKey(recording.id, placementFolderId),
+                )
+            )
+                continue;
             plannedPlacements.push({
                 itemId: recording.id,
                 placementFolderId,
@@ -729,6 +750,10 @@ async function planLocked(
             });
         }
         for (const placementFolderId of placements) {
+            if (
+                pendingRevocations.has(placementKey(mail.id, placementFolderId))
+            )
+                continue;
             plannedPlacements.push({
                 itemId: mail.id,
                 placementFolderId,
@@ -974,6 +999,7 @@ async function planLocked(
         }
         const candidates = (statesByKey.get(planned.key) ?? []).filter(
             (state) =>
+                !state.revocationPending &&
                 !consumed.has(state.id) &&
                 (state.id === planned.id || !plannedIds.has(state.id)),
         );
@@ -1023,6 +1049,41 @@ async function planLocked(
         }
     }
 
+    const revokedPlacements = new Set(
+        isOrg
+            ? (
+                  await withheldExportPlacements(contentUserId, [
+                      ...new Set(
+                          existingStates.map((state) => state.recordingId),
+                      ),
+                  ])
+              ).map((placement) =>
+                  placementKey(placement.itemId, placement.folderId),
+              )
+            : [],
+    );
+    const durableRevocations = new Set(
+        (
+            await db
+                .select({ id: folderExportMaterializations.id })
+                .from(folderExportMaterializations)
+                .where(
+                    and(
+                        eq(folderExportMaterializations.userId, userId),
+                        eq(
+                            folderExportMaterializations.exportConfigurationId,
+                            exportId,
+                        ),
+                        eq(
+                            folderExportMaterializations.revocationPending,
+                            true,
+                        ),
+                    ),
+                )
+        ).map((state) => state.id),
+    );
+    const completedRevocations: string[] = [];
+    let failedRevocation = false;
     const staleStates = existingStates.filter(
         (state) => !plannedIds.has(state.id),
     );
@@ -1031,27 +1092,66 @@ async function planLocked(
         const current = relocatedPath(state.logicalPath, moves);
         if (plannedFilePaths.has(current)) continue;
         const key = artifactKey(state);
+        const revoked =
+            durableRevocations.has(state.id) ||
+            revokedPlacements.has(
+                placementKey(state.recordingId, state.placementFolderId),
+            );
+        let removalFailed = false;
         const removed = await provider
-            .removeFile(current, { duplicate: placedKeys.has(key) })
-            .catch((error) => {
+            .removeFile(current, {
+                duplicate: placedKeys.has(key),
+                ...(revoked ? { revoked: true } : {}),
+            })
+            .catch(() => {
+                removalFailed = true;
                 console.error(
-                    `[folder-export] could not remove ${current}:`,
-                    error,
+                    "[folder-export] could not remove a tracked file",
                 );
                 return false;
             });
+        let revokedRemaining = revoked && !removed;
+        if (revokedRemaining && !removalFailed) {
+            try {
+                revokedRemaining = (await provider.ownedEntries()).has(current);
+            } catch {
+                // A failed ownership check cannot discharge a pending revocation.
+            }
+        }
+        if (revokedRemaining) failedRevocation = true;
+        if (revoked && !revokedRemaining) completedRevocations.push(state.id);
         // Its counterpart is not written yet: decide on the next plan.
-        if (!removed && plannedKeys.has(key) && !placedKeys.has(key)) {
+        if (
+            !removed &&
+            (revokedRemaining || (plannedKeys.has(key) && !placedKeys.has(key)))
+        ) {
             keptStates.set(state.id, { current, exported: false });
         }
     }
+    for (const state of existingStates) {
+        if (!moves.length && !consumed.has(state.id)) continue;
+        const current = relocatedPath(state.logicalPath, moves);
+        await db
+            .update(folderExportMaterializations)
+            .set({ logicalPath: current })
+            .where(
+                and(
+                    eq(folderExportMaterializations.id, state.id),
+                    eq(folderExportMaterializations.userId, userId),
+                    eq(folderExportMaterializations.revocationPending, true),
+                ),
+            );
+    }
     await keepStates(userId, exportId, keptStates);
+    await deleteStates(userId, exportId, completedRevocations, true);
     await deleteStates(userId, exportId, [
         ...staleStates
             .map((state) => state.id)
             .filter((id) => !keptStates.has(id)),
         ...unproducible,
     ]);
+
+    if (failedRevocation) throw exportRevocationPending();
 
     const plannedDirectories = new Set([
         ...pathPrefixes(configuration.targetPath),
@@ -1184,6 +1284,7 @@ async function reuseWrittenCopy(
                 continue;
             }
         }
+        state.logicalPath = planned.logicalPath;
         if (state.id !== planned.id) consumed.add(state.id);
         return sameVersion;
     }
@@ -1261,6 +1362,7 @@ async function deleteStates(
     userId: string,
     exportId: string,
     ids: string[],
+    revocationCompleted = false,
 ): Promise<void> {
     for (let offset = 0; offset < ids.length; offset += BATCH) {
         await db
@@ -1268,6 +1370,12 @@ async function deleteStates(
             .where(
                 and(
                     eq(folderExportMaterializations.userId, userId),
+                    revocationCompleted
+                        ? undefined
+                        : eq(
+                              folderExportMaterializations.revocationPending,
+                              false,
+                          ),
                     eq(
                         folderExportMaterializations.exportConfigurationId,
                         exportId,

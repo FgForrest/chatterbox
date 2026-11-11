@@ -1,19 +1,27 @@
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
 import { folderExportConfigurations } from "@/db/schema";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { isExportErrorRetryable } from "./retry";
 
 /**
  * Remembers a failure on the export itself when only the user can fix it,
  * so the export dialog can say why nothing arrives. Transient failures are
- * retried and not shown.
+ * retried and not shown, except pending restricted revocations, which stay visible until cleanup succeeds.
  */
 export async function recordExportFailure(
     userId: string,
     exportId: string,
     error: unknown,
 ): Promise<void> {
-    if (isExportErrorRetryable(error)) return;
+    if (
+        isExportErrorRetryable(error) &&
+        !(
+            error instanceof AppError &&
+            error.code === ErrorCode.EXPORT_REVOCATION_PENDING
+        )
+    )
+        return;
     const message = error instanceof Error ? error.message : String(error);
     await db
         .update(folderExportConfigurations)

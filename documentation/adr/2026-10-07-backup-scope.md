@@ -1,14 +1,14 @@
 ---
 title: Backups and exports carry one scope, chosen by the account, personal or Organization, never both
 date: 2026-10-07
-updated: 2026-11-08 19:20
+updated: 2026-11-10 13:20
 status: superseded
 kind: feature
 issues: []
 prs: [89]
 areas: [src/lib/export/archive-scope.ts, src/lib/export/resolve-archive-scope.ts, src/lib/export/build-archive.ts, src/lib/export/document-sidecars.ts, src/app/api/backup]
 supersedes: []
-superseded-by: [2026-10-28-curator-organization-folder-exports, 2026-11-08-ai-trim-proposal-before-learn]
+superseded-by: [2026-10-28-curator-organization-folder-exports, 2026-11-08-ai-trim-proposal-before-learn, 2026-11-10-restricted-organization-folders]
 relates: [2026-10-27-shared-folders-are-two-way, 2026-10-22-person-to-person-sharing, 2026-09-23-shared-organization-scope, 2026-10-07-tasks-from-summaries, 2026-10-27-meeting-agendas]
 ---
 
@@ -27,6 +27,8 @@ Organization content scope. Only that folder-export case changes; account-select
 personal folder exports and every other rule here still hold.
 
 **Superseded in part** by [AI trim proposals before Learn](2026-11-08-ai-trim-proposal-before-learn.md): A focused trim-decision import adapter now exists, without a general archive restore UI. Account-selected archive scopes and other export rules stay.
+
+**Superseded in part** by [restricted Organization folders](2026-11-10-restricted-organization-folders.md): owner archives retain Organization placement references and release grace, and bounded restriction restore adapters exist. The Organization archive also includes every item owned by the Organization account, including restricted and unfiled items. Member-owned withheld-only items stay in their personal archives. Scope still follows the account and every other rule here remains.
 
 ## Why
 

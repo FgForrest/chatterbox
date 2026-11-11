@@ -1,5 +1,6 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
+import { placementVisibleCondition } from "@/db/queries/restricted-folders";
 import {
     chatterItems,
     itemShares,
@@ -10,6 +11,7 @@ import {
     recordingFolders,
     users,
 } from "@/db/schema";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import type { ContentSegment } from "@/lib/content/types";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { type MailAccess, resolveMailAccess } from "@/lib/mail/access";
@@ -114,6 +116,10 @@ export async function loadMailDetail(
         .limit(1);
     if (!row) return null;
     const orgUserId = isOwn ? null : await getOrgUserId();
+    const viewer = {
+        userId: viewerUserId,
+        isCurator: await userCuratesOrganizationNow(viewerUserId),
+    };
     const [participants, [content], assignments] = await Promise.all([
         db
             .select()
@@ -158,6 +164,7 @@ export async function loadMailDetail(
                   )
                   .where(
                       and(
+                          placementVisibleCondition(viewer),
                           eq(recordingFolderAssignments.itemId, itemId),
                           eq(recordingFolderAssignments.userId, ownerUserId),
                           // The owner's private folders are theirs alone.

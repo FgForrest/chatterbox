@@ -1,13 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { recordIntent, requestAdvance, attachArriving, lockFolder } = vi.hoisted(
-    () => ({
-        lockFolder: vi.fn(async () => {}),
-        attachArriving: vi.fn(async () => {}),
-        recordIntent: vi.fn(async () => {}),
-        requestAdvance: vi.fn(async () => null),
-    }),
-);
+const {
+    recordIntent,
+    requestAdvance,
+    attachArriving,
+    lockFolder,
+    lockTree,
+    mockEnv,
+} = vi.hoisted(() => ({
+    lockFolder: vi.fn(async () => {}),
+    lockTree: vi.fn(async () => {}),
+    mockEnv: { IS_HOSTED: false, SELF_HOST_MODE: "shared" },
+    attachArriving: vi.fn(async () => {}),
+    recordIntent: vi.fn(async () => {}),
+    requestAdvance: vi.fn(async () => null),
+}));
+
+vi.mock("@/lib/env", () => ({ env: mockEnv }));
+vi.mock("@/db/queries/organization-tree", () => ({ lockOrgTree: lockTree }));
 
 vi.mock("@/lib/posthog-server", () => ({ captureServerException: vi.fn() }));
 
@@ -50,11 +60,13 @@ describe("folder-known-at-arrival", () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        mockEnv.IS_HOSTED = false;
         requestAdvance.mockResolvedValue(null);
     });
 
     it("creates a personal assignment before requesting processing", async () => {
         await requestArrivalInTx(tx as never, {
+            canCurate: false,
             itemId: "recording",
             userId: "owner",
             folder: {
@@ -64,7 +76,14 @@ describe("folder-known-at-arrival", () => {
             },
         });
 
-        expect(lockFolder).toHaveBeenCalledWith(tx, "owner", "personal-folder");
+        expect(lockTree).not.toHaveBeenCalled();
+        expect(lockFolder).toHaveBeenCalledWith(
+            tx,
+            "owner",
+            "personal-folder",
+            false,
+            false,
+        );
         expect(lockFolder.mock.invocationCallOrder[0]).toBeLessThan(
             values.mock.invocationCallOrder[0],
         );
@@ -79,6 +98,9 @@ describe("folder-known-at-arrival", () => {
             "owner",
             "recording",
             "file",
+            undefined,
+            false,
+            false,
         );
         expect(onConflictDoNothing.mock.invocationCallOrder[0]).toBeLessThan(
             attachArriving.mock.invocationCallOrder[0] ?? 0,
@@ -96,6 +118,7 @@ describe("folder-known-at-arrival", () => {
 
     it("records an Organization intent before requesting processing", async () => {
         await requestArrivalInTx(tx as never, {
+            canCurate: false,
             itemId: "recording",
             userId: "owner",
             folder: {
@@ -110,6 +133,7 @@ describe("folder-known-at-arrival", () => {
             itemId: "recording",
             folderId: "org-folder",
             requestPipeline: false,
+            canCurate: false,
         });
         expect(tx.insert).not.toHaveBeenCalled();
         expect(requestAdvance).toHaveBeenCalledOnce();
@@ -117,12 +141,23 @@ describe("folder-known-at-arrival", () => {
 
     it("leaves placement empty when the client chooses File later", async () => {
         await requestArrivalInTx(tx as never, {
+            canCurate: false,
             itemId: "recording",
             userId: "owner",
         });
 
         expect(tx.insert).not.toHaveBeenCalled();
         expect(recordIntent).not.toHaveBeenCalled();
+        expect(requestAdvance).toHaveBeenCalledOnce();
+    });
+    it("does not serialize hosted arrivals on a global Organization lock", async () => {
+        mockEnv.IS_HOSTED = true;
+        await requestArrivalInTx(tx as never, {
+            canCurate: false,
+            itemId: "recording",
+            userId: "owner",
+        });
+        expect(lockTree).not.toHaveBeenCalled();
         expect(requestAdvance).toHaveBeenCalledOnce();
     });
 });

@@ -36,7 +36,14 @@ export function mcpRecordingCondition(caller: McpCaller): SQL {
     return and(
         isNull(recordings.deletedAt),
         caller.kind === "user"
-            ? or(visible, receivedItemCondition(caller.userId, recordings.id))
+            ? or(
+                  visible,
+                  receivedItemCondition(
+                      caller.userId,
+                      recordings.id,
+                      caller.isCurator === true,
+                  ),
+              )
             : visible,
     ) as SQL;
 }
@@ -73,7 +80,14 @@ export function mcpItemCondition(
             ? inArray(chatterItems.kind, [...allowed])
             : eq(chatterItems.id, ""),
         caller.kind === "user"
-            ? or(visible, receivedItemCondition(caller.userId))
+            ? or(
+                  visible,
+                  receivedItemCondition(
+                      caller.userId,
+                      chatterItems.id,
+                      caller.isCurator === true,
+                  ),
+              )
             : (visible ?? eq(chatterItems.id, "")),
     ) as SQL;
 }

@@ -3781,6 +3781,7 @@ async function taskFolderCondition(
         viewer.userId,
         folderId,
         ANY_TASK_ITEM,
+        viewer.isCurator,
     );
     const folder = privateTreeFolders(folders).find(
         (entry) => entry.id === folderId,
