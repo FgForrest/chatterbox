@@ -217,6 +217,7 @@ export async function requestArrivalInTx(
                 view,
                 input.userId,
                 "categorize",
+                // Defaults first: a tracked phase keeps its own state and reason.
                 {
                     state: "pending",
                     reason: "arrival",

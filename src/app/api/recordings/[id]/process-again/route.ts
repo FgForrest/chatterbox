@@ -32,6 +32,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
 
     const advance = await db.transaction(async (tx) => {
         const recording = await lockTrimRecording(tx, userId, itemId);
+        // Mail has no recordings row: lock the item first, as the pipeline lock order requires.
         if (!recording)
             await tx
                 .select({ id: chatterItems.id })
