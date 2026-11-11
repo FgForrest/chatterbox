@@ -20,9 +20,7 @@ vi.mock("@/lib/meetings/service", () => ({
     changePoint: mocks.point,
     meetingFolderPaths: async () => () => "Private / Acme",
 }));
-vi.mock("@/lib/meetings/calendar", () => ({
-    matchRecorderAgendas: mocks.match,
-}));
+vi.mock("@/lib/meetings/rooms", () => ({ matchRecorderRoom: mocks.match }));
 vi.mock("@/lib/recorder/config", () => ({
     getRecorderServerConfig: () => ({}),
     serializeRecorderServerConfig: () => ({ noticeText: "Recording notice" }),
@@ -47,7 +45,11 @@ beforeEach(() => {
     ]);
     mocks.get.mockResolvedValue({ id: "agenda", points: [] });
     mocks.point.mockResolvedValue({ id: "point" });
-    mocks.match.mockResolvedValue([]);
+    mocks.match.mockResolvedValue({
+        data: [],
+        restricted: false,
+        invitations: [],
+    });
 });
 
 describe("recorder agenda API", () => {
@@ -66,6 +68,7 @@ describe("recorder agenda API", () => {
                 agendaLive: true,
                 agendaText: 1,
                 sessionAgenda: true,
+                agendaRooms: 1,
             },
         });
     });

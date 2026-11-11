@@ -1287,7 +1287,11 @@ describe.skipIf(!url)("agenda person shares (PostgreSQL)", () => {
             { params: Promise.resolve({}) },
         );
         expect(response.status).toBe(200);
-        expect(await response.json()).toEqual({ data: [] });
+        expect(await response.json()).toEqual({
+            data: [],
+            restricted: false,
+            invitations: [],
+        });
         await Promise.all(refreshes.map((refresh) => refresh()));
         expect(readSnapshot).not.toHaveBeenCalled();
     });

@@ -1,7 +1,7 @@
 ---
 title: Agendas share co-editing through accepted person invitations while recordings require separate consent
 date: 2026-11-08
-updated: 2026-11-08 13:42
+updated: 2026-11-11 20:42
 status: proposed
 kind: feature
 issues: [329]
@@ -9,7 +9,7 @@ prs: [348]
 areas: [src/lib/meetings, src/lib/sharing, src/db/queries/meetings.ts, src/db/queries/meeting-shares.ts, src/components/meetings, src/components/sharing, src/lib/export]
 supersedes: [2026-10-28-agendas-use-all-folder-placements, 2026-10-27-meeting-agendas]
 superseded-by: []
-relates: [2026-10-22-person-to-person-sharing, 2026-10-27-shared-folders-are-two-way, 2026-10-31-share-acceptance-with-existing-folder-access]
+relates: [2026-10-22-person-to-person-sharing, 2026-10-27-shared-folders-are-two-way, 2026-10-31-share-acceptance-with-existing-folder-access, 2026-11-11-recorder-panel-recording-block]
 ---
 
 # Agendas share co-editing through accepted person invitations while recordings require separate consent
@@ -111,6 +111,8 @@ keep direct sharing disabled. Neither mode needs data conversion or deployment c
 rollback requires no migration. Browser-local dismissal does not follow users between devices.
 
 ## Related work
+
+- [Recorder panel recording block and room sharing](2026-11-11-recorder-panel-recording-block.md) adds capability-gated room discovery, short-lived panel presence and owner-only invitations, retaining agenda visibility and existing acceptance rules.
 
 - [All agenda placements](2026-10-28-agendas-use-all-folder-placements.md) is superseded only for mandatory
   attachment filing into every agenda folder. Unavailable attacher folders are now skipped; the placement

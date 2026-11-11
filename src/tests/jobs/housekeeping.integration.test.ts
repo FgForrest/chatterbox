@@ -23,6 +23,7 @@ import {
     asyncJobs,
     mailDeliveryLog,
     mcpAccessLog,
+    recorderRoomPresence,
     sessions,
     storageDailySnapshots,
     stripeWebhookEvents,
@@ -168,6 +169,17 @@ describeWithDatabase("housekeeping prunes (PostgreSQL)", () => {
     }
 
     it("deletes rows past each window and keeps the rest", async () => {
+        await db()
+            .insert(recorderRoomPresence)
+            .values([
+                {
+                    userId: USER,
+                    roomKey: "a".repeat(64),
+                    seenAt: ago(4 * MINUTE),
+                    writtenAt: ago(4 * MINUTE),
+                },
+                { userId: USER, roomKey: "b".repeat(64), seenAt: ago(MINUTE) },
+            ]);
         await seedJobs();
         await seedWebhookDeliveries();
         await db()
@@ -261,6 +273,7 @@ describeWithDatabase("housekeeping prunes (PostgreSQL)", () => {
             ]);
 
         expect(await runHousekeeping()).toEqual({
+            recorder_room_presence: 1,
             meeting_agendas: 0,
             async_jobs: 2,
             webhook_deliveries: 2,
@@ -272,6 +285,12 @@ describeWithDatabase("housekeeping prunes (PostgreSQL)", () => {
             mcp_access_log: 1,
             mail_delivery_log: 1,
         });
+
+        expect(
+            (await db().select().from(recorderRoomPresence)).map(
+                (row) => row.roomKey,
+            ),
+        ).toEqual(["b".repeat(64)]);
 
         expect(
             await ids(

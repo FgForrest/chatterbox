@@ -1,7 +1,7 @@
 ---
 title: Recorder agendas use scoped Meet join links, PostgreSQL live invalidations and encrypted CRDT text with materialized archive fields
 date: 2026-11-08
-updated: 2026-11-10 18:05
+updated: 2026-11-11 19:53
 status: superseded
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [356]
 areas: [src/lib/meetings, src/db/queries/agenda-events.ts, src/db/schema.ts, src/lib/recording-sessions, src/app/api/v1/recorder, src/components/meetings, extensions/recorder]
 supersedes: [2026-10-27-meeting-agendas, 2026-10-22-meeting-recorder-banner]
 superseded-by: [2026-11-10-recorder-meeting-companion]
-relates: []
+relates: [2026-11-11-recorder-panel-recording-block]
 ---
 
 # Recorder agendas use scoped Meet join links, PostgreSQL live invalidations and encrypted CRDT text with materialized archive fields
@@ -141,6 +141,10 @@ The maintainer's real-click Google and Chrome checks remain: account-scoped Meet
 recording, notification clicks and the fallback window. The Chrome Web Store release is pending.
 
 ## Related work
+
+- [Recorder panel recording block](2026-11-11-recorder-panel-recording-block.md) keeps these
+  capability, presence and selection boundaries while restoring the complete recording surface
+  above an inline Agenda section.
 
 - [Meeting agendas](2026-10-27-meeting-agendas.md) is superseded only for server-only Meet codes and
   polling/whole-field-only collaboration. The scoped recorder join link is the exception; other

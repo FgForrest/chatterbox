@@ -224,6 +224,7 @@ export async function refreshServerConfig() {
             agendaLive: config.features?.agendaLive === true,
             agendaText: config.features?.agendaText === 1 ? 1 : 0,
             sessionAgenda: config.features?.sessionAgenda === true,
+            agendaRooms: config.features?.agendaRooms === 1 ? 1 : 0,
             encryptedRecordingProtocol: config.encrypted_recording_protocol,
             recordingFolderOverride: config.recording_folder_override === true,
             autoRecordPlatforms: Array.isArray(defaults.auto_record_platforms)

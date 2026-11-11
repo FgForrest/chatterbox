@@ -243,16 +243,54 @@ describe.each([
         expect(el("notice-text").textContent).toBe(expected);
         expect(el("notice-text").hidden).toBe(!expected);
     });
-    it("hides direct tab capture away from a meeting only in the panel", async () => {
+    it("offers direct tab capture, the idle hint and picker hint away from a meeting", async () => {
         chrome.tabs.get.mockResolvedValue({
             id: 7,
             url: "https://example.com",
         });
         await mount();
-        expect(el("start").hidden).toBe(variant === "panel");
+        expect(el("start").hidden).toBe(false);
+        expect(el("idle-hint").hidden).toBe(false);
+        expect(el("picker-hint").hidden).toBe(false);
         expect(el("start-desktop").hidden).toBe(false);
+        el("start").click();
+        await settle();
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+            type: "start-recording",
+            payload: expect.objectContaining({
+                tabId: variant === "panel" ? 7 : 8,
+                forceDesktop: false,
+                platformHint: undefined,
+            }),
+        });
         if (variant === "panel")
             expect(document.querySelector("header").hidden).toBe(true);
+    });
+    it("keeps the complete next-meeting card in the recording block without requiring an agenda", async () => {
+        local.serverDefaults = { nextMeeting: true };
+        chrome.storage.session.get = async () => ({
+            recorderNextMeeting: {
+                serverUrl: local.serverUrl,
+                connectionId: "1",
+                data: {
+                    title: "Team review",
+                    start: new Date(Date.now() + 60000).toISOString(),
+                    end: new Date(Date.now() + 3600000).toISOString(),
+                    joinUrl: "https://meet.google.com/xyz-uvwx-rst",
+                    accountEmail: "jitka@example.com",
+                },
+            },
+        });
+        await mount();
+        await settle();
+        expect(el("next-meeting-card").hidden).toBe(false);
+        expect(
+            el("next-meeting-card").querySelector("strong").textContent,
+        ).toBe("Team review");
+        expect(
+            el("next-meeting-card").querySelector("button").textContent,
+        ).toBe("joinMeet");
+        expect(document.body.contains(el("next-meeting-card"))).toBe(true);
     });
     it("closes the folder chooser of a view the state hides", async () => {
         await mount();
@@ -284,4 +322,31 @@ describe.each([
         expect(el("view-finalizing").hidden).toBe(false);
         expect(h.closeRecording).toHaveBeenCalled();
     });
+});
+
+it("#403 places the colleague notice above the complete panel recording controls", async () => {
+    const notice = document.createElement("p");
+    notice.textContent = "Jitka Dvořáková is recording this meeting";
+    widget = await mountRecordingControls(document.body, {
+        variant: "panel",
+        tabId: 7,
+        idleNotice: notice,
+    });
+    expect(el("view-idle").contains(notice)).toBe(true);
+    expect(notice.nextElementSibling).toBe(el("idle-hint"));
+    for (const id of [
+        "idle-hint",
+        "folder-row",
+        "start",
+        "start-desktop",
+        "picker-hint",
+    ])
+        expect(el(id).closest("[hidden]")).toBeNull();
+    listener({
+        type: "state",
+        state: { state: "recording", sessionId: "one", uploaded: [] },
+    });
+    await settle();
+    expect(notice.closest("[hidden]")).toBe(el("view-idle"));
+    expect(el("view-recording").hidden).toBe(false);
 });

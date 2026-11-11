@@ -79,7 +79,7 @@ export function publishJoinedMeeting(meeting, tabId, onRoute = () => {}) {
         if (!roomCode || !validBinding(meeting, settings) || !tab || roomCode !== meetCode(tab.pendingUrl || tab.url))
             throw new Error("Meeting unavailable");
         const binding = { agendaId: meeting.agendaId ?? null, end: meeting.end, roomCode, serverUrl: settings.serverUrl, connectionId: settings.connectionId };
-        const context = { agendaIds: meeting.agendaId ? [meeting.agendaId] : [], choose: false, tabId, roomCode };
+        const context = { agendaIds: meeting.agendaId ? [meeting.agendaId] : [], choose: false, tabId, roomCode, agendaSource: "join", roomAutomatic: false };
         await chrome.storage.session.set({
             [`${MEETING_TAB_PREFIX}${tabId}`]: binding,
             ...(meeting.agendaId ? { [agendaPanelKey(tabId)]: context, [`agenda-route:${tabId}`]: context } : {}),

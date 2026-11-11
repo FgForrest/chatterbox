@@ -30,7 +30,7 @@ export async function mountRecordingControls(
         agendaChoice = () => ({}),
         onState = () => {},
         onTab = () => {},
-        selectedAgenda = () => null,
+        idleNotice,
         beforeAction = async () => {},
     } = {},
 ) {
@@ -57,6 +57,8 @@ export async function mountRecordingControls(
         completed: root.querySelector("#" + "view-completed"),
         error: root.querySelector("#" + "view-error"),
     };
+
+    if (idleNotice) views.idle.prepend(idleNotice);
 
     localizeDocument();
 
@@ -210,14 +212,14 @@ export async function mountRecordingControls(
         const settings = await getSettings();
         if (version !== renderVersion) return;
         const hint = el("idle-hint");
-        hint.hidden = variant === "panel";
-        el("start").hidden = variant === "panel" && !currentPlatform;
+        hint.hidden = false;
+        el("start").hidden = false;
         const autoHint = el("auto-hint");
         autoHint.hidden = true;
         el("start").textContent = t("recordTabWithConsent");
         el("notice-text").textContent = customNoticeText(settings);
         el("notice-text").hidden = !el("notice-text").textContent;
-        el("picker-hint").hidden = variant === "panel" && Boolean(currentPlatform);
+        el("picker-hint").hidden = false;
         folderCombobox.reset(popupFolderChoice ?? agendaFolderChoice ?? settings);
 
         if (currentPlatform) {
@@ -512,7 +514,7 @@ export async function mountRecordingControls(
     meetingCard = createNextMeetingCard(
         el("next-meeting-card"),
         () => currentTab,
-        { popup: variant === "popup", state: () => currentState, ...(variant === "panel" ? { agendaId: selectedAgenda, compact: true } : {}) },
+        { popup: variant === "popup", state: () => currentState },
     );
     if (variant === "panel") el("view-idle").prepend(el("next-meeting-card"));
     const tabUpdated = (id, change, tab) => {

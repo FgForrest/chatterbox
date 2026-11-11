@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { bindAgendaTextInput } from "@/lib/meetings/text-sync";
+import { panelRoomHeartbeat } from "../../../extensions/recorder/lib/agenda-rooms.js";
 import {
     agendaPanelKey,
     canChooseRecordingAgenda,
@@ -31,6 +32,7 @@ let request;
 let onChanges;
 let matches;
 let subscription;
+let cards;
 let disconnect;
 let subscribe;
 const el = (id) =>
@@ -196,6 +198,9 @@ async function start(doc = document, tabId = 7) {
         "detectMeetingPlatform",
         "meetCode",
         "renderLinkedText",
+        "panelRoomHeartbeat",
+        "supportsAgendaRooms",
+        "mountRoomCards",
         `return (async () => { ${source} })();`,
     );
     await run(
@@ -228,6 +233,12 @@ async function start(doc = document, tabId = 7) {
         detectMeetingPlatform,
         meetCode,
         renderLinkedText,
+        panelRoomHeartbeat,
+        (value) => value?.serverDefaults?.agendaRooms === 1,
+        () => {
+            cards = { render: vi.fn(), destroy: vi.fn() };
+            return cards;
+        },
     );
 }
 
@@ -287,7 +298,9 @@ describe("#369 manual agenda panel choices", () => {
             [],
             expect.objectContaining({ onError: expect.any(Function) }),
         );
-        const buttons = [...el("choice-list").querySelectorAll("button")];
+        const buttons = [
+            ...el("choice-list").querySelectorAll("button:not(#none)"),
+        ];
         expect(buttons.slice(-3).map((node) => node.textContent)).toEqual([
             `Acme review${catalog.agendaYesterday.message} 14:00`,
             `Acme review${catalog.agendaToday.message} 10:00–11:00`,
@@ -316,7 +329,7 @@ describe("#369 manual agenda panel choices", () => {
             expect.objectContaining({ onError: expect.any(Function) }),
         );
         expect(
-            [...el("choice-list").querySelectorAll("button")].map(
+            [...el("choice-list").querySelectorAll("button:not(#none)")].map(
                 (node) => node.textContent,
             ),
         ).toEqual(["Acme review", "Other review"]);
@@ -356,7 +369,7 @@ describe("#369 manual agenda panel choices", () => {
     it.each([
         "initial",
         "change",
-    ])("keeps recording controls visible through %s chooser loading, failure, Retry and Back", async (entry) => {
+    ])("keeps recording controls visible through %s chooser loading, failure, Retry and Cancel", async (entry) => {
         session.recordingState = {
             state: "recording",
             sessionId: "session-one",
@@ -388,17 +401,17 @@ describe("#369 manual agenda panel choices", () => {
         await settle();
         expect(el("agenda-error").hidden).toBe(false);
         expect(el("retry").closest("[hidden]")).toBeNull();
-        expect(el("back").closest("[hidden]")).toBeNull();
+        expect(el("cancel-choice").closest("[hidden]")).toBeNull();
         expect(el("recorder-controls").closest("[hidden]")).toBeNull();
         el("retry").click();
         await settle();
         expect(matches).toHaveBeenCalledTimes(2);
         expect(el("agenda-error").hidden).toBe(true);
         expect(
-            el("choice-list").querySelectorAll("button").length,
+            el("choice-list").querySelectorAll("button:not(#none)").length,
         ).toBeGreaterThan(0);
         expect(el("recorder-controls").closest("[hidden]")).toBeNull();
-        el("back").click();
+        el("cancel-choice").click();
         expect(el("choices").hidden).toBe(true);
         expect(el("recorder-controls").closest("[hidden]")).toBeNull();
         if (entry === "change") expect(el("agenda").hidden).toBe(false);
@@ -407,7 +420,7 @@ describe("#369 manual agenda panel choices", () => {
     it("shows recording controls in a chooser and on errors while a colleague records", async () => {
         data.recordingBy = [{ name: "Acme colleague", self: false }];
         await start();
-        expect(el("recorder-controls").hidden).toBe(true);
+        expect(el("recorder-controls").hidden).toBe(false);
         matches.mockImplementationOnce(async (_now, _ids, { onError }) => {
             onError();
             return [];
@@ -416,7 +429,7 @@ describe("#369 manual agenda panel choices", () => {
         await settle();
         expect(el("agenda-error").hidden).toBe(false);
         expect(el("recorder-controls").closest("[hidden]")).toBeNull();
-        el("back").click();
+        el("cancel-choice").click();
         request.mockRejectedValueOnce(new Error("Offline"));
         await vi.advanceTimersByTimeAsync(15000);
         expect(el("agenda-error").hidden).toBe(false);
@@ -643,7 +656,7 @@ describe("agenda side panel", () => {
         expect(el("change-agenda").hidden).toBe(false);
         el("change-agenda").click();
         await settle();
-        el("choice-list").querySelectorAll("button")[1].click();
+        el("choice-list").querySelectorAll("button:not(#none)")[1].click();
         await settle();
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
             type: "select-agenda",
@@ -690,9 +703,8 @@ describe("agenda side panel", () => {
             stopped: true,
         };
         await start();
-        expect(el("recording-state").textContent).toBe(
-            catalog.agendaUnavailable.message,
-        );
+        expect(el("task-section").hidden).toBe(true);
+        expect(el("recorder-controls").hidden).toBe(false);
         expect(el("agenda-error").hidden).toBe(true);
         expect(document.getElementById("attachment")).toBeNull();
     });
@@ -782,13 +794,16 @@ describe("live panel collaboration", () => {
             expect.objectContaining({ method: "PATCH" }),
         );
     });
-    it("reveals controls only after Record as well and stays a live checklist during capture", async () => {
+    it("keeps the colleague notice inside complete controls and stays a live checklist during capture", async () => {
         data.recordingBy = [{ name: "Jitka Dvořáková", self: false }];
         await start();
         expect(el("recording-by").textContent).toContain("Jitka Dvořáková");
-        expect(el("recorder-controls").hidden).toBe(true);
-        el("record-also").click();
         expect(el("recorder-controls").hidden).toBe(false);
+        expect(el("colleague-recording").hidden).toBe(false);
+        expect(
+            el("colleague-recording").closest("#recorder-controls"),
+        ).not.toBeNull();
+        expect(document.getElementById("record-also")).toBeNull();
         session.recordingState = {
             state: "recording",
             sessionId: "session-one",
@@ -1001,13 +1016,542 @@ it("shows a partial choice lookup failure without claiming there are no agendas"
     );
 });
 
-it("keeps Back from reopening an initial empty chooser on the next poll", async () => {
+it("keeps Cancel from reopening an initial empty chooser on the next poll", async () => {
     session[agendaPanelKey(7)] = { agendaIds: [], choose: true, tabId: 7 };
     await start();
     expect(el("choices").hidden).toBe(false);
-    el("back").click();
+    el("cancel-choice").click();
     expect(el("choices").hidden).toBe(true);
     expect(el("recorder-controls").hidden).toBe(false);
     await vi.advanceTimersByTimeAsync(15000);
     expect(el("choices").hidden).toBe(true);
+});
+
+describe("#403 inline Agenda section", () => {
+    it.each([
+        false,
+        true,
+    ])("shows No agenda when nothing is chosen (explicit %s)", async (explicitNone) => {
+        session[agendaPanelKey(7)] = { agendaIds: [], tabId: 7, explicitNone };
+        await start();
+        expect(el("title").textContent).toBe("No agenda");
+        expect(el("title").tagName).toBe("H2");
+        expect(el("no-agenda-hint").hidden).toBe(false);
+        expect(el("change-agenda").textContent).toBe("Choose agenda");
+        expect(el("choices").hidden).toBe(true);
+        expect(el("recorder-controls").nextElementSibling).toBe(
+            el("agenda-section"),
+        );
+        expect(el("agenda-section").contains(el("agenda-error"))).toBe(true);
+        expect(matches).not.toHaveBeenCalled();
+    });
+    it.each([
+        false,
+        true,
+    ])("marks No agenda Selected in the framed chooser (explicit %s)", async (explicitNone) => {
+        session[agendaPanelKey(7)] = { agendaIds: [], tabId: 7, explicitNone };
+        await start();
+        el("change-agenda").click();
+        await settle();
+        expect(el("title").textContent).toBe("Choose agenda");
+        expect(el("choice-list").lastElementChild).toBe(el("none"));
+        expect(el("none").getAttribute("aria-checked")).toBe("true");
+        expect(el("none").querySelector(".selected-label").textContent).toBe(
+            "Selected",
+        );
+        expect(el("none").querySelector(".choice-radio")).not.toBeNull();
+        el("none").click();
+        await settle();
+        expect(el("choices").hidden).toBe(true);
+        expect(el("title").textContent).toBe("No agenda");
+        expect(session[agendaPanelKey(7)].explicitNone).toBe(true);
+    });
+    it("keeps the current agenda selected and Cancel restores it without sending a choice", async () => {
+        await start();
+        el("change-agenda").click();
+        await settle();
+        expect(el("title").textContent).toBe("Change agenda");
+        const selected = el("choice-list").querySelector(
+            '[aria-checked="true"]',
+        );
+        expect(selected.textContent).toContain("Acme review");
+        expect(selected.textContent).toContain("Selected");
+        expect(el("none").getAttribute("aria-checked")).toBe("false");
+        el("cancel-choice").click();
+        expect(el("title").textContent).toBe("Acme review");
+        expect(el("choices").hidden).toBe(true);
+        expect(el("agenda").hidden).toBe(false);
+        expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: "select-agenda" }),
+        );
+        expect(chrome.storage.session.set).not.toHaveBeenCalled();
+    });
+    it("restores the recording's selected agenda when its chooser opens from the popup", async () => {
+        session[agendaPanelKey(7)] = { agendaIds: [], tabId: 7, choose: true };
+        session.recordingState = {
+            state: "recording",
+            sessionId: "session-one",
+            tabId: 7,
+            agendaId: "agenda-one",
+        };
+        await start();
+        expect(el("title").textContent).toBe("Change agenda");
+        expect(
+            el("choice-list").querySelector('[aria-checked="true"]')
+                .textContent,
+        ).toContain("Acme review");
+        expect(el("none").getAttribute("aria-checked")).toBe("false");
+        el("cancel-choice").click();
+        expect(el("title").textContent).toBe("Acme review");
+        await chrome.storage.session.set({ recordingState: { state: "idle" } });
+        await vi.advanceTimersByTimeAsync(15000);
+        expect(el("title").textContent).toBe("Acme review");
+        expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: "select-agenda" }),
+        );
+    });
+    it("hides tasks after Stop even when the agenda was already read-only", async () => {
+        data.permissions.edit = false;
+        await start();
+        controlOptions.onState({
+            state: "recording",
+            sessionId: "session-one",
+        });
+        expect(el("task-section").hidden).toBe(false);
+        controlOptions.onState({
+            state: "recording",
+            sessionId: "session-one",
+            stopped: true,
+        });
+        expect(el("task-section").hidden).toBe(true);
+        expect(el("after-hint").hidden).toBe(false);
+        expect(el("points").querySelector(".status-icon")).not.toBeNull();
+        controlOptions.onState({ state: "idle" });
+        expect(el("task-section").hidden).toBe(false);
+        expect(el("after-hint").hidden).toBe(true);
+    });
+    it("shows the empty window inside the list above No agenda", async () => {
+        session[agendaPanelKey(7)] = { agendaIds: [], tabId: 7 };
+        matches.mockResolvedValue([]);
+        await start();
+        el("change-agenda").click();
+        await settle();
+        expect(el("choice-list").firstElementChild.textContent).toBe(
+            messages.agendaEmpty.message,
+        );
+        expect(el("choice-list").firstElementChild.nextElementSibling).toBe(
+            el("none"),
+        );
+        expect(el("choice-list").textContent).toContain("24 hours");
+        el("cancel-choice").click();
+        expect(el("title").textContent).toBe("No agenda");
+        expect(el("no-agenda-hint").hidden).toBe(false);
+    });
+    it("ignores a list arriving after Cancel", async () => {
+        await start();
+        let release;
+        matches.mockImplementationOnce(
+            () =>
+                new Promise((resolve) => {
+                    release = resolve;
+                }),
+        );
+        el("change-agenda").click();
+        await settle();
+        el("cancel-choice").click();
+        release([{ id: "late", title: "Late choice" }]);
+        await settle();
+        expect(el("title").textContent).toBe("Acme review");
+        expect(el("choices").hidden).toBe(true);
+        expect(el("choice-list").textContent).not.toContain("Late choice");
+    });
+    it("collapses immediately after selecting an agenda row without an Apply button", async () => {
+        await start();
+        el("change-agenda").click();
+        await settle();
+        el("choice-list").querySelector("button").click();
+        await settle();
+        expect(el("choices").hidden).toBe(true);
+        expect(session[agendaPanelKey(7)]).toMatchObject({
+            agendaIds: ["agenda-one"],
+            choose: false,
+            explicitNone: false,
+        });
+        expect(el("agenda").hidden).toBe(false);
+        expect(el("cancel-choice").hidden).toBe(true);
+    });
+    it("keeps the presence notice visible while choosing and hides it during capture", async () => {
+        data.recordingBy = [{ name: "Jitka Dvořáková", self: false }];
+        await start();
+        expect(controlOptions.idleNotice).toBe(el("colleague-recording"));
+        el("change-agenda").click();
+        await settle();
+        expect(el("colleague-recording").hidden).toBe(false);
+        expect(el("recorder-controls").hidden).toBe(false);
+        controlOptions.onState({ state: "recording", sessionId: "one" });
+        expect(el("colleague-recording").hidden).toBe(true);
+    });
+});
+
+describe("#403 room states in the panel", () => {
+    function enable() {
+        settings.serverDefaults = { agendas: true, agendaRooms: 1 };
+        settings.dataUseAcknowledgedAt = "now";
+        settings.hasApiKey = true;
+    }
+    it("shows only the restricted heading when a room has no visible agenda", async () => {
+        enable();
+        session[agendaPanelKey(7)] = { tabId: 7, agendaIds: [], choose: false };
+        chrome.runtime.sendMessage.mockImplementation(async (message) =>
+            message.type === "room-agendas"
+                ? { ok: true, data: [], restricted: true, invitations: [] }
+                : { ok: true, retryAfterMs: 20000 },
+        );
+        await start();
+        expect(el("title").textContent).toBe("Agenda is not shared with you");
+        expect(el("no-agenda-hint").hidden).toBe(true);
+        expect(el("recorder-controls").hidden).toBe(false);
+        expect(request).not.toHaveBeenCalled();
+        expect(cards.render).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                restricted: true,
+                people: [],
+                invitations: [],
+            }),
+        );
+    });
+    it("passes room invitations to the card without looking up the restricted agenda", async () => {
+        enable();
+        session[agendaPanelKey(7)] = { tabId: 7, agendaIds: [], choose: false };
+        const invitation = {
+            id: "share",
+            agendaId: "hidden",
+            title: "Acme planning",
+            version: 0,
+        };
+        chrome.runtime.sendMessage.mockImplementation(async (message) =>
+            message.type === "room-agendas"
+                ? {
+                      ok: true,
+                      data: [],
+                      restricted: true,
+                      invitations: [invitation],
+                  }
+                : { ok: true, retryAfterMs: 20000 },
+        );
+        await start();
+        expect(cards.render).toHaveBeenLastCalledWith(
+            expect.objectContaining({ invitations: [invitation] }),
+        );
+        expect(request).not.toHaveBeenCalled();
+        expect(el("title").hidden).toBe(true);
+        expect(el("no-agenda-hint").hidden).toBe(true);
+    });
+    it("names a live room agenda's chooser and follows its automatic selection on polling", async () => {
+        enable();
+        data.own = false;
+        session[agendaPanelKey(7)] = {
+            tabId: 7,
+            agendaIds: [],
+            choose: false,
+            roomAutomatic: true,
+        };
+        let id = "agenda-one";
+        chrome.runtime.sendMessage.mockImplementation(async (message) =>
+            message.type === "room-agendas"
+                ? {
+                      ok: true,
+                      data: [
+                          {
+                              id,
+                              chosenBy: [{ name: "Alex Rowan", self: false }],
+                          },
+                      ],
+                      restricted: false,
+                      invitations: [],
+                  }
+                : { ok: true, retryAfterMs: 20000 },
+        );
+        const base = request.getMockImplementation();
+        request.mockImplementation((path, init) =>
+            path.endsWith("/people")
+                ? Promise.reject(
+                      Object.assign(new Error("owner only"), { status: 404 }),
+                  )
+                : base(path, init),
+        );
+        await start();
+        expect(el("room-chosen-by").textContent).toBe(
+            "Chosen by Alex Rowan, who is recording this meeting",
+        );
+        id = data.id = "agenda-two";
+        data.title = "Next planning";
+        await vi.advanceTimersByTimeAsync(15000);
+        expect(el("title").textContent).toBe("Next planning");
+        expect(request).toHaveBeenCalledWith("/agenda-two");
+    });
+});
+
+describe("#403 selection provenance", () => {
+    function enable() {
+        settings.serverDefaults = { agendas: true, agendaRooms: 1 };
+        settings.dataUseAcknowledgedAt = "now";
+        settings.hasApiKey = true;
+    }
+    it.each([
+        { rows: [] },
+        { rows: [{ id: "agenda-two" }] },
+    ])("keeps an explicit Join selection when the room returns $rows", async ({
+        rows,
+    }) => {
+        enable();
+        session[agendaPanelKey(7)] = {
+            tabId: 7,
+            agendaIds: ["agenda-one"],
+            agendaSource: "join",
+            roomAutomatic: false,
+        };
+        chrome.runtime.sendMessage.mockImplementation(async (message) =>
+            message.type === "room-agendas"
+                ? { ok: true, data: rows, restricted: false, invitations: [] }
+                : { ok: true, retryAfterMs: 20000 },
+        );
+        await start();
+        await vi.advanceTimersByTimeAsync(60000);
+        expect(controlOptions.agendaChoice()).toEqual({
+            agendaId: "agenda-one",
+        });
+        expect(request).toHaveBeenCalledWith("/agenda-one");
+        expect(request).not.toHaveBeenCalledWith("/agenda-two");
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: "room-presence",
+                agendaId: "agenda-one",
+            }),
+        );
+    });
+    it("keeps the current recording's agenda ahead of automatic room matching", async () => {
+        enable();
+        session[agendaPanelKey(7)] = {
+            tabId: 7,
+            agendaIds: ["agenda-two"],
+            roomAutomatic: true,
+            agendaSource: "automatic",
+        };
+        session.recordingState = {
+            state: "recording",
+            tabId: 7,
+            sessionId: "capture",
+            agendaId: "agenda-one",
+        };
+        chrome.runtime.sendMessage.mockImplementation(async (message) =>
+            message.type === "room-agendas"
+                ? {
+                      ok: true,
+                      data: [{ id: "agenda-two" }],
+                      restricted: false,
+                      invitations: [],
+                  }
+                : { ok: true, retryAfterMs: 20000 },
+        );
+        await start();
+        expect(controlOptions.agendaChoice()).toEqual({
+            agendaId: "agenda-one",
+        });
+        expect(request).not.toHaveBeenCalledWith("/agenda-two");
+    });
+    it("does not reuse stale detail as the selection when an automatic match opens the chooser", async () => {
+        enable();
+        session[agendaPanelKey(7)] = {
+            tabId: 7,
+            agendaIds: ["agenda-one"],
+            roomAutomatic: true,
+        };
+        let rows = [{ id: "agenda-one" }];
+        chrome.runtime.sendMessage.mockImplementation(async (message) =>
+            message.type === "room-agendas"
+                ? { ok: true, data: rows, restricted: false, invitations: [] }
+                : { ok: true, retryAfterMs: 20000 },
+        );
+        await start();
+        rows = [{ id: "agenda-one" }, { id: "agenda-two" }];
+        await vi.advanceTimersByTimeAsync(15000);
+        expect(el("choices").hidden).toBe(false);
+        expect(el("none").getAttribute("aria-checked")).toBe("true");
+        expect(controlOptions.agendaChoice()).toEqual({});
+        expect(
+            chrome.runtime.sendMessage.mock.calls
+                .filter(([message]) => message.type === "room-presence")
+                .every(([message]) => message.agendaId === null),
+        ).toBe(true);
+    });
+    it("two panels follow A through throttled A+B matches to B without rebinding A beyond the presence TTL", async () => {
+        enable();
+        const recorder = document.implementation.createHTMLDocument("Recorder");
+        recorder.documentElement.innerHTML = html;
+        session[agendaPanelKey(7)] = {
+            tabId: 7,
+            agendaIds: ["agenda-one"],
+            agendaSource: "panel",
+        };
+        session[agendaPanelKey(8)] = {
+            tabId: 8,
+            agendaIds: [],
+            roomAutomatic: true,
+            agendaSource: "automatic",
+            choose: false,
+        };
+        let liveAgenda = "agenda-one";
+        const presence = new Map();
+        chrome.runtime.sendMessage.mockImplementation(async (message) => {
+            if (message.type === "room-presence") {
+                const previous = presence.get(message.tabId);
+                const retryAfterMs = previous
+                    ? 20000 - (Date.now() - previous.at)
+                    : 0;
+                if (retryAfterMs > 0) return { ok: true, retryAfterMs };
+                presence.set(message.tabId, {
+                    agendaId: message.agendaId,
+                    at: Date.now(),
+                });
+                return { ok: true, retryAfterMs: 0 };
+            }
+            if (message.type === "select-agenda") liveAgenda = message.agendaId;
+            if (message.type === "room-agendas") {
+                const ids = new Set(
+                    [
+                        liveAgenda,
+                        ...[...presence.values()]
+                            .filter((row) => Date.now() - row.at < 180000)
+                            .map((row) => row.agendaId),
+                    ].filter(Boolean),
+                );
+                return {
+                    ok: true,
+                    data: [...ids].map((id) => ({ id })),
+                    restricted: false,
+                    invitations: [],
+                };
+            }
+            return { ok: true };
+        });
+        request.mockImplementation(async (path) => ({
+            ...structuredClone(data),
+            id: path.split("/")[1],
+            title: path.includes("agenda-two")
+                ? "Next planning"
+                : "Acme review",
+        }));
+        await start(recorder, 7);
+        tab = { ...tab, id: 8 };
+        await start(document, 8);
+        expect(el("title").textContent).toBe("Acme review");
+        expect(presence.get(8).agendaId).toBeNull();
+        recorder.getElementById("change-agenda").click();
+        await settle();
+        const next = [...recorder.querySelectorAll(".agenda-option")].find(
+            (node) => node.textContent.includes("Other review"),
+        );
+        next.click();
+        await settle();
+        expect(presence.get(7).agendaId).toBe("agenda-one");
+        expect(liveAgenda).toBe("agenda-two");
+        await vi.advanceTimersByTimeAsync(15000);
+        expect(el("choices").hidden).toBe(false);
+        expect(el("choice-list").textContent).toContain("Other review");
+        expect(presence.get(7).agendaId).toBe("agenda-one");
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(presence.get(7).agendaId).toBe("agenda-two");
+        await vi.advanceTimersByTimeAsync(10000);
+        expect(el("title").textContent).toBe("Next planning");
+        expect(el("choices").hidden).toBe(true);
+        for (const interval of [180000, 300000]) {
+            await vi.advanceTimersByTimeAsync(interval);
+            expect(el("title").textContent).toBe("Next planning");
+            expect(el("choices").hidden).toBe(true);
+            expect(presence.get(8).agendaId).toBeNull();
+            expect(presence.get(7).agendaId).toBe("agenda-two");
+        }
+        expect(
+            chrome.runtime.sendMessage.mock.calls
+                .filter(
+                    ([message]) =>
+                        message.type === "room-presence" && message.tabId === 8,
+                )
+                .every(([message]) => message.agendaId === null),
+        ).toBe(true);
+    });
+    it.each([
+        false,
+        true,
+    ])("keeps reconciling an automatic chooser until a singleton matches (initial %s)", async (initial) => {
+        enable();
+        session[agendaPanelKey(7)] = {
+            tabId: 7,
+            agendaIds: initial ? ["agenda-one", "agenda-two"] : ["agenda-one"],
+            choose: initial,
+            roomAutomatic: true,
+            agendaSource: "automatic",
+        };
+        let rows = initial
+            ? [{ id: "agenda-one" }, { id: "agenda-two" }]
+            : [{ id: "agenda-one" }];
+        chrome.runtime.sendMessage.mockImplementation(async (message) =>
+            message.type === "room-agendas"
+                ? { ok: true, data: rows, restricted: false, invitations: [] }
+                : { ok: true, retryAfterMs: 20000 },
+        );
+        request.mockImplementation(async (path) => ({
+            ...structuredClone(data),
+            id: path.split("/")[1],
+            title: path.includes("agenda-two")
+                ? "Next planning"
+                : "Acme review",
+        }));
+        await start();
+        rows = [{ id: "agenda-one" }, { id: "agenda-two" }];
+        await vi.advanceTimersByTimeAsync(15000);
+        expect(el("choices").hidden).toBe(false);
+        rows = [{ id: "agenda-two" }];
+        await vi.advanceTimersByTimeAsync(8 * 60000);
+        expect(el("choices").hidden).toBe(true);
+        expect(el("title").textContent).toBe("Next planning");
+        expect(request).toHaveBeenCalledWith("/agenda-two");
+        expect(
+            chrome.runtime.sendMessage.mock.calls
+                .filter(([message]) => message.type === "room-presence")
+                .every(([message]) => message.agendaId === null),
+        ).toBe(true);
+    });
+    it.each([
+        "manual chooser",
+        "explicit selection",
+    ])("preserves a %s when automatic room matches change", async (mode) => {
+        enable();
+        session[agendaPanelKey(7)] = {
+            tabId: 7,
+            agendaIds: ["agenda-one"],
+            roomAutomatic: true,
+            agendaSource: "automatic",
+        };
+        let rows = [{ id: "agenda-one" }];
+        chrome.runtime.sendMessage.mockImplementation(async (message) =>
+            message.type === "room-agendas"
+                ? { ok: true, data: rows, restricted: false, invitations: [] }
+                : { ok: true, retryAfterMs: 20000 },
+        );
+        await start();
+        el("change-agenda").click();
+        await settle();
+        if (mode === "explicit selection") {
+            el("choice-list").querySelector("button").click();
+            await settle();
+        }
+        rows = [{ id: "agenda-two" }];
+        await vi.advanceTimersByTimeAsync(8 * 60000);
+        expect(el("choices").hidden).toBe(mode === "explicit selection");
+        expect(request).not.toHaveBeenCalledWith("/agenda-two");
+        if (mode === "explicit selection")
+            expect(el("title").textContent).toBe("Acme review");
+    });
 });
