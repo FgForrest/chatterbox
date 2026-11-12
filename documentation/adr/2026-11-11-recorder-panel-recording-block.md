@@ -1,11 +1,11 @@
 ---
 title: Recorder panels keep capture first and share agendas through short-lived room presence
 date: 2026-11-11
-updated: 2026-11-11 22:24
-status: proposed
+updated: 2026-11-12 06:50
+status: accepted
 kind: fix
 issues: [403]
-prs: []
+prs: [406]
 areas: [extensions/recorder, src/lib/meetings/rooms.ts, src/db/queries/recorder-rooms.ts, src/lib/recording-sessions, src/app/api/v1/recorder, src/db/schema.ts]
 supersedes: [2026-11-10-recorder-meeting-companion]
 superseded-by: []
@@ -212,3 +212,4 @@ Chrome Web Store submission and authenticated meeting checks remain release chec
   colleague notice for extension 0.9.9; implemented as issue #403 part 1.
 - **2026-11-11**: owner-only panel presence, restricted markers and in-panel invitation acceptance
   implemented as part 2 under the same decision.
+- **2026-11-12**: merged into `dev` as PR #406.
