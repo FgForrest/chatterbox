@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ActionTooltip } from "@/components/ui/tooltip";
 import type { RecordingFolder } from "@/types/folder";
+import { FolderRestrictionContactsDialog } from "./folder-restriction-contacts-dialog";
 import { FolderRestrictionDialog } from "./folder-restriction-dialog";
 import { RestrictedAudienceDialog } from "./restricted-audience-dialog";
 import { useRestrictedFolders } from "./restricted-folder-context";
@@ -23,7 +24,7 @@ export function RestrictedFolderControls({
     const i18n = useExtracted();
     const { writable } = useRestrictedFolders();
     const [action, setAction] = useState<
-        "audience" | "restrict" | "lift" | null
+        "audience" | "restrict" | "lift" | "contacts" | null
     >(null);
     if (
         folder.scope !== "org" ||
@@ -64,28 +65,36 @@ export function RestrictedFolderControls({
                     </Button>
                 </ActionTooltip>
             )}
-            {writable && canCurate && !folder.restricted && (
-                <ActionTooltip
-                    label={
-                        folder.restricting
-                            ? i18n("Retry restriction…")
-                            : i18n("Restrict…")
-                    }
-                >
-                    <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={
+            {writable &&
+                (canCurate || folder.canRestrict || !folder.restricting) &&
+                !folder.restricted && (
+                    <ActionTooltip
+                        label={
                             folder.restricting
                                 ? i18n("Retry restriction…")
                                 : i18n("Restrict…")
                         }
-                        onClick={() => setAction("restrict")}
                     >
-                        <FolderLock className="size-4" />
-                    </Button>
-                </ActionTooltip>
-            )}
+                        <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={
+                                folder.restricting
+                                    ? i18n("Retry restriction…")
+                                    : i18n("Restrict…")
+                            }
+                            onClick={() =>
+                                setAction(
+                                    canCurate || folder.canRestrict
+                                        ? "restrict"
+                                        : "contacts",
+                                )
+                            }
+                        >
+                            <FolderLock className="size-4" />
+                        </Button>
+                    </ActionTooltip>
+                )}
             {action === "audience" && (
                 <RestrictedAudienceDialog
                     folder={folder}
@@ -94,7 +103,15 @@ export function RestrictedFolderControls({
                     }}
                 />
             )}
-            {action && action !== "audience" && (
+            {action === "contacts" && (
+                <FolderRestrictionContactsDialog
+                    folder={folder}
+                    onOpenChange={(open) => {
+                        if (!open) setAction(null);
+                    }}
+                />
+            )}
+            {action && action !== "audience" && action !== "contacts" && (
                 <FolderRestrictionDialog
                     folder={folder}
                     folders={folders}

@@ -1,10 +1,10 @@
 import { after } from "next/server";
 import { z } from "zod";
-import { matchRecorderAgendas } from "@/lib/meetings/calendar";
+import { matchRecorderRoom } from "@/lib/meetings/rooms";
 import { meetingDate, meetingRoute } from "@/lib/meetings/route";
 export const GET = meetingRoute(
-    async ({ userId, url }) => ({
-        data: await matchRecorderAgendas(
+    async ({ userId, url }) =>
+        matchRecorderRoom(
             userId,
             meetingDate(url.searchParams.get("at"), new Date()),
             url.searchParams.has("meetCode")
@@ -12,6 +12,5 @@ export const GET = meetingRoute(
                 : undefined,
             (refresh) => after(refresh),
         ),
-    }),
     true,
 );

@@ -5,7 +5,11 @@ import { recordingSessions, users } from "@/db/schema";
 import { requireMeetingAccess } from "@/lib/meetings/access";
 
 /** Disclose recording participants only after checking the agenda's current visibility. */
-export async function agendaRecordingBy(userId: string, id: string) {
+export async function agendaRecordingBy(
+    userId: string,
+    id: string,
+    roomKey?: string,
+) {
     const { agenda } = await requireMeetingAccess(userId, id);
     const rows = await db
         .selectDistinct({ id: users.id, name: users.name })
@@ -14,6 +18,9 @@ export async function agendaRecordingBy(userId: string, id: string) {
         .where(
             and(
                 sql`${recordingSessions.metadata}->>'liveAgendaId' = ${agenda.id}`,
+                roomKey
+                    ? sql`${recordingSessions.metadata}->>'roomKey' = ${roomKey}`
+                    : undefined,
                 inArray(recordingSessions.status, ["open", "completing"]),
                 gt(
                     recordingSessions.startedAt,

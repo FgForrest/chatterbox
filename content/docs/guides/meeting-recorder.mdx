@@ -188,10 +188,13 @@ the server is updated.
   refuses the side panel, the agenda opens in a separate window. With the
   in-meeting prompt on, **Offer agendas in the meeting banner** adds **Show
   agenda** to the banner.
-- **Meeting companion (0.9.7).** Prepare points, edit titles and drop tasks in the web app.
-  The panel stays in one column at any width. Away from a meeting it shows the agenda read-only,
-  the target folder and **Record another screen or app**. When the next Calendar meeting belongs
-  to this agenda, it also offers **Join in Meet** with the connected account.
+- **Recording block (0.9.9).** The panel starts with the same recording controls as the popup:
+  idle hint, custom notice, target folder, **Consent confirmed · Record this tab** and
+  **Record another screen or app**. Both buttons stay available away from a meeting too.
+  The next Calendar meeting's **Join in Meet** offer stays in this block. The **Agenda** section
+  below shows the title and planned time, or **No agenda** and **Choose agenda**. You can attach
+  an agenda later in Chatterbox. Prepare points, edit titles and drop tasks in the web app;
+  away from a meeting, the panel shows points and tasks read-only.
 - **During the meeting.** Check points as **Discussed**, including independent subpoints, and
   mark tasks done with their checkboxes. Unchecking reopens a task when the server supports it;
   a refused change is explained and the saved status stays. Dropped tasks remain visible.
@@ -200,14 +203,18 @@ the server is updated.
   permissions. Colleagues' changes appear live on supporting servers, with polling as a fallback.
 - **Recording and saving.** The recording strip shows elapsed time, **You** and **Others** levels,
   the folder and **Stop and save**. After stopping, the panel shows segment upload progress and
-  a read-only summary of the discussed points. Upload errors retain the existing retry controls.
-  Colleagues see who is recording and can choose **Record as well**.
-- **Change agenda.** The header opens nearby agenda choices, marks the selected one and offers
-  **No agenda** and **Back**. Choosing another agenda also changes the running recording's agenda.
-  **No agenda** skips attachment; older servers may still attach automatically. Choices include
+  a read-only summary of the discussed points; tasks are hidden. Upload errors retain the existing
+  retry controls. When a colleague records, a notice above the buttons names them and the complete
+  recording block stays available.
+- **Choose or change agenda.** The link in the **Agenda** section expands a framed list there,
+  below the recording block. Rows show a radio circle, title and time, with **No agenda** at the
+  bottom. The current choice says **Selected**, including **No agenda**. Clicking a row selects
+  it immediately and collapses the list; **Cancel** restores the previous view without changing
+  anything. Choosing another agenda also changes the running recording's agenda. Choices include
   up to ten unrecorded agendas planned within the previous or next 24 hours, ordered by distance
-  to their planned interval, with your own agendas first on ties.
-- **Load errors.** A failed agenda request shows **Retry** while recording controls remain available.
+  to their planned interval, with your own agendas first on ties. If none are found, the list
+  explains the empty window and still offers **No agenda**.
+- **Load errors.** A failed agenda request shows **Retry** inside the Agenda section while recording controls remain available.
   A successful empty popup match says **This meeting has no agenda.** and offers **Choose agenda**.
 
 With Google Calendar connected, a supporting server shows the next own primary-calendar Meet event
@@ -223,6 +230,41 @@ mail or a typed URL still match by room code.
 10 minutes before it starts, and none while the meeting room is already open. The popup and panel
 show a participant notice only when you or the server operator supplied custom text. The consent
 button and the notice in Options remain.
+
+### Room agendas and sharing from the panel (0.9.9)
+
+On supporting servers, Google Meet also finds agendas chosen in the same room by an
+open panel or a live recording, even when they were chosen manually and have no
+Calendar event. You see only agendas you may read. A line below the time names the
+colleague who chose the agenda while recording the meeting. If several matches open the
+chooser automatically, it keeps checking and shows the agenda when only one remains.
+A chooser you open yourself and your explicit selections stay under your control.
+
+If an agenda is private, the icon opens the panel with **Agenda is not shared with you**.
+Its title, owner and recorder are hidden. You can record without an agenda or choose your own.
+The owner sees eligible people from the same Chatterbox server who have the panel open
+in that meeting and cannot see the agenda, only when the agenda is tied to that meeting's
+own Google Calendar event. The Calendar link read through the owner's connected Google
+account is the relationship the server trusts. A recording session, panel presence or another
+caller-declared room code does not qualify. Without that event and its Meet room, the list is
+empty and no share card appears. An open meeting tab alone does not count.
+Only the owner sees this card, before or during recording. **Share** invites one person;
+**Share with all (n)** appears for several people. A sent invitation shows its pending
+state until the person accepts, then that row disappears.
+
+An invitation appears in the receiver's panel with the sharer's name, title and time.
+**Save to** starts with the recording block's target folder; use the chip to choose
+an own private folder when the target is an Organization or received folder.
+**Decline** rejects the invitation. **Accept** files the agenda in the chosen folder
+and opens it for co-editing. If you already see the agenda through an accepted folder
+share, the web's optional extra filing rule still applies. Sharing does not grant access
+to the recording or to private task evidence.
+
+The open panel reports the Meet room and selected agenda once a minute. The server
+stores a keyed hash of the room code. Closing the panel or leaving Meet stops updates;
+presence may remain visible until it expires within about three minutes of the last update.
+Stale rows are removed by hourly housekeeping. Person sharing needs a self-hosted server with an Organization. Older
+servers keep existing matching and show no new room sharing controls.
 
 ## Microphone
 

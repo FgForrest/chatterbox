@@ -144,6 +144,9 @@ async function start() {
         detectMeetingPlatform,
         meetCode,
         renderLinkedText,
+        panelRoomHeartbeat: () => ({ update() {}, stop() {} }),
+        supportsAgendaRooms: () => false,
+        mountRoomCards: () => ({ render() {}, destroy() {} }),
     };
     await new Function(
         ...Object.keys(dependencies),
@@ -180,7 +183,7 @@ describe("panel links and growing notes", () => {
         expect(detail.points[0].text).toBe("Read https://example.com/plan.");
     });
 
-    it("shows linked point notes and a task count in the visible after-Stop summary", async () => {
+    it("shows linked point notes and hides the task section after Stop", async () => {
         state = { state: "recording", sessionId: "session-one" };
         detail.points[0].discussedAt = new Date().toISOString();
         detail.taskGroups[0].tasks[0].status = "done";
@@ -189,7 +192,9 @@ describe("panel links and growing notes", () => {
         expect(document.querySelector("#agenda").hidden).toBe(false);
         expect(document.querySelector("#tasks").hidden).toBe(true);
         const count = document.querySelector("#task-count");
-        expect(count.closest("[hidden]")).toBeNull();
+        expect(count.closest("[hidden]")).toBe(
+            document.querySelector("#task-section"),
+        );
         expect(count.textContent).toBe("Done 1 of 1");
         expect(document.querySelector("#point-count").textContent).toBe(
             "Discussed 1 of 1",

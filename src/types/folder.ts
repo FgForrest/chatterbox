@@ -17,6 +17,7 @@ export interface RecordingFolder {
     managers?: { name: string | null }[];
     accessRequest?: "none" | "pending" | "declined";
     restricting?: true;
+    canRestrict?: boolean;
     restrictedRole?: "manager" | "member" | "curator";
     sharedWithPeople?: boolean;
     insideSharedFolder?: boolean;

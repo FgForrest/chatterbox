@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/errors";
 import { assertCategorizableFolderInput } from "@/lib/folders/folders";
+import { recorderRoomKey } from "@/lib/meetings/room-key";
 import { readPrivateProcessingForItems } from "@/lib/pipeline/state";
 import {
     MAX_CHUNK_BYTES,
@@ -28,6 +29,8 @@ export const POST = apiHandler(async (request: Request) => {
 
     const body = await request.json().catch(() => null);
     const input = parseCreateRecordingSessionBody(body);
+    const roomKey = recorderRoomKey(input.meetCode);
+    if (roomKey) input.metadata.roomKey = roomKey;
     if (input.folderId) {
         const folder = await assertCategorizableFolderInput(
             authn.user.id,

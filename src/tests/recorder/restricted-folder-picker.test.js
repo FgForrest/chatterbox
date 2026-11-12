@@ -115,7 +115,7 @@ it("ships a higher version and both restricted colour tokens in the built CSS", 
     expect(
         JSON.parse(readFileSync("extensions/recorder/manifest.json", "utf8"))
             .version,
-    ).toBe("0.9.8");
+    ).toBe("0.9.9");
     const css = readFileSync(
         "extensions/recorder/generated/folders.css",
         "utf8",
