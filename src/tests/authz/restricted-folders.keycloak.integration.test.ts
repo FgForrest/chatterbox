@@ -13,10 +13,12 @@ import * as schema from "@/db/schema";
 import {
     recordingFolderAssignments,
     recordingFolders,
+    restrictedFolderMembers,
     userAccessStates,
     users,
 } from "@/db/schema";
 import { auth } from "@/lib/auth";
+import { holderAccess } from "@/lib/authz/access-state";
 import { encryptText } from "@/lib/encryption/fields";
 import {
     addRecordingToFolder,
@@ -24,6 +26,8 @@ import {
     createFolder,
     ensureRootFolders,
 } from "@/lib/folders/folders";
+import { changeFolderRestriction } from "@/lib/folders/restricted-folders";
+import { adminPath } from "@/lib/identity/providers/keycloak/http";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { requestArrivalInTx } from "@/lib/pipeline/arrival";
 import { resolveArrivalOrganizationContext } from "@/lib/pipeline/arrival-context";
@@ -142,6 +146,7 @@ suite("restricted folders with verified Keycloak curators", () => {
             "restricted-folders",
             {
                 owner: ["use"],
+                member: ["use"],
                 curator: ["use", "org.curate"],
                 administrator: ["use", "access.manage"],
             },
@@ -326,6 +331,123 @@ suite("restricted folders with verified Keycloak curators", () => {
                 )
             )?.role,
         ).toBe("owner");
+    });
+    async function openCreatorFolder(name: string) {
+        const [existing] = await database.db
+            .select()
+            .from(recordingFolders)
+            .where(eq(recordingFolders.id, folderId));
+        return createFolder({
+            userId: ids.owner,
+            parentId: existing.parentId ?? "missing",
+            name,
+        });
+    }
+    it("lets the creator restrict after fresh provider verification with one connection, while another member gets 403", async () => {
+        const target = await openCreatorFolder("Creator restriction");
+        const context = { params: Promise.resolve({ id: target.id }) };
+        expect(
+            (
+                await restrictRoute(
+                    request(
+                        "member",
+                        `/api/folders/${target.id}/restrict`,
+                        "POST",
+                        { audienceUserIds: [] },
+                    ),
+                    context,
+                )
+            ).status,
+        ).toBe(403);
+        await database.db
+            .update(userAccessStates)
+            .set({ verifiedAt: new Date(0) })
+            .where(eq(userAccessStates.userId, ids.owner));
+        const client = postgres(database.url, { max: 1 });
+        dbRef.current = drizzle(client, { schema }) as unknown as Record<
+            PropertyKey,
+            unknown
+        >;
+        try {
+            expect(
+                (
+                    await restrictRoute(
+                        request(
+                            "owner",
+                            `/api/folders/${target.id}/restrict`,
+                            "POST",
+                            { audienceUserIds: [] },
+                        ),
+                        context,
+                    )
+                ).status,
+            ).toBe(200);
+        } finally {
+            dbRef.current = database.db as unknown as Record<
+                PropertyKey,
+                unknown
+            >;
+            await client.end({ timeout: 1 });
+        }
+        expect(
+            await database.db
+                .select()
+                .from(restrictedFolderMembers)
+                .where(eq(restrictedFolderMembers.folderId, target.id)),
+        ).toMatchObject([{ userId: ids.owner, role: "manager" }]);
+    });
+    it.each([
+        "use",
+        "membership",
+    ])("refuses a creator after losing %s in Keycloak", async (loss) => {
+        const target = await openCreatorFolder(`Lost ${loss}`);
+        const person = realm.people.owner;
+        const http = realm.admin.http;
+        try {
+            if (loss === "use")
+                await http.delete(
+                    adminPath`/users/${person.id}/groups/${realm.groupIds.use}`,
+                );
+            else
+                await http.put(adminPath`/users/${person.id}`, {
+                    enabled: false,
+                });
+            await database.db
+                .update(userAccessStates)
+                .set({ verifiedAt: new Date(0) })
+                .where(eq(userAccessStates.userId, ids.owner));
+            await expect(
+                changeFolderRestriction(ids.owner, target.id, "restrict"),
+            ).rejects.toMatchObject({ statusCode: 403 });
+            expect(
+                await database.db
+                    .select()
+                    .from(restrictedFolderMembers)
+                    .where(eq(restrictedFolderMembers.folderId, target.id)),
+            ).toEqual([]);
+            expect(
+                (
+                    await database.db
+                        .select()
+                        .from(recordingFolders)
+                        .where(eq(recordingFolders.id, target.id))
+                )[0],
+            ).toMatchObject({ restrictedAt: null, restrictingAt: null });
+        } finally {
+            if (loss === "use")
+                await http.put(
+                    adminPath`/users/${person.id}/groups/${realm.groupIds.use}`,
+                );
+            else
+                await http.put(adminPath`/users/${person.id}`, {
+                    enabled: true,
+                });
+            await database.db
+                .update(userAccessStates)
+                .set({ verifiedAt: new Date(0) })
+                .where(eq(userAccessStates.userId, ids.owner));
+            expect((await holderAccess(ids.owner)).ok).toBe(true);
+        }
     });
     it("refreshes expired curator filing verification before one-connection arrival locks", async () => {
         const target = await createFolder({

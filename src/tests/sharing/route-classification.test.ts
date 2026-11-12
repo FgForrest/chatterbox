@@ -189,6 +189,7 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
         DELETE: "folders",
     },
     "folders/[id]/knowledge/route.ts": { GET: "folders" },
+    "folders/[id]/restriction-contacts/route.ts": { GET: "folders" },
     "folders/[id]/default-profiles/route.ts": {
         GET: "folders",
         PUT: "folders",

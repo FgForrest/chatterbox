@@ -35,6 +35,7 @@ interface ItemPreview {
     occurredAt: string;
 }
 interface RestrictPreview {
+    audience: AudiencePerson[];
     items: ItemPreview[];
     withdrawnItems: ItemPreview[];
     retainedAlmanacAdditions: { kind: "person" | "entity"; targetId: string }[];
@@ -120,22 +121,7 @@ export function FolderRestrictionDialog({
                 name: item.ownerName,
                 email: item.ownerEmail,
             }));
-            if (folder.restricting) {
-                const existing = await request<{
-                    members: {
-                        userId: string;
-                        name: string | null;
-                        email: string;
-                    }[];
-                }>(`/api/folders/${encodeURIComponent(folder.id)}/audience`);
-                owners.push(
-                    ...existing.members.map((member) => ({
-                        id: member.userId,
-                        name: member.name,
-                        email: member.email,
-                    })),
-                );
-            }
+            owners.push(...data.audience);
             if (!cancelled) {
                 setRestriction(data);
                 setFixed([
@@ -182,17 +168,7 @@ export function FolderRestrictionDialog({
         return () => {
             cancelled = true;
         };
-    }, [
-        action,
-        endpoint,
-        folder.id,
-        folder.access,
-        folder.restricting,
-        hasChildren,
-        request,
-        writable,
-        fail,
-    ]);
+    }, [action, endpoint, folder.access, hasChildren, request, writable, fail]);
     if (!writable || folder.access === false) return null;
     const withdrawnCounts = { audio: 0, mail: 0, meeting: 0 };
     for (const item of restriction?.withdrawnItems ?? []) {

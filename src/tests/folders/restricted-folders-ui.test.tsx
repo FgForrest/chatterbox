@@ -638,6 +638,7 @@ it("restriction preview fixes contributors and resolves retained Almanac labels"
             : json({
                   items: [previewItem],
                   withdrawnItems: [previewItem],
+                  audience: [],
                   retainedAlmanacAdditions: [
                       { kind: "person", targetId: "person" },
                   ],
@@ -1244,6 +1245,7 @@ it.each([
         json({
             items: [previewItem],
             withdrawnItems: [{ ...previewItem, kind }],
+            audience: [],
             retainedAlmanacAdditions: [],
             exports: [],
         }),
@@ -1270,6 +1272,7 @@ it("hides the empty withdrawal section", async () => {
         json({
             items: [],
             withdrawnItems: [],
+            audience: [],
             retainedAlmanacAdditions: [],
             exports: [],
         }),

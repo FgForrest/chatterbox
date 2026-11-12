@@ -19,6 +19,7 @@ import {
 import { useExtracted } from "next-intl";
 import { type DragEvent, useEffect, useMemo, useState } from "react";
 import { FolderAccessRequest } from "@/components/sharing/folder-access-request";
+import { FolderRestrictionContactsDialog } from "@/components/sharing/folder-restriction-contacts-dialog";
 import { FolderRestrictionDialog } from "@/components/sharing/folder-restriction-dialog";
 import {
     ReceivedFolderDialog,
@@ -128,7 +129,7 @@ export function FolderTree({
     const { writable } = useRestrictedFolders();
     const [restrictedDialog, setRestrictedDialog] = useState<{
         folder: RecordingFolder;
-        action: "audience" | "restrict" | "lift";
+        action: "audience" | "restrict" | "lift" | "contacts";
     } | null>(null);
     const dialogFolder = folders.find(
         (folder) => folder.id === restrictedDialog?.folder.id,
@@ -705,12 +706,18 @@ export function FolderTree({
                                                       )}
                                                   </DropdownMenuItem>
                                               )
-                                            : canCurate && (
+                                            : (canCurate ||
+                                                  folder.canRestrict ||
+                                                  !folder.restricting) && (
                                                   <DropdownMenuItem
                                                       onSelect={() =>
                                                           setRestrictedDialog({
                                                               folder,
-                                                              action: "restrict",
+                                                              action:
+                                                                  canCurate ||
+                                                                  folder.canRestrict
+                                                                      ? "restrict"
+                                                                      : "contacts",
                                                           })
                                                       }
                                                   >
@@ -812,11 +819,22 @@ export function FolderTree({
             {dialogFolder &&
                 dialogFolder.access !== false &&
                 restrictedDialog &&
-                restrictedDialog.action !== "audience" && (
+                restrictedDialog.action !== "audience" &&
+                restrictedDialog.action !== "contacts" && (
                     <FolderRestrictionDialog
                         folder={dialogFolder}
                         folders={folders}
                         action={restrictedDialog.action}
+                        onOpenChange={(open) => {
+                            if (!open) setRestrictedDialog(null);
+                        }}
+                    />
+                )}
+            {dialogFolder &&
+                dialogFolder.access !== false &&
+                restrictedDialog?.action === "contacts" && (
+                    <FolderRestrictionContactsDialog
+                        folder={dialogFolder}
                         onOpenChange={(open) => {
                             if (!open) setRestrictedDialog(null);
                         }}
