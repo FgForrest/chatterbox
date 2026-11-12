@@ -5301,6 +5301,32 @@ export const meetingAgendas = pgTable(
     }),
 );
 
+export const recorderRoomPresence = pgTable(
+    "recorder_room_presence",
+    {
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        roomKey: varchar("room_key", { length: 64 }).notNull(),
+        agendaId: text("agenda_id").references(() => meetingAgendas.id, {
+            onDelete: "set null",
+        }),
+        seenAt: timestamp("seen_at").notNull().defaultNow(),
+        writtenAt: timestamp("written_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        pk: primaryKey({ columns: [table.userId, table.roomKey] }),
+        roomSeenIdx: index("recorder_room_presence_room_seen_idx").on(
+            table.roomKey,
+            table.seenAt,
+        ),
+        seenIdx: index("recorder_room_presence_seen_idx").on(table.seenAt),
+        agendaIdx: index("recorder_room_presence_agenda_idx").on(
+            table.agendaId,
+        ),
+    }),
+);
+
 export const agendaPoints = pgTable(
     "agenda_points",
     {

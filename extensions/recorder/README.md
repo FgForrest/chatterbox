@@ -137,32 +137,81 @@ meeting audio keeps recording with a persistent notification and popup warning
 explaining the failure. After deliberately recording without a microphone, you
 can dismiss permission reminders in the popup and re-enable them in Options.
 
-## Agenda panels and Calendar meetings (0.9.7)
+## Agenda panels and Calendar meetings (0.9.9)
 
 On a tab with matching agendas, the toolbar icon opens the agenda side panel; a second click closes it. Recording starts from the panel's consent button. The keyboard shortcut keeps starting/stopping recording. Popup and panel share one recording widget. A panel opened without a toolbar invocation falls back to Chrome's sharing dialog if direct tab capture is refused. The separate agenda window remains the fallback when Chrome refuses a side panel.
 
-The panel is a live meeting checklist in one column at every width. Prepare points, edit titles
-and drop tasks in the web app. Away from a meeting, the agenda is read-only with the target folder,
-Join in Meet when the next Calendar meeting belongs to this agenda, and Record another screen or app.
-On the meeting tab it offers direct recording and discussed/task checkboxes. Note reveals a growing,
-soft-wrapped field; Enter finishes editing and pasted newlines become spaces. Non-empty notes show
-text when unfocused; click their text to edit. HTTP(S) and www. links in points, tasks and notes open
-in a new tab, with compact labels and full URLs in tooltips. Stored content stays plain text.
-The recording strip shows elapsed time, You/Others meters,
-folder and Stop and save. After stopping, upload progress and the discussed summary are read-only.
+The panel starts with the popup's shared recording block: idle hint, custom participant notice,
+target folder and both recording buttons. Consent confirmed · Record this tab is available on ordinary
+tabs too. The next Calendar meeting's Join in Meet card stays inside this block. While recording,
+the block shows elapsed time, You/Others meters, folder and Stop and save; after stopping it shows
+upload and saving progress, then completion. A colleague's recording adds a notice above the buttons
+without hiding them.
 
-Change agenda in the header shows nearby choices, the selected agenda, No agenda and Back. It also
-changes a running recording's selection. Up to ten unrecorded agendas planned within the previous
-or next 24 hours are ordered by distance to their interval, with own agendas first on ties. A failed
-load shows Retry and keeps recording controls available. The first successful edit during capture
-still links an editable agenda without replacing an already selected own agenda. Colleague recording
-presence and Record as well remain available.
+The Agenda section below has the agenda title and planned time, or No agenda with Choose agenda
+and a hint that an agenda can be attached later in Chatterbox. Choose agenda or Change agenda expands
+one framed list inline. Rows show radio circles, titles and planned times, followed by No agenda.
+The current choice, including No agenda, says Selected. Click a row to select and collapse the list;
+Cancel restores the previous view without changing the selection. An empty window explains that no
+timed agenda was found and still offers No agenda. Choosing also changes a running recording's agenda.
+Up to ten unrecorded agendas planned within the previous or next 24 hours are ordered by distance
+to their interval, with own agendas first on ties.
+
+Prepare points, edit titles and drop tasks in the web app. The panel stays in one column at every
+width. Away from a meeting, points and tasks are read-only. On the meeting or during capture,
+discussed/task checkboxes follow existing permissions. Note reveals a growing, soft-wrapped field;
+Enter finishes editing and pasted newlines become spaces. Non-empty notes show text when unfocused;
+click their text to edit. HTTP(S) and www. links in points, tasks and notes open in a new tab, with
+compact labels and full URLs in tooltips. Stored content stays plain text. After stopping, the panel
+shows read-only discussed coverage and hides tasks. Agenda load errors and Retry stay inside the
+Agenda section while recording controls keep working. The first successful edit during capture
+still links an editable agenda without replacing an already selected own agenda.
 
 New server capabilities independently enable live event updates, shared Yjs text editing, recording presence and the next Calendar meeting. The open panel owns its authenticated stream and text documents; disconnected streams retry with backoff and fall back to 15-second polling. Text inputs fetch the server seed before editing and retain focus/carets across remote changes. Older servers keep polling and plain point-note PATCHes.
 
 A supporting server offers your next own primary-calendar Meet event in popup and panel, with Join in Meet and the connected Google account email. Joining never records. Its new tab is bound to the supplied agenda, end and validated room code; redirects between `/<code>` and `/meet/<code>` preserve that identity. Joining from the popup or panel opens the agenda on the new meeting tab; other tabs keep their own panels. Joining from a Calendar notification opens the meeting tab; click the toolbar icon to open its agenda. The binding ends when the meeting ends, the tab closes or it leaves the room. Options controls one notification per meeting and a 0/1/2/5/10-minute lead (default 0); the old agenda reminder preference is inherited. The room already being open suppresses the notification; the card is hidden on that room's tab. The badge says only now during the event when you are outside its room; REC takes priority. Background Calendar refresh is at most every five minutes, plus a page-open refresh only after 60 seconds.
 
 The popup and panel use the application's actual FolderCombobox, bundled locally with static light/dark Tailwind CSS and recent folder IDs in extension local storage. The in-page pill keeps its existing picker.
+
+### Room-wide agendas and sharing (0.9.9)
+
+With `agendaRooms: 1`, a Meet room also finds visible agendas selected by another open
+panel or an open/completing recording started within twelve hours. These are added to
+Calendar matches, including untimed or manually selected agendas. A visible recording
+choice names the colleague beneath the time. Changes refresh through agenda events
+and fifteen-second room polling. A chooser opened automatically for several matches
+keeps following and loads the agenda when only one match remains. A chooser opened
+by the user and explicit selections retain their behavior. The toolbar opens the panel for a visible agenda,
+a restricted marker or an invitation; an empty room keeps the existing popup behavior.
+
+An inaccessible agenda shows **Agenda is not shared with you**, with no title, owner,
+ID or recorder name. Recording without an agenda and choosing a different agenda remain
+available. Only the agenda's author sees the share card, before and during recording.
+It lists eligible people from the same server with a panel open in the same room who
+cannot see that agenda, only when the agenda is tied to that meeting's Google Calendar
+event. The Calendar link read through the author’s connected Google account is the
+relationship the server trusts. Recording sessions, presence and other caller-declared
+room codes do not qualify. Without that event and its Meet room, the list is empty
+and no share card appears.
+**Share** or **Share with all (n)** sends ordinary invitations;
+pending rows say **Invitation sent, waiting for acceptance** and disappear after acceptance.
+Co-editors cannot see the people list or send invitations from this card.
+
+Receivers see the sharer's name, agenda title and time, **Save to** with the shared
+folder chip, then **Decline** and **Accept**. The default is the recording block's target
+folder. Ordinary acceptance requires an own private folder; choose one if the target
+is an Organization or received folder. Existing accepted folder access keeps the web's
+optional extra filing rule. Accepting shows the agenda and permits its existing co-editing;
+declining grants no access. Person sharing retains the self-host Organization mode gate.
+
+Presence is sent on panel open, selection change and every minute, only on Meet.
+Closing the panel or leaving the meeting stops updates; presence expires from room
+queries and people lists within about three minutes. Hourly housekeeping deletes stale rows.
+Writes are serialized per user and throttled to twenty seconds, with client retries for
+selection changes. Session creation sends the validated room code only with this flag;
+the server stores a keyed hash, never the code. No page content or full URL is sent.
+See the privacy policy twins for the disclosure. Servers without the flag retain existing
+matching and receive no session room code or panel heartbeat, with no sharing UI.
 
 ### Server compatibility
 
@@ -175,6 +224,7 @@ Every new request requires its advertised `/api/v1/recorder/config` capability:
 | `agendaLive` | Refresh the agenda every 15 seconds. |
 | `agendaText: 1` | Existing versioned point-note PATCHes; no collaborative text requests. |
 | `sessionAgenda` | No agenda field at session creation and no session agenda PATCH. Explicit completion choices still work. |
+| `agendaRooms: 1` | No session room code, panel presence, room sharing cards or invitations; existing Calendar matching remains. |
 
 Matching sends only a Meet room code and time to the server, never page content or a full tab URL. Other platforms match by time. Multiple matches offer a choice. The top-level discussed count excludes subpoints. Task checkboxes set done/open under existing canClose permissions; dropped tasks and absorbed agendas stay read-only. Servers that refuse reopening retain the saved task status and show the existing error.
 

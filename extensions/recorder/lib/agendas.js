@@ -27,7 +27,7 @@ export function supportsAgendas(settings) {
 }
 
 function supportsAgendaPath(settings, path) {
-    return supportsAgendas(settings) && (!/\/text(?:\?|$)/.test(path) || settings.serverDefaults?.agendaText === 1);
+    return supportsAgendas(settings) && (!/\/text(?:\?|$)/.test(path) || settings.serverDefaults?.agendaText === 1) && (!/\/(?:presence|people|invitations)(?:\/|\?|$)/.test(path) || settings.serverDefaults?.agendaRooms === 1);
 }
 
 /** Call an agenda route only after capability detection. */
@@ -66,18 +66,30 @@ export function currentAgendas(rows, now = Date.now()) {
 
 /** Match server-side, sending only a Meet room code, never a tab URL. */
 export async function matchAgendas(tabUrl, now = Date.now(), init = {}) {
-    if (!supportsAgendas(await getSettings())) return [];
+    return (await matchAgendaRoom(tabUrl, now, init)).data;
+}
+
+/** Additive room metadata is consumed only when this server advertised support. */
+export async function matchAgendaRoom(tabUrl, now = Date.now(), init = {}) {
+    const settings = await getSettings();
+    if (!supportsAgendas(settings)) return { data: [], restricted: false, invitations: [] };
     const query = new URLSearchParams({ at: new Date(now).toISOString() });
     if (tabUrl) {
         const url = new URL(tabUrl);
         if (url.hostname === "meet.google.com") {
             const code = meetCode(url);
-            if (!code) return [];
+            if (!code) return { data: [], restricted: false, invitations: [] };
             query.set("meetCode", code.toLowerCase());
         }
     }
     const body = await agendaRequest(`/match?${query}`, init);
-    return currentAgendas(Array.isArray(body.data) ? body.data : [], now);
+    const rooms = settings.serverDefaults?.agendaRooms === 1 && Boolean(tabUrl && meetCode(tabUrl));
+    const data = Array.isArray(body.data) ? body.data : [];
+    return {
+        data: rooms ? data.filter(row => row.roomBound === true || currentAgendas([row], now).length) : currentAgendas(data, now),
+        restricted: rooms && body.restricted === true,
+        invitations: rooms && Array.isArray(body.invitations) ? body.invitations : [],
+    };
 }
 
 /** Offer nearby manual choices alongside every current automatic time match. */

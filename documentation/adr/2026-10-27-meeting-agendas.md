@@ -1,7 +1,7 @@
 ---
 title: Meeting agendas are co-edited plans absorbed by recordings, with safe attachment and manual Calendar export
 date: 2026-10-27
-updated: 2026-11-10 18:05
+updated: 2026-11-11 20:42
 status: superseded
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [293]
 areas: [src/lib/meetings, src/db/queries/meetings.ts, src/db/queries/folder-participants.ts, src/db/schema.ts, src/app/api/meetings, src/app/api/v1/recorder, src/lib/mcp/tools/meetings.ts, src/lib/export/meetings.ts, src/lib/integrations/google]
 supersedes: []
 superseded-by: [2026-10-28-agendas-use-all-folder-placements, 2026-11-08-meeting-agendas-shared-with-people, 2026-11-08-recorder-live-agendas, 2026-11-10-recorder-meeting-companion]
-relates: [2026-10-27-shared-folders-are-two-way, 2026-10-12-calendar-meet-speaker-candidates, 2026-10-22-calendar-speaker-guesses-in-automatic-runs, 2026-10-07-tasks-from-summaries, 2026-10-22-meeting-recorder-banner, 2026-10-07-backup-scope]
+relates: [2026-10-27-shared-folders-are-two-way, 2026-10-12-calendar-meet-speaker-candidates, 2026-10-22-calendar-speaker-guesses-in-automatic-runs, 2026-10-07-tasks-from-summaries, 2026-10-22-meeting-recorder-banner, 2026-10-07-backup-scope, 2026-11-11-recorder-panel-recording-block]
 ---
 
 # Meeting agendas are co-edited plans absorbed by recordings, with safe attachment and manual Calendar export
@@ -168,6 +168,8 @@ and mail-role filtering. Existing task, sharing, export, Google, recorder and MC
   attachment rolls back without moving or deleting either item.
 
 ## Related work
+
+- [Recorder panel recording block and room sharing](2026-11-11-recorder-panel-recording-block.md) adds capability-gated room discovery, short-lived panel presence and owner-only invitations, retaining agenda visibility and existing acceptance rules.
 
 - [Two-way shared folders](2026-10-27-shared-folders-are-two-way.md): owns the partial supersession of person-to-person sharing. General participant-owned filing replaces the narrow explicit-attachment exception; receiver item rights and invitation revocation remain unchanged.
 - [Calendar speaker candidates](2026-10-12-calendar-meet-speaker-candidates.md) and

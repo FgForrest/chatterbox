@@ -9,8 +9,8 @@ afterEach(() => {
 });
 
 it.each([
-    ["en", "Change agenda", "Back"],
-    ["cs", "Změnit agendu", "Zpět"],
+    ["en", "Choose agenda", "Cancel"],
+    ["cs", "Vybrat agendu", "Zrušit"],
 ])("labels the agenda navigation actions in %s", (locale, other, close) => {
     const messages = JSON.parse(
         readFileSync(
@@ -30,5 +30,5 @@ it.each([
     );
     localizeDocument();
     expect(document.getElementById("change-agenda").textContent).toBe(other);
-    expect(document.getElementById("back").textContent).toBe(close);
+    expect(document.getElementById("cancel-choice").textContent).toBe(close);
 });

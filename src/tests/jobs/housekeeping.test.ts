@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { prunes, posthog } = vi.hoisted(() => ({
     prunes: {
         holdOverdueMeetings: vi.fn(),
+        pruneRecorderRoomPresence: vi.fn(),
         pruneAdminAuditLog: vi.fn(),
         pruneFinishedJobs: vi.fn(),
         pruneExpiredSessions: vi.fn(),
@@ -14,6 +15,10 @@ const { prunes, posthog } = vi.hoisted(() => ({
         pruneSettledWebhookDeliveries: vi.fn(),
     },
     posthog: { captureServerException: vi.fn() },
+}));
+
+vi.mock("@/db/queries/recorder-rooms", () => ({
+    pruneRecorderRoomPresence: prunes.pruneRecorderRoomPresence,
 }));
 
 vi.mock("@/db/queries/meetings", () => ({
@@ -104,6 +109,7 @@ describe("runHousekeeping", () => {
 
         expect(pruned).toEqual({
             meeting_agendas: 0,
+            recorder_room_presence: 0,
             webhook_deliveries: 0,
             api_rate_limit_buckets: 0,
             stripe_webhook_events: 0,

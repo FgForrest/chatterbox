@@ -7,6 +7,10 @@ const { assertFolder, createSession, gate } = vi.hoisted(() => ({
     gate: vi.fn(),
 }));
 
+vi.mock("@/lib/env", () => ({
+    env: { BETTER_AUTH_SECRET: "recorder-input-test" },
+}));
+
 vi.mock("@/lib/posthog-server", () => ({ captureServerException: vi.fn() }));
 vi.mock("@/lib/recording-sessions/route-gate", () => ({
     gateRecordingSessionRequest: gate,
