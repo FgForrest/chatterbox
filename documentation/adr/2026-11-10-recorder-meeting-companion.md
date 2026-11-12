@@ -1,14 +1,14 @@
 ---
 title: The recorder panel accompanies a meeting while preparation stays in the web app, and Join binds the tab before matching
 date: 2026-11-10
-updated: 2026-11-10 18:07
-status: accepted
+updated: 2026-11-11 20:42
+status: superseded
 kind: fix
 issues: [386]
 prs: []
 areas: [extensions/recorder, src/lib/integrations/google/meet-code.ts, src/app/meetings/[id]/route.ts, src/app/api/v1/recorder/agendas]
 supersedes: [2026-10-27-meeting-agendas, 2026-11-08-recorder-live-agendas]
-superseded-by: []
+superseded-by: [2026-11-11-recorder-panel-recording-block]
 relates: []
 ---
 
@@ -18,6 +18,12 @@ Extension 0.9.7 keeps the panel focused on meeting review and recording. Agenda 
 point title editing and task dropping remain in the web app. Join in Meet associates its new tab
 with the supplied agenda, event end and validated room identity before any automatic match.
 The manifest version remains 0.9.7 because that version has not been uploaded to the Store.
+
+**Superseded in part:** [Recorder panel recording block](2026-11-11-recorder-panel-recording-block.md)
+puts the complete popup recording block first, retains Record this tab away from meetings, replaces
+chooser/Back navigation with inline rows and Cancel, and keeps colleague presence inside the complete
+block, and adds room discovery, short-lived open-panel presence and owner-only sharing. Preparation,
+notes, permissions, live updates and Join tab binding rules still hold.
 
 ## Why
 

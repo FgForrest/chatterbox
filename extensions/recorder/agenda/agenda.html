@@ -9,36 +9,44 @@
         <link rel="stylesheet" href="agenda.css" />
     </head>
     <body>
-        <header class="agenda-header">
-            <div><h1 id="title" data-i18n="agendaMeetingTitle"></h1><p id="time" class="hint"></p></div>
-            <button id="change-agenda" class="link" type="button" data-i18n="agendaChange"></button>
-            <button id="back" class="link" type="button" data-i18n="agendaBack" hidden></button>
-        </header>
-        <section id="colleague-recording" class="presence" hidden><p id="recording-by"></p><button id="record-also" class="link" type="button" data-i18n="recordAlso"></button></section>
-        <section id="recorder-controls" class="recorder-controls"></section>
-        <p id="recording-state" class="hint" role="status"></p>
-        <section id="agenda-error" class="agenda-error" hidden role="alert">
-            <p id="status" class="error"></p>
-            <p class="hint" data-i18n="agendaLoadErrorHint"></p>
-            <button id="agenda-retry" type="button" data-i18n="agendaReload"></button>
+        <section id="recorder-controls" class="recorder-controls">
+            <p id="colleague-recording" class="presence" role="status" hidden><span id="recording-by"></span></p>
         </section>
-        <main id="agenda" hidden>
-            <section aria-labelledby="points-heading">
-                <div class="section-heading"><h2 id="points-heading" data-i18n="agendaPoints"></h2><span id="point-count" class="hint"></span></div>
-                <div id="point-progress" class="agenda-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div></div></div>
-                <div id="points"></div>
+        <section id="agenda-section" class="agenda-section" aria-labelledby="title">
+            <div class="agenda-header">
+                <div>
+                    <p class="eyebrow" data-i18n="agendaTitle"></p>
+                    <h2 id="title" data-i18n="agendaNone"></h2>
+                    <p id="time" class="hint"></p>
+                    <p id="room-chosen-by" class="hint" hidden></p>
+                </div>
+                <button id="change-agenda" class="link" type="button" data-i18n="agendaChoose"></button>
+                <button id="cancel-choice" class="link" type="button" data-i18n="cancel" hidden></button>
+            </div>
+            <section id="agenda-error" class="agenda-error" hidden role="alert">
+                <p id="status" class="error"></p>
+                <p class="hint" data-i18n="agendaLoadErrorHint"></p>
+                <button id="agenda-retry" type="button" data-i18n="agendaReload"></button>
             </section>
-            <section aria-labelledby="tasks-heading">
-                <div class="section-heading"><h2 id="tasks-heading" data-i18n="agendaTasks"></h2><span id="task-count" class="hint"></span></div>
-                <div id="tasks"></div>
-            </section>
-            <p id="away-hint" class="hint" data-i18n="agendaReadOnlyHint"></p>
-        </main>
-        <section id="choices" hidden aria-labelledby="title">
-            <p class="hint" data-i18n="agendaChoicesHint"></p>
-            <div id="choice-list"></div>
-            <button id="none" class="agenda-option" type="button" data-i18n="agendaNone"></button>
-            <p class="hint" data-i18n="agendaNoneHint"></p>
+            <p id="no-agenda-hint" class="hint" data-i18n="agendaNoneHint" hidden></p>
+            <div id="room-cards" hidden></div>
+            <div id="agenda" hidden>
+                <section aria-labelledby="points-heading">
+                    <div class="section-heading"><h3 id="points-heading" data-i18n="agendaPoints"></h3><span id="point-count" class="hint"></span></div>
+                    <div id="point-progress" class="agenda-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div></div></div>
+                    <div id="points"></div>
+                </section>
+                <section id="task-section" aria-labelledby="tasks-heading">
+                    <div class="section-heading"><h3 id="tasks-heading" data-i18n="agendaTasks"></h3><span id="task-count" class="hint"></span></div>
+                    <div id="tasks"></div>
+                </section>
+                <p id="away-hint" class="hint" data-i18n="agendaReadOnlyHint"></p>
+                <p id="after-hint" class="hint" data-i18n="agendaAfterHint" hidden></p>
+            </div>
+            <div id="choices" hidden>
+                <p class="hint" data-i18n="agendaChoicesHint"></p>
+                <div id="choice-list" role="radiogroup" aria-labelledby="title"></div>
+            </div>
         </section>
         <script type="module" src="agenda.js"></script>
     </body>

@@ -179,6 +179,7 @@ export async function findMeeting(
 }
 
 interface MeetingListInput {
+    ids?: string[];
     folderId?: string;
     overlapWith?: { start: Date; end: Date };
     from?: Date;
@@ -285,6 +286,7 @@ export async function listMeetingRows(
             and(
                 or(visibility(), visibleOriginalAbsorbed),
                 absorbedFilter,
+                input.ids ? inArray(meetingAgendas.id, input.ids) : undefined,
                 input.folderId
                     ? sql`(exists (select 1 from ${recordingFolderAssignments}
                         inner join ${recordingFolders} on ${recordingFolders.id} = ${recordingFolderAssignments.folderId}

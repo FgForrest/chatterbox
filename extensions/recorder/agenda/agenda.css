@@ -9,18 +9,38 @@ body {
 .hint {
     font-size: 11.5px;
 }
-.recorder-controls section {
-    margin: 0;
+.recorder-controls > section {
+    margin: 0 0 16px;
+}
+.recorder-controls > section:last-child {
+    margin-bottom: 0;
+}
+.agenda-section {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
 }
 .agenda-header {
+    display: flex;
     align-items: flex-start;
-    margin-bottom: 18px;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+.eyebrow {
+    margin: 0 0 2px;
+    color: var(--muted-foreground);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
 }
 .agenda-header > div {
     min-width: 0;
 }
-.agenda-header h1 {
-    font-size: 18px;
+.agenda-header h2 {
+    margin: 0;
+    font-size: 17px;
     font-weight: 650;
     line-height: 1.25;
     overflow-wrap: anywhere;
@@ -31,7 +51,7 @@ body {
 .agenda-header > button {
     flex: none;
     white-space: nowrap;
-    margin-top: 2px;
+    margin-top: 16px;
 }
 #agenda > section {
     margin-top: 18px;
@@ -44,7 +64,7 @@ body {
     padding-bottom: 6px;
     border-bottom: 1px solid var(--border);
 }
-.section-heading h2 {
+.section-heading h3 {
     margin: 0;
     font-size: 14px;
     font-weight: 600;
@@ -173,41 +193,77 @@ body {
     margin: 7px 5px 0;
     flex: none;
 }
-#away-hint {
+#away-hint,
+#after-hint {
     margin: 18px 0 0;
 }
 #choice-list {
-    display: grid;
-    gap: 8px;
-    margin: 14px 0 18px;
+    margin-top: 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--surface);
 }
 button.agenda-option {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 10px;
     width: 100%;
-    min-height: 52px;
+    min-height: 60px;
     text-align: start;
-    padding: 9px 12px;
-    border-radius: 9px;
+    padding: 11px 12px;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
     overflow-wrap: anywhere;
+}
+button.agenda-option:last-child {
+    border-bottom: none;
+}
+button.agenda-option:focus-visible {
+    outline-offset: -2px;
+}
+button.agenda-option:hover,
+button.agenda-option.selected {
+    background: color-mix(in srgb, var(--meeting) 8%, var(--surface));
+}
+.choice-radio {
+    box-sizing: border-box;
+    width: 16px;
+    height: 16px;
+    border: 1px solid var(--muted-foreground);
+    border-radius: 50%;
+    flex: none;
+}
+.selected .choice-radio {
+    border: 4px solid var(--meeting);
+}
+.choice-text {
+    flex: 1;
+    min-width: 0;
 }
 .agenda-option strong,
 .agenda-option .hint {
     display: block;
 }
-.agenda-option.selected {
-    border-color: var(--meeting);
+.agenda-option .hint {
+    margin-top: 2px;
 }
 .agenda-option .selected-label {
     color: var(--meeting);
     flex: none;
     font-size: 11.5px;
 }
-#none {
-    margin-bottom: 4px;
-    min-height: 44px;
+.choice-empty {
+    margin: 0;
+    padding: 14px 12px;
+    border-bottom: 1px solid var(--border);
+}
+#none:not(:first-child) {
+    border-top: 1px solid var(--border);
+}
+.choice-empty + #none {
+    border-top: none;
 }
 .recorder-controls {
     background: var(--surface);
@@ -215,17 +271,14 @@ button.agenda-option {
     border: 1px solid var(--border);
     border-radius: 12px;
 }
-.recorder-controls #meeting-prompt-offer,
-.recorder-controls #auto-hint {
-    display: none;
-}
 .recorder-controls #view-recording {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 10px;
 }
 .recorder-controls #view-recording .status,
-.recorder-controls #view-recording .meter {
+.recorder-controls #view-recording .meter,
+.recorder-controls #upload-status {
     grid-column: 1 / -1;
     margin: 0;
 }
@@ -236,13 +289,11 @@ button.agenda-option {
 }
 .recorder-controls #stop {
     grid-column: 2;
+    grid-row: 4;
     width: auto;
     min-height: 36px;
     font-weight: 600;
     align-self: center;
-}
-.recorder-controls #upload-status {
-    display: none;
 }
 .recorder-controls .field:has(.hint:empty) .hint,
 .recorder-controls .field .error:empty {
@@ -268,11 +319,11 @@ button.join-meet {
     font-weight: 600;
 }
 .presence {
-    padding: 12px 14px;
-    margin-bottom: 18px;
+    padding: 8px 10px;
+    margin-bottom: 10px;
     border: 1px solid var(--meeting);
-    border-radius: 12px;
-    background: var(--surface);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--meeting) 8%, var(--surface));
 }
 .agenda-error {
     border: 1px solid var(--error);
@@ -283,9 +334,26 @@ button.join-meet {
 .agenda-error .error {
     font-weight: 600;
 }
-#recording-state:empty {
+.agenda-header #time:empty {
     display: none;
 }
-#recording-state {
-    margin-top: 8px;
-}
+
+:root { --person-share: oklch(0.5 0.15 322); }
+@media (prefers-color-scheme: dark) { :root { --person-share: oklch(0.74 0.13 322); } }
+#room-cards { display: flex; flex-direction: column; gap: 12px; }
+#room-cards[hidden] { display: none; }
+.room-share { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--person-share) 60%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--person-share) 10%, var(--surface)); }
+.room-share h3, .room-share p { margin: 0; }
+.room-person { display: flex; align-items: center; gap: 10px; min-height: 40px; border-top: 1px solid color-mix(in srgb, var(--person-share) 30%, var(--border)); }
+.room-avatar { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 26px; height: 26px; border-radius: 50%; background: color-mix(in srgb, var(--person-share) 20%, var(--surface)); color: var(--person-share); font-size: 11px; font-weight: 600; }
+.room-name { min-width: 0; overflow-wrap: anywhere; }
+.room-person > :last-child { margin-inline-start: auto; }
+.room-share button { width: auto; min-height: 32px; padding: 5px 12px; font-size: 12.5px; }
+.room-share button.room-primary { background: var(--person-share); border-color: var(--person-share); color: var(--background); font-weight: 600; }
+.room-share-all { align-self: flex-end; border-color: var(--person-share); color: var(--person-share); }
+.room-sent { color: var(--person-share); text-align: end; font-size: 11.5px; max-width: 150px; }
+.room-share .hint { color: var(--muted-foreground); }
+.room-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.room-save { display: flex; align-items: center; gap: 8px; }
+.room-locked { margin: 0; border: 1px dashed var(--muted-foreground); border-radius: 10px; padding: 12px; }
+.room-locked::before { content: ""; display: inline-block; width: 16px; height: 16px; margin-inline-end: 8px; vertical-align: middle; background: currentColor; mask: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="12" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4" fill="none" stroke="black" stroke-width="2"/></svg>') center / contain no-repeat; }

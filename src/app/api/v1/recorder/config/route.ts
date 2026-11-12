@@ -26,6 +26,7 @@ export const GET = apiHandler(async (request: Request) => {
             agendaLive: true,
             agendaText: 1,
             sessionAgenda: true,
+            agendaRooms: 1,
         },
     });
 });

@@ -1,4 +1,5 @@
 import { AppError, ErrorCode } from "@/lib/errors";
+import { normalizeRecorderMeetCode } from "@/lib/meetings/room-code";
 import {
     ACCEPTED_SESSION_MIME_TYPES,
     MAX_CHANNEL_LABEL_LENGTH,
@@ -15,6 +16,7 @@ export interface RecordingSessionMetadata {
     channelLayout: string[];
     agendaId?: string | null;
     liveAgendaId?: string | null;
+    roomKey?: string;
     /** Where the meeting ran, when the client could tell: `google-meet`, `zoom`, `teams`. */
     platformHint?: string;
     clientVersion?: string;
@@ -23,6 +25,7 @@ export interface RecordingSessionMetadata {
 }
 
 export interface CreateRecordingSessionInput {
+    meetCode?: string;
     clientRecordingId: string;
     mimeType: string;
     metadata: RecordingSessionMetadata;
@@ -212,7 +215,9 @@ export function parseCreateRecordingSessionBody(
         metadata.timezoneOffsetMinutes = timezoneOffsetMinutes;
     }
 
+    const meetCode = normalizeRecorderMeetCode(raw.meetCode);
     return {
+        ...(meetCode ? { meetCode } : {}),
         clientRecordingId: raw.clientRecordingId,
         mimeType,
         metadata,
@@ -390,6 +395,8 @@ export function readRecordingSessionMetadata(
         metadata.agendaId = raw.agendaId;
     if (raw.liveAgendaId === null || typeof raw.liveAgendaId === "string")
         metadata.liveAgendaId = raw.liveAgendaId;
+    if (typeof raw.roomKey === "string" && /^[0-9a-f]{64}$/.test(raw.roomKey))
+        metadata.roomKey = raw.roomKey;
     if (typeof raw.platformHint === "string") {
         metadata.platformHint = raw.platformHint;
     }

@@ -1,6 +1,6 @@
 # Zásady ochrany soukromí rozšíření Klepna – nahrávání schůzek
 
-Aktualizováno: 10. listopadu 2026
+Aktualizováno: 11. listopadu 2026
 
 Tyto zásady popisují **rozšíření prohlížeče Klepna – nahrávání schůzek**. Nenahrazují zásady ochrany soukromí serveru Klepny ani jiných služeb, které si zvolíte.
 
@@ -56,6 +56,35 @@ ID vybrané agendy zůstává v metadatech pro obnovení odesílání do
 dokončení nebo zahození nahrávky; ID se posílá při dokončení. Při odpojení nebo novém propojení se dočasné agendy a volby smažou.
 Názvy v připomínkách mohou být viditelné v systémových oznámeních; připomínky
 můžete vypnout v Možnostech.
+
+## Agendy v místnosti a sdílení z panelu
+
+Pokud server podporuje agendy v místnosti, při spuštění nahrávání na Google Meetu se
+s relací odešle i ověřený kód místnosti. Otevřený panel na kartě Meetu odesílá tento
+kód při otevření, změně výběru a každou minutu. ID agendy připojí jen při výslovném
+výběru v tomto panelu nebo přes Připojit. Automaticky nalezenou či sledovanou agendu
+nesděluje jako vlastní výběr.
+Proces na pozadí odvozuje kód z dané karty; celou adresu nikdy neposílá. Server ukládá
+pouze HMAC-SHA256 otisk kódu s klíčem odvozeným ze svého stávajícího tajemství.
+Zavření panelu nebo odchod ze schůzky zastaví hlášení. Přítomnost může zůstat viditelná
+a ovlivňovat párování i seznam lidí, než přibližně do tří minut od posledního hlášení vyprší.
+Zastaralé řádky odstraňuje hodinový úklid. Samostatný čas zápisu zachová
+dvacetisekundový limit obnovování pro uživatele.
+
+Vlastník agendy vidí jména způsobilých lidí ze stejného serveru, kteří mají na stejné
+schůzce otevřený panel nahrávání a agendu nevidí, pouze pokud je agenda navázaná na
+vlastní událost této schůzky v Google Kalendáři. Server důvěřuje vazbě na Kalendář,
+kterou načítá přes připojený účet Google vlastníka agendy. Nahrávací relace, přítomnost
+v panelu ani jiný kód místnosti zadaný klientem nestačí. Bez této události a její místnosti
+Meet je seznam lidí prázdný a karta sdílení se neukáže. Samotná otevřená karta Meetu nestačí.
+Seznam dostává jen vlastník a jen on z panelu posílá pozvánky. Člověk bez přístupu
+zjistí jen to, že existuje nesdílená agenda, bez jejího názvu, ID, vlastníka či jmen
+nahrávajících. Pozvánka svému příjemci zpřístupní název agendy, plánovaný čas a jméno
+sdílejícího. Přijetí použije vybranou vlastní soukromou složku a stejná pravidla
+přístupu a zařazení jako web; odmítnutí přístup neudělí. Údaje pozvánek a lidí zůstávají
+v paměti panelu nebo v dočasném úložišti relace rozšíření. Starším serverům se kódy
+s nahrávkou ani přítomnost panelu neposílají a nové sdílení se nezobrazí. Dosavadní
+párování s Kalendářem může kód místnosti nadále odesílat, jak je popsáno výše.
 
 ## Schůzky z Kalendáře a živá spolupráce
 

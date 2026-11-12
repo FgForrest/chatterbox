@@ -23,6 +23,7 @@ import {
     clearAgendas,
     currentAgendas,
     matchAgendas,
+    matchAgendaRoom,
     openAgendaPanel as openAgendaPanelNow,
     openAgendaWindow,
     refreshAgendas,
@@ -31,6 +32,8 @@ import {
     supportsAgendas,
     shouldLinkEditedAgenda,
 } from "./lib/agendas.js";
+import { sessionRoom, supportsAgendaRooms } from "./lib/agenda-rooms.js";
+import { meetCode } from "./lib/meet-code.js";
 
 import {
     abortSession,
@@ -120,7 +123,7 @@ const agendaRoutesLoaded = chrome.storage.session.get(null).then((stored) => {
         }
     }
     const state = stored.recordingState;
-    if (state?.tabId != null && state.agendaId && state.state !== "idle") agendaTabs.set(state.tabId, { agendaIds: [state.agendaId], choose: false, tabId: state.tabId });
+    if (state?.tabId != null && state.agendaId && state.state !== "idle") agendaTabs.set(state.tabId, { agendaIds: [state.agendaId], choose: false, tabId: state.tabId, agendaSource: "recording", roomAutomatic: false });
     agendaRoutesReady = true;
     panelChanges.clear();
     return stored;
@@ -168,15 +171,22 @@ async function closeAgendaPanel(tabId) {
 
 async function routeAgendaTab(tab, settings, state, matches) {
     await agendaRoutesLoaded;
+    const target = JSON.stringify(meetingTarget(tab.url));
     let binding = await joinedMeeting(tab, settings);
     let rows = supportsAgendas(settings) && !binding ? matches ?? await bannerAgendas(tab) : [];
+    const freshTab = await chrome.tabs.get(tab.id).catch(() => null);
+    if (!freshTab || JSON.stringify(meetingTarget(freshTab.url)) !== target) return agendaTabs.has(tab.id);
     if (!binding) {
-        binding = await joinedMeeting(await chrome.tabs.get(tab.id).catch(() => null), settings);
+        binding = await joinedMeeting(freshTab, settings);
         if (binding) rows = [];
     }
-    const id = binding?.agendaId ?? (state.tabId === tab.id && state.agendaId && state.state !== STATE.idle ? state.agendaId : rows.length === 1 ? rows[0].id : null);
-    if (id || rows.length) {
-        const route = { agendaIds: id ? [id] : rows.map((row) => row.id), choose: !id, tabId: tab.id };
+    const recordingAgenda = state.tabId === tab.id && state.agendaId && state.state !== STATE.idle ? state.agendaId : null;
+    const id = binding?.agendaId ?? recordingAgenda ?? (rows.length === 1 ? rows[0].id : null);
+    const agendaSource = binding?.agendaId ? "join" : recordingAgenda ? "recording" : "automatic";
+    const room = supportsAgendaRooms(settings) && meetCode(tab.url) ? (await chrome.storage.session.get(`agenda-match:${tab.id}`))[`agenda-match:${tab.id}`] : null;
+    const roomState = room?.serverUrl === settings.serverUrl && room.connectionId === settings.connectionId && room.target === JSON.stringify(meetingTarget(tab.url)) && Date.now() - room.at < 60000 && (room.restricted || room.invitations?.length);
+    if (id || rows.length || roomState) {
+        const route = { agendaIds: id ? [id] : rows.map((row) => row.id), choose: !id && !roomState, tabId: tab.id, agendaSource, ...(supportsAgendaRooms(settings) && meetCode(tab.url) ? { roomAutomatic: agendaSource === "automatic" } : {}) };
         agendaTabs.set(tab.id, route);
         await chrome.storage.session.set({ [`agenda-route:${tab.id}`]: route });
         await safe(chrome.action.setPopup({ tabId: tab.id, popup: "" }));
@@ -595,6 +605,7 @@ async function startCapturedRecording({
             : CHANNEL_LAYOUT_MIXED;
 
     const sessionBody = {
+        ...sessionRoom(settings, tabId != null ? await chrome.tabs.get(tabId).catch(() => null) : null),
         clientRecordingId,
         mimeType: SESSION_MIME_TYPE,
         channelLayout,
@@ -1197,7 +1208,7 @@ async function navigateToRecording(serverUrl, recordingUrl, preferredTabId) {
 
 async function cachedBannerAgendas(tab, settings) {
     const cached = (await chrome.storage.session.get(`agenda-match:${tab.id}`))[`agenda-match:${tab.id}`];
-    return cached?.target === JSON.stringify(meetingTarget(tab.url)) && cached.serverUrl === settings.serverUrl && cached.connectionId === settings.connectionId && Date.now() - cached.at < 60000 ? currentAgendas(cached.agendas) : [];
+    return cached?.target === JSON.stringify(meetingTarget(tab.url)) && cached.serverUrl === settings.serverUrl && cached.connectionId === settings.connectionId && Date.now() - cached.at < 60000 ? cached.agendas.filter(row => (supportsAgendaRooms(settings) && row.roomBound) || currentAgendas([row]).length) : [];
 }
 
 async function bannerAgendas(tab, { strict = false } = {}) {
@@ -1205,17 +1216,19 @@ async function bannerAgendas(tab, { strict = false } = {}) {
     const target = JSON.stringify(meetingTarget(tab.url));
     const cached = (await chrome.storage.session.get(key))[key];
     const settings = await getSettings();
-    if (cached?.target === target && cached.serverUrl === settings.serverUrl && cached.connectionId === settings.connectionId && Date.now() - cached.at < 60000) return currentAgendas(cached.agendas);
+    if (cached?.target === target && cached.serverUrl === settings.serverUrl && cached.connectionId === settings.connectionId && Date.now() - cached.at < 60000) return cachedBannerAgendas(tab, settings);
     const controller = new AbortController();
     let timer;
     try {
-        const agendas = await Promise.race([
-            matchAgendas(tab.url, Date.now(), { signal: controller.signal }),
+        const room = await Promise.race([
+            matchAgendaRoom(tab.url, Date.now(), { signal: controller.signal }),
             new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error("Agenda match timed out")); }, strict ? 10000 : 1000); }),
         ]);
         if (controller.signal.aborted) throw new Error("Agenda match timed out");
-        await chrome.storage.session.set({ [key]: { target, serverUrl: settings.serverUrl, connectionId: settings.connectionId, at: Date.now(), agendas } });
-        return agendas;
+        const freshTab = await chrome.tabs.get(tab.id).catch(() => null);
+        if (freshTab && JSON.stringify(meetingTarget(freshTab.url)) === target)
+            await chrome.storage.session.set({ [key]: { target, serverUrl: settings.serverUrl, connectionId: settings.connectionId, at: Date.now(), agendas: room.data, restricted: room.restricted, invitations: room.invitations } });
+        return room.data;
     } catch (error) { if (strict) throw error; return []; }
     finally { clearTimeout(timer); }
 }
@@ -1262,6 +1275,22 @@ async function handleAgendaMessageNow(message, sender) {
     const settings = await getSettings();
     if (!supportsAgendas(settings)) return { ok: true, agendas: [] };
     const tab = message.tabId != null ? await chrome.tabs.get(message.tabId).catch(() => null) : null;
+    if (["room-presence", "room-agendas"].includes(message.type)) {
+        if (sender.url?.split("?")[0] !== chrome.runtime.getURL("agenda/agenda.html") || !supportsAgendaRooms(settings) || !meetCode(tab?.url)) return { ok: true, data: [], restricted: false, invitations: [] };
+        if (message.type === "room-presence") {
+            const panelTab = new URL(sender.url).searchParams.get("tab");
+            if ((panelTab !== null && !openPanels.has(Number(panelTab))) || message.roomCode !== meetCode(tab.url)) return { ok: true };
+            const result = await agendaRequest("/presence", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ meetCode: meetCode(tab.url), agendaId: message.agendaId ?? null }) });
+            return { ok: true, ...result };
+        }
+        const code = meetCode(tab.url);
+        const room = await matchAgendaRoom(tab.url);
+        const latestTab = await chrome.tabs.get(tab.id).catch(() => null);
+        if (meetCode(latestTab?.url) !== code) return { ok: true, data: [], restricted: false, invitations: [] };
+        await chrome.storage.session.set({ [`agenda-match:${tab.id}`]: { target: JSON.stringify(meetingTarget(tab.url)), serverUrl: settings.serverUrl, connectionId: settings.connectionId, at: Date.now(), agendas: room.data, restricted: room.restricted, invitations: room.invitations } });
+        await routeAgendaTab(tab, settings, await getState(), room.data);
+        return { ok: true, ...room };
+    }
     if (message.type === "match-agendas") {
         void refreshAgendas({ force: true }).catch(() => {});
         const binding = await joinedMeeting(tab, settings);
@@ -1313,7 +1342,8 @@ async function resolvePanelAgenda(message, sender, meeting, opened) {
     const matches = binding?.agendaId || message.agendaId ? [] : tab ? await bannerAgendas(tab, { strict: true }) : await matchAgendas();
     const id = message.choose ? null : message.agendaId || binding?.agendaId || (state.tabId === tabId ? state.agendaId : null) || (matches.length === 1 ? matches[0].id : null);
     const key = await opened;
-    await chrome.storage.session.set({ [key]: { agendaIds: id ? [id] : matches.map((row) => row.id), choose: !id, tabId } });
+    const agendaSource = id && binding?.agendaId === id ? "join" : id && state.tabId === tabId && state.agendaId === id ? "recording" : "automatic";
+    await chrome.storage.session.set({ [key]: { agendaIds: id ? [id] : matches.map((row) => row.id), choose: !id, tabId, agendaSource, roomAutomatic: agendaSource === "automatic" } });
     if (panelTabId != null && key === agendaPanelKey(panelTabId) && !(await chrome.tabs.get(panelTabId).catch(() => null))) await chrome.storage.session.remove(key);
 }
 
@@ -1497,7 +1527,7 @@ async function syncMeetingBannerNow(tabId, cachedOnly = false) {
             : cachedOnly ? await cachedBannerAgendas(tab, settings) : await bannerAgendas(tab) : [];
     const state = await getState();
     const entry = (await getArmed())[tabId];
-    const agendaRoute = tab ? await routeAgendaTab(tab, settings, state, cachedOnly ? await cachedBannerAgendas(tab, settings) : agendas) : false;
+    const agendaRoute = tab ? await routeAgendaTab(tab, settings, state, cachedOnly || !enabled || !settings.agendaBanner ? await cachedBannerAgendas(tab, settings) : agendas) : false;
     const ownRecording = state.tabId === tabId &&
         (!state.meetingTarget || sameMeetingTarget(state.meetingTarget, tab?.url));
     if (enabled && ownRecording && state.state !== STATE.idle) {
@@ -1966,7 +1996,10 @@ chrome.action.onClicked.addListener((tab) => {
                     await setAgendaPanelOpen(tab.id, true);
                     await chrome.storage.session.set({ [agendaPanelKey(tab.id)]: restored });
                 }
-                else await openAgendaPanel({ tabId: tab.id }, restored.agendaIds);
+                else {
+                    const key = await openAgendaPanel({ tabId: tab.id }, restored.agendaIds);
+                    await chrome.storage.session.set({ [key]: restored });
+                }
             } else {
                 await closeAgendaPanel(tab.id).catch(() => {});
                 await startFromInvocation(tab);
@@ -2224,7 +2257,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const tab = await publishJoinedMeeting({ ...meeting, serverUrl: cached.serverUrl, connectionId: cached.connectionId }, message.tabId, publishJoinRoute);
             if (message.fallback === true && meeting.agendaId) {
                 await chrome.tabs.update(tab.id, { active: true });
-                await openAgendaWindow({ tabId: tab.id }, [meeting.agendaId]);
+                const key = await openAgendaWindow({ tabId: tab.id }, [meeting.agendaId]);
+                await chrome.storage.session.set({ [key]: agendaTabs.get(tab.id) });
             }
             return tab;
         })()
@@ -2269,6 +2303,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     switch (message.type) {
         case "match-agendas":
         case "select-agenda":
+        case "room-presence":
+        case "room-agendas":
         case "edit-agenda":
             handleAgendaMessage(message, sender).then(sendResponse)
                 .catch(() => sendResponse({ ok: false, error: t("agendaFailed") }));

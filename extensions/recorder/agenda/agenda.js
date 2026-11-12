@@ -11,6 +11,8 @@ import {
 import { localizeDocument, t } from "../lib/i18n.js";
 import { renderLinkedText } from "../lib/linkify.js";
 import { meetCode } from "../lib/meet-code.js";
+import { panelRoomHeartbeat, supportsAgendaRooms } from "../lib/agenda-rooms.js";
+import { mountRoomCards } from "../lib/room-cards.js";
 import { formatMeetingTime } from "../lib/meeting-time.js";
 
 import { detectMeetingPlatform } from "../lib/platforms.js";
@@ -27,6 +29,7 @@ let context = {};
 let state = {};
 let currentTab;
 let choosing = false;
+let automaticChooser = false;
 let restoredContext = false;
 let loading = false;
 let reloadPending = false;
@@ -38,7 +41,6 @@ let stopStream;
 let streamId;
 let streamConnected = false;
 let reconciledAt = 0;
-let revealRecording = false;
 let lastEditable = false;
 const bindings = new Map();
 const fieldNodes = new Map();
@@ -46,6 +48,90 @@ const openNotes = new Set();
 let panelPort;
 let closed = false;
 let portRetry;
+let room = { data: [], restricted: false, invitations: [] };
+let roomPeople = [];
+const heartbeat = panelRoomHeartbeat(async message => {
+    const response = await chrome.runtime.sendMessage(message);
+    if (response?.ok && !response.retryAfterMs && !closed) void restore(true);
+    return response;
+});
+const roomCards = mountRoomCards(el("room-cards"), {
+    defaultFolder: () => recording() ? state : (detail ? { ...settings, ...agendaFolder(detail) } : settings ?? {}),
+    onError: showError,
+    onRefresh: () => restore(true),
+    onAccepted: async id => {
+        room.invitations = [];
+        if (id) await select(id);
+        await restore(true);
+    },
+});
+
+function renderRoom() {
+    const enabled = supportsAgendaRooms(settings) && Boolean(meetCode(currentTab?.url));
+    heartbeat.update(settings, currentTab, presenceAgendaId());
+    const people = enabled && detail?.own && !afterStop() ? roomPeople : [];
+    const restricted = enabled && !detail && !choosing && room.restricted;
+    roomCards.render({ agendaId: detail?.id, people, restricted,
+        invitations: enabled && !choosing ? room.invitations : [] });
+    el("room-cards").hidden ||= choosing;
+    const chosen = enabled && detail ? room.data.find(row => row.id === detail.id)?.chosenBy?.filter(person => !person.self) ?? [] : [];
+    el("room-chosen-by").hidden = !chosen.length || choosing;
+    el("room-chosen-by").textContent = chosen.length ? t("agendaRoomChosenBy", chosen.map(person => person.name || t("unknown")).join(", ")) : "";
+    el("title").hidden = enabled && !detail && !choosing && Boolean(room.invitations?.length);
+    if (restricted) {
+        el("title").textContent = t("agendaRoomRestricted");
+        el("no-agenda-hint").hidden = true;
+    }
+}
+
+async function refreshRoom() {
+    if (!supportsAgendaRooms(settings) || !meetCode(currentTab?.url)) {
+        room = { data: [], restricted: false, invitations: [] };
+        roomPeople = [];
+        return;
+    }
+    const tabId = currentTab.id;
+    const code = meetCode(currentTab.url);
+    const serverUrl = settings.serverUrl;
+    const connectionId = settings.connectionId;
+    function stillCurrent() {
+        return currentTab?.id === tabId && meetCode(currentTab.url) === code &&
+            supportsAgendaRooms(settings) && settings.serverUrl === serverUrl && settings.connectionId === connectionId;
+    }
+    const result = await chrome.runtime.sendMessage({ type: "room-agendas", tabId });
+    if (!stillCurrent()) return;
+    if (!result?.ok) throw new Error(t("agendaFailed"));
+    room = result;
+    const selected = room.data?.length === 1 ? room.data[0] : null;
+    if ((!choosing || automaticChooser) && !context.explicitNone && (!currentAgendaId() || context.roomAutomatic) && !recordingAgendaId()) {
+        context.agendaIds = selected ? [selected.id] : [];
+        context.choose = !selected && room.data?.length > 1;
+        context.roomAutomatic = true;
+        choosing = context.choose;
+        automaticChooser = choosing;
+    }
+}
+
+async function refreshRoomPeople(id) {
+    if (!supportsAgendaRooms(settings) || !meetCode(currentTab?.url) || !id) {
+        roomPeople = [];
+        return;
+    }
+    const tabId = currentTab.id;
+    const code = meetCode(currentTab.url);
+    const serverUrl = settings.serverUrl;
+    const connectionId = settings.connectionId;
+    try {
+        const response = await agendaRequest(`/${encodeURIComponent(id)}/people`);
+        if (currentTab?.id !== tabId || meetCode(currentTab.url) !== code ||
+            currentAgendaId() !== id || settings.serverUrl !== serverUrl || settings.connectionId !== connectionId) return;
+        roomPeople = response.data ?? [];
+    } catch (error) {
+        if (![403, 404].includes(error?.status)) throw error;
+        roomPeople = [];
+    }
+}
+
 function connectPanel() {
     if (closed || !chrome.runtime.connect) return;
     panelPort = chrome.runtime.connect({ name: "agenda-panel" });
@@ -172,6 +258,12 @@ function showError(error, load = false) {
 
 function recording() {
     return state.state === "recording" && !state.stopped;
+}
+function updateRecordingState(next) {
+    const wasAfterStop = afterStop();
+    state = next;
+    if (editable() !== lastEditable || afterStop() !== wasAfterStop) render();
+    renderRecording();
 }
 function afterStop() {
     return Boolean(
@@ -458,6 +550,7 @@ function render() {
     lastEditable = canEdit;
     el("agenda").hidden = false;
     el("choices").hidden = true;
+    el("no-agenda-hint").hidden = true;
     el("title").textContent = detail.title;
     el("time").textContent = detail.plannedStart
         ? formatMeetingTime(detail.plannedStart, detail.plannedEnd)
@@ -488,7 +581,9 @@ function render() {
     el("point-progress").setAttribute("aria-label", t("agendaPoints"));
     el("point-progress").firstElementChild.style.width = `${percent}%`;
     for (const point of top) renderPoint(point);
+    el("task-section").hidden = afterStop();
     el("tasks").hidden = afterStop();
+    el("after-hint").hidden = !afterStop();
     el("tasks").replaceChildren();
     const tasks = (detail.taskGroups ?? []).flatMap((group) => group.tasks);
     el("task-count").textContent = t("agendaTaskProgress", [
@@ -582,33 +677,58 @@ function render() {
     controls?.folder(agendaFolder(detail));
     void controls?.refreshMeeting();
     renderRecording();
+    renderRoom();
+}
+
+function renderNone() {
+    el("agenda").hidden = el("choices").hidden = true;
+    el("no-agenda-hint").hidden = false;
+    el("title").textContent = t("agendaNone");
+    el("time").textContent = "";
+    renderRecording();
+    renderRoom();
+}
+
+function recordingAgendaId() {
+    return state.sessionId && state.tabId === context.tabId && state.state !== "idle"
+        ? state.agendaId : null;
+}
+
+function currentAgendaId() {
+    if (context.explicitNone) return null;
+    if (["join", "panel"].includes(context.agendaSource) && context.agendaIds?.length === 1)
+        return context.agendaIds[0];
+    if (recordingAgendaId()) return recordingAgendaId();
+    if (context.agendaIds?.length === 1) return context.agendaIds[0];
+    return !choosing && context.choose && !context.roomAutomatic ? detail?.id : null;
+}
+
+function presenceAgendaId() {
+    return !choosing && ["join", "panel"].includes(context.agendaSource) ? currentAgendaId() : null;
+}
+
+function hasAgendaChoice() {
+    return Boolean(detail || currentAgendaId());
 }
 
 function renderRecording() {
-    el("recording-state").textContent =
-        state.state === "completed" && state.agendaUnavailable
-            ? t("agendaUnavailable")
-            : "";
     const colleagues = (detail?.recordingBy ?? []).filter(
         (person) => !person.self,
     );
     el("colleague-recording").hidden =
-        !colleagues.length || recording() || afterStop() || choosing;
+        !colleagues.length || recording() || afterStop();
     el("recording-by").textContent = t(
         "meetingRecordingBy",
         colleagues.map((person) => person.name || t("unknown")).join(", "),
     );
-    el("record-also").hidden = revealRecording;
-    el("recorder-controls").hidden =
-        !choosing &&
-        el("agenda-error").hidden &&
-        !recording() &&
-        !afterStop() &&
-        colleagues.length > 0 &&
-        !revealRecording;
+    el("change-agenda").textContent = t(
+        hasAgendaChoice() ? "agendaChange" : "agendaChoose",
+    );
     el("change-agenda").hidden =
-        choosing || (afterStop() && !canChooseRecordingAgenda(state));
-    el("back").hidden = !choosing;
+        choosing ||
+        !(settings && supportsAgendas(settings)) ||
+        (afterStop() && !canChooseRecordingAgenda(state));
+    el("cancel-choice").hidden = !choosing;
 }
 
 async function loadDetail(id, poll = false) {
@@ -675,6 +795,7 @@ async function select(agendaId) {
         return;
     }
     choosing = false;
+    automaticChooser = false;
     await chrome.storage.session.set({
         [panelKey]: {
             ...context,
@@ -682,19 +803,42 @@ async function select(agendaId) {
             choose: false,
             explicitNone: !agendaId,
             error: false,
+            roomAutomatic: false,
+            agendaSource: "panel",
         },
     });
+}
+
+function choiceRow(id, title, hint, selected) {
+    const choice = button("agendaShow", () => void select(id).catch(showError));
+    choice.className = "agenda-option";
+    if (id === null) choice.id = "none";
+    choice.setAttribute("role", "radio");
+    choice.setAttribute("aria-checked", String(selected));
+    choice.classList.toggle("selected", selected);
+    const radio = text("span", "", "choice-radio");
+    radio.setAttribute("aria-hidden", "true");
+    const label = text("span", "", "choice-text");
+    label.append(text("strong", title));
+    if (hint) label.append(text("span", hint, "hint"));
+    choice.replaceChildren(radio, label);
+    if (selected)
+        choice.append(text("span", t("agendaSelected"), "selected-label"));
+    return choice;
 }
 
 async function choices() {
     const version = ++generation;
     choosing = true;
-    el("agenda").hidden = true;
+    el("agenda").hidden = el("no-agenda-hint").hidden = true;
     el("choices").hidden = false;
-    el("title").textContent = t("agendaChange");
+    el("title").textContent = t(
+        hasAgendaChoice() ? "agendaChange" : "agendaChoose",
+    );
     el("time").textContent = "";
     el("choice-list").replaceChildren();
     renderRecording();
+    renderRoom();
     const now = Date.now();
     let incomplete = false;
     const rows = await agendaChoices(
@@ -717,36 +861,29 @@ async function choices() {
             start: detail.plannedStart,
             end: detail.plannedEnd,
         });
-    for (const agenda of rows) {
-        const choice = button(
-            "agendaShow",
-            () => void select(agenda.id).catch(showError),
+    for (const agenda of rows)
+        el("choice-list").append(
+            choiceRow(
+                agenda.id,
+                agenda.title,
+                agenda.start
+                    ? formatMeetingTime(agenda.start, agenda.end, now)
+                    : "",
+                agenda.id === currentAgendaId(),
+            ),
         );
-        choice.className = "agenda-option";
-        const label = text("span", "");
-        label.append(text("strong", agenda.title));
-        if (agenda.start)
-            label.append(
-                text(
-                    "span",
-                    formatMeetingTime(agenda.start, agenda.end, now),
-                    "hint",
-                ),
-            );
-        choice.replaceChildren(label);
-        if (
-            agenda.id === detail?.id ||
-            (context.agendaIds?.length === 1 &&
-                agenda.id === context.agendaIds[0])
-        ) {
-            choice.classList.add("selected");
-            choice.append(text("span", t("agendaSelected"), "selected-label"));
-        }
-        el("choice-list").append(choice);
-    }
     if (!rows.length && !incomplete)
-        el("choice-list").append(text("p", t("agendaEmpty"), "hint"));
-    el("none").classList.toggle("selected", context.explicitNone === true);
+        el("choice-list").append(
+            text("p", t("agendaEmpty"), "choice-empty hint"),
+        );
+    el("choice-list").append(
+        choiceRow(
+            null,
+            t("agendaNone"),
+            t("agendaNoneChoiceHint"),
+            !currentAgendaId(),
+        ),
+    );
 }
 
 async function restore(poll = false) {
@@ -764,6 +901,7 @@ async function restore(poll = false) {
             el("agenda").hidden = el("choices").hidden = true;
             el("status").textContent = t("agendaUnsupported");
             el("agenda-error").hidden = false;
+            renderRoom();
             return;
         }
         const stored = await chrome.storage.session.get([
@@ -777,24 +915,24 @@ async function restore(poll = false) {
             return;
         }
         if (!restoredContext) {
-            choosing =
-                context.choose === true ||
-                (context.agendaIds?.length !== 1 && !context.explicitNone);
+            choosing = context.choose === true || context.agendaIds?.length > 1;
+            automaticChooser = choosing && context.roomAutomatic === true;
             restoredContext = true;
         }
-        if (choosing) await choices();
-        else if (context.agendaIds?.length === 1)
-            await loadDetail(context.agendaIds[0], poll);
+        await refreshRoom();
+        const agendaId = currentAgendaId();
+        if (choosing) {
+            if (agendaId && detail?.id !== agendaId) await loadDetail(agendaId);
+            await choices();
+        } else if (agendaId) {
+            await Promise.all([loadDetail(agendaId, poll), refreshRoomPeople(agendaId)]);
+            renderRoom();
+        }
         else {
             clearLive();
             detail = null;
             controls?.folder(settings);
-            el("agenda").hidden = el("choices").hidden = true;
-            el("title").textContent = t(
-                context.explicitNone ? "agendaNone" : "agendaMeetingTitle",
-            );
-            el("time").textContent = "";
-            renderRecording();
+            renderNone();
         }
     } catch (error) {
         showError(error, true);
@@ -812,21 +950,37 @@ el("change-agenda").addEventListener("click", async () => {
         showError();
         return;
     }
+    automaticChooser = false;
     void choices().catch((error) => showError(error, true));
 });
-el("back").addEventListener("click", () => {
+el("cancel-choice").addEventListener("click", () => {
     generation += 1;
     choosing = false;
+    automaticChooser = false;
     context.choose = false;
     el("choices").hidden = true;
     el("agenda-error").hidden = true;
     if (detail) render();
-    else {
-        el("title").textContent = t("agendaMeetingTitle");
-        renderRecording();
-    }
+    else if (context.agendaIds?.length === 1) void restore();
+    else renderNone();
 });
-el("none").addEventListener("click", () => void select(null).catch(showError));
+el("choice-list").addEventListener("keydown", (event) => {
+    const keys = [
+        "ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft", "Home", "End",
+    ];
+    if (!keys.includes(event.key)) return;
+    const rows = [...el("choice-list").querySelectorAll('[role="radio"]')];
+    const index = rows.indexOf(document.activeElement);
+    if (index < 0) return;
+    event.preventDefault();
+    const direction = ["ArrowDown", "ArrowRight"].includes(event.key) ? 1 : -1;
+    const next = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? rows.length - 1
+          : (index + direction + rows.length) % rows.length;
+    rows[next].focus();
+});
 el("retry").addEventListener("click", async () => {
     try {
         el("agenda-error").hidden = true;
@@ -865,11 +1019,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
                 changes.serverDefaults.newValue?.agendaLive)
     )
         clearLive();
-    if (area === "session" && changes.recordingState) {
-        state = changes.recordingState.newValue ?? {};
-        if (editable() !== lastEditable) render();
-        renderRecording();
-    }
+    if (area === "session" && changes.recordingState)
+        updateRecordingState(changes.recordingState.newValue ?? {});
     if (
         area === "local" &&
         (changes.serverUrl ||
@@ -891,8 +1042,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
                 changes.encryptedApiKey ||
                 changes.dataUseAcknowledgedAt))
     ) {
-        if (area === "session")
+        if (area === "session") {
             choosing = changes[panelKey].newValue?.choose === true;
+            automaticChooser = choosing && changes[panelKey].newValue?.roomAutomatic === true;
+        }
         void restore().then(() => controls?.refreshTab());
     }
 });
@@ -900,40 +1053,49 @@ setInterval(() => {
     if (
         saving ||
         loading ||
-        choosing ||
+        (choosing && !automaticChooser) ||
         (detail?.recordingItemId &&
             settings?.serverDefaults?.agendaLive !== true) ||
-        (streamConnected && Date.now() - reconciledAt < 60000) ||
+        (streamConnected && Date.now() - reconciledAt < 60000 && !supportsAgendaRooms(settings)) ||
         (settings?.serverDefaults?.agendaText !== 1 &&
             document.activeElement?.matches('input[type="text"],textarea'))
     )
         return;
     void restore(true);
 }, 15000);
-el("record-also").addEventListener("click", () => {
-    revealRecording = true;
-    renderRecording();
-});
 controls = await mountRecordingControls(el("recorder-controls"), {
     variant: "panel",
+    idleNotice: el("colleague-recording"),
     tabId: () =>
         context.tabId ?? (panelTab === null ? undefined : Number(panelTab)),
-    selectedAgenda: () => detail?.id,
     agendaChoice: () =>
         context.explicitNone
             ? { agendaId: null }
-            : detail?.permissions.edit
+            : detail?.permissions.edit && currentAgendaId() === detail.id
               ? { agendaId: detail.id }
               : {},
     onTab: (tab) => {
+        const changedRoom = currentTab && meetCode(currentTab.url) !== meetCode(tab?.url);
         currentTab = tab;
+        if (settings) {
+            if (changedRoom) {
+                generation += 1;
+                clearLive();
+                room = { data: [], restricted: false, invitations: [] };
+                roomPeople = [];
+                if (context.roomAutomatic) {
+                    context.agendaIds = [];
+                    detail = null;
+                    renderNone();
+                }
+            }
+            heartbeat.update(settings, currentTab, presenceAgendaId());
+            if (!meetCode(tab?.url)) { room = { data: [], restricted: false, invitations: [] }; roomPeople = []; }
+        }
         render();
+        if (changedRoom) void restore(true);
     },
-    onState: (next) => {
-        state = next;
-        if (editable() !== lastEditable) render();
-        renderRecording();
-    },
+    onState: updateRecordingState,
     beforeAction: async () => {
         if (!(await flushText())) showError();
     },
@@ -952,4 +1114,6 @@ window.addEventListener("pagehide", () => {
     clearLive();
     controls?.destroy();
     panelPort?.disconnect();
+    heartbeat.stop();
+    roomCards.destroy();
 });

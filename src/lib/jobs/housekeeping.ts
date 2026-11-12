@@ -12,6 +12,7 @@ import {
 import { pruneMcpAccessLog } from "@/db/queries/mcp-audit";
 import { holdOverdueMeetings } from "@/db/queries/meetings";
 import { pruneExpiredRateLimitBuckets } from "@/db/queries/rate-limit";
+import { pruneRecorderRoomPresence } from "@/db/queries/recorder-rooms";
 import { writeStorageSnapshots } from "@/db/queries/storage-snapshots";
 import { pruneSettledWebhookDeliveries } from "@/db/queries/webhook-deliveries";
 import { env } from "@/lib/env";
@@ -69,6 +70,10 @@ export async function runHousekeeping(
 ): Promise<Record<string, number>> {
     const now = Date.now();
     const prunes: [string, (limit: number) => Promise<number>][] = [
+        [
+            "recorder_room_presence",
+            (limit) => pruneRecorderRoomPresence(limit, new Date(now)),
+        ],
         [
             "meeting_agendas",
             (limit) => holdOverdueMeetings(limit, new Date(now)),

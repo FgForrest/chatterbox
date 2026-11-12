@@ -1,6 +1,6 @@
 # Chatterbox Meeting Recorder privacy policy
 
-Last updated: 10 November 2026
+Last updated: 11 November 2026
 
 This policy describes the **Chatterbox Meeting Recorder browser extension**. It does not replace the privacy policy for a Chatterbox server or another service you choose to use.
 
@@ -55,6 +55,34 @@ rights. A selected agenda’s ID is kept with upload recovery metadata until the
 Cached agendas and choices are cleared on disconnect or a new pairing. Reminder titles
 may be visible in your operating system's notifications; turn reminders off in Options
 to prevent them.
+
+## Room agendas and sharing from the panel
+
+On servers advertising room support, starting a recording on Google Meet also sends the
+validated room code with the session. While the recorder panel is open on a Meet tab,
+it sends that code and an agenda ID only for a choice made explicitly in that panel or through Join.
+Automatically discovered or followed agendas send no agenda ID. Presence is sent on opening, on selection
+changes and every minute. The worker derives the code from that tab; it never sends
+the full URL. The server stores only an HMAC-SHA256 keyed hash of the code, using a key
+derived from its existing server secret. Presence expires from matching and people
+lists within about three minutes after the last update. Closing the panel or leaving the meeting
+stops updates; presence may remain visible until it expires. A separate write timestamp preserves
+the twenty-second per-user refresh cap; hourly housekeeping removes stale rows.
+
+The agenda's owner can see the names of eligible people on the same server who have
+the recorder panel open in the same meeting and cannot see the agenda, only when the agenda
+is tied to that meeting’s own Google Calendar event. The Calendar link, read through the owner’s
+connected Google account, is the relationship the server trusts. A recording session, panel presence
+or any other caller-declared room code does not qualify. Without that Calendar event and its Meet
+room, the people list is empty and no share card appears. An open Meet tab alone does not count.
+Only the owner receives that list and can send invitations
+from the panel. A caller without access learns only that a restricted agenda exists,
+without its title, ID, owner or recorder names. An invitation separately discloses its
+agenda title, planned time and sharer's name to its receiver. Accepting uses the chosen
+private folder and the same access and filing rules as the web app; declining grants
+no access. Invitation and people data stay in panel memory or extension session storage.
+Older servers receive neither session room codes nor panel presence and show no new
+sharing controls. Existing Calendar matching may still send the room code as described above.
 
 ## Calendar meetings and live collaboration
 

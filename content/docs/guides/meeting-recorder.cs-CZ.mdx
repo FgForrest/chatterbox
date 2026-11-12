@@ -193,10 +193,14 @@ u staršího serveru rozšíření oznámí, že se agendy objeví po jeho aktua
   odmítne, agenda se otevře v samostatném okně. Se zapnutou výzvou ve schůzce
   přidá volba **Nabízet agendu v liště ve schůzce** do lišty **Zobrazit
   agendu**.
-- **Průvodce schůzkou (0.9.7).** Body připravíte, jejich názvy upravíte a úkoly zahodíte na webu
-  Klepny. Panel zůstává jednosloupcový při každé šířce. Mimo schůzku ukazuje agendu ke čtení,
-  cílovou složku a **Nahrávat jinou obrazovku nebo aplikaci**. Pokud nejbližší schůzka z Kalendáře
-  patří k této agendě, nabídne i **Připojit se v Meet** s připojeným účtem.
+- **Blok nahrávání (0.9.9).** Panel začíná stejným ovládáním jako vyskakovací okno:
+  nápovědou, vlastním upozorněním účastníkům, cílovou složkou a tlačítky
+  **Souhlas potvrzen · Nahrávat tuto kartu** a **Nahrávat jinou obrazovku nebo aplikaci**.
+  Obě tlačítka zůstávají dostupná i mimo schůzku. Nabídka **Připojit se v Meet** k nejbližší
+  schůzce z Kalendáře je uvnitř tohoto bloku. Sekce **Agenda** pod ním ukazuje název a plánovaný
+  čas, nebo **Bez agendy** a **Vybrat agendu**. Agendu lze připojit později v Klepně. Body
+  připravíte, jejich názvy upravíte a úkoly zahodíte na webu; mimo schůzku jsou body a úkoly
+  v panelu jen ke čtení.
 - **Během schůzky.** Body označujete jako **Probráno**, podbody nezávisle na rodičích. Úkoly
   dokončíte zaškrtnutím; odškrtnutím je znovu otevřete, pokud to server podporuje. Odmítnutou
   změnu panel vysvětlí a ponechá uložený stav. Zahozené úkoly zůstávají viditelné. Počítadlo
@@ -205,14 +209,17 @@ u staršího serveru rozšíření oznámí, že se agendy objeví po jeho aktua
   oprávnění. Změny kolegů přicházejí průběžně, na starších serverech pravidelným načítáním.
 - **Nahrávání a ukládání.** Lišta ukazuje uplynulý čas, ukazatele **Vy** a **Ostatní**, složku
   a **Zastavit a uložit**. Po zastavení panel zobrazí průběh odesílání částí a přehled probraných
-  bodů ke čtení. Při chybě odesílání zůstává možnost ho opakovat. Kolegové vidí, kdo nahrává,
-  a mohou zvolit **Nahrávat také**.
-- **Změnit agendu.** Odkaz v záhlaví otevře okolní agendy, označí vybranou a nabídne
-  **Bez agendy** a **Zpět**. Výběr jiné agendy změní i agendu probíhající nahrávky.
-  **Bez agendy** přeskočí připojení; starší server ji přesto může připojit automaticky.
-  Výběr zahrnuje nejvýše deset agend bez nahrávky naplánovaných do 24 hodin před nebo po
-  aktuálním čase, nejbližší plánovanému intervalu jako první a při shodě vaše vlastní.
-- **Chyby načítání.** Neúspěšný požadavek nabídne **Zkusit znovu** a ovládání nahrávání zůstává
+  bodů ke čtení; úkoly se skryjí. Při chybě odesílání zůstává možnost ho opakovat. Když nahrává
+  kolega, upozornění nad tlačítky ukáže jeho jméno a celý blok nahrávání zůstane dostupný.
+- **Vybrat nebo změnit agendu.** Odkaz v sekci **Agenda** rozbalí orámovaný seznam přímo v ní,
+  pod blokem nahrávání. Řádky ukazují přepínač, název a čas, dole je **Bez agendy**. Aktuální
+  volba má značku **Vybraná**, včetně **Bez agendy**. Kliknutí na řádek ihned vybere agendu
+  a seznam sbalí; **Zrušit** vrátí předchozí zobrazení beze změny. Výběr jiné agendy změní
+  i agendu probíhající nahrávky. Výběr zahrnuje nejvýše deset agend bez nahrávky naplánovaných
+  do 24 hodin před nebo po aktuálním čase, nejbližší plánovanému intervalu jako první a při
+  shodě vaše vlastní. Prázdný seznam vysvětlí, že v tomto období žádná agenda s časem není,
+  a stále nabídne **Bez agendy**.
+- **Chyby načítání.** Neúspěšný požadavek nabídne **Zkusit znovu** v sekci Agenda a ovládání nahrávání zůstává
   dostupné. Úspěšné hledání bez shody ve vyskakovacím okně ukáže **K této schůzce není agenda.**
   a nabídne **Vybrat agendu**.
 
@@ -230,6 +237,40 @@ Volba **Připomínat schůzky** v **Možnostech** pošle ke každé schůzce nej
 0, 1, 2, 5 nebo 10 minut před začátkem, a žádné, když je místnost již otevřená. Vyskakovací okno
 a panel ukazují upozornění účastníkům pouze tehdy, když vlastní text nastavil provozovatel
 nebo vy. Tlačítko souhlasu i upozornění v Možnostech zůstávají.
+
+### Agendy v místnosti a sdílení z panelu (0.9.9)
+
+Na podporovaném serveru Google Meet najde také agendy vybrané v téže místnosti
+otevřeným panelem nebo probíhající nahrávkou, i když byly vybrány ručně a nemají
+událost v Kalendáři. Vidíte jen agendy, ke kterým máte přístup. Pod časem se objeví
+jméno kolegy, který agendu vybral a schůzku nahrává. Pokud více shod automaticky otevře
+výběr, panel dál kontroluje shody a při jediné zbývající agendě ji zobrazí. Výběr, který
+otevřete sami, i vaše výslovné volby zůstávají pod vaší kontrolou.
+
+U soukromé agendy otevře ikona panel se stavem **Agenda s vámi není sdílená**.
+Název, vlastník a nahrávající zůstanou skrytí. Můžete nahrávat bez agendy nebo
+vybrat vlastní. Vlastník vidí způsobilé lidi ze stejného serveru Klepny, kteří
+mají na téže schůzce otevřený panel a agendu nevidí, pouze pokud je agenda navázaná
+na vlastní událost této schůzky v Google Kalendáři. Server důvěřuje vazbě na Kalendář,
+kterou načítá přes připojený účet Google vlastníka agendy. Nahrávací relace, přítomnost
+v panelu ani jiný kód místnosti zadaný klientem nestačí. Bez této události a její místnosti
+Meet je seznam lidí prázdný a karta sdílení se neukáže. Samotná karta se schůzkou nestačí. Kartu sdílení vidí jen vlastník, před nahráváním i během něj.
+**Nasdílet** pozve jednoho člověka; pro více lidí se ukáže **Nasdílet všem (n)**.
+Po odeslání řádek ukazuje čekání na přijetí; po přijetí zmizí.
+
+Příjemce uvidí pozvánku ve svém panelu se jménem sdílejícího, názvem a časem.
+**Uložit do** předvybere cílovou složku bloku nahrávání. Pokud jde o složku
+Organizace nebo přijatou složku, vyberte čipem vlastní soukromou složku.
+**Odmítnout** pozvánku zamítne. **Přijmout** agendu zařadí do vybrané složky
+a otevře ji ke spoluúpravám. Pokud ji už vidíte přes přijaté sdílení složky,
+platí stejné pravidlo volitelného dalšího zařazení jako na webu. Sdílení agendy
+neuděluje přístup k nahrávce ani k soukromým podkladům úkolů.
+
+Otevřený panel hlásí místnost Meetu a vybranou agendu každou minutu. Server
+ukládá jen otisk kódu místnosti s tajným klíčem. Zavření panelu nebo opuštění Meetu
+zastaví hlášení. Přítomnost může zůstat viditelná, než přibližně do tří minut od posledního
+hlášení vyprší. Zastaralé řádky odstraňuje hodinový úklid. Sdílení s lidmi vyžaduje vlastní server
+s Organizací. Starší servery dál párují jako dosud a nové sdílení v panelu neukazují.
 
 ## Mikrofon
 
