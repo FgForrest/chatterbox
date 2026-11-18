@@ -13,10 +13,8 @@ import {
     waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-    type PickablePerson,
-    SpeakerPicker,
-} from "@/components/people/speaker-picker";
+import type { PickablePerson } from "@/components/people/people-search-list";
+import { SpeakerPicker } from "@/components/people/speaker-picker";
 
 function person(id: string, displayName: string): PickablePerson {
     return { id, displayName, primaryEmail: null };
@@ -82,7 +80,7 @@ describe("SpeakerPicker matching", () => {
         stubPeople([person("p-1", "Jan"), person("p-2", "Petra")]);
         const { onPick } = await renderAndType("Pe");
 
-        fireEvent.click(screen.getByRole("button", { name: "Petra" }));
+        fireEvent.click(screen.getByRole("option", { name: "Petra" }));
         fireEvent.click(screen.getByRole("button", { name: "Select" }));
 
         await waitFor(() => {
@@ -99,6 +97,45 @@ describe("SpeakerPicker matching", () => {
         await waitFor(() => {
             expect(onPick).toHaveBeenCalledWith({ displayName: "Jan" });
         });
+    });
+
+    it("pins the viewer only among eligible Organization people and keeps the dialog actions", async () => {
+        stubPeople([
+            {
+                ...person("private", "Zita Bílá"),
+                scope: "personal",
+                self: true,
+            },
+            { ...person("viewer", "Ema Žulová"), scope: "org", self: true },
+            { ...person("colleague", "Vít Bílý"), scope: "org" },
+        ]);
+        const onMarkUnknown = vi.fn().mockResolvedValue(true);
+        const props = {
+            label: "Speaker 0",
+            personId: "viewer",
+            onMarkUnknown,
+            onClose: vi.fn(),
+            onPick: vi.fn(),
+        };
+        const view = render(<SpeakerPicker {...props} />);
+        await screen.findByText("Zita Bílá");
+        view.rerender(<SpeakerPicker {...props} organizationOnly />);
+        expect(screen.queryByText("Zita Bílá")).toBeNull();
+        expect(
+            screen
+                .getAllByRole("option")
+                .map((row) => row.getAttribute("data-value")),
+        ).toEqual(["person:viewer", "person:colleague"]);
+        expect(
+            screen
+                .getByRole("link", { name: "Open in Almanac" })
+                .getAttribute("href"),
+        ).toBe("/almanac/viewer");
+        fireEvent.click(
+            screen.getByRole("button", { name: "Unknown speaker" }),
+        );
+        await waitFor(() => expect(props.onClose).toHaveBeenCalledOnce());
+        expect(onMarkUnknown).toHaveBeenCalledOnce();
     });
 
     it("closes without changes from Cancel", async () => {

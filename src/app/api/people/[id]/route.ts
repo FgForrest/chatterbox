@@ -12,6 +12,7 @@ import {
     mergePeople,
     updatePerson,
 } from "@/lib/knowledge/people";
+import { isOwnPerson } from "@/lib/knowledge/person-self";
 
 type IdContext = { params: Promise<{ id: string }> };
 
@@ -48,7 +49,12 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         throw new AppError(ErrorCode.NOT_FOUND, "Person not found", 404);
     }
 
-    return NextResponse.json({ person });
+    return NextResponse.json({
+        person: {
+            ...person,
+            self: isOwnPerson(person.primaryEmail, session.user.email),
+        },
+    });
 });
 
 /**

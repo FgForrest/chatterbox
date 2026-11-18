@@ -45,7 +45,7 @@ vi.mock("@/hooks/use-task-list-data", () => ({
         tasks: [],
         folders: [],
         filterFolders: [],
-        sortedAssignees: [],
+        visibleAssignees: [],
     }),
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), info: vi.fn() } }));

@@ -96,7 +96,7 @@ vi.mock("@/hooks/use-task-list-data", () => ({
     useTaskListData: () => ({
         tasks: [task("Follow up", null)],
         error: null,
-        sortedAssignees: [],
+        visibleAssignees: [],
         openCount: 1,
     }),
 }));

@@ -8,6 +8,15 @@ import { IntlProvider } from "use-intl/react";
 import { defaultLocale } from "@/lib/i18n/config";
 import { messagesForLocale } from "@/lib/i18n/messages";
 
+if (typeof window !== "undefined") {
+    globalThis.ResizeObserver ??= class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+    };
+    Element.prototype.scrollIntoView ??= () => {};
+}
+
 export * from "@testing-library/react/pure";
 
 function EnglishLocaleProvider({ children }: PropsWithChildren) {

@@ -172,19 +172,19 @@ describe.each([
         fireEvent.keyDown(search, { key: "ArrowDown" });
         fireEvent.keyDown(search, { key: "Enter" });
         await waitFor(() => expect(merge.disabled).toBe(false));
-        expect(
-            screen
-                .getByText("Selected")
-                .closest('[role="option"]')
-                ?.getAttribute("data-value"),
-        ).toBe("second");
+        const selected = () =>
+            mode === "person"
+                ? screen
+                      .getAllByRole("option")
+                      .find(
+                          (option) =>
+                              option.getAttribute("aria-checked") === "true",
+                      )
+                : screen.getByText("Selected").closest('[role="option"]');
+        const prefix = mode === "person" ? "person:" : "";
+        expect(selected()?.getAttribute("data-value")).toBe(`${prefix}second`);
         fireEvent.click(screen.getAllByRole("option", { name: /Šimon/ })[0]);
-        expect(
-            screen
-                .getByText("Selected")
-                .closest('[role="option"]')
-                ?.getAttribute("data-value"),
-        ).toBe("first");
+        expect(selected()?.getAttribute("data-value")).toBe(`${prefix}first`);
         fireEvent.change(search, { target: { value: "no-such-candidate" } });
         await screen.findByText("No matches.");
         expect(screen.queryAllByRole("option")).toHaveLength(0);

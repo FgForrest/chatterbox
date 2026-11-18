@@ -3294,7 +3294,9 @@ function addDays(day: string, days: number): string {
 }
 
 /** A person a task is assigned to. */
-export type TaskAssignee = NonNullable<TaskView["assignee"]>;
+export type TaskAssignee = NonNullable<TaskView["assignee"]> & {
+    self?: boolean;
+};
 
 /** Distinct assignees of the viewer's task tab and folder, without a list limit. */
 export async function listTrackedAssignees(
@@ -3302,7 +3304,7 @@ export async function listTrackedAssignees(
     organization = false,
     tab: "followed" | "all" = "followed",
     folderId?: string | null,
-): Promise<TaskAssignee[]> {
+): Promise<(TaskAssignee & { self: boolean })[]> {
     const conditions = taskTabConditions(viewer, tab, organization);
     if (folderId) {
         conditions.push(
@@ -3311,7 +3313,11 @@ export async function listTrackedAssignees(
         );
     }
     const rows = await db
-        .selectDistinct({ personId: people.id, name: people.displayName })
+        .selectDistinct({
+            personId: people.id,
+            name: people.displayName,
+            self: sql<boolean>`coalesce(${people.primaryEmailHash} = ${viewer.emailHash}, false)`,
+        })
         .from(recordingTasks)
         .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
         .innerJoin(people, assigneeJoin())

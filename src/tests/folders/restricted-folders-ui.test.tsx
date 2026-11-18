@@ -414,11 +414,14 @@ it("creates a restricted subfolder with selected IDs and an immutable creator", 
     expect(screen.getByText("you")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Remove you" })).toBeNull();
     expect(screen.getByText(/Everyone sees the folder's name/)).toBeTruthy();
-    fireEvent.change(screen.getByRole("searchbox"), {
-        target: { value: "Robin" },
-    });
+    fireEvent.change(
+        screen.getByRole("combobox", { name: "Colleague's name or email" }),
+        {
+            target: { value: "Robin" },
+        },
+    );
     fireEvent.click(
-        await screen.findByRole("button", { name: "Robin Fields" }),
+        await screen.findByRole("option", { name: /Robin Fields/ }),
     );
     fireEvent.click(screen.getByRole("button", { name: "New subfolder" }));
     await waitFor(() =>
@@ -519,7 +522,9 @@ it.each([
             ),
         );
     }
-    expect(screen.getByRole("searchbox")).toBeTruthy();
+    expect(
+        screen.getByRole("combobox", { name: "Colleague's name or email" }),
+    ).toBeTruthy();
 });
 it("does not fetch the audience for a public-only node", () => {
     mount(
@@ -565,7 +570,9 @@ it("keeps audience add and remove hidden in read-only mode", async () => {
         false,
     );
     await screen.findByText("has items here", { exact: false });
-    expect(screen.queryByRole("searchbox")).toBeNull();
+    expect(
+        screen.queryByRole("combobox", { name: "Colleague's name or email" }),
+    ).toBeNull();
     expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
 });
 it.each([
@@ -677,7 +684,9 @@ it("a folder with children gets an explanation instead of a restrict form", () =
     expect(
         screen.getByText(/Move this folder's subfolders elsewhere first/),
     ).toBeTruthy();
-    expect(screen.queryByRole("searchbox")).toBeNull();
+    expect(
+        screen.queryByRole("combobox", { name: "Colleague's name or email" }),
+    ).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
 });
 it("lift preview distinguishes released, waiting and retention-reached items", async () => {
@@ -990,11 +999,14 @@ it("lets an ordinary member add people and reports skipped recipients by name", 
     });
     mount(<RestrictedAudienceDialog folder={locked} onOpenChange={vi.fn()} />);
     await screen.findByText("has items here", { exact: false });
-    fireEvent.change(screen.getByRole("searchbox"), {
-        target: { value: "Jitka" },
-    });
+    fireEvent.change(
+        screen.getByRole("combobox", { name: "Colleague's name or email" }),
+        {
+            target: { value: "Jitka" },
+        },
+    );
     fireEvent.click(
-        await screen.findByRole("button", { name: "Jitka Dvořáková" }),
+        await screen.findByRole("option", { name: /Jitka Dvořáková/ }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Add people" }));
     expect(fetchMock).toHaveBeenLastCalledWith(
@@ -1107,7 +1119,9 @@ it("caps each audience selection at twenty additional people", () => {
             onChange={vi.fn()}
         />,
     );
-    expect(screen.getByRole("searchbox")).toHaveProperty("disabled", true);
+    expect(
+        screen.getByRole("combobox", { name: "Colleague's name or email" }),
+    ).toHaveProperty("disabled", true);
     expect(screen.queryByRole("button", { name: "Remove you" })).toBeNull();
 });
 
@@ -1167,19 +1181,23 @@ it("starts audience additions empty, excludes current members and marks the view
                 {
                     id: "new",
                     name: "Jitka Dvořáková",
-                    email: "jitka@example.com",
+                    email: "jitka@colleague.example",
                 },
             ],
         }),
     );
-    fireEvent.change(screen.getByRole("searchbox"), {
-        target: { value: "colleague" },
-    });
-    fireEvent.click(
-        await screen.findByRole("button", { name: "Jitka Dvořáková" }),
+    fireEvent.change(
+        screen.getByRole("combobox", { name: "Colleague's name or email" }),
+        {
+            target: { value: "colleague" },
+        },
     );
-    expect(screen.queryByRole("button", { name: "Robin Fields" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Lada Cloudfern" })).toBeNull();
+    const option = await screen.findByRole("option", {
+        name: /Jitka Dvořáková/,
+    });
+    expect(screen.queryByRole("option", { name: /Robin Fields/ })).toBeNull();
+    expect(screen.queryByRole("option", { name: /Lada Cloudfern/ })).toBeNull();
+    fireEvent.click(option);
     expect(
         screen.getByRole("button", { name: "Remove Jitka Dvořáková" }),
     ).toBeTruthy();

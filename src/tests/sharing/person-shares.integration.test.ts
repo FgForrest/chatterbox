@@ -514,6 +514,35 @@ describe.skipIf(!url)("person shares (PostgreSQL)", () => {
         expect(await findShareRecipients(owner, "organization")).toEqual([]);
     });
 
+    it("searches colleague name and email word starts regardless of case and diacritics", async () => {
+        await database.db.insert(users).values({
+            id: "new-colleague",
+            name: "Jitka Dvořáková",
+            email: "kontakt@sever.example",
+        });
+        for (const query of ["DVOR", "jit dvor", "SEVER", "kon@sev"]) {
+            const response = await peopleRoute(
+                new Request(
+                    `http://localhost/api/shares/people?q=${encodeURIComponent(query)}`,
+                    {
+                        headers: { "x-test-user": owner },
+                    },
+                ),
+            );
+            expect(response.status).toBe(200);
+            expect(await response.json()).toEqual({
+                people: [
+                    {
+                        id: "new-colleague",
+                        name: "Jitka Dvořáková",
+                        email: "kontakt@sever.example",
+                    },
+                ],
+            });
+        }
+        expect(await findShareRecipients(owner, "vorak")).toEqual([]);
+    });
+
     it.each([
         "hosted",
         "local",

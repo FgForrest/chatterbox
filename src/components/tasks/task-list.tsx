@@ -89,7 +89,7 @@ export function TaskList({
         folders,
         filterFolders,
         selectedPrivate,
-        sortedAssignees,
+        visibleAssignees,
     } = useTaskListData({
         tab,
         state,
@@ -209,7 +209,7 @@ export function TaskList({
                 {tab !== "mine" && (
                     <TaskAssigneeSelect
                         assignee={assignee}
-                        assignees={sortedAssignees}
+                        assignees={visibleAssignees}
                         onChange={(value) => setParam("assignee", value)}
                     />
                 )}

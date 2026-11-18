@@ -1,14 +1,4 @@
-import {
-    and,
-    asc,
-    eq,
-    inArray,
-    isNotNull,
-    isNull,
-    ne,
-    or,
-    sql,
-} from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, ne, or } from "drizzle-orm";
 import { db } from "@/db";
 import { queryItemFolderAudience } from "@/db/queries/item-folder-audience";
 import {
@@ -16,6 +6,7 @@ import {
     queryVisibleItemFolders,
 } from "@/db/queries/item-shares";
 import { liveShareItemCondition } from "@/db/queries/meeting-shares";
+import { searchShareRecipients } from "@/db/queries/share-recipients";
 import {
     chatterItems,
     itemShares,
@@ -33,6 +24,7 @@ import {
     isOrgAccount,
     isOrgScopeVisible,
 } from "@/lib/org/config";
+import { personSearchWords } from "@/lib/people/name-search";
 import { isRecordingShared } from "@/lib/sharing/shared";
 
 /** Refuse person sharing outside the self-host Organization scope and for its account. */
@@ -491,20 +483,6 @@ export async function findShareRecipients(userId: string, query: string) {
     await requirePersonSharing(userId);
     const term = query.trim();
     if (term.length < 2 || term.length > 100) return [];
-    const pattern = `%${term.replace(/[\\%_]/g, "\\$&")}%`;
-    return db
-        .select({ id: users.id, name: users.name, email: users.email })
-        .from(users)
-        .where(
-            and(
-                ne(users.id, userId),
-                activeShareRecipientCondition(),
-                or(
-                    sql`${users.name} ilike ${pattern} escape '\\'`,
-                    sql`${users.email} ilike ${pattern} escape '\\'`,
-                ),
-            ),
-        )
-        .orderBy(asc(users.name), asc(users.id))
-        .limit(10);
+    const terms = personSearchWords(term);
+    return terms.length ? searchShareRecipients(userId, terms) : [];
 }

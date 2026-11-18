@@ -1,6 +1,6 @@
 "use client";
 
-import { useExtracted, useLocale } from "next-intl";
+import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -17,7 +17,6 @@ import { useTaskFolderTree } from "@/hooks/use-task-folder-tree";
 import { tabEventOrigin } from "@/lib/events/tab-origin";
 import { descendantFolderIds } from "@/lib/folders/hierarchy";
 import { privateTreeFolders } from "@/lib/folders/private-tree";
-import { compareNamesBySurname } from "@/lib/people/name-order";
 import { taskFilterFolders } from "@/lib/tasks/folder-filter";
 import type {
     TaskAssignee,
@@ -99,7 +98,6 @@ export function useTaskListData({
     filterFolders?: boolean;
 }) {
     const i18n = useExtracted();
-    const locale = useLocale();
     const showMergeFailure = useTaskMergeFailure();
     const [openTaskIds, setOpenTaskIds] = useState<Set<string> | null>(null);
     const [error, setError] = useState(false);
@@ -131,7 +129,7 @@ export function useTaskListData({
         search: string;
         options: TaskAssignee[];
     } | null>(null);
-    const assigneeNames = useRef(new Map<string, string>());
+    const knownAssignees = useRef(new Map<string, TaskAssignee>());
     const assigneeRequest = useRef(0);
     const assigneeSearch = useMemo(() => {
         const params = new URLSearchParams();
@@ -140,17 +138,11 @@ export function useTaskListData({
         if (folder !== ALL) params.set("folder", folder);
         return params.size ? `?${params}` : "";
     }, [tab, allOrganization, folder]);
-    const sortedAssignees = useMemo(() => {
-        const compare = compareNamesBySurname(locale);
-        const options = assignees?.options ?? [];
-        return options
-            .filter(
-                (person) =>
-                    assignees?.search === assigneeSearch ||
-                    person.personId === assignee,
-            )
-            .sort((a, b) => compare(a.name, b.name));
-    }, [assignees, assigneeSearch, assignee, locale]);
+    const visibleAssignees = (assignees?.options ?? []).filter(
+        (person) =>
+            assignees?.search === assigneeSearch ||
+            person.personId === assignee,
+    );
     const query = useMemo(() => {
         const search = new URLSearchParams({ tab, state, sort });
         if (allOrganization) search.set("organization", "true");
@@ -196,30 +188,36 @@ export function useTaskListData({
             };
             if (request !== assigneeRequest.current) return;
             for (const person of body.assignees) {
-                assigneeNames.current.set(person.personId, person.name);
+                knownAssignees.current.set(person.personId, person);
             }
             if (
                 assignee !== ALL &&
                 assignee !== "none" &&
                 !body.assignees.some((person) => person.personId === assignee)
             ) {
-                let name = assigneeNames.current.get(assignee);
-                if (!name) {
+                let known = knownAssignees.current.get(assignee);
+                if (!known) {
                     const personResponse = await fetch(
                         `/api/people/${encodeURIComponent(assignee)}`,
                     );
                     if (personResponse.ok) {
                         const { person } = (await personResponse.json()) as {
-                            person: { displayName: string };
+                            person: { displayName: string; self: boolean };
                         };
-                        name = person.displayName;
-                        assigneeNames.current.set(assignee, name);
+                        known = {
+                            personId: assignee,
+                            name: person.displayName,
+                            self: person.self,
+                        };
+                        knownAssignees.current.set(assignee, known);
                     }
                 }
-                body.assignees.push({
-                    personId: assignee,
-                    name: name ?? i18n("Assignee"),
-                });
+                body.assignees.push(
+                    known ?? {
+                        personId: assignee,
+                        name: i18n("Assignee"),
+                    },
+                );
             }
             if (request === assigneeRequest.current)
                 setAssignees({
@@ -576,6 +574,6 @@ export function useTaskListData({
               )
             : [],
         selectedPrivate,
-        sortedAssignees,
+        visibleAssignees,
     };
 }

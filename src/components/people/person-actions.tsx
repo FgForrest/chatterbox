@@ -25,6 +25,7 @@ interface MergeCandidate {
     primaryEmail: string | null;
     scope?: "personal" | "org";
     duplicateScore?: number;
+    self?: boolean;
 }
 
 interface PersonActionsProps {
@@ -284,6 +285,7 @@ export function PersonActions({
                             email: candidate.primaryEmail,
                             scope: candidate.scope ?? "personal",
                             duplicateScore: candidate.duplicateScore,
+                            self: candidate.self,
                         }))}
                     />
                     <DialogFooter>

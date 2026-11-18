@@ -3,6 +3,7 @@
 import { Plus } from "lucide-react";
 import { useExtracted } from "next-intl";
 import type { RefObject } from "react";
+import { PeopleCombobox } from "@/components/people/people-combobox";
 import {
     Select,
     SelectContent,
@@ -52,24 +53,36 @@ export function TaskAssigneeSelect({
     onChange: (value: string) => void;
 }) {
     const i18n = useExtracted();
+    const leadingEntries = [
+        {
+            id: ALL,
+            label: i18n("All assignees"),
+            onSelect: () => onChange(ALL),
+        },
+        {
+            id: "none",
+            label: i18n("No assignee"),
+            onSelect: () => onChange("none"),
+        },
+    ];
     return (
-        <Select value={assignee} onValueChange={(value) => onChange(value)}>
-            <SelectTrigger
-                className="h-8 w-48 text-xs"
-                aria-label={i18n("Assignee")}
-            >
-                <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-                <SelectItem value={ALL}>{i18n("All assignees")}</SelectItem>
-                <SelectItem value="none">{i18n("No assignee")}</SelectItem>
-                {assignees.map((person) => (
-                    <SelectItem key={person.personId} value={person.personId}>
-                        {person.name}
-                    </SelectItem>
-                ))}
-            </SelectContent>
-        </Select>
+        <PeopleCombobox
+            value={assignee}
+            valueLabel={
+                leadingEntries.find((entry) => entry.id === assignee)?.label ??
+                assignees.find((person) => person.personId === assignee)?.name
+            }
+            aria-label={i18n("Assignee")}
+            className="h-8 min-h-0 w-48 text-xs"
+            list={{
+                people: assignees.map((person) => ({
+                    ...person,
+                    id: person.personId,
+                })),
+            }}
+            leadingEntries={leadingEntries}
+            onValueChange={(person) => onChange(person.id)}
+        />
     );
 }
 

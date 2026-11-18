@@ -30,6 +30,7 @@ import {
     showCornerNotice,
 } from "@/components/dashboard/corner-notice";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
+import { ColleagueSearchList } from "@/components/sharing/colleague-search-list";
 import {
     changeFolderShareRequest,
     ReceivedFolderDialog,
@@ -47,7 +48,6 @@ import {
     DialogDescription,
     DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import {
     Popover,
     PopoverContent,
@@ -180,9 +180,6 @@ export function PersonShareDialog({
         name: string;
     } | null>(null);
     const [query, setQuery] = useState("");
-    const [people, setPeople] = useState<
-        { id: string; name: string | null; email: string }[]
-    >([]);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [invitationsSkipped, setInvitationsSkipped] = useState(false);
@@ -217,38 +214,10 @@ export function PersonShareDialog({
             if (event.type === "share") reload();
         });
     }, [open, load]);
-    useEffect(() => {
-        if (!open || !canInvite || query.trim().length < 2) {
-            setPeople([]);
-            return;
-        }
-        const abort = new AbortController();
-        const timer = setTimeout(() => {
-            void fetch(`/api/shares/people?q=${encodeURIComponent(query)}`, {
-                signal: abort.signal,
-            })
-                .then(async (response) => {
-                    if (!response.ok)
-                        throw new Error(
-                            await getApiErrorMessage(
-                                response,
-                                i18n("Could not find colleagues"),
-                            ),
-                        );
-                    return response.json() as Promise<{
-                        people: typeof people;
-                    }>;
-                })
-                .then((data) => setPeople(data.people))
-                .catch((error) => {
-                    if (!abort.signal.aborted) setError(String(error));
-                });
-        }, 250);
-        return () => {
-            clearTimeout(timer);
-            abort.abort();
-        };
-    }, [query, open, i18n, canInvite]);
+    const reportSearchError = useCallback(
+        (error: unknown) => setError(String(error)),
+        [],
+    );
     const act = async (action: () => Promise<void>) => {
         if (busy) return;
         setBusy(true);
@@ -396,79 +365,60 @@ export function PersonShareDialog({
                 </p>
             )}
             {allowInvite && (
-                <Input
-                    type="search"
+                <ColleagueSearchList
+                    enabled={open && canInvite}
                     disabled={busy || !canInvite}
-                    aria-label={i18n("Colleague's name or email")}
-                    placeholder={i18n("Colleague's name or email")}
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                />
-            )}
-            {(canInvite ? people : [])
-                .filter(
-                    (person) =>
+                    query={query}
+                    onQueryChange={setQuery}
+                    onError={reportSearchError}
+                    excludedIds={shares
+                        .filter(
+                            (share) =>
+                                (share.state === "accepted" ||
+                                    share.state === "pending") &&
+                                !folderAudience.some(
+                                    (member) =>
+                                        member.receiverUserId ===
+                                        share.receiverUserId,
+                                ),
+                        )
+                        .map((share) => share.receiverUserId)}
+                    personDisabled={(person) =>
                         folderAudience.some(
                             (member) => member.receiverUserId === person.id,
-                        ) ||
-                        !shares.some(
-                            (share) =>
-                                share.receiverUserId === person.id &&
-                                (share.state === "accepted" ||
-                                    share.state === "pending"),
-                        ),
-                )
-                .map((person) => (
-                    <div
-                        key={person.id}
-                        className="flex items-center justify-between gap-2 rounded border p-2"
-                    >
-                        <div>
-                            {person.name ?? person.email}
-                            <div className="text-xs text-muted-foreground">
-                                {person.email}
-                            </div>
-                        </div>
-                        {folderAudience.some(
+                        )
+                    }
+                    selection={{
+                        onSelect: (person) => void act(() => invite(person.id)),
+                    }}
+                    personDetail={(person) => {
+                        const access = folderAudience.filter(
                             (member) => member.receiverUserId === person.id,
-                        ) ? (
+                        );
+                        return access.length ? (
                             <div className="space-y-1 text-xs text-person-share">
-                                {folderAudience
-                                    .filter(
-                                        (member) =>
-                                            member.receiverUserId === person.id,
-                                    )
-                                    .map((member) => (
-                                        <p key={member.folderId}>
-                                            {member.state === "accepted"
-                                                ? i18n(
-                                                      "Already sees it through {folder}",
-                                                      {
-                                                          folder: member.folderName,
-                                                      },
-                                                  )
-                                                : i18n(
-                                                      "Invited to folder {folder}",
-                                                      {
-                                                          folder: member.folderName,
-                                                      },
-                                                  )}
-                                        </p>
-                                    ))}
+                                {access.map((member) => (
+                                    <p key={member.folderId}>
+                                        {member.state === "accepted"
+                                            ? i18n(
+                                                  "Already sees it through {folder}",
+                                                  { folder: member.folderName },
+                                              )
+                                            : i18n(
+                                                  "Invited to folder {folder}",
+                                                  { folder: member.folderName },
+                                              )}
+                                    </p>
+                                ))}
                             </div>
                         ) : (
-                            <Button
-                                size="sm"
-                                disabled={busy}
-                                onClick={() =>
-                                    void act(() => invite(person.id))
-                                }
-                            >
+                            <span className="shrink-0 text-xs font-medium">
                                 {i18n("Add")}
-                            </Button>
-                        )}
-                    </div>
-                ))}
+                            </span>
+                        );
+                    }}
+                />
+            )}
             <p className="text-sm font-medium">{i18n("Shared with")}</p>
             <div className="max-h-72 space-y-2 overflow-auto">
                 {[

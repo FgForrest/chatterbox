@@ -80,7 +80,7 @@ export function FolderTasksPanel({
         onAdded,
         onReconciled,
         selectedPrivate,
-        sortedAssignees,
+        visibleAssignees,
         openCount,
     } = useTaskListData({
         tab,
@@ -185,7 +185,7 @@ export function FolderTasksPanel({
                     {tab !== "mine" && (
                         <TaskAssigneeSelect
                             assignee={assignee}
-                            assignees={sortedAssignees}
+                            assignees={visibleAssignees}
                             onChange={setAssignee}
                         />
                     )}

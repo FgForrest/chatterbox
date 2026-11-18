@@ -61,8 +61,11 @@ describe("task assignee routes", () => {
         });
     });
 
-    it("serves the authenticated viewer's assignees", async () => {
-        const assignees = [{ personId: "person-1", name: "Tova Quill" }];
+    it("serves the authenticated viewer's assignees with only the self flag added", async () => {
+        const assignees = [
+            { personId: "person-1", name: "Tova Quill", self: true },
+            { personId: "person-2", name: "Neri Bramble", self: false },
+        ];
         listTrackedAssignees.mockResolvedValue(assignees);
         const request = new Request("http://localhost/api/tasks/assignees");
         const response = await getAssignees(request);

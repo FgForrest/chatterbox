@@ -58,6 +58,7 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
     };
 });
 
+vi.mock("@/lib/tasks/route-helpers", () => ({ requireTaskViewer: vi.fn() }));
 vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 vi.mock("@/lib/posthog-server", () => ({
@@ -73,10 +74,12 @@ vi.mock("@/lib/export/document-sidecars", () => ({
     exportRecordingSidecarsIfEnabled: vi.fn().mockResolvedValue(undefined),
 }));
 
+import { GET as getAssignees } from "@/app/api/tasks/assignees/route";
 import { encryptText } from "@/lib/encryption/fields";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { type TaskViewer, taskViewer } from "@/lib/tasks/access";
+import { requireTaskViewer } from "@/lib/tasks/route-helpers";
 import {
     type CallerTaskQuery,
     addTask as createTask,
@@ -521,15 +524,34 @@ describeWithDatabase("listCallerTasks (PostgreSQL)", () => {
     it("lists distinct decrypted assignees only from the viewer's Tracked tasks", async () => {
         expect(await listTrackedAssignees(viewer("alice"))).toEqual(
             expect.arrayContaining([
-                { personId: person.aliceBob, name: "Bob" },
-                { personId: person.orgBob, name: "Bob B." },
+                { personId: person.aliceBob, name: "Bob", self: false },
+                { personId: person.orgBob, name: "Bob B.", self: false },
             ]),
         );
         expect(await listTrackedAssignees(viewer("alice"))).toHaveLength(2);
         expect(await listTrackedAssignees(viewer("bob"))).toEqual([
-            { personId: person.orgCarol, name: "Carol" },
+            { personId: person.orgCarol, name: "Carol", self: false },
         ]);
         expect(await listTrackedAssignees(viewer("carol"))).toEqual([]);
+    });
+
+    it("marks primary-email hash matches in the assignees route response", async () => {
+        vi.mocked(requireTaskViewer).mockResolvedValue(viewer("bob"));
+        const response = await getAssignees(
+            new Request("http://localhost/api/tasks/assignees?tab=all"),
+        );
+        expect(response.status).toBe(200);
+        const { assignees } = (await response.json()) as {
+            assignees: { personId: string; name: string; self: boolean }[];
+        };
+        expect(assignees.filter((person) => person.self)).toEqual([
+            { personId: person.orgBob, name: "Bob B.", self: true },
+        ]);
+        expect(assignees).toContainEqual({
+            personId: person.orgCarol,
+            name: "Carol",
+            self: false,
+        });
     });
 
     it("lists the Organization's shared assignees once and filters its tasks", async () => {
@@ -537,8 +559,8 @@ describeWithDatabase("listCallerTasks (PostgreSQL)", () => {
         expect(assignees).toHaveLength(2);
         expect(assignees).toEqual(
             expect.arrayContaining([
-                { personId: person.orgBob, name: "Bob B." },
-                { personId: person.orgCarol, name: "Carol" },
+                { personId: person.orgBob, name: "Bob B.", self: false },
+                { personId: person.orgCarol, name: "Carol", self: false },
             ]),
         );
         expect(
@@ -597,7 +619,7 @@ describeWithDatabase("listCallerTasks (PostgreSQL)", () => {
         }
         expect(await listTrackedAssignees(viewer("bob"))).toEqual(
             expect.arrayContaining([
-                { personId: privatePerson, name: "Vela Mosswick" },
+                { personId: privatePerson, name: "Vela Mosswick", self: false },
             ]),
         );
     });
@@ -639,9 +661,13 @@ describeWithDatabase("listCallerTasks (PostgreSQL)", () => {
         ).toBe(true);
         expect(await listTrackedAssignees(viewer("alice"))).toEqual(
             expect.arrayContaining([
-                { personId: person.aliceBob, name: "Bob" },
-                { personId: donePerson, name: "Sora Thistlemere" },
-                { personId: droppedPerson, name: "Zeni Cloudfern" },
+                { personId: person.aliceBob, name: "Bob", self: false },
+                { personId: donePerson, name: "Sora Thistlemere", self: false },
+                {
+                    personId: droppedPerson,
+                    name: "Zeni Cloudfern",
+                    self: false,
+                },
             ]),
         );
     });

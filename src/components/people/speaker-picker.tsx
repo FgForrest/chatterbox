@@ -1,9 +1,9 @@
 "use client";
 
-import { Check, Loader2, Search, UserPlus, X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import Link from "next/link";
 import { useExtracted } from "next-intl";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { PlayAtTarget } from "@/components/playback/play-at-button";
 import { PlayTurnButton } from "@/components/playback/play-turn-button";
 import { Button } from "@/components/ui/button";
@@ -15,14 +15,8 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-
-export interface PickablePerson {
-    id: string;
-    displayName: string;
-    primaryEmail: string | null;
-    scope?: "personal" | "org";
-}
+import { foldPersonSearch } from "@/lib/people/name-search";
+import { PeopleSearchList, type PickablePerson } from "./people-search-list";
 
 export interface SpeakerPickerProps {
     /** The raw provider label being named, e.g. `speaker_0`. */
@@ -78,7 +72,9 @@ export function SpeakerPicker({
     onUnlinkVoice,
 }: SpeakerPickerProps) {
     const i18n = useExtracted();
-    const [people, setPeople] = useState<PickablePerson[] | null>(null);
+    const [knownPeople, setKnownPeople] = useState<PickablePerson[] | null>(
+        null,
+    );
     const [query, setQuery] = useState("");
     const [selectedPersonId, setSelectedPersonId] = useState<string | null>(
         null,
@@ -92,44 +88,34 @@ export function SpeakerPicker({
                 response.ok ? response.json() : { people: [] },
             )
             .then((body: { people?: PickablePerson[] }) => {
-                if (cancelled) return;
-                const known = body.people ?? [];
-                setPeople(
-                    organizationOnly
-                        ? known.filter((person) => person.scope === "org")
-                        : known,
-                );
+                if (!cancelled) setKnownPeople(body.people ?? []);
             })
             .catch(() => {
-                if (!cancelled) setPeople([]);
+                if (!cancelled) setKnownPeople([]);
             });
         return () => {
             cancelled = true;
         };
-    }, [organizationOnly]);
+    }, []);
 
-    const matched = useMemo(() => {
-        const needle = query.trim().toLowerCase();
-        const all = people ?? [];
-        if (!needle) return all;
-        return all.filter(
-            (person) =>
-                person.displayName.toLowerCase().includes(needle) ||
-                person.primaryEmail?.toLowerCase().includes(needle),
-        );
-    }, [people, query]);
+    const people = organizationOnly
+        ? (knownPeople?.filter((person) => person.scope === "org") ?? null)
+        : knownPeople;
 
-    const matches = matched.slice(0, 8);
-    const exactMatch = (people ?? []).find(
-        (person) =>
-            person.displayName.toLowerCase() === query.trim().toLowerCase(),
-    );
+    const trimmedQuery = query.trim();
+    const exactMatch = trimmedQuery
+        ? people?.find(
+              (person) =>
+                  foldPersonSearch(person.displayName) ===
+                  foldPersonSearch(trimmedQuery),
+          )
+        : undefined;
     const selectedPerson = (people ?? []).find(
         (person) => person.id === selectedPersonId,
     );
     const personToSelect = selectedPerson ?? exactMatch;
-    const trimmedQuery = query.trim();
-    const canSubmit = Boolean(personToSelect || trimmedQuery);
+    const canSubmit =
+        people !== null && Boolean(personToSelect || trimmedQuery);
     const createsPerson = canSubmit && !personToSelect;
 
     async function submit() {
@@ -241,106 +227,44 @@ export function SpeakerPicker({
                         </Link>
                     </Button>
                 )}
-                <div className="space-y-2">
-                    <div className="relative">
-                        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                            autoFocus
-                            role="combobox"
-                            aria-controls="speaker-person-options"
-                            aria-expanded={matches.length > 0}
-                            value={query}
-                            onChange={(event) => {
-                                setQuery(event.target.value);
-                                setSelectedPersonId(null);
-                            }}
-                            onKeyDown={(event) => {
-                                if (event.key === "Enter" && canSubmit) {
-                                    event.preventDefault();
-                                    void submit();
-                                }
-                            }}
-                            placeholder={i18n("Search people or enter a name")}
-                            aria-label={i18n("Who is {speaker}?", {
-                                speaker: label,
-                            })}
-                            className="pl-9"
-                        />
-                    </div>
-
-                    <div className="min-h-20 rounded-md border bg-muted/20 p-1">
-                        {people === null ? (
-                            <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-                                {i18n("Loading people…")}
-                            </p>
-                        ) : matches.length > 0 ? (
-                            <ul
-                                id="speaker-person-options"
-                                className="max-h-56 space-y-0.5 overflow-y-auto"
-                            >
-                                {matches.map((person) => {
-                                    const selected =
-                                        person.id === personToSelect?.id;
-                                    return (
-                                        <li key={person.id}>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    setSelectedPersonId(
-                                                        person.id,
-                                                    );
-                                                    setQuery(
-                                                        person.displayName,
-                                                    );
-                                                }}
-                                                className="flex w-full items-center gap-3 rounded px-3 py-2 text-left text-sm transition-colors hover:bg-muted"
-                                            >
-                                                <span
-                                                    aria-hidden="true"
-                                                    className="flex size-7 shrink-0 items-center justify-center rounded-full bg-background text-xs font-medium"
-                                                >
-                                                    {person.displayName
-                                                        .slice(0, 1)
-                                                        .toUpperCase()}
-                                                </span>
-                                                <span className="min-w-0 flex-1">
-                                                    <span className="block truncate font-medium">
-                                                        {person.displayName}
-                                                    </span>
-                                                    {person.primaryEmail && (
-                                                        <span className="block truncate text-xs text-muted-foreground">
-                                                            {
-                                                                person.primaryEmail
-                                                            }
-                                                        </span>
-                                                    )}
-                                                </span>
-                                                {selected && (
-                                                    <Check className="size-4 shrink-0 text-primary" />
-                                                )}
-                                            </button>
-                                        </li>
-                                    );
-                                })}
-                            </ul>
-                        ) : (
-                            <div className="flex min-h-20 items-center justify-center gap-2 px-3 py-5 text-sm text-muted-foreground">
-                                {trimmedQuery ? (
-                                    <>
-                                        <UserPlus className="size-4" />{" "}
-                                        {i18n("Create “{name}”", {
-                                            name: trimmedQuery,
-                                        })}
-                                    </>
-                                ) : (
-                                    i18n(
-                                        "No people yet. Enter a name to create one.",
-                                    )
-                                )}
-                            </div>
-                        )}
-                    </div>
-                </div>
+                <PeopleSearchList
+                    framed
+                    people={people?.map((person) => ({
+                        ...person,
+                        name: person.displayName,
+                        email: person.primaryEmail,
+                    }))}
+                    label={i18n("Who is {speaker}?", { speaker: label })}
+                    placeholder={i18n("Search people or enter a name")}
+                    loadingLabel={
+                        people === null ? i18n("Loading people…") : undefined
+                    }
+                    emptyLabel={i18n(
+                        "No people yet. Enter a name to create one.",
+                    )}
+                    query={query}
+                    onQueryChange={(value) => {
+                        setQuery(value);
+                        setSelectedPersonId(null);
+                    }}
+                    disabled={submitting}
+                    selection={{
+                        id: personToSelect?.id ?? personId,
+                        onSelect: (person) => {
+                            setSelectedPersonId(person.id);
+                            setQuery(person.displayName);
+                        },
+                    }}
+                    create={
+                        createsPerson
+                            ? {
+                                  label: (name) =>
+                                      i18n("Create “{name}”", { name }),
+                                  onSelect: () => void submit(),
+                              }
+                            : undefined
+                    }
+                />
 
                 <DialogFooter>
                     {onMarkUnknown && (
