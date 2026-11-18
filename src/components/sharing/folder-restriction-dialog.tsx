@@ -308,14 +308,6 @@ export function FolderRestrictionDialog({
                                                 </li>
                                             ))}
                                         </ul>
-                                        <a
-                                            className="underline"
-                                            href="/almanac/care?section=shares"
-                                        >
-                                            {i18n(
-                                                "Review additions from sharing",
-                                            )}
-                                        </a>
                                         <p>
                                             {i18n(
                                                 "People who saw this folder may have downloaded its items.",

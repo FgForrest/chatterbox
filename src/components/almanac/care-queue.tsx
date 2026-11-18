@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CareProblemList } from "@/components/almanac/care-problem-list";
 import { DuplicateFixCard } from "@/components/almanac/duplicate-fix-card";
-import { ShareAdditionsList } from "@/components/almanac/share-additions-list";
 import { Button } from "@/components/ui/button";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import type { CareProblemKind } from "@/lib/knowledge/care-types";
@@ -25,16 +24,9 @@ export function CareQueue({
     sessionKey: string;
 }) {
     const i18n = useExtracted();
-    const [section, setSection] = useState<
-        "duplicates" | "shares" | CareProblemKind
-    >("duplicates");
-    useEffect(() => {
-        if (
-            new URLSearchParams(window.location.search).get("section") ===
-            "shares"
-        )
-            setSection("shares");
-    }, []);
+    const [section, setSection] = useState<"duplicates" | CareProblemKind>(
+        "duplicates",
+    );
     const [page, setPage] = useState<DuplicatePage>(
         initial ?? { candidates: [], nextCursor: null, limited: false },
     );
@@ -150,11 +142,6 @@ export function CareQueue({
             hint: i18n("The same person or thing twice"),
         },
         {
-            id: "shares",
-            label: i18n("New from sharing"),
-            hint: i18n("Last 14 days"),
-        },
-        {
             id: "fact_conflict",
             label: i18n("Conflicting facts"),
             hint: i18n("Two current values for one relation"),
@@ -195,9 +182,7 @@ export function CareQueue({
                 ))}
             </nav>
             <div className="min-w-0 space-y-3 p-4" aria-live="polite">
-                {section === "shares" ? (
-                    <ShareAdditionsList />
-                ) : section !== "duplicates" ? (
+                {section !== "duplicates" ? (
                     <CareProblemList key={section} kind={section} />
                 ) : (
                     <>

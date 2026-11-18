@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useExtracted, useFormatter } from "next-intl";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,6 @@ import type {
     KeptReason,
     ShareAddition,
     SharedAdditionsGroup,
-    SharedAdditionsPage,
     ShareUndoResult,
 } from "@/lib/knowledge/share-review";
 
@@ -28,7 +27,6 @@ export function ShareAdditionsGroupCard({
     const confirm = useConfirm();
     const [data, setData] = useState(group);
     const [busy, setBusy] = useState(false);
-    const [reviewed, setReviewed] = useState(Boolean(group.reviewedAt));
     const [result, setResult] = useState<ShareUndoResult | null>(null);
     const reason = (value: KeptReason) =>
         value === "changed"
@@ -52,23 +50,18 @@ export function ShareAdditionsGroupCard({
                   : addition.kind === "alias"
                     ? i18n("Alias")
                     : i18n("E-mail");
-    async function act(
-        action: "review" | "undo" | "delete",
-        additionId?: string,
-    ) {
+    async function act(action: "undo" | "delete", additionId?: string) {
         if (busy) return;
         setBusy(true);
         const previous = data;
-        if (action === "review") setReviewed(true);
-        else
-            setData((current) => ({
-                ...current,
-                additions: current.additions.map((row) =>
-                    !additionId || row.id === additionId
-                        ? { ...row, removedAt: new Date().toISOString() }
-                        : row,
-                ),
-            }));
+        setData((current) => ({
+            ...current,
+            additions: current.additions.map((row) =>
+                !additionId || row.id === additionId
+                    ? { ...row, removedAt: new Date().toISOString() }
+                    : row,
+            ),
+        }));
         try {
             const response = await fetch("/api/knowledge/care/shares", {
                 method: "POST",
@@ -76,35 +69,27 @@ export function ShareAdditionsGroupCard({
                 body: JSON.stringify({ eventId: group.id, action, additionId }),
             });
             if (!response.ok) throw new Error();
-            if (action !== "review") {
-                const outcome: ShareUndoResult = await response.json();
-                setResult(outcome);
-                setData((current) => ({
-                    ...current,
-                    undoneAt:
-                        action === "undo"
-                            ? new Date().toISOString()
-                            : current.undoneAt,
-                    additions: previous.additions.map((row) =>
-                        outcome.removed.includes(row.id)
-                            ? { ...row, removedAt: new Date().toISOString() }
-                            : outcome.kept.some((kept) => kept.id === row.id)
-                              ? {
-                                    ...row,
-                                    keptReason:
-                                        outcome.kept.find(
-                                            (kept) => kept.id === row.id,
-                                        )?.reason ?? null,
-                                }
-                              : row,
-                    ),
-                }));
-            }
+            const outcome: ShareUndoResult = await response.json();
+            setResult(outcome);
+            setData((current) => ({
+                ...current,
+                undoneAt:
+                    action === "undo"
+                        ? new Date().toISOString()
+                        : current.undoneAt,
+                additions: previous.additions.map((row) => {
+                    if (outcome.removed.includes(row.id))
+                        return { ...row, removedAt: new Date().toISOString() };
+                    const kept = outcome.kept.find(
+                        (kept) => kept.id === row.id,
+                    );
+                    return kept ? { ...row, keptReason: kept.reason } : row;
+                }),
+            }));
             onChanged();
             router.refresh();
         } catch {
             setData(previous);
-            if (action === "review") setReviewed(Boolean(previous.reviewedAt));
             toast.error(i18n("Could not update this share's additions"));
         } finally {
             setBusy(false);
@@ -140,13 +125,11 @@ export function ShareAdditionsGroupCard({
                 `/api/knowledge/care/shares?eventId=${encodeURIComponent(group.id)}&additionOffset=${data.nextOffset}`,
             );
             if (!response.ok) throw new Error();
-            const next: SharedAdditionsPage = await response.json();
-            const page = next.groups[0];
-            if (page)
-                setData((current) => ({
-                    ...page,
-                    additions: [...current.additions, ...page.additions],
-                }));
+            const page: SharedAdditionsGroup = await response.json();
+            setData((current) => ({
+                ...page,
+                additions: [...current.additions, ...page.additions],
+            }));
         } catch {
             toast.error(i18n("Could not load Care"));
         } finally {
@@ -237,111 +220,19 @@ export function ShareAdditionsGroupCard({
                     })}
                 </output>
             )}
-            <div className="flex flex-wrap gap-2">
-                <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy || reviewed}
-                    onClick={() => void act("review")}
-                >
-                    {reviewed ? i18n("Reviewed") : i18n("Mark reviewed")}
-                </Button>
-                <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy || Boolean(data.undoneAt)}
-                    onClick={() => void remove()}
-                >
-                    {i18n("Undo all additions from this share")}
-                </Button>
-            </div>
+            <Button
+                size="sm"
+                variant="outline"
+                disabled={busy || Boolean(data.undoneAt)}
+                onClick={() => void remove()}
+            >
+                {i18n("Undo all additions from this share")}
+            </Button>
             <p className="text-xs text-muted-foreground">
                 {i18n(
                     "Undo leaves the item shared. Changed additions and data from other sources are kept.",
                 )}
             </p>
         </article>
-    );
-}
-
-export function ShareAdditionsList() {
-    const i18n = useExtracted();
-    const [page, setPage] = useState<SharedAdditionsPage | null>(null);
-    const [offset, setOffset] = useState(0);
-    const [retry, setRetry] = useState(0);
-    const [error, setError] = useState(false);
-    useEffect(() => {
-        const controller = new AbortController();
-        setError(false);
-        void fetch(
-            `/api/knowledge/care/shares?offset=${offset}&retry=${retry}`,
-            {
-                signal: controller.signal,
-            },
-        )
-            .then(async (response) => {
-                if (!response.ok) throw new Error();
-                const next: SharedAdditionsPage = await response.json();
-                if (!controller.signal.aborted) setPage(next);
-            })
-            .catch(() => {
-                if (!controller.signal.aborted) setError(true);
-            });
-        return () => controller.abort();
-    }, [offset, retry]);
-    return (
-        <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-                {i18n(
-                    "Additions from shares in the last 14 days. Shares made before the upgrade have no provenance and cannot be undone here.",
-                )}
-            </p>
-            {error ? (
-                <div role="alert">
-                    {i18n("Could not load Care")}
-                    <Button
-                        variant="outline"
-                        onClick={() => setRetry((value) => value + 1)}
-                    >
-                        {i18n("Try again")}
-                    </Button>
-                </div>
-            ) : !page ? (
-                <output>{i18n("Loading…")}</output>
-            ) : (
-                <>
-                    {!page.groups.length && <p>{i18n("All done here.")}</p>}
-                    {page.groups.map((group) => (
-                        <ShareAdditionsGroupCard
-                            key={group.id}
-                            group={group}
-                            onChanged={() => {}}
-                        />
-                    ))}
-                    <div className="flex gap-2">
-                        {offset > 0 && (
-                            <Button
-                                variant="outline"
-                                onClick={() =>
-                                    setOffset((value) =>
-                                        Math.max(0, value - 20),
-                                    )
-                                }
-                            >
-                                {i18n("Previous")}
-                            </Button>
-                        )}
-                        {page.nextOffset !== null && (
-                            <Button
-                                variant="outline"
-                                onClick={() => setOffset(page.nextOffset ?? 0)}
-                            >
-                                {i18n("Next")}
-                            </Button>
-                        )}
-                    </div>
-                </>
-            )}
-        </div>
     );
 }

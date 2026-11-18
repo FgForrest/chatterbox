@@ -669,11 +669,7 @@ it("restriction preview fixes contributors and resolves retained Almanac labels"
     expect(
         screen.queryByRole("button", { name: "Remove Lada Cloudfern" }),
     ).toBeNull();
-    expect(
-        screen
-            .getByRole("link", { name: "Review additions from sharing" })
-            .getAttribute("href"),
-    ).toBe("/almanac/care?section=shares");
+    expect(screen.queryByRole("link")).toBeNull();
 });
 it("a folder with children gets an explanation instead of a restrict form", () => {
     mount(
