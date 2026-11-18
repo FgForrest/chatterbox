@@ -112,7 +112,11 @@ const EMPTY_MEETINGS: MeetingRowData[] = [];
 
 function clearItemLinkContext(params: URLSearchParams) {
     for (const key of [...params.keys()]) {
-        if (key === "playFrom" || key.startsWith("evidence"))
+        if (
+            key === "widget" ||
+            key === "playFrom" ||
+            key.startsWith("evidence")
+        )
             params.delete(key);
     }
 }
@@ -687,13 +691,14 @@ export function Workstation({
                 else params.delete("view");
                 setItemLinkQuery(linked ? params.toString() : "");
                 const restoredView = window.history.state?.mobileView;
-                const nextMobileView = previewingFolderView
-                    ? "detail"
-                    : restoredView === "list" || restoredView === "detail"
-                      ? restoredView
-                      : traversing && locationFolder
-                        ? "list"
-                        : "detail";
+                const nextMobileView =
+                    previewingFolderView || params.has("widget")
+                        ? "detail"
+                        : restoredView === "list" || restoredView === "detail"
+                          ? restoredView
+                          : traversing && locationFolder
+                            ? "list"
+                            : "detail";
                 setMobileView(nextMobileView);
                 if (!linked)
                     toast.error(
@@ -1804,26 +1809,29 @@ export function Workstation({
                             code: error.code,
                         });
                     }
-                    const refusal = folderRefusal(error) ?? shareRefusal(error);
+                    const share = shareRefusal(error, recordingId);
+                    const refusal = folderRefusal(error) ?? share?.message;
                     if (refusal) {
                         const recording = recordings.find(
                             (candidate) => candidate.id === recordingId,
                         );
                         toast.error(refusal, {
-                            action: recording
-                                ? {
-                                      label: i18n("Open recording"),
-                                      onClick: () => {
-                                          selectRecordingByUser(recording);
-                                          setSelectedFolderId(null);
-                                          writeSelection(
-                                              recording,
-                                              null,
-                                              "replace",
-                                          );
-                                      },
-                                  }
-                                : undefined,
+                            action:
+                                share?.action ??
+                                (recording
+                                    ? {
+                                          label: i18n("Open recording"),
+                                          onClick: () => {
+                                              selectRecordingByUser(recording);
+                                              setSelectedFolderId(null);
+                                              writeSelection(
+                                                  recording,
+                                                  null,
+                                                  "replace",
+                                              );
+                                          },
+                                      }
+                                    : undefined),
                         });
                     } else {
                         toast.error(
@@ -1952,10 +1960,12 @@ export function Workstation({
                 );
                 if (!response.ok) {
                     const error = await parseApiError(response);
+                    const share = shareRefusal(error, recordingId);
                     toast.error(
                         folderRefusal(error) ??
-                            shareRefusal(error) ??
+                            share?.message ??
                             i18n("Could not move recording"),
+                        { action: share?.action },
                     );
                     throw new Error(i18n("Could not move recording"));
                 }

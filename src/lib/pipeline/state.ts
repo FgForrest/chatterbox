@@ -62,7 +62,7 @@ export async function readPrivateProcessingForItems(
     return new Map(rows.map((row) => [row.itemId, row.phases]));
 }
 
-/** Write one phase without replacing a record from a higher generation. */
+/** Write one phase, preserving its binding unless the caller supplies the exact job to replace. */
 export async function updatePhaseInTx(
     tx: Tx,
     itemId: string,
@@ -70,6 +70,7 @@ export async function updatePhaseInTx(
     userId: string,
     phase: PhaseName,
     record: PhaseRecord,
+    replaceJobId?: string,
 ): Promise<boolean> {
     view = pipelineDriver(userId).view;
     const [current] = await tx
@@ -102,7 +103,8 @@ export async function updatePhaseInTx(
         ) &&
         previous
     ) {
-        if (previous.jobId) record = { ...record, ...previous };
+        if (previous.jobId && previous.jobId !== replaceJobId)
+            record = { ...record, ...previous };
         if (previous.steps) {
             const steps = { ...record.steps };
             for (const name of ["summary", "topics", "title"] as const) {

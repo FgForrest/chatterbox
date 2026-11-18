@@ -1,14 +1,14 @@
 ---
 title: A summary's tasks are accepted automatically and sharing no longer waits for a task review
 date: 2026-10-21
-updated: 2026-10-22 22:30
+updated: 2026-11-18 21:03
 status: superseded
 kind: feature
 issues: []
 prs: [224]
 areas: [src/lib/tasks, src/lib/sharing/share-gate.ts]
 supersedes: [2026-10-07-tasks-from-summaries, 2026-10-19-processing-profiles-and-workflow]
-superseded-by: [2026-10-22-owner-reviews-tasks-sharing-ungated]
+superseded-by: [2026-10-22-owner-reviews-tasks-sharing-ungated, 2026-11-18-owner-review-before-share]
 relates: []
 ---
 
@@ -20,6 +20,8 @@ went away. A task matched to its assignee on a first name alone was saved unassi
 "who is this?". It was superseded the next day: the maintainer had meant something narrower, and the
 owner's review came back (see
 [owner reviews tasks, sharing ungated](2026-10-22-owner-reviews-tasks-sharing-ungated.md)).
+
+**Superseded in part** by [owner review before sharing](2026-11-18-owner-review-before-share.md). Its surviving ungated-sharing rule no longer applies to first-time Organization recording shares. The assignee hint and the mail exception still hold.
 
 ## Why
 

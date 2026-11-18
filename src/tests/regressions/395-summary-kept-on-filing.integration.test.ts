@@ -1985,7 +1985,7 @@ async function mutate(
             );
 
             it.runIf(kind === "audio")(
-                "keeps real pending Plaud proposals and review settlement across filing",
+                "keeps real pending Plaud proposals and review settlement across private filing",
                 async () => {
                     await db()
                         .update(aiEnhancements)
@@ -2041,7 +2041,7 @@ async function mutate(
                         .from(taskMentions)
                         .where(eq(taskMentions.itemId, ITEM));
                     expect(mentions.length).toBeGreaterThan(0);
-                    await mutate(file, "POST", { folderId: "org-a" });
+                    await mutate(file, "POST", { folderId: "private-b" });
                     await advance();
                     await advance();
                     expect(

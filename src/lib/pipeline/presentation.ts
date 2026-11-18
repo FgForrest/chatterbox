@@ -65,6 +65,7 @@ import { recordingJobSubject } from "@/lib/sharing/view";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
 import { waitingTaskDecisions } from "@/lib/tasks/waiting-review";
 import { TOPICS_JOB_KIND } from "@/lib/topics/topics-job";
+import { preferredTranscript } from "@/lib/transcription/preferred-source";
 import { TRANSCRIPTION_JOB_KIND } from "@/lib/transcription/transcription-job";
 import type { FolderKind } from "@/types/folder";
 
@@ -130,6 +131,7 @@ export interface ItemProcessingPresentation {
     processAgain: boolean;
     processAgainReason: "profile_changed" | null;
     learnFindingsWaiting: number;
+    failedLearnRunId?: string;
     latestLearnRun?: {
         status:
             | "queued"
@@ -574,6 +576,7 @@ export async function loadPrivateItemProcessing(
                   .select({
                       id: transcriptions.id,
                       revision: transcriptions.revision,
+                      source: transcriptions.source,
                   })
                   .from(transcriptions)
                   .where(
@@ -620,6 +623,8 @@ export async function loadPrivateItemProcessing(
             ),
         db
             .select({
+                id: learnRuns.id,
+                view: learnRuns.view,
                 transcriptionId: learnRuns.transcriptionId,
                 transcriptRevision: learnRuns.transcriptRevision,
                 inputs: learnRuns.inputs,
@@ -636,13 +641,12 @@ export async function loadPrivateItemProcessing(
                     learnRunCurrentScope(orgUserId),
                 ),
             )
-            .orderBy(desc(learnRuns.createdAt)),
+            .orderBy(desc(learnRuns.createdAt), desc(learnRuns.id)),
     ]);
-    const taskReviewWaiting = await countItemTaskReviewWaiting(
-        itemId,
-        ownerUserId,
-        orgUserId,
-    );
+    const canReviewTasks = viewerUserId === ownerUserId;
+    const taskReviewWaiting = canReviewTasks
+        ? await countItemTaskReviewWaiting(itemId, ownerUserId, orgUserId)
+        : 0;
     const folderSummaries = await folderPaths(
         ownerUserId,
         orgUserId,
@@ -783,6 +787,10 @@ export async function loadPrivateItemProcessing(
         taskReviewWaiting,
         summaryCurrent,
     );
+    if (!canReviewTasks && phases.taskReview) {
+        phases = { ...phases };
+        delete phases.taskReview;
+    }
     const processAgain =
         !legacy &&
         !effectiveManualOnly(item) &&
@@ -793,6 +801,15 @@ export async function loadPrivateItemProcessing(
         viewerUserId === ownerUserId &&
         view === "private" &&
         item.kind === "audio";
+    const preferred = ownerTrim ? preferredTranscript(transcripts) : undefined;
+    const currentPrivateLearn = preferred
+        ? learnRunRows.find(
+              (run) =>
+                  run.view === "private" &&
+                  run.transcriptionId === preferred.id &&
+                  run.transcriptRevision === preferred.revision,
+          )
+        : undefined;
     const trimProposal =
         ownerTrim &&
         phases.trim?.state === "waiting" &&
@@ -855,6 +872,9 @@ export async function loadPrivateItemProcessing(
                   updatedAt: learnRunRows[0].updatedAt.toISOString(),
               }
             : null,
+        ...(currentPrivateLearn?.status === "failed"
+            ? { failedLearnRunId: currentPrivateLearn.id }
+            : {}),
         taskReviewWaiting,
         jobs: { transcription: null, summary: null, topics: null, title: null },
         startedBy: processingStartedBy(

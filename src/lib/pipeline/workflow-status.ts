@@ -2,6 +2,7 @@ import type { PipelineWait } from "@/lib/pipeline/outcome";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import type { ProcessingStep } from "@/lib/pipeline/processing-status";
 import type { PhaseName } from "@/lib/pipeline/types";
+import { isShareReviewProblem } from "@/lib/sharing/share-gate";
 
 export type WorkflowStepId = "record" | "receive" | Exclude<PhaseName, "trim">;
 
@@ -384,31 +385,37 @@ export function deriveWorkflowStatus(
         ) ??
         actionable.find(({ status }) => status !== null);
     const status = selected?.status ?? null;
+    const shareReviewWaiting =
+        data.steps.share?.waitingFor?.kind === "shareGate" &&
+        data.phases.share?.problems?.some(isShareReviewProblem);
     const current =
         selected?.phase ??
+        (shareReviewWaiting ? "share" : undefined) ??
         steps.find(
             (step) => step.state === "manual" && step.reason === "erased",
         )?.id;
     const visible =
-        !data.legacy &&
-        (status !== null ||
-            steps.some(
-                (step) => step.state === "skipped" && step.reason === "shared",
-            ) ||
-            steps.some(
-                (step) =>
-                    step.state === "outdated" ||
-                    (step.state === "manual" && step.reason === "erased"),
-            ) ||
-            visiblePhases.some(
-                (phase) =>
-                    data.steps[phase].state === "pending" &&
-                    (phase !== "taskReview" ||
-                        data.taskReviewWaiting > 0 ||
-                        data.phases.taskReview !== undefined) &&
-                    data.profile !== null &&
-                    !data.manualOnly,
-            ));
+        Boolean(shareReviewWaiting) ||
+        (!data.legacy &&
+            (status !== null ||
+                steps.some(
+                    (step) =>
+                        step.state === "skipped" && step.reason === "shared",
+                ) ||
+                steps.some(
+                    (step) =>
+                        step.state === "outdated" ||
+                        (step.state === "manual" && step.reason === "erased"),
+                ) ||
+                visiblePhases.some(
+                    (phase) =>
+                        data.steps[phase].state === "pending" &&
+                        (phase !== "taskReview" ||
+                            data.taskReviewWaiting > 0 ||
+                            data.phases.taskReview !== undefined) &&
+                        data.profile !== null &&
+                        !data.manualOnly,
+                )));
     return {
         visible,
         steps: steps.map((step) => ({ ...step, current: step.id === current })),

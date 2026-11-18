@@ -31,6 +31,8 @@ import {
 import { isRecordingShared } from "@/lib/sharing/shared";
 import type { RecordingView } from "@/lib/sharing/view";
 
+type ProfileReader = Pick<typeof db, "select">;
+
 type StoredProfile = typeof processingProfiles.$inferSelect;
 
 /** The Organization view cannot run until a curator selects a usable profile. */
@@ -95,8 +97,9 @@ async function readProfileRevision(input: {
     revisionId?: string;
     scope?: "personal" | "organization";
     allowArchived?: boolean;
+    executor?: ProfileReader;
 }): Promise<ResolvedItemProfile | null> {
-    const [row] = await db
+    const [row] = await (input.executor ?? db)
         .select({
             profile: processingProfiles,
             revisionId: processingProfileRevisions.id,
@@ -130,12 +133,18 @@ async function readProfileRevision(input: {
             ),
         )
         .limit(1);
-    if (!row || !(await mayUseProfile(input.actorUserId, row.profile))) {
+    if (
+        !row ||
+        !(await mayUseProfile(input.actorUserId, row.profile, {
+            executor: input.executor,
+            readOnly: Boolean(input.executor),
+        }))
+    ) {
         return null;
     }
     const resolved = present(row.profile, row.settings);
     if (row.profile.deletedAt) {
-        const [viewer] = await db
+        const [viewer] = await (input.executor ?? db)
             .select({ uiLocale: users.uiLocale })
             .from(users)
             .where(eq(users.id, input.actorUserId))
@@ -265,11 +274,18 @@ async function defaultProfile(input: {
     ownerUserId: string;
     actorUserId: string;
     channel: ProfileChannel;
+    executor?: ProfileReader;
+    organizationUserId?: string | null;
 }): Promise<ResolvedItemProfile | null> {
     const profile = await getDefaultProfile(
         input.ownerUserId,
         input.channel,
         input.actorUserId,
+        {
+            seed: !input.executor,
+            executor: input.executor,
+            organizationUserId: input.organizationUserId,
+        },
     );
     if (!profile) return null;
     if (!profile.currentRevisionId) return null;
@@ -327,8 +343,9 @@ export async function resolveItemProfile(
     actorUserId = ownerUserId,
     step?: ProfileStepName,
     jobId?: string,
+    executor?: ProfileReader,
 ): Promise<ResolvedItemProfile> {
-    const [item] = await db
+    const [item] = await (executor ?? db)
         .select({ kind: chatterItems.kind })
         .from(chatterItems)
         .where(
@@ -346,12 +363,12 @@ export async function resolveItemProfile(
             404,
         );
     }
-    const orgUserId = await getOrgUserId();
+    const orgUserId = await getOrgUserId(executor);
     const channel = item.kind;
     const shared = Boolean(
-        orgUserId && (await isRecordingShared(itemId, orgUserId)),
+        orgUserId && (await isRecordingShared(itemId, orgUserId, executor)),
     );
-    let [processing] = await db
+    let [processing] = await (executor ?? db)
         .select({
             profileId: itemProcessing.profileId,
             profileRevisionId: itemProcessing.profileRevisionId,
@@ -378,6 +395,7 @@ export async function resolveItemProfile(
                 ownerUserId,
                 actorUserId,
                 revisionId,
+                executor,
             });
         } catch (error) {
             if (error instanceof AppError && error.code === ErrorCode.NOT_FOUND)
@@ -390,7 +408,7 @@ export async function resolveItemProfile(
         ? processing?.phases.categorize?.heldProfiles?.[step]
         : undefined;
     if (held && held.jobId === jobId) {
-        const [job] = await db
+        const [job] = await (executor ?? db)
             .select({ status: asyncJobs.status })
             .from(asyncJobs)
             .where(
@@ -416,7 +434,7 @@ export async function resolveItemProfile(
     }
     if (shared && actorUserId !== ownerUserId) {
         view = "org";
-        [processing] = await db
+        [processing] = await (executor ?? db)
             .select({
                 profileId: itemProcessing.profileId,
                 profileRevisionId: itemProcessing.profileRevisionId,
@@ -448,6 +466,7 @@ export async function resolveItemProfile(
                     ? { revisionId: processing.profileRevisionId }
                     : {}),
                 allowArchived: true,
+                executor,
             });
             if (personal) return { ...personal, assigned: true };
             if (orgUserId) {
@@ -461,6 +480,7 @@ export async function resolveItemProfile(
                         ? { revisionId: processing.profileRevisionId }
                         : {}),
                     allowArchived: true,
+                    executor,
                 });
                 if (organization) return { ...organization, assigned: true };
             }
@@ -475,6 +495,7 @@ export async function resolveItemProfile(
                     ? { revisionId: processing.profileRevisionId }
                     : {}),
                 allowArchived: true,
+                executor,
             });
             if (organization) return { ...organization, assigned: true };
         }
@@ -486,6 +507,8 @@ export async function resolveItemProfile(
             ownerUserId,
             actorUserId,
             channel,
+            executor,
+            organizationUserId: orgUserId,
         });
         if (resolved) return resolved;
         throw new AppError(
@@ -500,6 +523,8 @@ export async function resolveItemProfile(
             ownerUserId: orgUserId,
             actorUserId,
             channel,
+            executor,
+            organizationUserId: orgUserId,
         });
         if (resolved) return resolved;
     }
@@ -512,8 +537,9 @@ export async function loadItemProfileRevision(input: {
     ownerUserId: string;
     actorUserId?: string;
     revisionId: string;
+    executor?: ProfileReader;
 }): Promise<ResolvedItemProfile> {
-    const [item] = await db
+    const [item] = await (input.executor ?? db)
         .select({ kind: chatterItems.kind })
         .from(chatterItems)
         .where(
@@ -530,7 +556,7 @@ export async function loadItemProfileRevision(input: {
             404,
         );
     }
-    const orgUserId = await getOrgUserId();
+    const orgUserId = await getOrgUserId(input.executor);
     const actorUserId = input.actorUserId ?? input.ownerUserId;
     const candidates = [
         { ownerUserId: input.ownerUserId, scope: "personal" as const },
@@ -540,7 +566,7 @@ export async function loadItemProfileRevision(input: {
     ];
     let resolved: ResolvedItemProfile | null = null;
     for (const candidate of candidates) {
-        const [revision] = await db
+        const [revision] = await (input.executor ?? db)
             .select({ profileId: processingProfileRevisions.profileId })
             .from(processingProfileRevisions)
             .innerJoin(
@@ -567,6 +593,7 @@ export async function loadItemProfileRevision(input: {
             revisionId: input.revisionId,
             scope: candidate.scope,
             allowArchived: true,
+            executor: input.executor,
         });
         if (resolved) break;
     }

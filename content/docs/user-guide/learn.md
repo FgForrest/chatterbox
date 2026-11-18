@@ -19,7 +19,7 @@ Learn is available on self-hosted instances with an AI provider that can write s
 
 When Learn is manual, its widget says it is ready and offers **Learn**. Starting it changes the widget to **Learn is reading the transcript** without opening a window. You can leave the page while it runs. When it finishes, the widget offers **Review**.
 
-When the item's processing profile has **Run automatically** on for Learn, Learn runs after a new transcript. If it finds suggestions, its review appears inline as part of the workflow. The strip says **Review needed** and its **Review Learn** action opens the review and scrolls to it. The title, summary and topics wait so they use the corrected transcript, and an intended Organization share waits with them. After 72 hours they continue without the review. The review stays open until you finish it or the item is shared.
+When the item's processing profile has **Run automatically** on for Learn, Learn runs after a new transcript. If it finds suggestions, its review appears inline as part of the workflow. The strip says **Review needed** and its **Review Learn** action opens the review and scrolls to it. The title, summary and topics wait up to 72 hours so they can use the corrected transcript. The first Organization share of a recording waits even after that timeout, until its owner finishes or skips Learn. If Learn fails on the preferred transcript, the owner can try again or choose **Skip**. A new preferred transcript or revision needs its own Learn run.
 
 If Learn finds nothing to review and **Correct the transcript after Learn** is on, the Learn step stays **Running** while it reads the transcript again and corrects misheard words. The summary says that it is waiting for this correction and starts by itself when the pass finishes. You can still click **Summarize** to start it immediately.
 
@@ -63,14 +63,14 @@ Accepted corrections are kept beside the original text, never in place of it, so
 
 After a regular Finish, when the processing profile has **Correct the transcript after Learn** on, Learn then reads the whole transcript once more with the Almanac at hand and fixes other misheard words. Each fix is underlined in amber and can be undone.
 
-When you share a recording or mail whose Learn review you finished for its current content, what you confirmed becomes Organization knowledge without another confirmation. The completed state and available counts appear in the item's **Knowledge** panel. The workflow continues without another Learn review. Curators can use **Re-learn** to review it again, and can merge or delete Organization people and things.
+When you share a recording or mail whose Learn review you finished for its current content, what you confirmed becomes Organization knowledge without another confirmation. The completed state and available counts appear in the item's **Knowledge** panel. The workflow continues without another Learn review. Curators can use **Re-learn** to review it again, and can merge or delete Organization people and things. If a private Learn run is still open when publication takes place, sharing closes it and its findings stay private.
 
 ## Where reviews wait
 
 - The item header's **Knowledge** icon badges suggestions waiting for you. Its panel subtitle offers **Review** to open the existing review.
 - The **Needs review** filter above the recording list.
 - The badge on **Almanac**, and the **Review** tab there.
-- Sharing an item with the Organization closes its unfinished private review, and its findings stay private. Only what you confirmed in a finished review becomes Organization knowledge.
+- Review lists and badges include only your own items. A curator can open a shared recording and finish Organization-view Learn there, including after a rerun.
 
 ## Good to know
 

@@ -1,14 +1,14 @@
 ---
 title: Curators manage existing Organization Almanac entries; their new entries stay private
 date: 2026-10-21
-updated: 2026-10-22 22:30
-status: accepted
+updated: 2026-11-18 21:03
+status: superseded
 kind: fix
 issues: []
 prs: [222]
 areas: [src/lib/authz/curator.ts, src/lib/knowledge/people.ts, src/lib/knowledge/entities.ts, src/lib/knowledge/vocabulary.ts, src/db/queries/almanac-import.ts, src/app/(app)/almanac]
 supersedes: [2026-09-23-shared-organization-scope]
-superseded-by: []
+superseded-by: [2026-11-18-owner-review-before-share]
 relates: [2026-10-01-almanac-and-new-records, 2026-10-22-organization-almanac-grows-on-share, 2026-10-14-identity-provider-authorization, 2026-10-22-almanac-curator-desk]
 ---
 
@@ -19,6 +19,8 @@ and things, set their e-mail, manage their nicknames and manual facts, and manag
 vocabulary types and suggested phrases, exactly as the organization account could. A curator's
 *new* people, things and list imports still go to the curator's own private Almanac. Shipped in
 PR #222.
+
+**Superseded in part** by [owner review before sharing](2026-11-18-owner-review-before-share.md). The Learn review queue and its badge count only the viewer’s own items, including their Organization-view runs. Curators can still review Learn from an opened shared recording and manage Organization Almanac entries.
 
 ## Why
 

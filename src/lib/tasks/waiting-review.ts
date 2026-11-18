@@ -1,7 +1,13 @@
-import { and, eq, isNull, notExists } from "drizzle-orm";
+import { and, eq, exists, isNull, notExists, or } from "drizzle-orm";
 import type { db } from "@/db";
 import { reviewableTaskTargetCondition } from "@/db/queries/tasks";
-import { recordingTasks, taskMentions, taskUpdateProposals } from "@/db/schema";
+import {
+    chatterItems,
+    mailPendingShares,
+    recordingTasks,
+    taskMentions,
+    taskUpdateProposals,
+} from "@/db/schema";
 import { taskReviewState } from "@/lib/tasks/review-state";
 
 type Executor = Pick<typeof db, "select">;
@@ -11,6 +17,100 @@ export interface WaitingTaskDecisions {
     proposals: number;
     followUps: number;
     total: number;
+}
+
+/** Find private audio shares whose owner is reviewing this authorized target. */
+export async function intendedSharesReviewingTask(
+    executor: Executor & Pick<typeof db, "selectDistinct">,
+    taskId: string,
+    targetOwnerUserId: string,
+): Promise<{ itemId: string; userId: string }[]> {
+    const sources = await executor
+        .selectDistinct({
+            itemId: mailPendingShares.itemId,
+            userId: mailPendingShares.userId,
+        })
+        .from(mailPendingShares)
+        .innerJoin(
+            chatterItems,
+            and(
+                eq(chatterItems.id, mailPendingShares.itemId),
+                eq(chatterItems.userId, mailPendingShares.userId),
+            ),
+        )
+        .innerJoin(
+            recordingTasks,
+            and(
+                eq(recordingTasks.id, taskId),
+                eq(recordingTasks.userId, targetOwnerUserId),
+            ),
+        )
+        .where(
+            and(
+                eq(chatterItems.kind, "audio"),
+                isNull(chatterItems.deletedAt),
+                reviewableTaskTargetCondition(taskId, mailPendingShares.userId),
+                or(
+                    exists(
+                        executor
+                            .select({ id: taskUpdateProposals.id })
+                            .from(taskUpdateProposals)
+                            .where(
+                                and(
+                                    eq(taskUpdateProposals.taskId, taskId),
+                                    eq(
+                                        taskUpdateProposals.itemId,
+                                        mailPendingShares.itemId,
+                                    ),
+                                    eq(
+                                        taskUpdateProposals.userId,
+                                        mailPendingShares.userId,
+                                    ),
+                                    eq(
+                                        taskUpdateProposals.state,
+                                        "awaiting_source_review",
+                                    ),
+                                ),
+                            ),
+                    ),
+                    exists(
+                        executor
+                            .select({ id: taskMentions.id })
+                            .from(taskMentions)
+                            .where(
+                                and(
+                                    eq(taskMentions.taskId, taskId),
+                                    eq(
+                                        taskMentions.itemId,
+                                        mailPendingShares.itemId,
+                                    ),
+                                    eq(
+                                        taskMentions.userId,
+                                        mailPendingShares.userId,
+                                    ),
+                                    eq(taskMentions.matchDecision, "suggested"),
+                                    eq(taskMentions.view, "private"),
+                                ),
+                            ),
+                    ),
+                ),
+            ),
+        )
+        .orderBy(mailPendingShares.itemId, mailPendingShares.userId);
+    const waiting = await Promise.all(
+        sources.map(
+            async ({ itemId, userId }) =>
+                (
+                    await waitingTaskDecisions(
+                        executor,
+                        itemId,
+                        userId,
+                        "private",
+                    )
+                ).total,
+        ),
+    );
+    return sources.filter((_, index) => waiting[index] > 0);
 }
 
 /** Counts distinct source-review decisions for one owner-scoped item. */

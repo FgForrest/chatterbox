@@ -69,6 +69,8 @@ Profil může shrnout přepis 2krát až 5krát a výsledky sloučit, takže i b
 
 Shrnutí hledá věci, které někdo slíbil udělat. Úkol již nepatří jednomu shrnutí: shromažďuje zmínky z nahrávek a pošty zařazených do jeho rozsahu složek. **Kde to zaznělo** otevře zvukovou pasáž nebo zvýrazní odpovídající text pošty. **Dřívější zmínka** ukazuje starší důkaz bez změny úkolu.
 
+Návrhy úkolů z nahrávek a e-mailů může kontrolovat pouze jejich vlastník, i po sdílení s Organizací. Před prvním sdílením nahrávky vlastník její kontrolu dokončí nebo přeskočí. Poštu lze sdílet bez dokončené kontroly.
+
 Jakmile jsou změny úkolů připravené, otevře se za shrnutím vložený prvek **Kontrola úkolů**. Pruh pracovního postupu uvádí **Ke kontrole** a akce **Zkontrolovat úkoly** k němu přeskočí. Pokud úkoly vznikly ze shrnutí, které jste po pracovním postupu spustili sami, kompaktní řádek **Kontrola úkolů** nabídne akci **Kontrola**; teprve toto výslovné kliknutí otevře kontrolu v okně.
 
 ![Kontrola navržených úkolů](images/task-review.png)
@@ -83,7 +85,7 @@ Nadpis Úkoly obsahuje zaškrtávátko celé skupiny a počet vybraných polože
 
 Dokud jste nic nezměnili, **Přeskočit** v záhlaví kontroly znamená „teď ne“ a nic nezamítá. Po prvním zaškrtnutí, úpravě, sloučení nebo přidání úkolu tlačítko zmizí a nevrátí se ani po obnovení stránky. Přeskočení skryje kartu a přibližně osm sekund nabídne **Vrátit**; opuštění stránky akci potvrdí ihned. Po dokončené ani přeskočené kontrole nezůstává další řádek.
 
-Vlastník nebo jiný oprávněný kontrolující může otevřít **Přeskočené návrhy (n)** pod shrnutím vedle **Přidat úkol** nebo v záhlaví seznamu úkolů. Zavření okna je ponechá přeskočené; dokončení v něm je konečné. I pozdější shrnutí ponechají kontrolu této položky přeskočenou, dokud ji nedokončíte. Volba **Jen mluvčí a shrnutí** v Učení může stejným způsobem přeskočit následnou kontrolu úkolů.
+Vlastník může znovu otevřít **Přeskočené návrhy (n)** pod shrnutím vedle **Přidat úkol** nebo v záhlaví seznamu úkolů. Zavření okna je ponechá přeskočené; dokončení v něm je konečné. I pozdější shrnutí ponechají kontrolu této položky přeskočenou, dokud ji nedokončíte. Vlastník může následnou kontrolu úkolů přeskočit také volbou **Jen mluvčí a shrnutí** v Učení.
 
 Kontrola zobrazuje jednu kartu pro každý úkol. Shoda je hlavní rozhodnutí; změny termínu, dokončení, **Už není potřeba** a **Předáno někomu jinému** pro tento úkol jsou uvedeny pod ní. Tlačítko **Kde to zaznělo** ukazuje čas a během přehrávání pasáže se změní na pozastavení. Pokud citaci nelze v přepisu najít, kontrola to napíše místo nefunkčního odkazu.
 
@@ -91,7 +93,7 @@ Kontrola zobrazuje jednu kartu pro každý úkol. Shoda je hlavní rozhodnutí; 
 
 ![Výběr dřívějšího úkolu ke sloučení](images/task-merge-earlier.png)
 
-Po přijetí shody ji může vlastník položky v jejím seznamu úkolů zrušit; u sdílené položky to mohou provést také kurátoři. Zrušením se tato zmínka oddělí do vlastního úkolu. Změny polí již použité na dřívější úkol zůstanou použité.
+Přijatou shodu může v seznamu úkolů zrušit pouze vlastník zdrojové položky. Zrušením se tato zmínka oddělí do vlastního úkolu. Změny polí již použité na dřívější úkol zůstanou použité.
 
 Přijaté úkoly jsou uvedené u položky. Zaškrtněte je po dokončení, nebo použijte **Přidat úkol** pro ruční doplnění. Úkol žije, dokud existuje alespoň jedna zmínka, i když nahradíte shrnutí, které jej původně našlo.
 

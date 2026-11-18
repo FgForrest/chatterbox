@@ -108,6 +108,8 @@ export function LearnResults({
     sharedReview,
     describe,
     onRelearn,
+    onSkip,
+    skipping,
 }: {
     kind?: "audio" | "mail";
     open: boolean;
@@ -130,6 +132,8 @@ export function LearnResults({
      * was rejected on the item may be proposed again.
      */
     onRelearn?: (forget: boolean) => void;
+    onSkip?: () => void;
+    skipping?: boolean;
 }) {
     const i18n = useExtracted();
     const name = useProductName();
@@ -316,8 +320,20 @@ export function LearnResults({
                     >
                         {i18n("Close")}
                     </Button>
+                    {onSkip && (
+                        <Button
+                            variant="outline"
+                            onClick={onSkip}
+                            disabled={skipping}
+                        >
+                            {i18n("Skip")}
+                        </Button>
+                    )}
                     {onRelearn && (
-                        <Button onClick={() => onRelearn(forget)}>
+                        <Button
+                            onClick={() => onRelearn(forget)}
+                            disabled={skipping}
+                        >
                             {i18n("Re-learn")}
                         </Button>
                     )}

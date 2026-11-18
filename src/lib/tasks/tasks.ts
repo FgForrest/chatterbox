@@ -20,6 +20,7 @@ import {
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import { receivedItemSinceCondition } from "@/db/queries/item-shares";
+import { lockPipelineTargetsInTx } from "@/db/queries/pipeline-jobs";
 import { lockPrivateFolderTree } from "@/db/queries/private-folder-tree";
 import { taskTabConditions } from "@/db/queries/task-list";
 import { taskNoteHasMailSource } from "@/db/queries/task-visibility";
@@ -59,6 +60,7 @@ import { assertOrgScopeWritable } from "@/lib/org/config";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { hasAudio } from "@/lib/recordings/audio-availability";
 import { notifyIfShared } from "@/lib/sharing/notify";
+import { sharedItemCondition } from "@/lib/sharing/shared";
 import {
     ANY_TASK_ITEM,
     assignedToViewer,
@@ -103,7 +105,10 @@ import {
 } from "@/lib/tasks/routing";
 import { logTaskStatusInTx } from "@/lib/tasks/status-transitions";
 import { isoDateOrNull } from "@/lib/tasks/summary-items";
-import { waitingTaskDecisions } from "@/lib/tasks/waiting-review";
+import {
+    intendedSharesReviewingTask,
+    waitingTaskDecisions,
+} from "@/lib/tasks/waiting-review";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -235,7 +240,7 @@ export interface TaskMatchView {
 }
 
 export interface RecordingTasks {
-    /** The viewer reviews and edits this recording's tasks. */
+    /** The viewer can edit accepted tasks on this item. */
     canEdit: boolean;
     /**
      * Suppress the summary's action-item fallback after review or when
@@ -512,6 +517,7 @@ export async function listRecordingTasks(
         .limit(1);
     if (!recording || !hasContentKind(recording, "kind")) return null;
 
+    const canReview = recording.ownerUserId === viewer.userId;
     const linkedMentions = await db
         .select({
             id: taskMentions.id,
@@ -560,9 +566,10 @@ export async function listRecordingTasks(
                 ),
                 // Again here: the recording may be withdrawn meanwhile.
                 taskVisible(viewer, ANY_TASK_ITEM),
-                recording.canEdit
-                    ? undefined
-                    : ne(recordingTasks.status, "proposed"),
+                or(
+                    ne(recordingTasks.status, "proposed"),
+                    eq(recordingTasks.userId, viewer.userId),
+                ),
             ),
         )
         .orderBy(asc(recordingTasks.position), asc(recordingTasks.createdAt));
@@ -582,21 +589,26 @@ export async function listRecordingTasks(
             quote: decryptOptional(mention.quote),
         });
     }
-    const undoableTaskIds = recording.canEdit
+    const undoableTaskIds = canReview
         ? new Set(linkedTaskIds)
         : new Set<string>();
     const views = rows.map((row) => toView(row, mentions, undoableTaskIds));
     const [rejection] = await db
         .select({ id: recordingTaskRejections.id })
         .from(recordingTaskRejections)
-        .where(eq(recordingTaskRejections.itemId, recordingId))
+        .where(
+            and(
+                eq(recordingTaskRejections.itemId, recordingId),
+                eq(recordingTaskRejections.userId, recording.ownerUserId),
+            ),
+        )
         .limit(1);
 
     const [updates, matches, reviewState] = await Promise.all([
-        recording.canEdit
+        canReview
             ? listUpdateProposals(viewer, recordingId, recording.ownerUserId)
             : [],
-        recording.canEdit
+        canReview
             ? listSuggestedMatches(
                   viewer,
                   recordingId,
@@ -605,19 +617,21 @@ export async function listRecordingTasks(
                   views.filter((task) => task.status === "proposed"),
               )
             : [],
-        taskReviewState(db, {
-            itemId: recordingId,
-            userId: recording.ownerUserId,
-            view: recording.shared ? "org" : "private",
-        }),
+        canReview
+            ? taskReviewState(db, {
+                  itemId: recordingId,
+                  userId: recording.ownerUserId,
+                  view: recording.shared ? "org" : "private",
+              })
+            : { skipped: false, changed: false },
     ]);
     return {
-        taskReviewSkipped: recording.canEdit && reviewState.skipped,
-        taskReviewChanged: recording.canEdit && reviewState.changed,
+        taskReviewSkipped: reviewState.skipped,
+        taskReviewChanged: reviewState.changed,
         canEdit: recording.canEdit,
         reviewed:
             reviewState.skipped ||
-            (!recording.canEdit && recording.hasProposals) ||
+            (!canReview && recording.hasProposals) ||
             rejection !== undefined ||
             views.some((task) => task.status !== "proposed"),
         tasks: views.filter((task) => task.status !== "proposed"),
@@ -634,21 +648,19 @@ export async function undoTaskMatch(
     taskId: string,
 ): Promise<void> {
     const [item] = await db
-        .select({
-            ownerUserId: chatterItems.userId,
-            canEdit: sql<boolean>`${taskContentEditable(viewer, ANY_TASK_ITEM)}`,
-        })
+        .select({ ownerUserId: chatterItems.userId })
         .from(chatterItems)
         .where(
             and(
                 eq(chatterItems.id, itemId),
+                eq(chatterItems.userId, viewer.userId),
                 isNull(chatterItems.deletedAt),
                 sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
                 taskVisible(viewer, ANY_TASK_ITEM),
             ),
         )
         .limit(1);
-    if (!item?.canEdit) throw notFound();
+    if (!item) throw notFound();
 
     await retryOnDeadlock(() =>
         db.transaction(async (tx) => {
@@ -1077,7 +1089,8 @@ async function lockTask(
     if (!row?.visible) throw notFound();
     if (row.shared && viewer.isCurator) assertOrgScopeWritable();
     // A proposal is its reviewer's alone.
-    if (row.status === "proposed" && !row.canEdit) throw notFound();
+    if (row.status === "proposed" && row.ownerUserId !== viewer.userId)
+        throw notFound();
     return { ...row, text: decryptText(row.text) };
 }
 
@@ -1131,15 +1144,17 @@ async function lockMailTask(
         .limit(1);
     if (!row?.visible) throw notFound();
     if (row.shared && viewer.isCurator) assertOrgScopeWritable();
-    if (row.status === "proposed" && !row.canEdit) throw notFound();
+    if (row.status === "proposed" && row.ownerUserId !== viewer.userId)
+        throw notFound();
     return { ...row, text: decryptText(row.text) };
 }
 
-/** Lock a recording the viewer reviews, refusing anyone else. */
+/** Lock an item and recheck the requested task permissions. */
 async function lockRecordingForEdit(
     tx: Tx,
     viewer: TaskViewer,
     recordingId: string,
+    action: "review" | "addAccepted",
 ): Promise<{ ownerUserId: string; shared: boolean; occurredAt: Date }> {
     const [recordingRow] = await tx
         .select({
@@ -1186,7 +1201,11 @@ async function lockRecordingForEdit(
         );
     }
     if (row.shared && viewer.isCurator) assertOrgScopeWritable();
-    if (!row.canEdit) throw forbidden();
+    if (
+        !row.canEdit ||
+        (action === "review" && row.ownerUserId !== viewer.userId)
+    )
+        throw forbidden();
     return row;
 }
 
@@ -1285,7 +1304,12 @@ export async function addTask(
     const text = cleanText(input.text);
     const dueDate = cleanDue(input.dueDate ?? null);
     const id = await db.transaction(async (tx) => {
-        const recording = await lockRecordingForEdit(tx, viewer, recordingId);
+        const recording = await lockRecordingForEdit(
+            tx,
+            viewer,
+            recordingId,
+            input.status === "open" ? "addAccepted" : "review",
+        );
         const assigneePersonId = input.assigneePersonId
             ? await assignablePerson(
                   tx,
@@ -1383,7 +1407,7 @@ export async function updateTask(
     change: TaskChange,
     origin?: string,
 ): Promise<TaskView> {
-    const task = await retryOnDeadlock(() =>
+    const { task, advanced } = await retryOnDeadlock(() =>
         db.transaction(async (tx) => {
             if (change.folderId !== undefined)
                 await lockPrivateFolderTree(tx, viewer.userId);
@@ -1442,6 +1466,21 @@ export async function updateTask(
                     },
                     "changed",
                 );
+            const nextStatus =
+                change.status !== task.status ? change.status : undefined;
+            const affectedShares =
+                task.status === "open" &&
+                task.recordingId &&
+                (nextStatus ||
+                    change.dueDate !== undefined ||
+                    change.assigneePersonId !== undefined)
+                    ? await intendedSharesReviewingTask(
+                          tx,
+                          taskId,
+                          task.ownerUserId,
+                      )
+                    : [];
+            await lockPipelineTargetsInTx(tx, affectedShares, true);
             const now = new Date();
             const set: Partial<typeof recordingTasks.$inferInsert> = {
                 version: task.version + 1,
@@ -1495,8 +1534,8 @@ export async function updateTask(
                 set.dueEffectiveAt = now;
             }
             if (change.ticked !== undefined) set.ticked = change.ticked;
-            if (change.status !== undefined && change.status !== task.status) {
-                set.status = change.status;
+            if (nextStatus) {
+                set.status = nextStatus;
                 set.statusChangedAt = now;
                 set.statusChangedByUserId = viewer.userId;
                 set.statusEffectiveAt = now;
@@ -1513,13 +1552,13 @@ export async function updateTask(
                 )
                 .returning({ id: recordingTasks.id });
             if (!updated.length) throw versionConflict();
-            if (change.status !== undefined && change.status !== task.status) {
+            if (nextStatus) {
                 await logTaskStatusInTx(
                     tx,
                     taskId,
                     viewer.userId,
                     task.status,
-                    change.status,
+                    nextStatus,
                     now,
                 );
                 await settleEarlierTaskProposalsInTx(tx, {
@@ -1545,9 +1584,25 @@ export async function updateTask(
                     effectiveAt: now,
                 });
             }
-            return task;
+            let advanced = false;
+            for (const { itemId, userId } of affectedShares) {
+                if (
+                    (await waitingTaskDecisions(tx, itemId, userId, "private"))
+                        .total
+                )
+                    continue;
+                const request = await requestAdvanceInTx(tx, {
+                    itemId,
+                    userId,
+                    view: "private",
+                    reason: "task-review",
+                });
+                if (request) advanced = true;
+            }
+            return { task, advanced };
         }),
     );
+    if (advanced) nudge();
     await tasksChanged(task.ownerUserId, task.recordingId, origin);
     return requireTaskView(viewer, taskId);
 }
@@ -1795,6 +1850,10 @@ async function readMergeTaskRows(
                 isNull(chatterItems.deletedAt),
                 sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
                 taskVisible(viewer, ANY_TASK_ITEM, true),
+                or(
+                    ne(recordingTasks.status, "proposed"),
+                    eq(recordingTasks.userId, viewer.userId),
+                ),
             ),
         )
         .orderBy(asc(recordingTasks.id));
@@ -2025,13 +2084,8 @@ function prepareTaskMerge(
                 "a proposal may be merged only from its item's review",
             );
         }
-        if (
-            source.ownerUserId !== viewer.userId &&
-            !(viewer.isCurator && source.shared)
-        ) {
-            throw mergeRule(
-                "only the item's owner or a curator may accept its match",
-            );
+        if (source.ownerUserId !== viewer.userId) {
+            throw mergeRule("only the item's owner may accept its match");
         }
     } else if (
         !(source.assigned && target.assigned) &&
@@ -2381,7 +2435,12 @@ export async function mergeProposals(
         );
     }
     const merged = await db.transaction(async (tx) => {
-        const recording = await lockRecordingForEdit(tx, viewer, recordingId);
+        const recording = await lockRecordingForEdit(
+            tx,
+            viewer,
+            recordingId,
+            "review",
+        );
         const rows = await tx
             .select()
             .from(recordingTasks)
@@ -2499,7 +2558,12 @@ function tickUpdateProposalOnce(
     version: number,
 ): Promise<void> {
     return db.transaction(async (tx) => {
-        const recording = await lockRecordingForEdit(tx, viewer, recordingId);
+        const recording = await lockRecordingForEdit(
+            tx,
+            viewer,
+            recordingId,
+            "review",
+        );
         await markTaskReviewInTx(
             tx,
             {
@@ -2603,7 +2667,6 @@ export async function acceptReview(
     const [authorizedSource] = await db
         .select({
             ownerUserId: chatterItems.userId,
-            canEdit: sql<boolean>`${taskContentEditable(viewer, ANY_TASK_ITEM)}`,
         })
         .from(chatterItems)
         .where(
@@ -2611,11 +2674,11 @@ export async function acceptReview(
                 eq(chatterItems.id, recordingId),
                 isNull(chatterItems.deletedAt),
                 sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
-                taskVisible(viewer, ANY_TASK_ITEM),
+                eq(chatterItems.userId, viewer.userId),
             ),
         )
         .limit(1);
-    if (!authorizedSource?.canEdit) throw notFound();
+    if (!authorizedSource) throw notFound();
     const result = await retryOnDeadlock(() =>
         db.transaction(async (tx) => {
             await lockItemTaskGraphInTx(tx, {
@@ -2626,6 +2689,7 @@ export async function acceptReview(
                 tx,
                 viewer,
                 recordingId,
+                "review",
             );
             const proposals = await tx
                 .select({
@@ -2921,8 +2985,6 @@ export async function acceptReview(
                 invisibleUpdateIds.length + invisibleMatchIds.length;
             let touched = new Map<string, string>();
             const selectedMatchTaskIds = new Set<string>();
-            const mayAcceptMatches =
-                recording.ownerUserId === viewer.userId || viewer.isCurator;
             for (const match of suggestedMatches.filter((row) => row.ticked)) {
                 const [target] = await tx
                     .select({
@@ -2945,11 +3007,7 @@ export async function acceptReview(
                         ),
                     )
                     .limit(1);
-                if (
-                    mayAcceptMatches &&
-                    target?.status === "open" &&
-                    target.visible
-                ) {
+                if (target?.status === "open" && target.visible) {
                     selectedMatchTaskIds.add(match.taskId);
                 } else {
                     updatesSkipped += 1;
@@ -3120,10 +3178,7 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
             .where(
                 and(
                     eq(recordingTasks.status, "proposed"),
-                    taskContentEditable(viewer, {
-                        id: recordingTasks.itemId,
-                        userId: recordingTasks.userId,
-                    }),
+                    eq(recordingTasks.userId, viewer.userId),
                 ),
             ),
         db
@@ -3135,10 +3190,7 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
             .where(
                 and(
                     eq(taskUpdateProposals.state, "awaiting_source_review"),
-                    taskContentEditable(viewer, {
-                        id: taskUpdateProposals.itemId,
-                        userId: taskUpdateProposals.userId,
-                    }),
+                    eq(taskUpdateProposals.userId, viewer.userId),
                     reviewableTaskTargetCondition(
                         taskUpdateProposals.taskId,
                         viewer.userId,
@@ -3155,10 +3207,11 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
             .where(
                 and(
                     eq(taskMentions.matchDecision, "suggested"),
-                    taskContentEditable(viewer, {
-                        id: taskMentions.itemId,
-                        userId: taskMentions.userId,
-                    }),
+                    eq(
+                        taskMentions.view,
+                        taskReviewView(taskMentions.itemId, viewer.orgUserId),
+                    ),
+                    eq(taskMentions.userId, viewer.userId),
                     reviewableTaskTargetCondition(
                         taskMentions.taskId,
                         viewer.userId,
@@ -3221,14 +3274,11 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
                 inArray(chatterItems.id, [...waiting.keys()]),
                 isNull(chatterItems.deletedAt),
                 sql`(${chatterItems.id} is null or ${chatterItems.kind} in ('audio', 'mail'))`,
-                taskContentEditable(viewer, {
-                    id: chatterItems.id,
-                    userId: chatterItems.userId,
-                }),
+                eq(chatterItems.userId, viewer.userId),
                 taskReviewNotSkipped(
                     chatterItems.id,
                     chatterItems.userId,
-                    sql`case when ${recordingSharedCondition(chatterItems.id)} then 'org' else 'private' end`,
+                    taskReviewView(chatterItems.id, viewer.orgUserId),
                 ),
             ),
         )
@@ -3241,6 +3291,15 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
             title: decryptText(row.title),
             proposals: waiting.get(row.recordingId)?.size ?? 0,
         }));
+}
+
+function taskReviewView(
+    itemId: typeof chatterItems.id | typeof taskMentions.itemId,
+    orgUserId: string | null,
+) {
+    return orgUserId
+        ? sql`case when ${sharedItemCondition(orgUserId, itemId)} then 'org' else 'private' end`
+        : sql`'private'`;
 }
 
 export type TaskTab = "mine" | "followed" | "tracked" | "all";
@@ -3833,7 +3892,12 @@ export async function skipTaskReview(
 ): Promise<void> {
     await retryOnDeadlock(() =>
         db.transaction(async (tx) => {
-            const item = await lockRecordingForEdit(tx, viewer, itemId);
+            const item = await lockRecordingForEdit(
+                tx,
+                viewer,
+                itemId,
+                "review",
+            );
             const view = item.shared ? "org" : "private";
             const scope = { itemId, userId: item.ownerUserId, view } as const;
             if (
@@ -3864,7 +3928,12 @@ export async function touchTaskReview(
 ): Promise<void> {
     await retryOnDeadlock(() =>
         db.transaction(async (tx) => {
-            const item = await lockRecordingForEdit(tx, viewer, itemId);
+            const item = await lockRecordingForEdit(
+                tx,
+                viewer,
+                itemId,
+                "review",
+            );
             await markTaskReviewInTx(
                 tx,
                 {

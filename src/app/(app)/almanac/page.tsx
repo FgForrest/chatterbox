@@ -11,7 +11,6 @@ import {
     transcriptSpeakers,
 } from "@/db/schema";
 import { requireAuth } from "@/lib/auth-server";
-import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { aliasTextsVisibleTo } from "@/lib/knowledge/aliases";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { listPeople } from "@/lib/knowledge/people";
@@ -63,18 +62,7 @@ export default async function PeoplePage() {
                 ),
             )
             .groupBy(transcriptSpeakers.personId),
-        isLearnDeploymentAvailable()
-            ? userCuratesOrganizationNow(userId).then((organization) =>
-                  Promise.all([
-                      userId !== orgUserId
-                          ? pendingReviewCount(userId, false)
-                          : 0,
-                      organization && orgUserId
-                          ? pendingReviewCount(orgUserId, true)
-                          : 0,
-                  ]).then(([own, shared]) => own + shared),
-              )
-            : 0,
+        isLearnDeploymentAvailable() ? pendingReviewCount(userId) : 0,
     ]);
     const i18n = await getExtracted();
 

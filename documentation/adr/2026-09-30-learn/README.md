@@ -1,14 +1,14 @@
 ---
 title: Learn proposes knowledge from transcripts for a person to confirm; knowledge stays encrypted and is searched in memory
 date: 2026-09-30
-updated: 2026-11-08 19:20
+updated: 2026-11-18 21:03
 status: superseded
 kind: feature
 issues: []
 prs: [69]
 areas: [src/lib/learn, src/lib/knowledge, src/lib/sharing/share-gate.ts, src/app/api/mcp/learn, src/lib/learn/auto-learn.ts]
 supersedes: [2026-09-14-speaker-identity-without-biometrics]
-superseded-by: [2026-10-01-almanac-and-new-records, 2026-10-02-almanac-guided-transcript-correction, 2026-11-02-quick-finish-of-reviews, 2026-11-03-destructive-recording-cut, 2026-11-08-optional-speaker-review-and-speech-samples]
+superseded-by: [2026-10-01-almanac-and-new-records, 2026-10-02-almanac-guided-transcript-correction, 2026-11-02-quick-finish-of-reviews, 2026-11-03-destructive-recording-cut, 2026-11-08-optional-speaker-review-and-speech-samples, 2026-11-18-owner-review-before-share]
 relates: [2026-09-28-agent-bridge-cli-providers, 2026-09-30-self-hosted-embeddings, 2026-09-30-shared-recording-edited-by-organization, 2026-10-01-name-matching-across-word-forms, 2026-10-12-calendar-meet-speaker-candidates, 2026-10-20-learn-review-one-column, 2026-09-23-shared-organization-scope, 2026-09-13-durable-job-queue, 2026-10-22-recording-language-checked-by-learn, 2026-11-08-ai-trim-proposal-before-learn]
 ---
 
@@ -22,6 +22,8 @@ Knowledge has two layers: a shared one owned by the Organization account and a p
 user, chosen by whether the recording is shared. PR #69 built the whole plan in six phases, each
 reviewed by two independent model reviewers and fixed before the next; a follow-up, PR #79, fixed what
 the first real automatic run exposed.
+
+**Superseded in part** by [owner review before sharing](../2026-11-18-owner-review-before-share.md). The first recording share checks only the preferred transcript’s current Learn when the profile runs it automatically. The owner can skip a failed run for that revision. The other Learn and speaker rules still hold.
 
 **Superseded in part** by [destructive recording cuts](../2026-11-03-destructive-recording-cut.md): "Facts die with their transcript" has one exception. A confirmed fact in the owner's private scope becomes manual when a cut removes its last supported evidence. The rest of this rule still holds, including normal Organization withdrawal.
 

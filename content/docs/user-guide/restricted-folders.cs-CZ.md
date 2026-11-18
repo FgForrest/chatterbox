@@ -27,7 +27,7 @@ Hlavička položky ukazuje cestu složky a **Vidí**, s avatary okruhu a **a kur
 
 Kurátor v otevřené organizační složce zvolí **Uzavřít složku…**. Náhled vyjmenuje vlastníky položek, kteří se přidají do počátečního okruhu, položky stažené ze sdílení s Organizací, dřívější přírůstky Almanachu, které zůstanou, a dotčené exporty. U větší složky se během zpracování ukazuje **Uzavírání…**. Přerušené uzavření může kurátor zopakovat. Stávající okruh se zachová a lze ho rozšířit.
 
-Správce okruhu nebo kurátor zvolí **Otevřít celé Organizaci…**. Náhled rozliší položky sdílené hned a položky čekající, až vlastník dokončí pojmenování řečníků nebo jiné podmínky sdílení. Čekající položky stále vidí dosavadní okruh. Zrušení čekajícího umístění toto zařazení odebere. Retence Organizace se uplatní po 30denní lhůtě každé položky. Náhled ukáže odhadovaný konec lhůty a položky, které retence zasáhne.
+Správce okruhu nebo kurátor zvolí **Otevřít celé Organizaci…**. Náhled rozliší položky sdílené hned a položky čekající, až vlastník dokončí pojmenování mluvčích, Učení nebo kontrolu úkolů. Čekající položky stále vidí dosavadní okruh. Zrušení čekajícího umístění toto zařazení odebere. Retence Organizace se uplatní po 30denní lhůtě každé položky. Náhled ukáže odhadovaný konec lhůty a položky, které retence zasáhne.
 
 Při zařazení uzavřené položky do otevřené organizační složky se Klepna zeptá **Sdílet s celou Organizací?**. Jména řečníků a fakta přejdou do Almanachu Organizace a položka zůstane i v uzavřené složce.
 

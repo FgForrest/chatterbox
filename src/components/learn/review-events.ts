@@ -19,8 +19,7 @@ export function onLearnReviewsChanged(listener: () => void): () => void {
 }
 
 /**
- * How many Learn reviews wait for the viewer, counted again whenever one
- * is finished. 0 where Learn is unavailable.
+ * How many Learn and task reviews wait for the viewer on their own items.
  */
 export function usePendingReviews(): number {
     const [pending, setPending] = useState(0);

@@ -924,7 +924,6 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             ],
         });
 
-        await expect(share(LATER)).resolves.toBeUndefined();
         expect((await gatherFacts(LATER, "private", ALICE)).taskReview).toEqual(
             {
                 proposals: 0,
@@ -1211,7 +1210,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         });
     });
 
-    it("lets an Organization curator undo a match on a shared item", async () => {
+    it("reserves undo for the source item owner after sharing", async () => {
         const target = await addTask(alice, REC, {
             text: "Publish the launch brief",
             status: "open",
@@ -1230,7 +1229,18 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         await share(REC);
         await share(LATER);
 
-        await undoTaskMatch(org, LATER, target.id);
+        expect((await review(org, LATER)).tasks).toMatchObject([
+            { id: target.id, canUndoMatch: false },
+        ]);
+        await expect(
+            undoTaskMatch(org, LATER, target.id),
+        ).rejects.toMatchObject({
+            statusCode: 404,
+        });
+        expect((await review(alice, LATER)).tasks).toMatchObject([
+            { id: target.id, canUndoMatch: true },
+        ]);
+        await undoTaskMatch(alice, LATER, target.id);
 
         const [mention] = await db()
             .select({ decision: taskMentions.matchDecision })
@@ -1304,7 +1314,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         ]);
     });
 
-    it("shares while follow-up changes still wait for review", async () => {
+    it("waits to share while follow-up changes still need review", async () => {
         const task = await addTask(alice, LATER, {
             text: "Send the partner email",
             status: "open",
@@ -1315,6 +1325,13 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             userId: ALICE,
             kind: "done",
         });
+        await expect(share(REC)).rejects.toMatchObject({
+            code: "SHARE_REQUIREMENTS_UNMET",
+            details: {
+                problems: [{ kind: "tasks_unreviewed", waiting: "review" }],
+            },
+        });
+        await acceptReview(alice, REC);
         await expect(share(REC)).resolves.toBeUndefined();
     });
 
@@ -1683,7 +1700,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         ).toEqual([task.id]);
     });
 
-    it("gives an idp curator the shared-item rights and match-review right", async () => {
+    it("lets an idp curator edit shared tasks while the owner reviews matches", async () => {
         mockEnv.AUTHZ_MODE = "idp";
         try {
             await share();
@@ -1855,8 +1872,11 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                     matchDecision: "suggested",
                     ticked: true,
                 });
-            expect((await review(curator, LATER)).matches).toHaveLength(1);
-            await acceptReview(curator, LATER);
+            expect((await review(curator, LATER)).matches).toEqual([]);
+            await expect(acceptReview(curator, LATER)).rejects.toMatchObject({
+                statusCode: 404,
+            });
+            await acceptReview(alice, LATER);
             const [mention] = await db()
                 .select({ decision: taskMentions.matchDecision })
                 .from(taskMentions)
@@ -1880,7 +1900,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
     it.each([
         "local",
         "idp",
-    ] as const)("resolves %s curators for accepting and undoing shared matches", async (mode) => {
+    ] as const)("limits shared match review to the owner in %s mode", async (mode) => {
         mockEnv.AUTHZ_MODE = mode;
         try {
             const curator =
@@ -1919,21 +1939,23 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                     ticked: true,
                 })
                 .returning({ id: taskMentions.id });
+            await expect(
+                tickUpdateProposal(
+                    curator,
+                    LATER,
+                    mention?.id ?? "",
+                    false,
+                    task.version,
+                ),
+            ).rejects.toMatchObject({ statusCode: 403 });
             await tickUpdateProposal(
-                curator,
-                LATER,
-                mention?.id ?? "",
-                false,
-                task.version,
-            );
-            await tickUpdateProposal(
-                curator,
+                alice,
                 LATER,
                 mention?.id ?? "",
                 true,
                 task.version,
             );
-            await acceptReview(curator, LATER);
+            await acceptReview(alice, LATER);
             expect(
                 (
                     await db()
@@ -1947,7 +1969,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         }
     });
 
-    it("shows a shared recording's proposals to the home owner and curators", async () => {
+    it("shows a shared recording's proposals only to the home owner", async () => {
         await share();
         await db()
             .insert(recordingTasks)
@@ -1958,7 +1980,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 text: encryptText("Book the venue"),
                 source: "riffado",
             });
-        expect((await review(org)).proposals).toHaveLength(1);
+        expect((await review(org)).proposals).toEqual([]);
         expect((await review(alice)).proposals).toHaveLength(1);
         expect((await review(bob)).proposals).toEqual([]);
         await expect(acceptReview(alice, REC)).resolves.toMatchObject({
@@ -3544,7 +3566,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         expect(await recordingsAwaitingTaskReview(org)).toEqual([]);
     });
 
-    it("lists a shared recording's review for its owner and curators", async () => {
+    it("lists a shared recording's review for its owner", async () => {
         const open = await addTask(alice, LATER, {
             text: "Send the partner email",
             status: "open",
@@ -3554,14 +3576,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         await followUp(open.id, REC);
         await propose(LATER, "Draft the pricing page");
 
-        expect(await recordingsAwaitingTaskReview(org)).toEqual([
-            {
-                recordingId: REC,
-                kind: "audio",
-                title: `Recording ${REC}`,
-                proposals: 1,
-            },
-        ]);
+        expect(await recordingsAwaitingTaskReview(org)).toEqual([]);
         expect(await recordingsAwaitingTaskReview(alice)).toEqual([
             {
                 recordingId: LATER,

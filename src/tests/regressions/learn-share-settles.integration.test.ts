@@ -340,10 +340,11 @@ describeWithDatabase("finished private Learn at share (PostgreSQL)", () => {
 
     async function automaticProfile(
         plaudTranscript: "use" | "also_transcribe" = "use",
+        automaticSummary = true,
     ) {
         const settings = defaultProfileSettings("audio");
         settings.steps.topics.automatic = true;
-        settings.steps.summary.automatic = true;
+        settings.steps.summary.automatic = automaticSummary;
         settings.steps.learn.automatic = true;
         settings.steps.title.automatic = false;
         settings.steps.transcribe.plaudTranscript = plaudTranscript;
@@ -523,7 +524,7 @@ describeWithDatabase("finished private Learn at share (PostgreSQL)", () => {
     });
 
     it("selects the own-transcript review even when a Plaud review finished more recently", async () => {
-        await automaticProfile();
+        await automaticProfile("use", false);
         const source = await run({ createdAt: new Date(Date.now() - 60_000) });
         const [plaud] = await db()
             .insert(transcriptions)
@@ -575,7 +576,7 @@ describeWithDatabase("finished private Learn at share (PostgreSQL)", () => {
         "use",
         "also_transcribe",
     ] as const)("settles a Plaud-only review only when the profile uses it (%s)", async (policy) => {
-        await automaticProfile(policy);
+        await automaticProfile(policy, false);
         await db()
             .update(transcriptions)
             .set({ source: "plaud" })

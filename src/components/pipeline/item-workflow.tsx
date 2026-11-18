@@ -29,10 +29,16 @@ import {
     TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useItemProcessing } from "@/hooks/use-item-processing";
+import {
+    shareReviewHref,
+    useShareProblemMessage,
+} from "@/hooks/use-share-problem-message";
+import { useSkipFailedLearn } from "@/hooks/use-skip-failed-learn";
 import type { CategorizationPanelPresentation } from "@/lib/pipeline/categorization-presentation";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import type { WorkflowActionCode } from "@/lib/pipeline/workflow-status";
+import { isShareReviewProblem } from "@/lib/sharing/share-gate";
 import type {
     RecordingFolder,
     RecordingFolderAssignment,
@@ -305,7 +311,10 @@ export function ItemWorkflow({
     onProcessingChange,
 }: ItemWorkflowProps) {
     const i18n = useExtracted();
+    const shareProblemMessage = useShareProblemMessage();
     const canEdit = isOwn && view !== "org";
+    const { skip: skipLearn, skipping: skippingLearn } =
+        useSkipFailedLearn(itemId);
     const processingEnabled = canEdit || view === "org";
     const { data, setData, workflow, refresh, stale } = useItemProcessing({
         itemId,
@@ -771,6 +780,12 @@ export function ItemWorkflow({
         onMoveBetweenFolders: moveBetweenFolders,
     };
 
+    const failedLearnRunId =
+        canEdit &&
+        workflow?.status?.action === "retry" &&
+        workflow.status.params?.step === "learn"
+            ? data?.failedLearnRunId
+            : undefined;
     return (
         <>
             {processingEnabled && workflow && (
@@ -778,8 +793,49 @@ export function ItemWorkflow({
                     workflow={workflow}
                     kind={kind}
                     onAction={handleAction}
+                    secondaryAction={
+                        failedLearnRunId ? (
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={skippingLearn}
+                                onClick={() => void skipLearn(failedLearnRunId)}
+                            >
+                                {i18n("Skip")}
+                            </Button>
+                        ) : undefined
+                    }
                 />
             )}
+            {processingEnabled &&
+                isOwn &&
+                data?.steps.share?.reason === "gate_blocked" &&
+                data.phases.share?.problems
+                    ?.filter(isShareReviewProblem)
+                    .map((problem) => {
+                        const isLearn = problem.kind === "learn_unfinished";
+                        const waitsForSummary =
+                            !isLearn && problem.waiting === "summary";
+                        return (
+                            <p
+                                key={problem.kind}
+                                className="text-xs text-muted-foreground"
+                            >
+                                {shareProblemMessage(problem)}{" "}
+                                <a
+                                    className="font-medium text-primary underline underline-offset-2"
+                                    href={shareReviewHref(itemId, problem)}
+                                >
+                                    {isLearn
+                                        ? i18n("Open Learn")
+                                        : waitsForSummary
+                                          ? i18n("Open summary")
+                                          : i18n("Review tasks")}
+                                </a>
+                            </p>
+                        );
+                    })}
             {stale && (
                 <output className="flex items-center gap-1 text-xs text-muted-foreground">
                     {i18n("Status may be out of date")} ·{" "}

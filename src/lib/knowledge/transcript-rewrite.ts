@@ -102,8 +102,12 @@ export async function transcriptRewrittenInTx(
             ),
         );
     await supersedeCorrectionPassesInTx(tx, args.userId, args.transcriptionId);
-    const held = await riffadoRecordingOfInTx(tx, args.transcriptionId);
-    if (held) await clearAutoLearnHoldInTx(tx, held);
+    const held = await riffadoRecordingOfInTx(
+        tx,
+        args.transcriptionId,
+        args.userId,
+    );
+    if (held) await clearAutoLearnHoldInTx(tx, held, args.userId);
     // Once, after both: the knowledge of every scope the rewrite touched.
     await bumpScopeInTx(tx, [
         ...(args.cut ? [args.userId] : []),

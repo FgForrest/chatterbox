@@ -13,6 +13,7 @@ import type {
     SummaryStepName,
 } from "@/lib/pipeline/types";
 import { trimHolds } from "@/lib/recordings/trim-proposal";
+import { isShareReviewProblem } from "@/lib/sharing/share-gate";
 
 function sameInput(
     record: PhaseRecord | undefined,
@@ -84,7 +85,8 @@ export function isProviderBlockedReason(
     return reason != null && PROVIDER_BLOCKED_REASONS.has(reason);
 }
 
-function stepRequested(
+/** Whether the current input already has a step request that needs no retry. */
+export function stepRequested(
     record: PhaseRecord | undefined,
     step: SummaryStepName,
     input: ContentRevisionInput,
@@ -482,7 +484,50 @@ function sameProblems(
     left: PhaseRecord["problems"],
     right: NonNullable<PipelineFacts["share"]>["problems"],
 ): boolean {
-    return JSON.stringify(left ?? []) === JSON.stringify(right);
+    const previous = left ?? [];
+    return (
+        previous.length === right.length &&
+        right.every((problem, index) => {
+            const prior = previous[index];
+            if (problem.kind !== prior?.kind) return false;
+            if (
+                problem.kind === "tasks_unreviewed" &&
+                prior.kind === "tasks_unreviewed"
+            )
+                return prior.waiting === problem.waiting;
+            if (
+                problem.kind === "unresolved_speakers" &&
+                prior.kind === "unresolved_speakers"
+            )
+                return (
+                    prior.source === problem.source &&
+                    prior.labels.length === problem.labels.length &&
+                    problem.labels.every(
+                        (label, i) => label === prior.labels[i],
+                    )
+                );
+            return true;
+        })
+    );
+}
+
+function planShareBlock(
+    facts: PipelineFacts,
+    actions: PipelineAction[],
+): boolean {
+    const problems = facts.share?.problems ?? [];
+    if (problems.length === 0) return false;
+    const current = facts.phases.share;
+    if (
+        current?.state !== "waiting" ||
+        current.reason !== "gate_blocked" ||
+        !sameProblems(current.problems, problems)
+    ) {
+        const waiting = markPhase(facts, "share", "waiting", "gate_blocked");
+        if (waiting.type === "markPhase") waiting.record.problems = problems;
+        actions.push(waiting);
+    }
+    return true;
 }
 
 function planShare(facts: PipelineFacts, actions: PipelineAction[]): void {
@@ -507,21 +552,7 @@ function planShare(facts: PipelineFacts, actions: PipelineAction[]): void {
         }
         return;
     }
-    const problems = facts.share?.problems ?? [];
-    if (problems.length > 0) {
-        const current = facts.phases.share;
-        if (
-            current?.state === "waiting" &&
-            current.reason === "gate_blocked" &&
-            sameProblems(current.problems, problems)
-        ) {
-            return;
-        }
-        const waiting = markPhase(facts, "share", "waiting", "gate_blocked");
-        if (waiting.type === "markPhase") waiting.record.problems = problems;
-        actions.push(waiting);
-        return;
-    }
+    if (planShareBlock(facts, actions)) return;
     const summaryQueued = actions.some(
         (action) => action.type === "queueSummary",
     );
@@ -825,27 +856,51 @@ function placementPreservesStartedPhase(
 
 /** Decide the work due solely from durable item facts. */
 export function planAdvance(facts: PipelineFacts): PipelinePlan {
+    const plan = planProcessing(facts);
+    if (
+        facts.view === "private" &&
+        facts.item.exists &&
+        !facts.item.deleted &&
+        facts.categorization.intendedFolderIds.length > 0 &&
+        facts.share?.problems.some(isShareReviewProblem) &&
+        !facts.share.cutJobActive &&
+        !trimHolds(facts.phases.trim) &&
+        !facts.phases.share?.jobId &&
+        facts.phases.share?.state !== "failed" &&
+        !(facts.manualOnly && facts.share.confirmationRequired) &&
+        !plan.actions.some(
+            (action) =>
+                action.type === "completeCategorization" ||
+                (action.type === "markPhase" && action.phase === "share"),
+        )
+    ) {
+        planShareBlock(facts, plan.actions);
+    }
+    return plan;
+}
+
+function planProcessing(facts: PipelineFacts): PipelinePlan {
     if (facts.view === "org") return { actions: [] };
     if (!facts.item.exists || facts.item.deleted) {
         return { actions: [], reason: "gone" };
     }
 
     if (legacyContentAlreadyHandled(facts)) {
-        return {
-            actions: facts.legacyFallback
-                ? Object.entries(facts.phases).flatMap(([phase, record]) =>
-                      record
-                          ? [
-                                {
-                                    type: "markPhase" as const,
-                                    phase: phase as keyof PipelineFacts["phases"],
-                                    record,
-                                },
-                            ]
-                          : [],
-                  )
-                : [],
-        };
+        const actions: PipelineAction[] = facts.legacyFallback
+            ? Object.entries(facts.phases).flatMap(([phase, record]) =>
+                  record
+                      ? [
+                            {
+                                type: "markPhase" as const,
+                                phase: phase as keyof PipelineFacts["phases"],
+                                record,
+                            },
+                        ]
+                      : [],
+              )
+            : [];
+        if (facts.item.kind === "audio") planShare(facts, actions);
+        return { actions };
     }
 
     const mail = facts.mail;
@@ -1557,6 +1612,15 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
         sameInput(learn, input) &&
         (minimumGeneration === undefined ||
             learn.generation >= minimumGeneration)
+    ) {
+        planSummary();
+        return { actions };
+    }
+
+    if (
+        learn?.state === "skipped" &&
+        learn.reason === "owner_skipped" &&
+        sameInput(learn, input)
     ) {
         planSummary();
         return { actions };

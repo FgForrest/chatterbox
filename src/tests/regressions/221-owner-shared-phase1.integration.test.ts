@@ -207,7 +207,7 @@ const content = {
         ) {
             const settings = defaultProfileSettings("audio");
             settings.steps.trim.automatic = false;
-            settings.steps.summary.automatic = true;
+            settings.steps.summary.automatic = ownerUserId !== OWNER;
             settings.steps.topics.automatic = true;
             settings.steps.learn.automatic = false;
             settings.steps.title.automatic = false;
@@ -470,7 +470,7 @@ const content = {
             ).toBe(true);
         });
 
-        it("finishes a running summary on the old profile and uses the new profile for topics", async () => {
+        it("finishes a running manual summary on the old profile and uses the new profile for topics", async () => {
             const started = phases();
             started.summary = {
                 ...started.summary,

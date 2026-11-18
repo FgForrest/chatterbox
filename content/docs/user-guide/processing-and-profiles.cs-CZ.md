@@ -17,7 +17,9 @@ Položku můžete také přetáhnout na složku ve stromu. Položky adresované 
 
 Po zařazení se v řádku pod názvem zobrazí štítky složek, **Přidat do složky**, zamýšlené složky Organizace a vpravo štítek profilu. Jeho nabídka umožňuje změnit profil nebo zvolit **Bez automatického zpracování**.
 
-Výběrem složky Organizace vytvoříte zamýšlené umístění. Položka zůstane během zpracování soukromá. Klepna ji automaticky nasdílí, jakmile projde kontrolami přepisu, mluvčích a Učení. Zamýšlené sdílení čeká během posuzování ořezu, rozhodování vlastníka i samotného ořezávání. Odmítnutí, uplynutí čtyř hodin nebo dokončený ořez toto čekání uvolní. Již sdílené nahrávky zůstávají sdílené. Kontrola úkolů sdílení nezdržuje. Při volbě **Bez automatického zpracování** místo toho čeká: zamýšlená složka v řádku nabízí **Sdílet nyní** a tlačítko pro zrušení.
+Výběrem složky Organizace vytvoříte zamýšlené umístění. K prvnímu sdílení potřebuje nahrávka přepis s pojmenovanými nebo neznámými mluvčími, dokončené nebo přeskočené automatické Učení a vyřešené návrhy úkolů. Čeká také na plánované nebo probíhající automatické shrnutí. Krok **Sdílet** uvádí důvody a odkazuje na kontroly. Zamýšlené sdílení čeká i během posuzování ořezu, rozhodování vlastníka a samotného ořezávání. Odmítnutí, uplynutí čtyř hodin nebo dokončený ořez toto čekání uvolní. Již sdílené nahrávky zůstávají sdílené. Při volbě **Bez automatického zpracování** nabízí zamýšlená složka **Sdílet nyní** a tlačítko pro zrušení.
+
+Pro poštu neplatí podmínky sdílení. Pokud Učení pozastaví zpracování, automatické zařazení čeká na jeho kontrolu až 72 hodin. Ruční zařazení pošty do otevřené složky Organizace ji nasdílí ihned. Sdílení s Organizací ukončí případný otevřený soukromý běh Učení. Návrhy úkolů může zkontrolovat pouze vlastník e-mailu.
 
 <span id="profiles-are-processing-recipes" />
 

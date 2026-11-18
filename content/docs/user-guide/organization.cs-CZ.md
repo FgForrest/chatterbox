@@ -13,20 +13,23 @@ Složku Organizace vyberte na vložené kartě **Zařadit nahrávku** nebo **Za�
 
 ![Řádek složek a výběr Přidat do složky se složkami Organizace](images/add-to-folder.png)
 
-Tím nejprve vytvoříte zamýšlené umístění v Organizaci. Položka zůstane během zpracování podle profilu soukromá. Klepna ji automaticky nasdílí, jakmile je připravena ke čtení ostatními:
+Tím vytvoříte zamýšlené umístění v Organizaci. Před prvním sdílením nahrávky potřebuje Klepna:
 
-- u nahrávky existuje přepis,
-- každý mluvčí je pojmenovaný nebo označený jako neznámý.
+- přepis, ve kterém je každý mluvčí pojmenovaný nebo označený jako neznámý,
+- dokončené Učení v soukromém pohledu, pokud je profil spouští,
+- hotové automatické shrnutí, pokud ještě čeká nebo běží, a dokončenou kontrolu návrhů úkolů.
 
-Kontrola úkolů sdílení nezdržuje. Kolegové uvidí navržený úkol až po jeho přijetí vlastníkem nebo kurátorem.
+Učení i kontrolu úkolů lze také rychle dokončit přeskočením, pokud to kontrola nabízí. Krok **Sdílet** ukazuje, na co nahrávka čeká, a odkazuje na kontrolu. Stejné požadavky platí při ručním zařazení nebo přesunu do otevřené složky Organizace. Návrhy úkolů vidí jen vlastník nahrávky nebo e-mailu, dokud je nepřijme.
 
-Řádek složek ukazuje zamýšlenou složku Organizace a pruh pracovního postupu přidá krok **Sdílet**, na kterém je vidět čekající kontrola. Sdílení zruší otevřený soukromý běh [Učení](learn.md). Jeho zjištění zůstanou soukromá. Pokud profil Organizace zapíná automatické Učení, spustí se nový běh v rozsahu Organizace a shrnutí počká na jeho kontrolu.
+Pokud nahrávka ještě nemá profil zpracování a zařazením získá profil s automatickým Učením nebo shrnutím, Klepna uloží složku jako zamýšlené umístění. Nahrávka zůstane soukromá, dokud tyto kroky neskončí a nedokončíte potřebné kontroly. Klepna ji pak v této složce nasdílí. Pokud uzavřením dřívějšího úkolu odpadne poslední rozhodnutí v kontrole úkolů, sdílení může pokračovat, jakmile jsou splněny ostatní podmínky.
 
 Pokud jste dokončili soukromou kontrolu Učení pro aktuální obsah položky, Klepna při sdílení předá potvrzené poznatky Organizaci bez dalšího potvrzení. Panel **Znalosti** otevřený ze záhlaví položky ukazuje Učení jako dokončené s počtem použitých změn a pracovní postup ho počítá jako hotové. Totéž platí pro e-maily. Kurátoři mohou spustit **Učit se znovu** a osoby i věci Organizace slučovat nebo mazat.
 
 Položka zařazená s volbou **Bez automatického zpracování** se sama nenasdílí. U zamýšlené složky jsou v řádku akce **Sdílet nyní** a zrušení. Pruh uvádí **Na vás.** a čeká, dokud položku nenasdílíte nebo umístění nezrušíte.
 
-Pošta poslaná přímo na adresu složky Organizace také začíná jako soukromé zamýšlené umístění, prochází stejnými kontrolami a automaticky se nasdílí. Viz [Pošta](mail.md).
+Pošta poslaná na adresu složky Organizace zůstává nejprve soukromá a složka je jejím zamýšleným umístěním. Pro poštu neplatí podmínky sdílení. Pokud zpracování pozastaví Učení, automatické zařazení na jeho kontrolu čeká až 72 hodin. Ruční zařazení pošty do otevřené složky Organizace ji nasdílí ihned. Návrhy úkolů může zkontrolovat pouze vlastník e-mailu. Viz [Pošta](mail.md).
+
+Pokud je při sdílení položky s Organizací soukromý běh Učení ještě otevřený, sdílení ho ukončí a jeho poznatky zůstanou soukromé. To se může stát u pošty nebo u nahrávky, u níž otevřený běh nespadá pod podmínky sdílení. Pokud profil zapíná automatické Učení, může pak proběhnout v rozsahu Organizace.
 
 ## Sdílená položka
 
@@ -69,7 +72,7 @@ Ve výchozím nastavení může každý člen provést 60 volání za hodinu u k
 Při autorizaci přes poskytovatele identity jsou osoby s oprávněním `org.curate` kurátory a osoby s oprávněním `access.manage` spravují přístup a poskytovatele Organizace. V místní instalaci tyto povinnosti drží organizační účet. Kurátoři mohou:
 
 - upravovat sdílené nahrávky a poštu,
-- kontrolovat sdílené výsledky Učení a úkoly,
+- na otevřené sdílené položce dokončit Učení v pohledu Organizace a upravovat přijaté sdílené úkoly,
 - spravovat profily, osoby, věci a navržené vztahy Organizace,
 - procházet **Almanach → Péče → Možné duplicity**, porovnávat a slučovat záznamy Organizace nebo zvolit **Nejsou stejní**, aby se dvojice už nenabízela žádnému kurátorovi (viz [Péče](almanac.md#care-possible-duplicates)),
 - nastavit export složek Organizace,
