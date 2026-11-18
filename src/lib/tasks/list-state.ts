@@ -17,6 +17,7 @@ export type TaskListPatch = {
 type TaskListState = {
     scope: TaskListScope;
     confirmed: TaskListItem[] | null;
+    members: ReadonlySet<string>;
     pending: ReadonlyMap<string, TaskListPatch[]>;
     retained: ReadonlyMap<string, Retention>;
     merging: ReadonlySet<string>;
@@ -26,7 +27,7 @@ type TaskListState = {
 
 type Action = { scope: TaskListScope } & (
     | { type: "reset" | "loading" }
-    | { type: "loadFailed"; inserts: TaskListItem[] }
+    | { type: "loadFailed" }
     | {
           type: "loaded";
           rows: TaskListItem[];
@@ -39,9 +40,10 @@ type Action = { scope: TaskListScope } & (
           id: string;
           patch: TaskListPatch;
           saved?: TaskView;
-          matchesFolder?: (row: TaskView) => boolean;
       }
-    | { type: "merge" | "mergeFailed" | "mergeSaved"; id: string }
+    | { type: "merge"; id: string }
+    | { type: "mergeFailed"; id: string }
+    | { type: "mergeSaved"; id: string; deletedId: string; survivor: TaskView }
     | { type: "insert"; row: TaskListItem }
     | { type: "reconcile"; id: string; row?: TaskListItem }
 );
@@ -51,6 +53,7 @@ export function createTaskListState(scope: TaskListScope): TaskListState {
     return {
         scope,
         confirmed: null,
+        members: new Set(),
         pending: new Map(),
         retained: new Map(),
         merging: new Set(),
@@ -66,35 +69,46 @@ function retentionFor(state: TaskListState, id: string) {
     );
 }
 
+function carried(state: TaskListState, id: string) {
+    return (
+        state.retained.has(id) || state.pending.has(id) || state.merging.has(id)
+    );
+}
+
 function replaceConfirmed(
     state: TaskListState,
     rows: TaskListItem[],
     inserts: TaskListItem[],
     openRows: TaskListItem[] | null,
 ) {
-    const fresh = new Map(rows.map((row) => [row.id, row]));
-    const remaining = new Map(
-        [...inserts, ...rows].map((row) => [row.id, fresh.get(row.id) ?? row]),
-    );
+    const remaining = new Map(inserts.map((row) => [row.id, row]));
+    const listed = new Set(rows.map((row) => row.id));
     const open = new Map(openRows?.map((row) => [row.id, row]));
+    for (const row of rows) {
+        const openRow = open.get(row.id);
+        remaining.set(
+            row.id,
+            openRow && openRow.version > row.version ? openRow : row,
+        );
+    }
     const before = new Map<string, TaskListItem[]>();
     let kept: TaskListItem[] = [];
     let lastNeighbor: string | undefined;
     for (const previous of state.confirmed ?? []) {
         const id = previous.id;
-        let row = remaining.get(id);
-        if (
-            retentionFor(state, id) ||
-            state.pending.has(id) ||
-            state.merging.has(id)
-        ) {
-            const openRow = open.get(id);
-            if (openRow && (!row || openRow.version > row.version))
-                row = openRow;
-            kept.push(row && row.version >= previous.version ? row : previous);
+        const keptInPlace = carried(state, id);
+        const cached = remaining.get(id);
+        if (!cached && !keptInPlace) continue;
+        const fresh = listed.has(id) ? cached : open.get(id);
+        const confirmed =
+            fresh && fresh.version >= previous.version ? fresh : previous;
+        const row =
+            cached && cached.version > confirmed.version ? cached : confirmed;
+        if (keptInPlace) {
+            kept.push(row);
             remaining.delete(id);
-        } else if (row) {
-            if (row.version < previous.version) remaining.set(id, previous);
+        } else {
+            remaining.set(id, row);
             if (kept.length) before.set(id, kept);
             kept = [];
             lastNeighbor = id;
@@ -108,34 +122,9 @@ function replaceConfirmed(
     return lastNeighbor ? ordered : [...kept, ...ordered];
 }
 
-function matchesQuery(
-    row: TaskListItem,
-    scope: TaskListScope,
-    matchesFolder: (row: TaskView) => boolean,
-): boolean {
-    if (scope.state !== "all" && row.status !== scope.state) return false;
-    if (!matchesFolder(row)) return false;
-    const params = new URLSearchParams(scope.query);
-    const assignee = params.get("assignee");
-    if (assignee === "none" && row.assignee) return false;
-    if (
-        assignee &&
-        assignee !== "none" &&
-        row.assignee?.personId !== "" &&
-        row.assignee?.personId !== assignee
-    )
-        return false;
-    const due = params.get("due");
-    const today = params.get("today");
-    if (due === "none") return row.dueDate === null;
-    if (!today || (due !== "overdue" && due !== "week")) return true;
-    if (!row.dueDate) return false;
-    if (due === "overdue") return row.dueDate < today;
-    const end = new Date(`${today}T00:00:00Z`);
-    end.setUTCDate(end.getUTCDate() + 7);
-    return (
-        row.dueDate >= today && row.dueDate <= end.toISOString().slice(0, 10)
-    );
+function setOpen(ids: Set<string>, row: TaskView) {
+    if (row.status === "open") ids.add(row.id);
+    else ids.delete(row.id);
 }
 
 /**
@@ -155,13 +144,14 @@ export function taskListReducer(
             return {
                 ...state,
                 error: true,
-                confirmed: state.confirmed ?? action.inserts,
+                confirmed: state.confirmed ?? [],
             };
         case "loaded": {
             const { rows, inserts, openRows } = action;
             return {
                 ...state,
                 confirmed: replaceConfirmed(state, rows, inserts, openRows),
+                members: new Set([...rows, ...inserts].map((row) => row.id)),
                 error: false,
                 openIds: openRows && new Set(openRows.map((row) => row.id)),
             };
@@ -177,7 +167,7 @@ export function taskListReducer(
             };
         }
         case "settlePatch": {
-            const { id, patch, saved, matchesFolder } = action;
+            const { id, patch, saved } = action;
             const queue = state.pending.get(id);
             if (!queue?.includes(patch)) return state;
             const pending = new Map(state.pending);
@@ -188,43 +178,27 @@ export function taskListReducer(
             const retained = new Map(state.retained);
             if (saved && patch.retain && !retained.has(id))
                 retained.set(id, patch.retain);
-            const openIds = state.openIds && new Set(state.openIds);
-            const confirmed =
+            if (!saved) retained.delete(id);
+            const next = { ...state, pending, retained };
+            if (!saved && retentionFor(state, id))
+                next.members = new Set(state.members).add(id);
+            const keep = next.members.has(id) || carried(next, id);
+            next.confirmed =
                 state.confirmed?.flatMap((previous) => {
                     if (previous.id !== id) return [previous];
+                    if (!keep) return [];
                     const row =
                         saved && saved.version >= previous.version
                             ? { ...previous, ...saved }
                             : previous;
-                    if (openIds && patch.retain) {
-                        if (row.status === "open") openIds.add(id);
-                        else openIds.delete(id);
+                    if (saved && patch.retain && next.openIds) {
+                        const adjusted = new Set(next.openIds);
+                        setOpen(adjusted, row);
+                        next.openIds = adjusted;
                     }
-                    const retaining = remaining.some((entry) => entry.retain);
-                    if (
-                        !saved &&
-                        !retaining &&
-                        retentionFor(state, id) &&
-                        matchesFolder &&
-                        !matchesQuery(row, state.scope, matchesFolder)
-                    ) {
-                        retained.delete(id);
-                        return [];
-                    }
-                    if (
-                        saved &&
-                        !retaining &&
-                        !retained.has(id) &&
-                        matchesFolder &&
-                        !matchesFolder(row) &&
-                        !remaining.some(
-                            (entry) => entry.fields.folder !== undefined,
-                        )
-                    )
-                        return [];
                     return [row];
                 }) ?? null;
-            return { ...state, confirmed, pending, retained, openIds };
+            return next;
         }
         case "merge":
             return { ...state, merging: new Set(state.merging).add(action.id) };
@@ -233,17 +207,36 @@ export function taskListReducer(
             const { id } = action;
             const merging = new Set(state.merging);
             merging.delete(id);
-            if (action.type === "mergeFailed") return { ...state, merging };
+            if (action.type === "mergeFailed") {
+                const next = { ...state, merging };
+                if (!state.members.has(id) && !carried(next, id))
+                    next.confirmed =
+                        state.confirmed?.filter((row) => row.id !== id) ?? null;
+                return next;
+            }
+            const { deletedId, survivor } = action;
+            const members = new Set(state.members);
             const pending = new Map(state.pending);
             const retained = new Map(state.retained);
             const openIds = state.openIds && new Set(state.openIds);
-            pending.delete(id);
-            retained.delete(id);
-            openIds?.delete(id);
+            members.delete(deletedId);
+            merging.delete(deletedId);
+            pending.delete(deletedId);
+            retained.delete(deletedId);
+            openIds?.delete(deletedId);
             return {
                 ...state,
                 confirmed:
-                    state.confirmed?.filter((row) => row.id !== id) ?? null,
+                    state.confirmed?.flatMap((row) => {
+                        if (row.id === deletedId) return [];
+                        if (
+                            row.id === survivor.id &&
+                            survivor.version >= row.version
+                        )
+                            return [{ ...row, ...survivor }];
+                        return [row];
+                    }) ?? null,
+                members,
                 pending,
                 retained,
                 merging,
@@ -254,17 +247,25 @@ export function taskListReducer(
             return {
                 ...state,
                 confirmed: [action.row, ...(state.confirmed ?? [])],
+                members: new Set(state.members).add(action.row.id),
             };
         case "reconcile": {
             const rows = (state.confirmed ?? []).filter(
                 (row) => row.id !== action.id,
             );
+            const members = new Set(state.members);
+            members.delete(action.id);
             const inserted = action.row;
             if (!inserted)
-                return { ...state, confirmed: state.confirmed && rows };
+                return {
+                    ...state,
+                    confirmed: state.confirmed && rows,
+                    members,
+                };
             const existing = rows.find((row) => row.id === inserted.id);
             return {
                 ...state,
+                members: members.add(inserted.id),
                 confirmed: existing
                     ? rows.map((row) =>
                           row === existing && inserted.version > row.version
@@ -301,10 +302,8 @@ export function taskListView(
                 !ownMatchesFolder(row)
             )
                 return [];
-            if (openIds && retention) {
-                if (row.status === "open") openIds.add(row.id);
-                else openIds.delete(row.id);
-            }
+            if (openIds && patches.some((patch) => patch.retain))
+                setOpen(openIds, row);
             return [
                 retention?.group
                     ? { ...row, retainedGroup: retention.group }

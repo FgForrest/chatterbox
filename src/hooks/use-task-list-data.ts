@@ -29,6 +29,7 @@ import { taskFilterFolders } from "@/lib/tasks/folder-filter";
 import {
     createTaskListState,
     type TaskListPatch,
+    type TaskListScope,
     taskListReducer,
     taskListView,
 } from "@/lib/tasks/list-state";
@@ -80,7 +81,11 @@ export function useTaskListData({
     const ownInserts = useRef(
         new Map<
             string,
-            { task: TaskListItem; query: string | null; reconciled: boolean }
+            {
+                task: TaskListItem;
+                scope: TaskListScope | null;
+                reconciled: boolean;
+            }
         >(),
     );
     const loadRequest = useRef(0);
@@ -157,12 +162,16 @@ export function useTaskListData({
     const currentScope = useRef(scope);
     currentScope.current = scope;
     const versions = useRef(new Map<string, number>());
-    const saves = useRef(new Map<string, Promise<void>>());
-    const rememberVersion = useCallback((row: TaskView) => {
-        versions.current.set(
-            row.id,
-            Math.max(row.version, versions.current.get(row.id) ?? row.version),
-        );
+    const saves = useRef(new Map<string, Promise<boolean>>());
+    const confirmTask = useCallback((row: TaskView) => {
+        if (row.version < (versions.current.get(row.id) ?? row.version)) return;
+        versions.current.set(row.id, row.version);
+        const insert = ownInserts.current.get(row.id);
+        if (insert)
+            ownInserts.current.set(row.id, {
+                ...insert,
+                task: { ...insert.task, ...row },
+            });
     }, []);
 
     const loadAssignees = useCallback(async () => {
@@ -237,105 +246,81 @@ export function useTaskListData({
         assigneeSearch,
     ]);
 
-    const load = useCallback(
-        async (options?: { preserveOwnInserts?: boolean }) => {
-            if (scope !== currentScope.current) return;
-            const request = ++loadRequest.current;
-            dispatch({ type: "loading", scope });
-            const reconciled = options?.preserveOwnInserts
-                ? []
-                : [...ownInserts.current]
-                      .filter(([, entry]) => entry.reconciled)
-                      .map(([id]) => id);
-            const insertedRows = () =>
-                [...ownInserts.current.values()]
-                    .filter((entry) => entry.query === query)
-                    .map((entry) => entry.task);
-            try {
-                const taskQuery = new URLSearchParams(query);
-                const needsFolders =
-                    filterFolders && !folderCache.current.has(folderScope);
-                if (!needsFolders) taskQuery.delete("folders");
-                const openQuery = new URLSearchParams(query);
-                openQuery.delete("folders");
-                openQuery.set("state", "open");
-                const [response, openResponse] = await Promise.all([
-                    fetch(`/api/tasks?${taskQuery}`),
-                    countOpen && state !== "open" && state !== "all"
-                        ? fetch(`/api/tasks?${openQuery}`)
-                        : Promise.resolve(null),
-                ]);
-                if (!response.ok || (openResponse && !openResponse.ok))
-                    throw new Error();
-                const body = (await response.json()) as {
-                    tasks: TaskListItem[];
-                    folderIds?: string[];
-                };
-                const openBody = openResponse
-                    ? ((await openResponse.json()) as { tasks: TaskListItem[] })
-                    : null;
-                if (
-                    scope !== currentScope.current ||
-                    request !== loadRequest.current
-                )
-                    return;
-                for (const id of reconciled) ownInserts.current.delete(id);
-                const inserts = insertedRows();
-                const openRows =
-                    openBody?.tasks.filter((row) => row.status === "open") ??
-                    null;
-                const knownIds = new Set([
-                    ...saves.current.keys(),
-                    ...body.tasks.map((row) => row.id),
-                    ...inserts.map((row) => row.id),
-                ]);
-                versions.current = new Map(
-                    [...versions.current].filter(([id]) => knownIds.has(id)),
+    const load = useCallback(async () => {
+        if (scope !== currentScope.current) return;
+        const request = ++loadRequest.current;
+        dispatch({ type: "loading", scope });
+        for (const [id, entry] of ownInserts.current) {
+            if (entry.reconciled && entry.scope !== scope)
+                ownInserts.current.delete(id);
+        }
+        try {
+            const taskQuery = new URLSearchParams(query);
+            const needsFolders =
+                filterFolders && !folderCache.current.has(folderScope);
+            if (!needsFolders) taskQuery.delete("folders");
+            const openQuery = new URLSearchParams(query);
+            openQuery.delete("folders");
+            openQuery.set("state", "open");
+            const [response, openResponse] = await Promise.all([
+                fetch(`/api/tasks?${taskQuery}`),
+                countOpen && state !== "open" && state !== "all"
+                    ? fetch(`/api/tasks?${openQuery}`)
+                    : Promise.resolve(null),
+            ]);
+            if (!response.ok || (openResponse && !openResponse.ok))
+                throw new Error();
+            const body = (await response.json()) as {
+                tasks: TaskListItem[];
+                folderIds?: string[];
+            };
+            const openBody = openResponse
+                ? ((await openResponse.json()) as { tasks: TaskListItem[] })
+                : null;
+            if (
+                scope !== currentScope.current ||
+                request !== loadRequest.current
+            )
+                return;
+            const openRows =
+                openBody?.tasks.filter((row) => row.status === "open") ?? null;
+            for (const row of [...body.tasks, ...(openRows ?? [])])
+                confirmTask(row);
+            dispatch({
+                type: "loaded",
+                scope,
+                rows: body.tasks,
+                inserts: [...ownInserts.current.values()]
+                    .filter((entry) => entry.scope === scope)
+                    .map((entry) => entry.task),
+                openRows,
+            });
+            if (needsFolders) {
+                folderCache.current = new Map(folderCache.current).set(
+                    folderScope,
+                    body.folderIds ?? [],
                 );
-                for (const row of [...inserts, ...body.tasks])
-                    rememberVersion(row);
-                for (const row of openRows ?? []) {
-                    if (saves.current.has(row.id)) rememberVersion(row);
-                }
-                dispatch({
-                    type: "loaded",
-                    scope,
-                    rows: body.tasks,
-                    inserts,
-                    openRows,
-                });
-                if (needsFolders) {
-                    folderCache.current = new Map(folderCache.current).set(
-                        folderScope,
-                        body.folderIds ?? [],
-                    );
-                    setTaskFolders(folderCache.current);
-                }
-            } catch {
-                if (
-                    scope !== currentScope.current ||
-                    request !== loadRequest.current
-                )
-                    return;
-                dispatch({
-                    type: "loadFailed",
-                    scope,
-                    inserts: insertedRows(),
-                });
-                toast.error(i18n("Could not load your tasks"));
+                setTaskFolders(folderCache.current);
             }
-        },
-        [
-            query,
-            scope,
-            i18n,
-            state,
-            countOpen,
-            filterFolders,
-            folderScope,
-            rememberVersion,
-        ],
-    );
+        } catch {
+            if (
+                scope !== currentScope.current ||
+                request !== loadRequest.current
+            )
+                return;
+            dispatch({ type: "loadFailed", scope });
+            toast.error(i18n("Could not load your tasks"));
+        }
+    }, [
+        query,
+        scope,
+        i18n,
+        state,
+        countOpen,
+        filterFolders,
+        folderScope,
+        confirmTask,
+    ]);
 
     useEffect(() => {
         void revision;
@@ -352,15 +337,12 @@ export function useTaskListData({
             .catch(() => {});
     }, [markSeen]);
 
-    const reload = useCallback(
-        (options?: { preserveOwnInserts?: boolean }) => {
-            if (scope !== currentScope.current) return Promise.resolve([]);
-            folderCache.current = new Map();
-            setTaskFolders(folderCache.current);
-            return Promise.all([load(options), loadAssignees()]);
-        },
-        [scope, load, loadAssignees],
-    );
+    const reload = useCallback(() => {
+        if (scope !== currentScope.current) return Promise.resolve([]);
+        folderCache.current = new Map();
+        setTaskFolders(folderCache.current);
+        return Promise.all([load(), loadAssignees()]);
+    }, [scope, load, loadAssignees]);
     const latestReload = useRef(reload);
     latestReload.current = reload;
 
@@ -387,6 +369,7 @@ export function useTaskListData({
         dispatch({ type: "patch", scope, id, patch });
         const run = (saves.current.get(id) ?? Promise.resolve())
             .then(async () => {
+                if (!saves.current.has(id)) return false;
                 const saved = await changeTask(id, {
                     ...change,
                     version: Math.max(
@@ -394,52 +377,24 @@ export function useTaskListData({
                         versions.current.get(id) ?? task.version,
                     ),
                 });
-                rememberVersion(saved);
-                const insert = ownInserts.current.get(id);
-                const matchesFolder =
-                    change.folderId === undefined || ownMatchesFolder(saved);
-                if (insert) {
-                    const leftQuery =
-                        !matchesFolder ||
-                        (patch.retain &&
-                            state !== "all" &&
-                            saved.status !== state);
-                    ownInserts.current.set(id, {
-                        ...insert,
-                        task: { ...insert.task, ...saved },
-                        query:
-                            leftQuery && insert.query === query
-                                ? null
-                                : insert.query,
-                    });
-                }
+                if (!saves.current.has(id)) return false;
+                confirmTask(saved);
                 dispatch({
                     type: "settlePatch",
                     scope,
                     id,
                     patch,
                     saved,
-                    matchesFolder:
-                        change.folderId === undefined
-                            ? undefined
-                            : ownMatchesFolder,
                 });
-                if (
+                return (
                     change.assigneePersonId !== undefined ||
                     change.folderId !== undefined ||
                     scope !== currentScope.current
-                )
-                    await latestReload.current();
+                );
             })
-            .catch(async (error: unknown) => {
-                dispatch({
-                    type: "settlePatch",
-                    scope,
-                    id,
-                    patch,
-                    matchesFolder: (row) =>
-                        !selectedPrivate || ownMatchesFolder(row),
-                });
+            .catch((error: unknown) => {
+                if (!saves.current.has(id)) return false;
+                dispatch({ type: "settlePatch", scope, id, patch });
                 toast.error(
                     error instanceof TaskRequestError && error.conflict
                         ? i18n("Someone changed this meanwhile. Reloaded.")
@@ -447,13 +402,15 @@ export function useTaskListData({
                           ? error.message
                           : i18n("Could not save the task"),
                 );
-                versions.current.delete(id);
-                await latestReload.current();
+                return true;
             })
             .finally(() => {
                 if (saves.current.get(id) === run) saves.current.delete(id);
             });
         saves.current.set(id, run);
+        void run.then((shouldReload) => {
+            if (shouldReload) void latestReload.current();
+        });
     };
 
     const merge = async (
@@ -464,13 +421,23 @@ export function useTaskListData({
         const id = task.id;
         dispatch({ type: "merge", scope, id });
         try {
-            const result = await mergeTaskIntoTarget(id, targetTaskId, options);
-            ownInserts.current.delete(id);
-            versions.current.delete(id);
-            dispatch({ type: "mergeSaved", scope: currentScope.current, id });
+            const { mergeOwnerNotified, ...survivor } =
+                await mergeTaskIntoTarget(id, targetTaskId, options);
+            const deletedId = survivor.id === id ? targetTaskId : id;
+            ownInserts.current.delete(deletedId);
+            versions.current.delete(deletedId);
+            saves.current.delete(deletedId);
+            confirmTask(survivor);
+            dispatch({
+                type: "mergeSaved",
+                scope: currentScope.current,
+                id,
+                deletedId,
+                survivor,
+            });
             announceTasksChanged();
             await latestReload.current();
-            return { ownerNotified: result.mergeOwnerNotified };
+            return { ownerNotified: mergeOwnerNotified };
         } catch (error) {
             dispatch({ type: "mergeFailed", scope, id });
             if (scope !== currentScope.current) await latestReload.current();
@@ -483,38 +450,35 @@ export function useTaskListData({
         const entry = ownInserts.current.get(temporaryId);
         ownInserts.current.delete(temporaryId);
         versions.current.delete(temporaryId);
-        const matchesFolder = !!task && ownMatchesFolder(task);
+        const current = currentScope.current;
+        const show =
+            task &&
+            ownMatchesFolder(task) &&
+            entry?.scope?.query === current.query;
         if (task) {
-            rememberVersion(task);
+            confirmTask(task);
             if (entry)
                 ownInserts.current.set(task.id, {
                     task,
-                    query: matchesFolder ? entry.query : null,
+                    scope: show ? current : null,
                     reconciled: true,
                 });
         }
         dispatch({
             type: "reconcile",
-            scope: currentScope.current,
+            scope: current,
             id: temporaryId,
-            row:
-                task &&
-                matchesFolder &&
-                entry?.query === currentScope.current.query
-                    ? task
-                    : undefined,
+            row: show ? task : undefined,
         });
-        if (task && filterFolders)
-            void latestReload.current({ preserveOwnInserts: true });
+        if (task && filterFolders) void latestReload.current();
     };
     const onAdded = (task: TaskListItem) => {
         const matchesFolder = ownMatchesFolder(task);
         ownInserts.current.set(task.id, {
             task,
-            query: matchesFolder ? query : null,
+            scope: matchesFolder ? scope : null,
             reconciled: false,
         });
-        rememberVersion(task);
         if (matchesFolder) dispatch({ type: "insert", scope, row: task });
     };
 

@@ -15,12 +15,6 @@ import { TaskList } from "@/components/tasks/task-list";
 import { useTaskListData } from "@/hooks/use-task-list-data";
 import { tabEventOrigin } from "@/lib/events/tab-origin";
 import type { OrgClientEvent } from "@/lib/events/types";
-import {
-    createTaskListState,
-    type TaskListPatch,
-    taskListReducer,
-    taskListView,
-} from "@/lib/tasks/list-state";
 import type { TaskListItem } from "@/lib/tasks/tasks";
 import type {
     RecordingFolder,
@@ -537,63 +531,289 @@ it.each([
     expect(result.current.openCount).toBe(2);
 });
 
-describe("task list reducer", () => {
-    const scope = { query: "state=open", state: "open" };
-    const matchesFolder = () => true;
-
-    it("rolls back to the freshest confirmed row after reapplying a pending patch", () => {
-        const patch: TaskListPatch = { fields: { status: "done" }, retain: {} };
-        const initial = taskListReducer(createTaskListState(scope), {
-            type: "loaded",
-            scope,
-            rows: [task],
-            openRows: null,
-            inserts: [],
-        });
-        const pending = taskListReducer(initial, {
-            type: "patch",
-            scope,
-            id: task.id,
-            patch,
-        });
-        const fresh = { ...task, version: 2, note: "A confirmed note" };
-        const refreshed = taskListReducer(pending, {
-            type: "loaded",
-            scope,
-            rows: [fresh],
-            openRows: null,
-            inserts: [],
-        });
-        expect(taskListView(refreshed, matchesFolder).tasks).toEqual([
-            { ...fresh, status: "done" },
-        ]);
-        const rolledBack = taskListReducer(refreshed, {
-            type: "settlePatch",
-            scope,
-            id: task.id,
-            patch,
-            matchesFolder,
-        });
-        expect(taskListView(rolledBack, matchesFolder)).toEqual({
-            tasks: [fresh],
-            openCount: 1,
-        });
+it("removes the private task and applies the returned Organization survivor and version", async () => {
+    const own = { ...before, own: true, recording: null };
+    const ownDone = { ...own, status: "done", version: 2 } as const;
+    const ownReopened = { ...own, version: 3 };
+    const survivor = { ...task, text: "Combined draft", version: 4 };
+    const refresh = Promise.withResolvers<Response>();
+    let merged = false;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith("/merge")) {
+            merged = true;
+            return Response.json({ ...survivor, mergeOwnerNotified: true });
+        }
+        if (init?.method === "PATCH" && url.endsWith(own.id)) {
+            const change = JSON.parse(String(init.body)) as { status: string };
+            return Response.json(
+                change.status === "done" ? ownDone : ownReopened,
+            );
+        }
+        if (init?.method === "PATCH")
+            return Response.json({ ...survivor, note: "Merged", version: 5 });
+        if (url.startsWith("/api/tasks?"))
+            return merged ? refresh.promise : Response.json({ tasks: [task] });
+        return Response.json({ assignees: [], folders: [] });
     });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() =>
+        useTaskListData({ tab: "all", state: "all", initialFolders: [] }),
+    );
+    await waitFor(() => expect(result.current.tasks).toEqual([task]));
+    const temporary = { ...own, id: "temporary", version: 0 };
+    act(() => {
+        result.current.onAdded(temporary);
+        result.current.onReconciled(temporary.id, own);
+    });
+    await act(async () =>
+        result.current.update(own, { status: "done" }, { status: "done" }),
+    );
+    await act(async () =>
+        result.current.update(ownDone, { status: "open" }, { status: "open" }),
+    );
 
-    it("ignores a former query's refresh when returning to the same filters", () => {
-        const revisited = { ...scope };
-        const reset = taskListReducer(createTaskListState(scope), {
-            type: "reset",
-            scope: revisited,
-        });
-        expect(
-            taskListReducer(reset, {
-                type: "loaded",
-                scope,
-                rows: [task],
-                openRows: null,
-                inserts: [],
+    let merging: ReturnType<typeof result.current.merge> | undefined;
+    await act(async () => {
+        merging = result.current.merge(task, own.id);
+    });
+    expect(result.current.tasks).toEqual([survivor]);
+    await act(async () =>
+        result.current.update(task, { note: "Merged" }, { note: "Merged" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+        `/api/tasks/${task.id}`,
+        expect.objectContaining({
+            body: JSON.stringify({ note: "Merged", version: 4 }),
+        }),
+    );
+    await act(async () => {
+        refresh.resolve(Response.json({ tasks: [survivor] }));
+        await expect(merging).resolves.toEqual({ ownerNotified: true });
+    });
+    expect(result.current.tasks).toEqual([
+        { ...survivor, note: "Merged", version: 5 },
+    ]);
+});
+
+it.each([
+    false,
+    true,
+])("sends a queued note while refreshes hang after a write with conflict=%s", async (conflict) => {
+    const assignee = { personId: "person", name: "Jitka Dvořáková" };
+    const first = Promise.withResolvers<Response>();
+    const list = Promise.withResolvers<Response>();
+    const options = Promise.withResolvers<Response>();
+    const assigned = { ...task, assignee, version: 2 };
+    const savedNote = { ...assigned, note: "A note", version: 3 };
+    let refreshing = false;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (init?.method === "PATCH") {
+            const change = JSON.parse(String(init.body)) as { note?: string };
+            return change.note ? Response.json(savedNote) : first.promise;
+        }
+        if (url.startsWith("/api/tasks?"))
+            return refreshing ? list.promise : Response.json({ tasks: [task] });
+        return refreshing ? options.promise : Response.json({ assignees: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() =>
+        useTaskListData({ tab: "all", state: "open", initialFolders: [] }),
+    );
+    await waitFor(() => expect(result.current.tasks).toEqual([task]));
+    act(() => {
+        result.current.update(
+            task,
+            { assigneePersonId: assignee.personId },
+            { assignee },
+        );
+        result.current.update(task, { note: "A note" }, { note: "A note" });
+    });
+    refreshing = true;
+    await act(async () =>
+        first.resolve(
+            conflict
+                ? new Response(null, { status: 409 })
+                : Response.json(assigned),
+        ),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+        `/api/tasks/${task.id}`,
+        expect.objectContaining({
+            body: JSON.stringify({ note: "A note", version: conflict ? 1 : 2 }),
+        }),
+    );
+    expect(result.current.tasks).toEqual([savedNote]);
+    await act(async () => {
+        list.resolve(Response.json({ tasks: [savedNote] }));
+        options.resolve(Response.json({ assignees: [assignee] }));
+    });
+});
+
+it.each([
+    false,
+    true,
+])("uses the latest version for a delayed assignment on a retained row with an auxiliary Open snapshot=%s", async (auxiliary) => {
+    const initial = auxiliary ? saved : task;
+    const changed = auxiliary
+        ? { ...task, status: "open" as const, version: 3 }
+        : saved;
+    const fresh = { ...changed, version: 4 };
+    const assignee = { personId: "person", name: "Petr Bureš" };
+    let refresh = false;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (init?.method === "PATCH") {
+            const change = JSON.parse(String(init.body)) as {
+                assigneePersonId?: string;
+            };
+            return Response.json(
+                change.assigneePersonId
+                    ? { ...changed, assignee, version: 5 }
+                    : changed,
+            );
+        }
+        if (url.startsWith("/api/tasks?")) {
+            const isPrimary = url.includes(`state=${initial.status}`);
+            return Response.json({
+                tasks: refresh
+                    ? auxiliary && !isPrimary
+                        ? [fresh]
+                        : []
+                    : isPrimary
+                      ? [initial]
+                      : [],
+            });
+        }
+        return Response.json({ assignees: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() =>
+        useTaskListData({
+            tab: "all",
+            state: initial.status,
+            countOpen: true,
+            initialFolders: [],
+        }),
+    );
+    await waitFor(() => expect(result.current.tasks).toEqual([initial]));
+    const delayedAssignment = result.current.update;
+    await act(async () =>
+        result.current.update(
+            initial,
+            { status: changed.status },
+            { status: changed.status },
+        ),
+    );
+    refresh = true;
+    await act(async () => {
+        await result.current.reload();
+    });
+    const latest = auxiliary ? fresh : changed;
+    expect(result.current.tasks).toEqual([latest]);
+    await act(async () =>
+        delayedAssignment(
+            initial,
+            { assigneePersonId: assignee.personId },
+            { assignee },
+        ),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+        `/api/tasks/${task.id}`,
+        expect.objectContaining({
+            body: JSON.stringify({
+                assigneePersonId: assignee.personId,
+                version: latest.version,
             }),
-        ).toBe(reset);
+        }),
+    );
+});
+
+it("keeps a reopened row without counting it after it leaves the folder's assignee filter", async () => {
+    const assignee = { personId: "selected", name: "Adam Zelený" };
+    const reassignee = { personId: "other", name: "Jitka Dvořáková" };
+    const closed = { ...saved, assignee };
+    const reopened = { ...task, assignee, version: 3 };
+    const reassigned = { ...reopened, assignee: reassignee, version: 4 };
+    let row: TaskListItem = closed;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (init?.method === "PATCH") {
+            row = row === closed ? reopened : reassigned;
+            return Response.json(row);
+        }
+        if (url.startsWith("/api/tasks?"))
+            return Response.json({
+                tasks:
+                    url.includes(`state=${row.status}`) &&
+                    row.assignee === assignee
+                        ? [row]
+                        : [],
+            });
+        return Response.json({ assignees: [assignee] });
     });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() =>
+        useTaskListData({
+            tab: "all",
+            state: "done",
+            folder: folder.id,
+            initialFolders: [folder],
+            assignee: assignee.personId,
+            countOpen: true,
+        }),
+    );
+    await waitFor(() => expect(result.current.tasks).toEqual([closed]));
+    expect(result.current.openCount).toBe(0);
+    await act(async () =>
+        result.current.update(closed, { status: "open" }, { status: "open" }),
+    );
+    expect(result.current.openCount).toBe(1);
+    await act(async () => {
+        await result.current.reload();
+    });
+    expect(result.current.openCount).toBe(1);
+    await act(async () =>
+        result.current.update(
+            reopened,
+            { assigneePersonId: reassignee.personId },
+            { assignee: reassignee },
+        ),
+    );
+    expect(result.current.tasks).toEqual([reassigned]);
+    expect(result.current.openCount).toBe(0);
+});
+
+it("keeps an added own task across same-query reloads even if the assignee filter excludes it", async () => {
+    const assignee = { personId: "selected", name: "Adam Zelený" };
+    const own = { ...task, own: true, recording: null };
+    const temporary = { ...own, id: "temporary", version: 0 };
+    vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) =>
+            Response.json(
+                url.startsWith("/api/tasks?")
+                    ? { tasks: [] }
+                    : { assignees: [assignee] },
+            ),
+        ),
+    );
+    const initialProps = {
+        tab: "all" as const,
+        state: "open",
+        assignee: assignee.personId,
+        initialFolders: [],
+    };
+    const { result, rerender } = renderHook(useTaskListData, {
+        initialProps,
+    });
+    await waitFor(() => expect(result.current.tasks).toEqual([]));
+    act(() => result.current.onAdded(temporary));
+    act(() => result.current.onReconciled(temporary.id, own));
+    await act(async () => {
+        await result.current.reload();
+    });
+    expect(result.current.tasks).toEqual([own]);
+
+    rerender({ ...initialProps, state: "done" });
+    await waitFor(() => expect(result.current.tasks).toEqual([]));
+    rerender(initialProps);
+    await waitFor(() => expect(result.current.tasks).toEqual([]));
 });
