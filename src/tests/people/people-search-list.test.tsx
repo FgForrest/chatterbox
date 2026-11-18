@@ -168,8 +168,16 @@ it("keeps the active option linked when new data moves it out of a context group
         />,
     );
     expect(searchField().getAttribute("aria-activedescendant")).toBe(
-        screen.getByRole("option", { name: contextPerson.name }).id,
+        screen.getByRole("option", { name: `${contextPerson.name} You` }).id,
     );
+});
+
+it("marks only the pinned viewer as You", () => {
+    render(<PeopleSearchList people={people} />);
+    expect(
+        screen.getByRole("option", { name: `${viewer.name} You` }),
+    ).toBeTruthy();
+    expect(screen.getAllByText("You")).toHaveLength(1);
 });
 
 it("debounces server search and ignores responses to older queries", async () => {

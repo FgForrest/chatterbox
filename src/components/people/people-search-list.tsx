@@ -194,6 +194,7 @@ export function PeopleSearchList<T extends PeopleListPerson>({
             contextPeople.set(person.id, person);
         else others.push(person);
     }
+    const pinnedIdSet = new Set(pinned.map((person) => person.id));
     const contextual = Array.from(contextIds).flatMap((id) => {
         const person = contextPeople.get(id);
         return person ? [person] : [];
@@ -294,7 +295,14 @@ export function PeopleSearchList<T extends PeopleListPerson>({
                     {Array.from(name)[0]?.toUpperCase()}
                 </span>
                 <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">{name}</span>
+                    <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate font-medium">{name}</span>{" "}
+                        {pinnedIdSet.has(person.id) && (
+                            <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                                {i18n("You")}
+                            </span>
+                        )}
+                    </span>
                     {person.email && person.email !== name && (
                         <span className="block truncate text-xs text-muted-foreground">
                             {person.email}
