@@ -15,7 +15,10 @@ import {
 } from "@/lib/knowledge/share-provenance";
 import { transcriptSpeakerLabels } from "@/lib/knowledge/speaker-labels";
 import { carryTaskReviewScopeInTx } from "@/lib/tasks/review-state";
-import { routeAwaitingShareTaskProposalsInTx } from "@/lib/tasks/routing";
+import {
+    routeAwaitingShareTaskProposalsInTx,
+    type TaskTargetChanges,
+} from "@/lib/tasks/routing";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -123,7 +126,8 @@ export async function publishSpeakerNamesInTx(
  * as it is shared: a shared task names someone everyone can see, and the
  * assignee finds it in their list. Same promotion, and the same locks
  * held by the caller, as `publishSpeakerNamesInTx`. Returns the scopes the
- * change reached, for the caller to bump.
+ * change reached, for the caller to bump; items whose tasks the held
+ * proposals changed are added to `taskTargets`.
  */
 export async function publishTaskAssigneesInTx(
     tx: Tx,
@@ -131,7 +135,13 @@ export async function publishTaskAssigneesInTx(
         recordingId,
         ownerUserId,
         orgUserId,
-    }: { recordingId: string; ownerUserId: string; orgUserId: string },
+        taskTargets,
+    }: {
+        recordingId: string;
+        ownerUserId: string;
+        orgUserId: string;
+        taskTargets?: TaskTargetChanges;
+    },
 ): Promise<Set<string>> {
     const event = await shareEventInTx(tx, recordingId, ownerUserId, orgUserId);
     const rows = await tx
@@ -215,7 +225,7 @@ export async function publishTaskAssigneesInTx(
         { itemId: recordingId, userId: ownerUserId, view: "private" },
         "org",
     );
-    await routeAwaitingShareTaskProposalsInTx(tx, recordingId);
+    await routeAwaitingShareTaskProposalsInTx(tx, recordingId, taskTargets);
     if (personIds.length > 0) scopes.add(orgUserId);
     return scopes;
 }

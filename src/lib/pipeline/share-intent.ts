@@ -33,6 +33,10 @@ import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { RECORDING_CUT_KIND } from "@/lib/recordings/cut";
 import { trimHolds } from "@/lib/recordings/trim-proposal";
 import type { ShareGateProblem } from "@/lib/sharing/share-gate";
+import {
+    type TaskTargetChanges,
+    taskTargetsChanged,
+} from "@/lib/tasks/routing";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -207,8 +211,10 @@ export async function executeIntendedSharesWithOutcome(
     }
     let shared = false;
     for (const intent of intents) {
-        const result = await retryOnDeadlock(() =>
-            db.transaction(async (tx) => {
+        let taskTargets: TaskTargetChanges = new Map();
+        const result = await retryOnDeadlock(() => {
+            taskTargets = new Map();
+            return db.transaction(async (tx) => {
                 await lockOrgTree(tx);
                 await lockOrgPeople(tx);
                 await lockItemForFolderMutation(tx, itemId, ownerUserId);
@@ -351,6 +357,7 @@ export async function executeIntendedSharesWithOutcome(
                     itemId,
                     folderId: current.folderId,
                     orgUserId,
+                    taskTargets,
                 });
                 if (problems.length > 0) {
                     return {
@@ -373,8 +380,9 @@ export async function executeIntendedSharesWithOutcome(
                     shared: true,
                     confirmationRequired: false,
                 };
-            }),
-        );
+            });
+        });
+        await taskTargetsChanged(taskTargets);
         if ("waitingForCut" in result && result.waitingForCut) {
             console.info(`[share] waiting item=${itemId} reason=cut`);
             return {
