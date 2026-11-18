@@ -219,31 +219,34 @@ export function FolderTasksPanel({
                         onReconciled={onReconciled}
                     />
                 )}
-                {error ? (
+                {error && (
                     <li className="space-y-2 p-4" role="alert">
                         <p>{i18n("Could not load your tasks")}</p>
                         <Button variant="outline" onClick={() => void reload()}>
                             {i18n("Try again")}
                         </Button>
                     </li>
-                ) : tasks === null ? (
+                )}
+                {tasks === null ? (
                     <li className="flex items-center gap-2 p-8 text-sm text-muted-foreground">
                         <Loader2 className="size-4 animate-spin" />
                         {i18n("Loading tasks…")}
                     </li>
                 ) : tasks.length === 0 ? (
-                    <li className="space-y-2 p-8 text-center text-sm text-muted-foreground">
-                        <p>{i18n("No tasks in this folder")}</p>
-                        {canAdd && !addOpen && (
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setAddOpen(true)}
-                            >
-                                {i18n("Add task")}
-                            </Button>
-                        )}
-                    </li>
+                    !error && (
+                        <li className="space-y-2 p-8 text-center text-sm text-muted-foreground">
+                            <p>{i18n("No tasks in this folder")}</p>
+                            {canAdd && !addOpen && (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setAddOpen(true)}
+                                >
+                                    {i18n("Add task")}
+                                </Button>
+                            )}
+                        </li>
+                    )
                 ) : (
                     ordered
                         .filter((entry) => groups.has(entry.id))

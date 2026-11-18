@@ -53,7 +53,10 @@ import { descendantFolderIds } from "@/lib/folders/hierarchy";
 import { privateTreeFolders } from "@/lib/folders/private-tree";
 import { nudge } from "@/lib/jobs/nudge";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
-import { recordingSharedCondition } from "@/lib/knowledge/org-people";
+import {
+    recordingSharedCondition,
+    visibleOwnerCondition,
+} from "@/lib/knowledge/org-people";
 import { assertOrgScopeWritable } from "@/lib/org/config";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { hasAudio } from "@/lib/recordings/audio-availability";
@@ -3293,18 +3296,26 @@ function addDays(day: string, days: number): string {
 /** A person a task is assigned to. */
 export type TaskAssignee = NonNullable<TaskView["assignee"]>;
 
-/** Distinct assignees of all the viewer's Tracked tasks, without a list limit. */
+/** Distinct assignees of the viewer's task tab and folder, without a list limit. */
 export async function listTrackedAssignees(
     viewer: TaskViewer,
     organization = false,
     tab: "followed" | "all" = "followed",
+    folderId?: string | null,
 ): Promise<TaskAssignee[]> {
+    const conditions = taskTabConditions(viewer, tab, organization);
+    if (folderId) {
+        conditions.push(
+            await taskFolderCondition(viewer, folderId, tab === "all"),
+            visibleOwnerCondition(people.userId, viewer.userId),
+        );
+    }
     const rows = await db
         .selectDistinct({ personId: people.id, name: people.displayName })
         .from(recordingTasks)
         .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
         .innerJoin(people, assigneeJoin())
-        .where(and(...taskTabConditions(viewer, tab, organization)));
+        .where(and(...conditions));
     return rows.map((row) => ({ ...row, name: decryptText(row.name) }));
 }
 

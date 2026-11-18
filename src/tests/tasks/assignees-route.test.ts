@@ -73,6 +73,7 @@ describe("task assignee routes", () => {
             viewer,
             false,
             "followed",
+            null,
         );
     });
 
@@ -104,12 +105,35 @@ describe("task assignee routes", () => {
         );
     });
 
-    it("loads All assignees without losing the authenticated viewer", async () => {
+    it.each([
+        "followed",
+        "all",
+    ] as const)("loads %s assignees for the requested folder", async (tab) => {
         const response = await getAssignees(
-            new Request("http://localhost/api/tasks/assignees?tab=all"),
+            new Request(
+                `http://localhost/api/tasks/assignees?tab=${tab}&folder=folder-1&state=done&due=week`,
+            ),
         );
         expect(response.status).toBe(200);
-        expect(listTrackedAssignees).toHaveBeenCalledWith(viewer, false, "all");
+        expect(listTrackedAssignees).toHaveBeenCalledWith(
+            viewer,
+            false,
+            tab,
+            "folder-1",
+        );
+    });
+
+    it("treats an empty folder like the tasks route does", async () => {
+        const response = await getAssignees(
+            new Request("http://localhost/api/tasks/assignees?tab=all&folder="),
+        );
+        expect(response.status).toBe(200);
+        expect(listTrackedAssignees).toHaveBeenCalledWith(
+            viewer,
+            false,
+            "all",
+            null,
+        );
     });
 
     it.each([

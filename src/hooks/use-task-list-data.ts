@@ -14,8 +14,10 @@ import { localToday } from "@/components/tasks/task-fields";
 import { useTaskMergeFailure } from "@/components/tasks/task-merge-feedback";
 import { useOrgEvents } from "@/hooks/use-org-events";
 import { useTaskFolderTree } from "@/hooks/use-task-folder-tree";
+import { tabEventOrigin } from "@/lib/events/tab-origin";
 import { descendantFolderIds } from "@/lib/folders/hierarchy";
 import { privateTreeFolders } from "@/lib/folders/private-tree";
+import { compareNamesBySurname } from "@/lib/people/name-order";
 import { taskFilterFolders } from "@/lib/tasks/folder-filter";
 import type {
     TaskAssignee,
@@ -27,6 +29,46 @@ import type {
 import type { RecordingFolder } from "@/types/folder";
 
 const ALL = "all";
+
+function retainChangedRows(
+    rows: TaskListItem[],
+    previous: TaskListItem[] | null,
+    changedIds: ReadonlySet<string>,
+    pendingIds: ReadonlySet<string>,
+    openRows: ReadonlyMap<string, TaskListItem>,
+): TaskListItem[] {
+    if (!previous || changedIds.size === 0) return rows;
+    const remaining = new Map(rows.map((row) => [row.id, row]));
+    const before = new Map<string, TaskListItem[]>();
+    let kept: TaskListItem[] = [];
+    let lastNeighbor: string | undefined;
+    for (const row of previous) {
+        if (changedIds.has(row.id)) {
+            let fresh = remaining.get(row.id);
+            const open = openRows.get(row.id);
+            if (open && (!fresh || open.version > fresh.version)) fresh = open;
+            kept.push(
+                fresh &&
+                    (fresh.version > row.version ||
+                        (fresh.version === row.version &&
+                            !pendingIds.has(row.id)))
+                    ? fresh
+                    : row,
+            );
+            remaining.delete(row.id);
+        } else if (remaining.has(row.id)) {
+            if (kept.length > 0) before.set(row.id, kept);
+            kept = [];
+            lastNeighbor = row.id;
+        }
+    }
+    const merged = [...remaining.values()].flatMap((row) => [
+        ...(before.get(row.id) ?? []),
+        row,
+        ...(row.id === lastNeighbor ? kept : []),
+    ]);
+    return lastNeighbor ? merged : [...kept, ...merged];
+}
 
 /** Shared task queries, optimistic inserts and serialized versioned mutations. */
 export function useTaskListData({
@@ -59,7 +101,7 @@ export function useTaskListData({
     const i18n = useExtracted();
     const locale = useLocale();
     const showMergeFailure = useTaskMergeFailure();
-    const [openCount, setOpenCount] = useState<number | null>(null);
+    const [openTaskIds, setOpenTaskIds] = useState<Set<string> | null>(null);
     const [error, setError] = useState(false);
     const folderScope = `${tab}:${allOrganization}`;
     const [taskFolders, setTaskFolders] = useState(new Map<string, string[]>());
@@ -85,14 +127,30 @@ export function useTaskListData({
                     descendantFolderIds(privateFolders, selectedPrivate.id).has(
                         task.folder.id,
                     ))));
-    const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
+    const [assignees, setAssignees] = useState<{
+        search: string;
+        options: TaskAssignee[];
+    } | null>(null);
     const assigneeNames = useRef(new Map<string, string>());
     const assigneeRequest = useRef(0);
-    const sortedAssignees = useMemo(
-        () =>
-            [...assignees].sort((a, b) => a.name.localeCompare(b.name, locale)),
-        [assignees, locale],
-    );
+    const assigneeSearch = useMemo(() => {
+        const params = new URLSearchParams();
+        if (tab === "all") params.set("tab", "all");
+        else if (allOrganization) params.set("organization", "true");
+        if (folder !== ALL) params.set("folder", folder);
+        return params.size ? `?${params}` : "";
+    }, [tab, allOrganization, folder]);
+    const sortedAssignees = useMemo(() => {
+        const compare = compareNamesBySurname(locale);
+        const options = assignees?.options ?? [];
+        return options
+            .filter(
+                (person) =>
+                    assignees?.search === assigneeSearch ||
+                    person.personId === assignee,
+            )
+            .sort((a, b) => compare(a.name, b.name));
+    }, [assignees, assigneeSearch, assignee, locale]);
     const query = useMemo(() => {
         const search = new URLSearchParams({ tab, state, sort });
         if (allOrganization) search.set("organization", "true");
@@ -115,15 +173,22 @@ export function useTaskListData({
         filterFolders,
     ]);
 
-    const currentQuery = useRef(query);
-    currentQuery.current = query;
+    const scope = useMemo(
+        () => ({ query, changedIds: new Set<string>() }),
+        [query],
+    );
+    const currentQuery = useRef(scope);
+    currentQuery.current = scope;
+    const loadedQuery = useRef(scope);
+    const versions = useRef(new Map<string, number>());
+    const pending = useRef(new Map<string, Promise<void>>());
 
     const loadAssignees = useCallback(async () => {
         if (tab === "mine") return;
         const request = ++assigneeRequest.current;
         try {
             const response = await fetch(
-                `/api/tasks/assignees${tab === "all" ? "?tab=all" : allOrganization ? "?organization=true" : ""}`,
+                `/api/tasks/assignees${assigneeSearch}`,
             );
             if (!response.ok) throw new Error();
             const body = (await response.json()) as {
@@ -157,22 +222,26 @@ export function useTaskListData({
                 });
             }
             if (request === assigneeRequest.current)
-                setAssignees(body.assignees);
+                setAssignees({
+                    search: assigneeSearch,
+                    options: body.assignees,
+                });
         } catch {
             return;
         }
-    }, [tab, assignee, i18n, allOrganization]);
+    }, [tab, assignee, i18n, assigneeSearch]);
 
     useEffect(() => {
+        void revision;
         void loadAssignees();
         return () => {
             assigneeRequest.current++;
         };
-    }, [loadAssignees]);
+    }, [loadAssignees, revision]);
 
     const load = useCallback(
         async (options?: { preserveOwnInserts?: boolean }) => {
-            if (query !== currentQuery.current) return;
+            if (scope !== currentQuery.current) return;
             const request = ++loadRequest.current;
             setError(false);
             const reconciled = options?.preserveOwnInserts
@@ -206,23 +275,62 @@ export function useTaskListData({
                 };
                 const openBody = openResponse
                     ? ((await openResponse.json()) as { tasks: TaskListItem[] })
-                    : body;
+                    : null;
                 if (
-                    query !== currentQuery.current ||
+                    scope !== currentQuery.current ||
                     request !== loadRequest.current
                 )
                     return;
                 for (const id of reconciled) ownInserts.current.delete(id);
-                const inserts = insertedRows();
+                const changedIds = new Set(scope.changedIds);
+                const pendingIds = new Set(pending.current.keys());
+                const inserts = insertedRows().filter(
+                    (row) => !changedIds.has(row.id),
+                );
                 const insertedIds = new Set(inserts.map((task) => task.id));
                 const rows = [
                     ...inserts,
                     ...body.tasks.filter((task) => !insertedIds.has(task.id)),
                 ];
-                versions.current = new Map(
-                    rows.map((task) => [task.id, task.version]),
+                const openRows = new Map(
+                    openBody?.tasks
+                        .filter((row) => row.status === "open")
+                        .map((row) => [row.id, row]),
                 );
-                setTasks(rows);
+                const nextVersions = new Map(
+                    [...versions.current].filter(
+                        ([id]) => changedIds.has(id) || pendingIds.has(id),
+                    ),
+                );
+                for (const row of rows) {
+                    nextVersions.set(
+                        row.id,
+                        Math.max(
+                            row.version,
+                            nextVersions.get(row.id) ?? row.version,
+                        ),
+                    );
+                }
+                for (const row of openRows.values()) {
+                    if (!changedIds.has(row.id)) continue;
+                    nextVersions.set(
+                        row.id,
+                        Math.max(
+                            row.version,
+                            nextVersions.get(row.id) ?? row.version,
+                        ),
+                    );
+                }
+                versions.current = nextVersions;
+                setTasks((previous) =>
+                    retainChangedRows(
+                        rows,
+                        previous,
+                        changedIds,
+                        pendingIds,
+                        openRows,
+                    ),
+                );
                 if (needsFolders) {
                     folderCache.current = new Map(folderCache.current).set(
                         folderScope,
@@ -230,33 +338,33 @@ export function useTaskListData({
                     );
                     setTaskFolders(folderCache.current);
                 }
-                setOpenCount(
-                    openBody.tasks.filter((task) => task.status === "open")
-                        .length,
-                );
+                setOpenTaskIds(openBody ? new Set(openRows.keys()) : null);
             } catch {
                 if (
-                    query !== currentQuery.current ||
+                    scope !== currentQuery.current ||
                     request !== loadRequest.current
                 )
                     return;
                 setError(true);
-                setTasks(insertedRows());
+                setTasks((current) => current ?? insertedRows());
                 toast.error(i18n("Could not load your tasks"));
             }
         },
-        [query, i18n, state, countOpen, filterFolders, folderScope],
+        [query, scope, i18n, state, countOpen, filterFolders, folderScope],
     );
 
     useEffect(() => {
         void revision;
-        setTasks(null);
-        setOpenCount(null);
+        if (loadedQuery.current !== scope) {
+            loadedQuery.current = scope;
+            setTasks(null);
+            setOpenTaskIds(null);
+        }
         void load();
         return () => {
             loadRequest.current++;
         };
-    }, [load, revision]);
+    }, [load, revision, scope]);
 
     useEffect(() => {
         if (!markSeen) return;
@@ -267,56 +375,79 @@ export function useTaskListData({
 
     const reload = useCallback(
         (options?: { preserveOwnInserts?: boolean }) => {
-            if (query !== currentQuery.current) return Promise.resolve([]);
+            if (scope !== currentQuery.current) return Promise.resolve([]);
             folderCache.current = new Map();
             setTaskFolders(folderCache.current);
             return Promise.all([load(options), loadAssignees()]);
         },
-        [query, load, loadAssignees],
+        [scope, load, loadAssignees],
     );
     const latestReload = useRef(reload);
     latestReload.current = reload;
 
-    useOrgEvents(true, () => void reload());
-
-    const versions = useRef(new Map<string, number>());
-    const pending = useRef(new Map<string, Promise<void>>());
+    useOrgEvents(true, (event) => {
+        if (event.type === "recording" && event.origin === tabEventOrigin())
+            return;
+        void reload();
+    });
 
     const update = (
         task: TaskListItem,
         change: Omit<TaskChange, "version">,
         optimistic: Partial<TaskView>,
     ) => {
+        const changedStatus =
+            change.status !== undefined && change.status !== task.status;
+        if (changedStatus) scope.changedIds.add(task.id);
         setTasks(
             (current) =>
                 current
                     ?.map((row) =>
                         row.id === task.id ? { ...row, ...optimistic } : row,
                     )
-                    .filter(ownMatchesFolder) ?? null,
+                    .filter(
+                        (row) =>
+                            scope.changedIds.has(row.id) ||
+                            ownMatchesFolder(row),
+                    ) ?? null,
         );
         const run = (pending.current.get(task.id) ?? Promise.resolve())
             .then(async () => {
+                if (changedStatus) scope.changedIds.add(task.id);
                 const saved = await changeTask(task.id, {
                     ...change,
                     version: versions.current.get(task.id) ?? task.version,
                 });
-                versions.current.set(task.id, saved.version);
-                if (pending.current.get(task.id) === run) {
+                versions.current.set(
+                    task.id,
+                    Math.max(
+                        saved.version,
+                        versions.current.get(task.id) ?? saved.version,
+                    ),
+                );
+                if (
+                    pending.current.get(task.id) === run &&
+                    (!changedStatus || scope === currentQuery.current)
+                ) {
                     setTasks(
                         (current) =>
                             current?.map((row) =>
-                                row.id === task.id ? { ...row, ...saved } : row,
+                                row.id === task.id &&
+                                saved.version >= row.version
+                                    ? { ...row, ...saved }
+                                    : row,
                             ) ?? null,
                     );
                 }
                 if (
                     change.assigneePersonId !== undefined ||
-                    change.folderId !== undefined
+                    change.folderId !== undefined ||
+                    (changedStatus && scope !== currentQuery.current)
                 )
                     await latestReload.current();
             })
             .catch(async (error: unknown) => {
+                scope.changedIds.delete(task.id);
                 toast.error(
                     error instanceof TaskRequestError && error.conflict
                         ? i18n("Someone changed this meanwhile. Reloaded.")
@@ -350,11 +481,12 @@ export function useTaskListData({
                 targetTaskId,
                 options,
             );
+            currentQuery.current.changedIds.delete(task.id);
             announceTasksChanged();
             await latestReload.current();
             return { ownerNotified: result.mergeOwnerNotified };
         } catch (error) {
-            if (query === currentQuery.current) setTasks(snapshot);
+            if (scope === currentQuery.current) setTasks(snapshot);
             else await latestReload.current();
             showMergeFailure(error);
             return false;
@@ -377,7 +509,7 @@ export function useTaskListData({
                 (row) => row.id !== temporaryId && row.id !== task?.id,
             );
             return task &&
-                entry?.query === currentQuery.current &&
+                entry?.query === currentQuery.current.query &&
                 ownMatchesFolder(task)
                 ? [task, ...remaining]
                 : remaining;
@@ -397,13 +529,23 @@ export function useTaskListData({
         );
     };
 
+    let openCount =
+        tasks?.filter((row) => row.status === "open").length ?? null;
+    if (state !== "open" && state !== "all") {
+        const ids = openTaskIds && new Set(openTaskIds);
+        if (ids) {
+            for (const row of tasks ?? []) {
+                if (!scope.changedIds.has(row.id)) continue;
+                if (row.status === "open") ids.add(row.id);
+                else ids.delete(row.id);
+            }
+        }
+        openCount = ids?.size ?? null;
+    }
+
     return {
         tasks,
-        openCount:
-            state === "open" || state === "all"
-                ? (tasks?.filter((task) => task.status === "open").length ??
-                  null)
-                : openCount,
+        openCount,
         error,
         reload,
         update,

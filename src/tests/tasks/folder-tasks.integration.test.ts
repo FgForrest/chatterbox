@@ -344,4 +344,77 @@ describe.skipIf(!url)("folder tasks across all visible sources", () => {
             ["own", "own-child", "task-owned", "task-shared-owned"].sort(),
         );
     });
+
+    it("lists readable assignees in the selected subtree across accepted task states", async () => {
+        const fixtures = [
+            ["folder-person", "viewer", "Jitka Dvořáková", "owned"],
+            ["sibling-person", "viewer", "Petr Bureš", "sibling-item"],
+            ["team-person", "org", "Adam Zelený", "shared-other", "other"],
+            ["private-person", "other", "Radka Cibulková", "received"],
+            ["hidden-person", "other", "Iva Čermáková", "hidden"],
+        ] as const;
+        await database.db.insert(people).values(
+            fixtures.map(([id, userId, name]) => ({
+                id,
+                userId,
+                displayName: encryptText(name),
+            })),
+        );
+        await database.db.insert(recordingTasks).values(
+            fixtures.map(
+                ([personId, personOwner, , itemId, userId = personOwner]) => ({
+                    itemId,
+                    userId,
+                    text: encryptText("A completed task"),
+                    status: "done" as const,
+                    source: "manual" as const,
+                    assigneePersonId: personId,
+                }),
+            ),
+        );
+        const childAssignee = { personId: "assignee", name: "Lada Cloudfern" };
+        for (const tab of ["followed", "all"] as const) {
+            const assignees = await listTrackedAssignees(
+                viewer(),
+                false,
+                tab,
+                "folder",
+            );
+            expect(assignees).toHaveLength(2);
+            expect(assignees).toEqual(
+                expect.arrayContaining([
+                    childAssignee,
+                    { personId: "folder-person", name: "Jitka Dvořáková" },
+                ]),
+            );
+            expect(
+                await listTrackedAssignees(viewer(), false, tab, "child"),
+            ).toEqual([childAssignee]);
+            expect(
+                await listTrackedAssignees(viewer(), false, tab, "sibling"),
+            ).toEqual([{ personId: "sibling-person", name: "Petr Bureš" }]);
+            expect(
+                await listTrackedAssignees(
+                    viewer(),
+                    false,
+                    tab,
+                    "other-private",
+                ),
+            ).toEqual([]);
+        }
+        expect(
+            await listTrackedAssignees(viewer(), false, "followed", "team"),
+        ).toEqual([childAssignee]);
+        const team = await listTrackedAssignees(viewer(), false, "all", "team");
+        expect(team).toHaveLength(2);
+        expect(team).toEqual(
+            expect.arrayContaining([
+                childAssignee,
+                { personId: "team-person", name: "Adam Zelený" },
+            ]),
+        );
+        const ownRows = (await list("all", "folder")).filter((row) => row.own);
+        expect(ids(ownRows)).toEqual(["own", "own-child"]);
+        expect(ownRows.every((row) => row.assignee === null)).toBe(true);
+    });
 });
