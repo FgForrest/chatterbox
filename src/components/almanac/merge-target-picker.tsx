@@ -4,6 +4,7 @@ import { Command } from "cmdk";
 import { Check } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useMemo } from "react";
+import { PeopleSearchList } from "@/components/people/people-search-list";
 import {
     type DuplicateRecord,
     scoreDuplicate,
@@ -20,6 +21,7 @@ interface MergeTarget {
     heardAs?: string[];
     typeKey?: string;
     duplicateScore?: number;
+    self?: boolean;
 }
 
 function searchKey(value: string): string {
@@ -81,6 +83,56 @@ export function MergeTargetPicker({
                 return a.index - b.index;
             });
     }, [candidates, source]);
+    const badge = (candidate: MergeTarget) =>
+        (candidate.scope || candidate.badge) && (
+            <span
+                className={
+                    candidate.scope === "org" && !candidate.badge
+                        ? "shrink-0 rounded-full border border-organization/20 bg-organization/5 px-1.5 py-0.5 text-[10px] leading-none text-organization"
+                        : "shrink-0 rounded-full border border-primary/20 bg-primary/5 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground"
+                }
+            >
+                {candidate.badge ??
+                    (candidate.scope === "org"
+                        ? i18n("Organization")
+                        : i18n("Private"))}
+            </span>
+        );
+
+    if (source?.kind === "person") {
+        const likelyMatchIds = ranked
+            .filter(({ score }) => score >= 0.6)
+            .map(({ candidate }) => candidate.id);
+        const likelyMatches = new Set(likelyMatchIds);
+        return (
+            <PeopleSearchList
+                framed
+                label={i18n("Merge target")}
+                placeholder={i18n("Search by name or email")}
+                people={candidates}
+                excludedIds={[source.id]}
+                selection={{
+                    id: value,
+                    onSelect: (person) => onChange(person.id),
+                }}
+                context={{
+                    ids: likelyMatchIds,
+                    heading: i18n("Likely matches"),
+                }}
+                personDetail={(person) => (
+                    <>
+                        {likelyMatches.has(person.id) && (
+                            <span className="text-xs text-muted-foreground">
+                                {i18n("Likely match")}
+                            </span>
+                        )}
+                        {badge(person)}
+                    </>
+                )}
+                onQueryChange={() => onChange("")}
+            />
+        );
+    }
     return (
         <Command
             label={i18n("Merge target")}
@@ -131,21 +183,7 @@ export function MergeTargetPicker({
                                 </span>
                             )}
                         </span>
-                        {(candidate.scope || candidate.badge) && (
-                            <span
-                                className={
-                                    candidate.scope === "org" &&
-                                    !candidate.badge
-                                        ? "shrink-0 rounded-full border border-organization/20 bg-organization/5 px-1.5 py-0.5 text-[10px] leading-none text-organization"
-                                        : "shrink-0 rounded-full border border-primary/20 bg-primary/5 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground"
-                                }
-                            >
-                                {candidate.badge ??
-                                    (candidate.scope === "org"
-                                        ? i18n("Organization")
-                                        : i18n("Private"))}
-                            </span>
-                        )}
+                        {badge(candidate)}
                         <Check
                             aria-hidden="true"
                             className={`size-4 shrink-0 text-primary ${value === candidate.id ? "opacity-100" : "opacity-0"}`}

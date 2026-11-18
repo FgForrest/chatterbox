@@ -25,6 +25,7 @@ import type {
 } from "@/lib/tasks/tasks";
 
 vi.mock("next-intl", () => ({
+    useLocale: () => "en",
     useExtracted: () => (text: string, values?: Record<string, unknown>) =>
         text.replace(/\{(\w+)\}/g, (_match, key: string) =>
             String(values?.[key] ?? ""),
@@ -633,7 +634,7 @@ describe("task review rows", () => {
         expect(screen.queryByRole("checkbox", { name: "Done" })).toBeNull();
         expect(screen.getByRole("img", { name: "Open" })).toBeTruthy();
         expect(
-            screen.getByRole("button", { name: "Assigned to Ada" }),
+            screen.getByRole("combobox", { name: "Assigned to Ada" }),
         ).toHaveProperty("disabled", true);
         expect(screen.queryByRole("textbox", { name: "Task" })).toBeNull();
         expect(screen.queryByLabelText("Due date")).toBeNull();
@@ -670,8 +671,8 @@ describe("task review rows", () => {
             true,
         );
 
-        fireEvent.pointerDown(
-            screen.getByRole("button", { name: "Assigned to Nobody" }),
+        fireEvent.click(
+            screen.getByRole("combobox", { name: "Assigned to Nobody" }),
         );
 
         expect(await screen.findByText("Organization Olivia")).toBeTruthy();

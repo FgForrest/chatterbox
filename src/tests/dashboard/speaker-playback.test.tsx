@@ -154,6 +154,79 @@ describe("speaker playback navigation", () => {
         vi.unstubAllGlobals();
     });
 
+    it.each([
+        { query: "Vít Šedý", choice: { personId: "p2" }, navigate: false },
+        { query: "Vít", choice: { displayName: "Vít" }, navigate: false },
+        { query: "Vít", choice: { personId: "p2" }, navigate: true },
+    ])("names a transcript speaker with Enter ($query, navigate=$navigate)", async ({
+        query,
+        choice,
+        navigate,
+    }) => {
+        const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+            if (url === "/api/people") {
+                return Response.json({
+                    people: [
+                        { id: "p2", displayName: "Vít Šedý" },
+                        { id: "p3", displayName: "Vít Šedý Zimní" },
+                    ],
+                });
+            }
+            if (url.includes("/speakers")) {
+                return Response.json({
+                    transcriptionId: "tx-1",
+                    revision: 1,
+                    speakers:
+                        init?.method === "PUT"
+                            ? [
+                                  {
+                                      label: "speaker_0",
+                                      personId: "p2",
+                                      personName: query,
+                                  },
+                              ]
+                            : [],
+                });
+            }
+            return Response.json({ topics: null });
+        });
+        vi.stubGlobal("fetch", fetchMock);
+        render(
+            <TranscriptionPanel
+                recording={recording}
+                transcripts={[
+                    {
+                        source: "riffado",
+                        text: "speaker_0: First.\nspeaker_1: Reply.\nspeaker_0: Again.",
+                        turns,
+                        version: { transcriptionId: "tx-1", revision: 1 },
+                    },
+                ]}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+            />,
+        );
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Speaker 0" }),
+        );
+        const search = await screen.findByRole("combobox", {
+            name: "Who is Speaker 0?",
+        });
+        await screen.findByRole("option", { name: "Vít Šedý" });
+        fireEvent.change(search, { target: { value: query } });
+        if (navigate) fireEvent.keyDown(search, { key: "ArrowDown" });
+        fireEvent.keyDown(search, { key: "Enter" });
+        await waitFor(() =>
+            expect(
+                fetchMock.mock.calls
+                    .filter(([, init]) => init?.method === "PUT")
+                    .map(([, init]) => JSON.parse(String(init?.body))),
+            ).toEqual([
+                expect.objectContaining({ label: "speaker_0", ...choice }),
+            ]),
+        );
+    });
+
     it("plays and scrolls through one speaker, then starts another at their first turn", async () => {
         const onPlayFromTurn = vi.fn();
         render(

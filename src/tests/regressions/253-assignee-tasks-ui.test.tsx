@@ -912,7 +912,7 @@ describe("#253 task desk UI", () => {
         await screen.findByText("Only you");
         expect(
             Boolean(
-                screen.queryByRole("button", { name: "Assigned to {name}" }),
+                screen.queryByRole("combobox", { name: "Assigned to {name}" }),
             ),
         ).toBe(tab === "followed" || canEdit);
     });

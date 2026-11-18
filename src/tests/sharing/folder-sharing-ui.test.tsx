@@ -326,7 +326,7 @@ describe("folder person sharing UI", () => {
                 ),
             ).toBeTruthy();
             expect(
-                view.getByRole("searchbox", {
+                view.getByRole("combobox", {
                     name: "Colleague's name or email",
                 }),
             ).toHaveProperty("disabled", true);
@@ -377,14 +377,15 @@ describe("folder person sharing UI", () => {
                 },
             );
             const view = await renderVariant();
-            const search = view.getByRole("searchbox", {
+            const search = view.getByRole("combobox", {
                 name: "Colleague's name or email",
             });
             await waitFor(() =>
                 expect(search).toHaveProperty("disabled", false),
             );
             fireEvent.change(search, { target: { value: "Jitka" } });
-            fireEvent.click(await view.findByRole("button", { name: "Add" }));
+            fireEvent.click(await view.findByRole("option", { name: /Jitka/ }));
+            fireEvent.click(view.getByRole("button", { name: "Add" }));
             await waitFor(() => {
                 expect(
                     screen.getAllByText(

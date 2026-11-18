@@ -13,6 +13,7 @@ import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FolderTasksPanel } from "@/components/tasks/folder-tasks-panel";
 import type { TaskRow as TaskRowComponent } from "@/components/tasks/task-row";
+import type { OrgClientEvent } from "@/lib/events/types";
 import type { TaskListItem } from "@/lib/tasks/tasks";
 import type {
     FolderOrganization,
@@ -38,14 +39,17 @@ const { translate, rowProps, orgEvent } = vi.hoisted(() => ({
                 String(values?.[key] ?? match),
             ),
     rowProps: new Map<string, ComponentProps<typeof TaskRowComponent>>(),
-    orgEvent: { current: null as (() => void) | null },
+    orgEvent: { current: null as ((event: OrgClientEvent) => void) | null },
 }));
 vi.mock("next-intl", () => ({
     useExtracted: () => translate,
     useLocale: () => "en",
 }));
 vi.mock("@/hooks/use-org-events", () => ({
-    useOrgEvents: (enabled: boolean, callback: () => void) => {
+    useOrgEvents: (
+        enabled: boolean,
+        callback: (event: OrgClientEvent) => void,
+    ) => {
         if (enabled) orgEvent.current = callback;
     },
 }));
@@ -359,7 +363,9 @@ describe("folder tasks panel", () => {
         expect(fetchMock).toHaveBeenCalledWith(
             "/api/tasks?tab=all&state=open&sort=created&folder=projects",
         );
-        expect(fetchMock).toHaveBeenCalledWith("/api/tasks/assignees?tab=all");
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/tasks/assignees?tab=all&folder=projects",
+        );
         expect(
             screen
                 .getByRole("button", { name: "All" })
@@ -584,9 +590,11 @@ describe("folder tasks panel", () => {
         );
         fetchMock.mockClear();
         await act(async () => rowProps.get("own")?.onFollow?.());
-        expect(fetchMock).toHaveBeenCalledWith("/api/tasks/assignees?tab=all");
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/tasks/assignees?tab=all&folder=projects",
+        );
         fetchMock.mockClear();
-        await act(async () => orgEvent.current?.());
+        await act(async () => orgEvent.current?.({ type: "tree" }));
         expect(fetchMock).toHaveBeenCalledWith(
             "/api/tasks?tab=all&state=open&sort=created&folder=projects",
         );
@@ -613,7 +621,7 @@ describe("folder tasks panel", () => {
                 ? new Response(null, { status: 500 })
                 : Response.json({ assignees: [] }),
         );
-        await act(async () => orgEvent.current?.());
+        await act(async () => orgEvent.current?.({ type: "tree" }));
         expect(screen.getByRole("alert").textContent).toContain(
             "Could not load your tasks",
         );

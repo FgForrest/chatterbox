@@ -2,18 +2,20 @@
 
 import { X } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { HelpLink } from "@/components/help/help-button";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import {
+    type AudiencePerson,
+    ColleagueSearchList,
+} from "./colleague-search-list";
 import { useRestrictedFolders } from "./restricted-folder-context";
 
-export interface AudiencePerson {
-    id: string;
-    name: string | null;
-    email: string;
+export type { AudiencePerson } from "./colleague-search-list";
+
+function reportSearchError(error: unknown) {
+    toast.error(String(error));
 }
 
 /** The colleague search and selected audience used by creation and restriction. */
@@ -32,34 +34,7 @@ export function RestrictedAudiencePicker({
 }) {
     const i18n = useExtracted();
     const [query, setQuery] = useState("");
-    const [people, setPeople] = useState<AudiencePerson[]>([]);
-    const searchError = i18n("Could not find colleagues");
-    useEffect(() => {
-        if (query.trim().length < 2 || disabled) {
-            setPeople([]);
-            return;
-        }
-        const abort = new AbortController();
-        const timer = setTimeout(() => {
-            void fetch(`/api/shares/people?q=${encodeURIComponent(query)}`, {
-                signal: abort.signal,
-            })
-                .then(async (response) => {
-                    if (!response.ok) throw new Error(searchError);
-                    return response.json() as Promise<{
-                        people: AudiencePerson[];
-                    }>;
-                })
-                .then((data) => setPeople(data.people))
-                .catch((error) => {
-                    if (!abort.signal.aborted) toast.error(String(error));
-                });
-        }, 250);
-        return () => {
-            abort.abort();
-            clearTimeout(timer);
-        };
-    }, [query, disabled, searchError]);
+    const searchDisabled = disabled || selected.length >= 20;
     return (
         <div className="flex flex-col gap-2">
             <div className="flex flex-wrap gap-2">
@@ -96,37 +71,24 @@ export function RestrictedAudiencePicker({
                     </span>
                 ))}
             </div>
-            <Input
-                type="search"
-                value={query}
-                disabled={disabled || selected.length >= 20}
-                onChange={(event) => setQuery(event.target.value)}
-                aria-label={i18n("Colleague's name or email")}
-                placeholder={i18n("Colleague's name or email")}
+            <ColleagueSearchList
+                enabled={!searchDisabled}
+                disabled={searchDisabled}
+                query={query}
+                onQueryChange={setQuery}
+                onError={reportSearchError}
+                excludedIds={[
+                    ...excludedUserIds,
+                    ...fixed.map((person) => person.id),
+                    ...selected.map((person) => person.id),
+                ]}
+                selection={{
+                    onSelect: (person) => {
+                        onChange([...selected, person]);
+                        setQuery("");
+                    },
+                }}
             />
-            {people
-                .filter(
-                    (person) =>
-                        !excludedUserIds.includes(person.id) &&
-                        ![...fixed, ...selected].some(
-                            (entry) => entry.id === person.id,
-                        ),
-                )
-                .map((person) => (
-                    <Button
-                        key={person.id}
-                        variant="ghost"
-                        className="justify-start"
-                        type="button"
-                        disabled={disabled || selected.length >= 20}
-                        onClick={() => {
-                            onChange([...selected, person]);
-                            setQuery("");
-                        }}
-                    >
-                        {person.name ?? person.email}
-                    </Button>
-                ))}
             <p className="text-xs text-muted-foreground">
                 {i18n("Curators always see restricted folders.")}
             </p>

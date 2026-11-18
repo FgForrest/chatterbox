@@ -347,6 +347,38 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
             expect(response.status).toBe(404);
         });
 
+        it("marks only the viewer's primary-email matches as self in the list", async () => {
+            const email = `${ALICE.toUpperCase()}@EXAMPLE.TEST`;
+            const personalSelf = await person(ALICE, "Ema Zelená", { email });
+            const orgSelf = await person(orgUserId, "Emma Zelená", { email });
+            const contact = await person(ALICE, "Vít Šípek");
+            await person(BOB, "Jitka Bílá", { email });
+
+            const response = await call(listPeopleRoute, ALICE, "/api/people");
+            expect(response.status).toBe(200);
+            const body = (await response.json()) as {
+                people: { id: string; self: boolean }[];
+            };
+            expect(body.people.map(({ id, self }) => ({ id, self }))).toEqual(
+                expect.arrayContaining([
+                    { id: personalSelf, self: true },
+                    { id: orgSelf, self: true },
+                    { id: contact, self: false },
+                ]),
+            );
+            expect(body.people).toHaveLength(3);
+
+            const detail = await call(
+                getPersonRoute,
+                ALICE,
+                `/api/people/${orgSelf}`,
+                { params: { id: orgSelf } },
+            );
+            expect(await detail.json()).toMatchObject({
+                person: { id: orgSelf, self: true },
+            });
+        });
+
         it("hides tombstones from the list", async () => {
             const keep = await person(ALICE, "Jana");
             const lose = await person(ALICE, "J.");

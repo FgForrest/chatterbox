@@ -8,6 +8,7 @@ import {
     listPeople,
     MAX_DISPLAY_NAME_LENGTH,
 } from "@/lib/knowledge/people";
+import { isOwnPerson } from "@/lib/knowledge/person-self";
 import { assertOwnScopeWritable, isOrgAccount } from "@/lib/org/config";
 
 const MAX_EMAIL_LENGTH = 320;
@@ -16,7 +17,13 @@ const MAX_NOTES_LENGTH = 4000;
 export const GET = apiHandler(async (request: Request) => {
     const session = await requireApiSession(request);
 
-    return NextResponse.json({ people: await listPeople(session.user.id) });
+    const people = await listPeople(session.user.id);
+    return NextResponse.json({
+        people: people.map((person) => ({
+            ...person,
+            self: isOwnPerson(person.primaryEmail, session.user.email),
+        })),
+    });
 });
 
 export const POST = apiHandler(async (request: Request) => {

@@ -19,6 +19,7 @@ import type {
 } from "@/lib/tasks/tasks";
 
 vi.mock("next-intl", () => ({
+    useLocale: () => "en",
     useExtracted: () => (text: string, values?: Record<string, unknown>) =>
         text.replace(/\{(\w+)\}/g, (_match, key: string) =>
             String(values?.[key] ?? ""),
@@ -115,12 +116,10 @@ it("shows who is this beside the heard name and lets the owner choose a person",
         />,
     );
     expect(screen.getByText("who is this?")).toBeTruthy();
-    const picker = screen.getByRole("button", { name: "Assigned to Zava" });
+    const picker = screen.getByRole("combobox", { name: "Assigned to Zava" });
     expect(picker.textContent).toContain("Zava");
     fireEvent.keyDown(picker, { key: "ArrowDown" });
-    fireEvent.click(
-        await screen.findByRole("menuitem", { name: /Zava Noren/ }),
-    );
+    fireEvent.click(await screen.findByRole("option", { name: /Zava Noren/ }));
     await waitFor(() => expect(document.activeElement).toBe(picker));
     expect(onChange).toHaveBeenCalledWith(
         { assigneePersonId: "zava-full" },

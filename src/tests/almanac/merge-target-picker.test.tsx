@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EntityActions } from "@/components/almanac/entity-actions";
+import { MergeTargetPicker } from "@/components/almanac/merge-target-picker";
 import { PersonActions } from "@/components/people/person-actions";
 import { VocabularyList } from "@/components/people/vocabulary-list";
 
@@ -172,19 +173,19 @@ describe.each([
         fireEvent.keyDown(search, { key: "ArrowDown" });
         fireEvent.keyDown(search, { key: "Enter" });
         await waitFor(() => expect(merge.disabled).toBe(false));
-        expect(
-            screen
-                .getByText("Selected")
-                .closest('[role="option"]')
-                ?.getAttribute("data-value"),
-        ).toBe("second");
+        const selected = () =>
+            mode === "person"
+                ? screen
+                      .getAllByRole("option")
+                      .find(
+                          (option) =>
+                              option.getAttribute("aria-checked") === "true",
+                      )
+                : screen.getByText("Selected").closest('[role="option"]');
+        const prefix = mode === "person" ? "person:" : "";
+        expect(selected()?.getAttribute("data-value")).toBe(`${prefix}second`);
         fireEvent.click(screen.getAllByRole("option", { name: /Šimon/ })[0]);
-        expect(
-            screen
-                .getByText("Selected")
-                .closest('[role="option"]')
-                ?.getAttribute("data-value"),
-        ).toBe("first");
+        expect(selected()?.getAttribute("data-value")).toBe(`${prefix}first`);
         fireEvent.change(search, { target: { value: "no-such-candidate" } });
         await screen.findByText("No matches.");
         expect(screen.queryAllByRole("option")).toHaveLength(0);
@@ -201,4 +202,33 @@ it("searches people by email and shows both scope marks", async () => {
     expect(screen.getByRole("option").textContent).toContain(
         "second@example.test",
     );
+});
+
+it("keeps match order and badges with linear candidate ID lookups", () => {
+    const readId = vi.fn((index: number) => `candidate-${index}`);
+    const candidates = Array.from({ length: 40 }, (_, index) => ({
+        get id() {
+            return readId(index);
+        },
+        name: `Colleague ${index}`,
+        duplicateScore: 0.6 + index / 100,
+    }));
+    const picker = (size: number) => (
+        <MergeTargetPicker
+            candidates={candidates.slice(0, size)}
+            value=""
+            onChange={vi.fn()}
+            source={{ id: "source", name: "Source", kind: "person" }}
+        />
+    );
+    const smaller = render(picker(20));
+    const smallerReads = readId.mock.calls.length;
+    smaller.unmount();
+    readId.mockClear();
+    render(picker(40));
+    const options = screen.getAllByRole("option");
+    expect(options[0].textContent).toContain("Colleague 39");
+    expect(options.at(-1)?.textContent).toContain("Colleague 0");
+    expect(screen.getAllByText("Likely match")).toHaveLength(40);
+    expect(readId.mock.calls.length).toBeLessThanOrEqual(smallerReads * 2.25);
 });

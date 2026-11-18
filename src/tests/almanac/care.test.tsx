@@ -643,7 +643,7 @@ describe("Almanac curator care", () => {
             translated,
         );
     });
-    it("ranks likely matches before the original unrelated order", async () => {
+    it("groups likely matches before unrelated people", async () => {
         render(
             <MergeTargetPicker
                 source={{ id: "source", name: "Ondra Kalous", kind: "person" }}
