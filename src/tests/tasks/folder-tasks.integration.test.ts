@@ -8,6 +8,7 @@ import {
     recordingFolderAssignments,
     recordingFolders,
     recordingTasks,
+    taskFollowers,
     users,
 } from "@/db/schema";
 import { encryptText } from "@/lib/encryption/fields";
@@ -351,6 +352,7 @@ describe.skipIf(!url)("folder tasks across all visible sources", () => {
             ["sibling-person", "viewer", "Petr Bureš", "sibling-item"],
             ["team-person", "org", "Adam Zelený", "shared-other", "other"],
             ["private-person", "other", "Radka Cibulková", "received"],
+            ["received-org-person", "org", "Marek Dub", "received", "other"],
             ["hidden-person", "other", "Iva Čermáková", "hidden"],
         ] as const;
         await database.db.insert(people).values(
@@ -360,18 +362,51 @@ describe.skipIf(!url)("folder tasks across all visible sources", () => {
                 displayName: encryptText(name),
             })),
         );
-        await database.db.insert(recordingTasks).values(
-            fixtures.map(
-                ([personId, personOwner, , itemId, userId = personOwner]) => ({
-                    itemId,
-                    userId,
-                    text: encryptText("A completed task"),
-                    status: "done" as const,
-                    source: "manual" as const,
-                    assigneePersonId: personId,
-                }),
-            ),
-        );
+        const added = await database.db
+            .insert(recordingTasks)
+            .values(
+                fixtures.map(
+                    ([
+                        personId,
+                        personOwner,
+                        ,
+                        itemId,
+                        userId = personOwner,
+                    ]) => ({
+                        itemId,
+                        userId,
+                        text: encryptText("A completed task"),
+                        status: "done" as const,
+                        source: "manual" as const,
+                        assigneePersonId: personId,
+                    }),
+                ),
+            )
+            .returning({
+                id: recordingTasks.id,
+                itemId: recordingTasks.itemId,
+            });
+        const [receivedWithSharedAssignee] = await database.db
+            .insert(recordingTasks)
+            .values({
+                itemId: "received",
+                userId: "other",
+                text: encryptText("A received task with a shared assignee"),
+                status: "done",
+                source: "manual",
+                assigneePersonId: "assignee",
+            })
+            .returning({
+                id: recordingTasks.id,
+                itemId: recordingTasks.itemId,
+            });
+        await database.db
+            .insert(taskFollowers)
+            .values(
+                [...added, receivedWithSharedAssignee]
+                    .filter((task) => task.itemId === "received")
+                    .map(({ id }) => ({ taskId: id, userId: "viewer" })),
+            );
         const childAssignee = {
             personId: "assignee",
             name: "Lada Cloudfern",
@@ -384,7 +419,34 @@ describe.skipIf(!url)("folder tasks across all visible sources", () => {
                 tab,
                 "folder",
             );
-            expect(assignees).toHaveLength(2);
+            expect.soft(assignees).toHaveLength(2);
+            const unscopedIds = (
+                await listTrackedAssignees(viewer(), false, tab)
+            ).map(({ personId }) => personId);
+            expect.soft(unscopedIds).not.toContain("private-person");
+            expect.soft(unscopedIds).not.toContain("received-org-person");
+            const rows = await listTasks(viewer(), {
+                tab,
+                folderId: "folder",
+                state: "done",
+                sort: "created",
+                due: null,
+                today: null,
+            });
+            expect(
+                rows
+                    .filter(
+                        ({ receivedOwnerName }) =>
+                            receivedOwnerName !== undefined,
+                    )
+                    .map(({ assignee }) => assignee),
+            ).toEqual(
+                expect.arrayContaining([
+                    { personId: "", name: "Radka Cibulková" },
+                    { personId: "", name: "Marek Dub" },
+                    { personId: "", name: "Lada Cloudfern" },
+                ]),
+            );
             expect(assignees).toEqual(
                 expect.arrayContaining([
                     childAssignee,

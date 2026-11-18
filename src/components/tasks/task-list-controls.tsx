@@ -4,6 +4,7 @@ import { Plus } from "lucide-react";
 import { useExtracted } from "next-intl";
 import type { RefObject } from "react";
 import { PeopleCombobox } from "@/components/people/people-combobox";
+import { Button } from "@/components/ui/button";
 import {
     Select,
     SelectContent,
@@ -46,10 +47,12 @@ export function TaskStateSelect({
 export function TaskAssigneeSelect({
     assignee,
     assignees,
+    selectedLabel,
     onChange,
 }: {
     assignee: string;
     assignees: TaskAssignee[];
+    selectedLabel?: string;
     onChange: (value: string) => void;
 }) {
     const i18n = useExtracted();
@@ -70,7 +73,7 @@ export function TaskAssigneeSelect({
             value={assignee}
             valueLabel={
                 leadingEntries.find((entry) => entry.id === assignee)?.label ??
-                assignees.find((person) => person.personId === assignee)?.name
+                selectedLabel
             }
             aria-label={i18n("Assignee")}
             className="h-8 min-h-0 w-48 text-xs"
@@ -83,6 +86,19 @@ export function TaskAssigneeSelect({
             leadingEntries={leadingEntries}
             onValueChange={(person) => onChange(person.id)}
         />
+    );
+}
+
+/** Inline failure state shared by the task lists. */
+export function TaskListLoadError({ retry }: { retry: () => void }) {
+    const i18n = useExtracted();
+    return (
+        <li className="space-y-2 p-4" role="alert">
+            <p>{i18n("Could not load your tasks")}</p>
+            <Button variant="outline" onClick={retry}>
+                {i18n("Try again")}
+            </Button>
+        </li>
     );
 }
 

@@ -135,7 +135,9 @@ const task: TaskListItem = {
 
 let assignees: TaskAssignee[];
 let tasks: TaskListItem[];
-let fetchMock: ReturnType<typeof vi.fn>;
+let fetchMock: ReturnType<
+    typeof vi.fn<(input: RequestInfo | URL) => Promise<Response>>
+>;
 
 beforeEach(() => {
     navigation.params = new URLSearchParams("tab=tracked");
@@ -318,8 +320,11 @@ it("refreshes assignees on Organization events and retains the selected person",
     expect(fetchMock).toHaveBeenCalledWith(
         expect.stringContaining("assignee=person-1"),
     );
+    expect(
+        screen.getByRole("combobox", { name: "Assignee" }).textContent,
+    ).toContain(firstPerson.name);
     await openAssignee();
-    expect(screen.getByRole("option", { name: firstPerson.name })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: firstPerson.name })).toBeNull();
 });
 
 it("resolves a bookmarked person who no longer has tasks", async () => {
@@ -331,11 +336,15 @@ it("resolves a bookmarked person who no longer has tasks", async () => {
             screen.getByRole("combobox", { name: "Assignee" }).textContent,
         ).toContain(firstPerson.name),
     );
-    expect(fetchMock).toHaveBeenCalledWith("/api/people/person-1");
+    expect(fetchMock).toHaveBeenCalledWith(
+        "/api/people/person-1",
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     await openAssignee();
     expect(screen.getAllByRole("option")[2].getAttribute("data-value")).toBe(
-        "person:person-1",
+        "person:other",
     );
+    expect(screen.queryByRole("option", { name: firstPerson.name })).toBeNull();
 });
 
 it("reloads tasks and options after a saved assignee change", async () => {
@@ -418,11 +427,16 @@ it("reloads Followed options for a different folder and keeps the selected name"
     assignees = [newPerson];
     navigation.params.set("folder", "folder-2");
     view.rerender(<TaskList organization={false} />);
+    await waitFor(() =>
+        expect(
+            screen.getByRole("combobox", { name: "Assignee" }).textContent,
+        ).toContain(firstPerson.name),
+    );
     await openAssignee();
     expect(
         await screen.findByRole("option", { name: newPerson.name }),
     ).toBeTruthy();
-    expect(screen.getByRole("option", { name: firstPerson.name })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: firstPerson.name })).toBeNull();
     expect(
         screen.queryByRole("option", { name: secondPerson.name }),
     ).toBeNull();
@@ -491,4 +505,66 @@ it("chooses and clears the folder filter while retaining other URL filters", asy
         "/tasks?tab=all&state=done&due=none&sort=due",
         { scroll: false },
     );
+});
+
+it("clears a missing selection even when the folder options fail to refresh", async () => {
+    navigation.params = new URLSearchParams(
+        "tab=tracked&folder=folder-1&assignee=person-1",
+    );
+    const view = render(<TaskList organization={false} />);
+    const trigger = () => screen.getByRole("combobox", { name: "Assignee" });
+    await waitFor(() =>
+        expect(trigger().textContent).toContain(firstPerson.name),
+    );
+
+    assignees = [secondPerson];
+    navigation.params.set("folder", "folder-2");
+    view.rerender(<TaskList organization={false} />);
+    await openAssignee();
+    await screen.findByRole("option", { name: secondPerson.name });
+    fireEvent.click(screen.getByRole("option", { name: "All assignees" }));
+
+    const fetchOptions = fetchMock.getMockImplementation();
+    if (!fetchOptions) throw new Error("Missing fetch mock");
+    fetchMock.mockImplementation((input: RequestInfo | URL) =>
+        String(input).startsWith("/api/tasks/assignees")
+            ? Promise.resolve(new Response(null, { status: 500 }))
+            : fetchOptions(input),
+    );
+    navigation.params.delete("assignee");
+    view.rerender(<TaskList organization={false} />);
+    await openAssignee();
+    expect(
+        screen.getByRole("option", { name: secondPerson.name }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("option", { name: firstPerson.name })).toBeNull();
+});
+
+it("lets the Tasks page retry an initial failure and keeps rows on a failed refresh", async () => {
+    const original = fetchMock.getMockImplementation();
+    if (!original) throw new Error("Missing fetch mock");
+    let failTasks = true;
+    fetchMock.mockImplementation((input: RequestInfo | URL) =>
+        failTasks && String(input).startsWith("/api/tasks?")
+            ? Promise.resolve(new Response(null, { status: 503 }))
+            : original(input),
+    );
+    render(<TaskList organization={false} />);
+    expect((await screen.findByRole("alert")).textContent).toContain(
+        "Could not load your tasks",
+    );
+    expect(screen.queryByText("Nothing here.")).toBeNull();
+
+    tasks = [task];
+    failTasks = false;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await screen.findByText(task.text);
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    failTasks = true;
+    await act(async () => orgEvent.current?.({ type: "tree" }));
+    expect(screen.getByRole("alert").textContent).toContain(
+        "Could not load your tasks",
+    );
+    expect(screen.getByText(task.text)).toBeTruthy();
 });
