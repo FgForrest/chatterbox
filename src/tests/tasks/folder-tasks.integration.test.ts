@@ -300,7 +300,7 @@ describe.skipIf(!url)("folder tasks across all visible sources", () => {
             ["own", "own-child", "task-owned", "task-received"].sort(),
         );
         expect(await listTrackedAssignees(viewer(), false, "all")).toEqual([
-            { personId: "assignee", name: "Lada Cloudfern" },
+            { personId: "assignee", name: "Lada Cloudfern", self: false },
         ]);
     });
     it("keeps Organization Mine empty, allows All, and never exposes personal tasks", async () => {
@@ -407,7 +407,11 @@ describe.skipIf(!url)("folder tasks across all visible sources", () => {
                     .filter((task) => task.itemId === "received")
                     .map(({ id }) => ({ taskId: id, userId: "viewer" })),
             );
-        const childAssignee = { personId: "assignee", name: "Lada Cloudfern" };
+        const childAssignee = {
+            personId: "assignee",
+            name: "Lada Cloudfern",
+            self: false,
+        };
         for (const tab of ["followed", "all"] as const) {
             const assignees = await listTrackedAssignees(
                 viewer(),
@@ -446,7 +450,11 @@ describe.skipIf(!url)("folder tasks across all visible sources", () => {
             expect(assignees).toEqual(
                 expect.arrayContaining([
                     childAssignee,
-                    { personId: "folder-person", name: "Jitka Dvořáková" },
+                    {
+                        personId: "folder-person",
+                        name: "Jitka Dvořáková",
+                        self: false,
+                    },
                 ]),
             );
             expect(
@@ -454,7 +462,9 @@ describe.skipIf(!url)("folder tasks across all visible sources", () => {
             ).toEqual([childAssignee]);
             expect(
                 await listTrackedAssignees(viewer(), false, tab, "sibling"),
-            ).toEqual([{ personId: "sibling-person", name: "Petr Bureš" }]);
+            ).toEqual([
+                { personId: "sibling-person", name: "Petr Bureš", self: false },
+            ]);
             expect(
                 await listTrackedAssignees(
                     viewer(),
@@ -472,7 +482,7 @@ describe.skipIf(!url)("folder tasks across all visible sources", () => {
         expect(team).toEqual(
             expect.arrayContaining([
                 childAssignee,
-                { personId: "team-person", name: "Adam Zelený" },
+                { personId: "team-person", name: "Adam Zelený", self: false },
             ]),
         );
         const ownRows = (await list("all", "folder")).filter((row) => row.own);

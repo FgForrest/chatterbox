@@ -154,7 +154,9 @@ beforeEach(() => {
         if (url === "/api/folders") return Response.json({ folders: [] });
         if (url === "/api/tasks/pending") return Response.json({});
         if (url === "/api/people/person-1")
-            return Response.json({ person: { displayName: firstPerson.name } });
+            return Response.json({
+                person: { displayName: firstPerson.name, self: true },
+            });
         return Response.json({}, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -192,20 +194,35 @@ it("marks new tasks as seen once when the Tasks page opens", async () => {
     });
 });
 
-it("offers assignees in surname order after All assignees and No assignee", async () => {
+it("offers fixed choices, the viewer and then assignees in surname order", async () => {
+    assignees = [
+        secondPerson,
+        { personId: "viewer", name: "Ema Žulová", self: true },
+        { personId: "person-3", name: "Jitka Dvořáková" },
+        firstPerson,
+    ];
     render(<TaskList organization={false} />);
     await waitFor(() =>
         expect(fetchMock).toHaveBeenCalledWith("/api/tasks/assignees"),
     );
     await openAssignee();
-    expect(
-        screen.getAllByRole("option").map((option) => option.textContent),
-    ).toEqual([
-        "All assignees",
-        "No assignee",
-        firstPerson.name,
-        secondPerson.name,
+    const options = screen.getAllByRole("option");
+    expect(options.map((option) => option.getAttribute("data-value"))).toEqual([
+        "entry:all",
+        "entry:none",
+        "person:viewer",
+        "person:person-1",
+        "person:person-3",
+        "person:person-2",
     ]);
+    expect(options[0].textContent).toBe("All assignees");
+    expect(options[1].textContent).toBe("No assignee");
+    fireEvent.change(screen.getByRole("combobox", { name: "Search people" }), {
+        target: { value: "BURES" },
+    });
+    expect(
+        screen.queryByRole("option", { name: secondPerson.name }),
+    ).toBeNull();
     fireEvent.click(screen.getByRole("option", { name: firstPerson.name }));
     expect(navigation.replace).toHaveBeenCalledWith(
         "/tasks?tab=tracked&assignee=person-1",
@@ -311,7 +328,7 @@ it("refreshes assignees on Organization events and retains the selected person",
 });
 
 it("resolves a bookmarked person who no longer has tasks", async () => {
-    assignees = [];
+    assignees = [{ personId: "other", name: "Ema Abelová" }];
     navigation.params.set("assignee", "person-1");
     render(<TaskList organization={false} />);
     await waitFor(() =>
@@ -323,6 +340,11 @@ it("resolves a bookmarked person who no longer has tasks", async () => {
         "/api/people/person-1",
         expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+    await openAssignee();
+    expect(screen.getAllByRole("option")[2].getAttribute("data-value")).toBe(
+        "person:other",
+    );
+    expect(screen.queryByRole("option", { name: firstPerson.name })).toBeNull();
 });
 
 it("reloads tasks and options after a saved assignee change", async () => {

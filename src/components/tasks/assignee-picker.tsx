@@ -1,18 +1,10 @@
 "use client";
 
-import { Check, ChevronDown, Search, UserRound, UserX } from "lucide-react";
+import { UserRound, UserX } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useEffect, useMemo, useState } from "react";
-import type { PickablePerson } from "@/components/people/speaker-picker";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+import { useEffect, useState } from "react";
+import { PeopleCombobox } from "@/components/people/people-combobox";
+import type { PickablePerson } from "@/components/people/people-search-list";
 import { cn } from "@/lib/utils";
 
 /** A person the recording's speakers are, offered first. */
@@ -49,9 +41,8 @@ function loadPeople(): Promise<PickablePerson[]> {
 }
 
 /**
- * Who has to do a task: the recording's speakers first, then anyone in the
- * Almanac, or nobody. Someone without an email is marked: without one, no
- * user is them, and the task shows in nobody's own list.
+ * Choose the viewer, a recording speaker, another Almanac person, or nobody.
+ * Someone without an email is marked because the task shows in nobody's own list.
  */
 export function AssigneePicker({
     value,
@@ -65,7 +56,6 @@ export function AssigneePicker({
     const i18n = useExtracted();
     const [open, setOpen] = useState(false);
     const [people, setPeople] = useState<PickablePerson[] | null>(null);
-    const [query, setQuery] = useState("");
 
     useEffect(() => {
         if (!open || people) return;
@@ -78,158 +68,99 @@ export function AssigneePicker({
         };
     }, [open, people]);
 
-    const others = useMemo(() => {
-        const speakerIds = new Set(speakers.map((speaker) => speaker.personId));
-        const needle = query.trim().toLowerCase();
-        return (people ?? [])
+    const offered = new Map(
+        (people ?? [])
             .filter((person) => !organizationOnly || person.scope === "org")
-            .filter((person) => !speakerIds.has(person.id))
-            .filter(
-                (person) =>
-                    !needle ||
-                    person.displayName.toLowerCase().includes(needle) ||
-                    person.primaryEmail?.toLowerCase().includes(needle),
-            )
-            .slice(0, 12);
-    }, [people, speakers, organizationOnly, query]);
-    const emailOf = useMemo(
-        () => new Map((people ?? []).map((p) => [p.id, p.primaryEmail])),
-        [people],
+            .map((person) => [
+                person.id,
+                {
+                    id: person.id,
+                    name: person.displayName,
+                    email: person.primaryEmail,
+                    self: person.self,
+                },
+            ]),
     );
-    const shownSpeakers = speakers.filter(
-        (speaker) =>
-            !query.trim() ||
-            speaker.name.toLowerCase().includes(query.trim().toLowerCase()),
-    );
-
+    for (const speaker of speakers) {
+        const person = offered.get(speaker.personId);
+        if (person) person.name = speaker.name;
+        else if (!organizationOnly) {
+            offered.set(speaker.personId, {
+                id: speaker.personId,
+                name: speaker.name,
+                email: null,
+                self: false,
+            });
+        }
+    }
     const pick = (person: { personId: string; name: string } | null) => {
-        setOpen(false);
-        setQuery("");
         if (person?.personId !== value?.personId) onChange(person);
     };
 
     const label =
         value?.name ?? (hint ? `${hint}${check ? "" : "?"}` : i18n("Nobody"));
     return (
-        <DropdownMenu open={open} onOpenChange={setOpen}>
-            <DropdownMenuTrigger
-                disabled={disabled}
-                className={cn(
-                    "inline-flex max-w-44 items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors hover:bg-muted disabled:cursor-default disabled:hover:bg-transparent",
-                    check &&
-                        "border-amber-500 text-amber-700 dark:text-amber-400",
-                    !value && "text-muted-foreground",
-                )}
-                aria-label={i18n("Assigned to {name}", { name: label })}
-                title={
-                    check
-                        ? i18n("Matched by first name only. Check who it is.")
-                        : hint && !value
-                          ? i18n("Heard “{name}”, who is not in the Almanac.", {
-                                name: hint,
-                            })
-                          : undefined
-                }
-            >
-                <UserRound className="size-3 shrink-0" />
-                <span className="truncate">{label}</span>
-                {check && !value && <span>{i18n("who is this?")}</span>}
-                {!disabled && <ChevronDown className="size-3 shrink-0" />}
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-64">
-                <div className="relative p-1">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                        type="search"
-                        autoFocus
-                        value={query}
-                        onChange={(event) => setQuery(event.target.value)}
-                        onKeyDown={(event) => event.stopPropagation()}
-                        placeholder={i18n("Search people")}
-                        aria-label={i18n("Search people")}
-                        className="h-8 pl-8 text-sm"
-                    />
-                </div>
-                {shownSpeakers.length > 0 && (
-                    <>
-                        <DropdownMenuLabel className="text-xs text-muted-foreground">
-                            {i18n("In this recording")}
-                        </DropdownMenuLabel>
-                        {shownSpeakers.map((speaker) => (
-                            <PersonItem
-                                key={speaker.personId}
-                                name={speaker.name}
-                                selected={value?.personId === speaker.personId}
-                                noEmail={
-                                    people !== null &&
-                                    !emailOf.get(speaker.personId)
-                                }
-                                onSelect={() => pick(speaker)}
-                            />
-                        ))}
-                    </>
-                )}
-                {others.length > 0 && (
-                    <>
-                        <DropdownMenuLabel className="text-xs text-muted-foreground">
-                            {i18n("Almanac")}
-                        </DropdownMenuLabel>
-                        {others.map((person) => (
-                            <PersonItem
-                                key={person.id}
-                                name={person.displayName}
-                                selected={value?.personId === person.id}
-                                noEmail={!person.primaryEmail}
-                                onSelect={() =>
-                                    pick({
-                                        personId: person.id,
-                                        name: person.displayName,
-                                    })
-                                }
-                            />
-                        ))}
-                    </>
-                )}
-                {people === null && (
-                    <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                        {i18n("Loading people…")}
-                    </p>
-                )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => pick(null)}>
-                    <UserX className="size-3.5" /> {i18n("Nobody")}
-                </DropdownMenuItem>
-            </DropdownMenuContent>
-        </DropdownMenu>
-    );
-}
-
-function PersonItem({
-    name,
-    selected,
-    noEmail,
-    onSelect,
-}: {
-    name: string;
-    selected: boolean;
-    noEmail: boolean;
-    onSelect: () => void;
-}) {
-    const i18n = useExtracted();
-    return (
-        <DropdownMenuItem onSelect={onSelect}>
-            <span className="min-w-0 flex-1 truncate">{name}</span>
-            {noEmail && (
-                <span
-                    className="text-[10px] text-muted-foreground"
-                    title={i18n(
-                        "No email in the Almanac, so nobody gets it in their own list.",
-                    )}
-                >
-                    {i18n("no email")}
-                </span>
+        <PeopleCombobox
+            open={open}
+            onOpenChange={setOpen}
+            variant="pill"
+            disabled={disabled}
+            value={value?.personId ?? (hint ? undefined : "nobody")}
+            valueLabel={
+                <>
+                    <UserRound className="size-3 shrink-0" aria-hidden />
+                    <span className="truncate">{label}</span>
+                    {check && !value && <span>{i18n("who is this?")}</span>}
+                </>
+            }
+            className={cn(
+                "max-w-44 transition-colors hover:bg-muted",
+                check && "border-amber-500 text-amber-700 dark:text-amber-400",
+                !value && "text-muted-foreground",
             )}
-            {selected && <Check className="size-3.5 text-primary" />}
-        </DropdownMenuItem>
+            aria-label={i18n("Assigned to {name}", { name: label })}
+            title={
+                check
+                    ? i18n("Matched by first name only. Check who it is.")
+                    : hint && !value
+                      ? i18n("Heard “{name}”, who is not in the Almanac.", {
+                            name: hint,
+                        })
+                      : undefined
+            }
+            list={{
+                people: [...offered.values()],
+                context: {
+                    heading: i18n("In this recording"),
+                    ids: speakers.map((speaker) => speaker.personId),
+                },
+                peopleHeading: i18n("Almanac"),
+                loadingLabel:
+                    people === null ? i18n("Loading people…") : undefined,
+                personDetail: (person) =>
+                    people !== null &&
+                    !person.email && (
+                        <span
+                            className="text-[10px] text-muted-foreground"
+                            title={i18n(
+                                "No email in the Almanac, so nobody gets it in their own list.",
+                            )}
+                        >
+                            {i18n("no email")}
+                        </span>
+                    ),
+            }}
+            trailingEntries={[
+                {
+                    id: "nobody",
+                    label: i18n("Nobody"),
+                    icon: <UserX className="size-3.5" aria-hidden />,
+                    onSelect: () => pick(null),
+                },
+            ]}
+            onValueChange={(person) =>
+                pick({ personId: person.id, name: person.name })
+            }
+        />
     );
 }

@@ -40,7 +40,7 @@ vi.mock("@/hooks/use-task-list-data", () => ({
                 recording: { id: "recording", view: "org" },
             },
         ],
-        sortedAssignees: [],
+        visibleAssignees: [],
         openCount: 1,
         selectedPrivate: null,
     }),
@@ -357,11 +357,12 @@ it.each([
     );
     await screen.findByText(colleague.name);
     if (action === "add") {
-        fireEvent.change(screen.getByRole("searchbox"), {
-            target: { value: "Jitka" },
-        });
+        fireEvent.change(
+            screen.getByRole("combobox", { name: "Colleague's name or email" }),
+            { target: { value: "Jitka" } },
+        );
         fireEvent.click(
-            await screen.findByRole("button", { name: newcomer.name }),
+            await screen.findByRole("option", { name: /Jitka Dvořáková/ }),
         );
         fireEvent.click(screen.getByRole("button", { name: "Add people" }));
         expect(screen.getAllByText("Audience member")).toHaveLength(2);

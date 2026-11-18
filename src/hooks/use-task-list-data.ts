@@ -1,6 +1,6 @@
 "use client";
 
-import { useExtracted, useLocale } from "next-intl";
+import { useExtracted } from "next-intl";
 import {
     useCallback,
     useEffect,
@@ -24,7 +24,6 @@ import { useTaskFolderTree } from "@/hooks/use-task-folder-tree";
 import { tabEventOrigin } from "@/lib/events/tab-origin";
 import { descendantFolderIds } from "@/lib/folders/hierarchy";
 import { privateTreeFolders } from "@/lib/folders/private-tree";
-import { compareNamesBySurname } from "@/lib/people/name-order";
 import { taskFilterFolders } from "@/lib/tasks/folder-filter";
 import {
     createTaskListState,
@@ -73,7 +72,6 @@ export function useTaskListData({
     filterFolders?: boolean;
 }) {
     const i18n = useExtracted();
-    const locale = useLocale();
     const showMergeFailure = useTaskMergeFailure();
     const folderScope = `${tab}:${allOrganization}`;
     const [taskFolders, setTaskFolders] = useState(new Map<string, string[]>());
@@ -120,11 +118,8 @@ export function useTaskListData({
         if (folder !== ALL) params.set("folder", folder);
         return params.size ? `?${params}` : "";
     }, [tab, allOrganization, folder]);
-    const sortedAssignees = useMemo(() => {
-        if (assignees?.search !== assigneeSearch) return [];
-        const compare = compareNamesBySurname(locale);
-        return [...assignees.options].sort((a, b) => compare(a.name, b.name));
-    }, [assignees, assigneeSearch, locale]);
+    const visibleAssignees =
+        assignees?.search === assigneeSearch ? assignees.options : [];
     const selectedAssigneeName = assigneeNames.get(assignee);
     const selectedAssigneeLabel =
         assignee === ALL || assignee === "none"
@@ -517,7 +512,7 @@ export function useTaskListData({
               )
             : [],
         selectedPrivate,
-        sortedAssignees,
+        visibleAssignees,
         selectedAssigneeLabel,
     };
 }

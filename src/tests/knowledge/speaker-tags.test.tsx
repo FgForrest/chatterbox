@@ -928,7 +928,7 @@ describe("confirmed person speaker groups", () => {
             fireEvent.click(dialog.getByRole("button", { name: "Speaker 2" }));
             expect(dialog.getByRole("combobox")).toHaveProperty("value", "");
             fireEvent.click(
-                await dialog.findByRole("button", { name: "Petra" }),
+                await dialog.findByRole("option", { name: /Petra/ }),
             );
             fireEvent.click(dialog.getByRole("button", { name: "Select" }));
         }

@@ -3,6 +3,7 @@
 import { Plus } from "lucide-react";
 import { useExtracted } from "next-intl";
 import type { RefObject } from "react";
+import { PeopleCombobox } from "@/components/people/people-combobox";
 import { Button } from "@/components/ui/button";
 import {
     Select,
@@ -55,32 +56,36 @@ export function TaskAssigneeSelect({
     onChange: (value: string) => void;
 }) {
     const i18n = useExtracted();
-    const allLabel = i18n("All assignees");
-    const noneLabel = i18n("No assignee");
+    const leadingEntries = [
+        {
+            id: ALL,
+            label: i18n("All assignees"),
+            onSelect: () => onChange(ALL),
+        },
+        {
+            id: "none",
+            label: i18n("No assignee"),
+            onSelect: () => onChange("none"),
+        },
+    ];
     return (
-        <Select value={assignee} onValueChange={(value) => onChange(value)}>
-            <SelectTrigger
-                className="h-8 w-48 text-xs"
-                aria-label={i18n("Assignee")}
-            >
-                <SelectValue>
-                    {assignee === ALL
-                        ? allLabel
-                        : assignee === "none"
-                          ? noneLabel
-                          : selectedLabel}
-                </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-                <SelectItem value={ALL}>{allLabel}</SelectItem>
-                <SelectItem value="none">{noneLabel}</SelectItem>
-                {assignees.map((person) => (
-                    <SelectItem key={person.personId} value={person.personId}>
-                        {person.name}
-                    </SelectItem>
-                ))}
-            </SelectContent>
-        </Select>
+        <PeopleCombobox
+            value={assignee}
+            valueLabel={
+                leadingEntries.find((entry) => entry.id === assignee)?.label ??
+                selectedLabel
+            }
+            aria-label={i18n("Assignee")}
+            className="h-8 min-h-0 w-48 text-xs"
+            list={{
+                people: assignees.map((person) => ({
+                    ...person,
+                    id: person.personId,
+                })),
+            }}
+            leadingEntries={leadingEntries}
+            onValueChange={(person) => onChange(person.id)}
+        />
     );
 }
 
