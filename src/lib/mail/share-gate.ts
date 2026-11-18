@@ -11,6 +11,7 @@ import { publishKnowledgeInTx } from "@/lib/knowledge/share-knowledge";
 import type { ShareGateProblem } from "@/lib/sharing/share-gate";
 import { publishTaskAssigneesInTx } from "@/lib/sharing/share-names";
 import { isRecordingShared } from "@/lib/sharing/shared";
+import type { TaskTargetChanges } from "@/lib/tasks/routing";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -39,6 +40,7 @@ export async function shareMailInTx(
         itemId: string;
         folderId: string;
         orgUserId: string;
+        taskTargets?: TaskTargetChanges;
     },
 ): Promise<void> {
     const wasShared = await isRecordingShared(
@@ -89,6 +91,7 @@ export async function shareMailInTx(
         recordingId: input.itemId,
         ownerUserId: input.ownerUserId,
         orgUserId: input.orgUserId,
+        taskTargets: input.taskTargets,
     });
     await bumpScopeInTx(tx, [...knowledge.scopes, ...assignees]);
 }

@@ -58,6 +58,10 @@ import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { loadShareGate } from "@/lib/sharing/load-share-gate";
 import { sharedItemCondition } from "@/lib/sharing/shared";
 import { lockItemTaskGraphInTx } from "@/lib/tasks/mentions";
+import {
+    type TaskTargetChanges,
+    taskTargetsChanged,
+} from "@/lib/tasks/routing";
 
 export const RESTRICTED_FOLDER_JOB_KIND = "folder.restriction";
 export const RESTRICTED_FOLDER_REQUEST_LIMIT = 25;
@@ -508,8 +512,10 @@ export async function processRestrictedFolderItem(
 ) {
     const orgUserId = await getOrgUserId();
     if (!orgUserId) return;
-    await retryOnDeadlock(() =>
-        db.transaction(async (tx) => {
+    let taskTargets: TaskTargetChanges = new Map();
+    await retryOnDeadlock(() => {
+        taskTargets = new Map();
+        return db.transaction(async (tx) => {
             await lockOrgTree(tx);
             await lockOrgPeople(tx);
             const [folder] = await tx
@@ -598,6 +604,7 @@ export async function processRestrictedFolderItem(
                     itemId: work.itemId,
                     folderId: work.folderId,
                     orgUserId,
+                    taskTargets,
                 });
                 if (!problems.length)
                     await tx
@@ -633,9 +640,10 @@ export async function processRestrictedFolderItem(
                     folder.restrictingAt,
                 );
             await notifyRestrictedAudienceInTx(tx, work.folderId);
-        }),
-    );
+        });
+    });
     await orgTreeChanged(work.folderId, { structural: true });
+    await taskTargetsChanged(taskTargets);
 }
 
 /** Restrict or lift with durable per-item recovery and at most 25 immediate item transactions. */

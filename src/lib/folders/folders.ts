@@ -90,6 +90,10 @@ import {
     lockItemTaskGraphInTx,
     withdrawItemTaskHomesInTx,
 } from "@/lib/tasks/mentions";
+import {
+    type TaskTargetChanges,
+    taskTargetsChanged,
+} from "@/lib/tasks/routing";
 import type {
     FolderKind,
     FolderOrganization,
@@ -1829,6 +1833,8 @@ export async function pruneRedundantAssignmentsInTx(
  * Share an owner's item into one Organization folder in the caller's
  * transaction. Takes the Organization tree, people and item locks in the
  * established order. A refused gate returns its problems without writing.
+ * Items whose tasks the share changed are added to `taskTargets`; the
+ * caller passes them to `taskTargetsChanged` after commit.
  */
 export async function shareItemToOrganizationFolderInTx(
     tx: Tx,
@@ -1838,6 +1844,7 @@ export async function shareItemToOrganizationFolderInTx(
         folderId: string;
         orgUserId: string;
         canReadRestricted?: boolean;
+        taskTargets?: TaskTargetChanges;
     },
 ): Promise<ShareGateProblem[]> {
     await lockOrgTree(tx);
@@ -1973,6 +1980,7 @@ export async function shareItemToOrganizationFolderInTx(
                 itemId: input.itemId,
                 folderId: folder.id,
                 orgUserId: input.orgUserId,
+                taskTargets: input.taskTargets,
             });
         } catch (error) {
             if (
@@ -2038,6 +2046,7 @@ export async function shareItemToOrganizationFolderInTx(
         recordingId: input.itemId,
         ownerUserId: input.ownerUserId,
         orgUserId: input.orgUserId,
+        taskTargets: input.taskTargets,
     });
     await bumpScopeInTx(tx, [
         ...names.scopes,
@@ -2087,8 +2096,10 @@ export async function addRecordingToFolder(input: {
     }
     assertWritable(target);
 
-    const problems = await retryOnDeadlock(() =>
-        db.transaction(async (tx) => {
+    let taskTargets: TaskTargetChanges = new Map();
+    const problems = await retryOnDeadlock(() => {
+        taskTargets = new Map();
+        return db.transaction(async (tx) => {
             if (target.scope === "org") {
                 return shareItemToOrganizationFolderInTx(tx, {
                     ownerUserId: input.userId,
@@ -2096,6 +2107,7 @@ export async function addRecordingToFolder(input: {
                     folderId: target.folder.id,
                     orgUserId: target.ownerId,
                     canReadRestricted,
+                    taskTargets,
                 });
             }
             await lockCategorizableFolderInTx(
@@ -2137,8 +2149,8 @@ export async function addRecordingToFolder(input: {
                 reason: "placement",
             });
             return [];
-        }),
-    );
+        });
+    });
     if (problems.length > 0) {
         throw new AppError(
             ErrorCode.SHARE_REQUIREMENTS_UNMET,
@@ -2155,6 +2167,7 @@ export async function addRecordingToFolder(input: {
     } else {
         await scheduleFolderExportProjection(input.userId);
     }
+    await taskTargetsChanged(taskTargets);
 }
 
 /**
@@ -2704,8 +2717,10 @@ export async function moveRecordingBetweenFolders(input: {
         ),
         resolveFilingFolder(input.userId, input.toFolderId, db, canCurate),
     ]);
-    await retryOnDeadlock(() =>
-        db.transaction(async (tx) => {
+    let taskTargets: TaskTargetChanges = new Map();
+    await retryOnDeadlock(() => {
+        taskTargets = new Map();
+        return db.transaction(async (tx) => {
             if (targets.some((target) => target.scope === "org"))
                 await lockOrgTree(tx);
             const from = await resolvePlacementSource(
@@ -2808,6 +2823,7 @@ export async function moveRecordingBetweenFolders(input: {
                     folderId: to.folder.id,
                     orgUserId: to.ownerId,
                     canReadRestricted: canCurate,
+                    taskTargets,
                 });
                 if (problems.length)
                     throw new AppError(
@@ -2914,11 +2930,12 @@ export async function moveRecordingBetweenFolders(input: {
                 view: from.scope === "org" && !ownerOnly ? "org" : "private",
                 reason: "placement",
             });
-        }),
-    );
+        });
+    });
     nudge();
     if (orgUserId) await orgTreeChanged();
     await scheduleFolderExportProjection(input.userId);
+    await taskTargetsChanged(taskTargets);
 }
 
 /**
