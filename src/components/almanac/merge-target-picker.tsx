@@ -100,7 +100,10 @@ export function MergeTargetPicker({
         );
 
     if (source?.kind === "person") {
-        const likelyMatches = ranked.filter(({ score }) => score >= 0.6);
+        const likelyMatchIds = ranked
+            .filter(({ score }) => score >= 0.6)
+            .map(({ candidate }) => candidate.id);
+        const likelyMatches = new Set(likelyMatchIds);
         return (
             <PeopleSearchList
                 framed
@@ -113,14 +116,12 @@ export function MergeTargetPicker({
                     onSelect: (person) => onChange(person.id),
                 }}
                 context={{
-                    ids: likelyMatches.map(({ candidate }) => candidate.id),
+                    ids: likelyMatchIds,
                     heading: i18n("Likely matches"),
                 }}
                 personDetail={(person) => (
                     <>
-                        {likelyMatches.some(
-                            ({ candidate }) => candidate.id === person.id,
-                        ) && (
+                        {likelyMatches.has(person.id) && (
                             <span className="text-xs text-muted-foreground">
                                 {i18n("Likely match")}
                             </span>

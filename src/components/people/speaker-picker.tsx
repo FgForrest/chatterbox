@@ -103,28 +103,42 @@ export function SpeakerPicker({
         : knownPeople;
 
     const trimmedQuery = query.trim();
+    const spelling = trimmedQuery.toLowerCase();
+    const folded = foldPersonSearch(trimmedQuery);
     const exactMatch = trimmedQuery
         ? people?.find(
-              (person) =>
-                  foldPersonSearch(person.displayName) ===
-                  foldPersonSearch(trimmedQuery),
+              (person) => person.displayName.toLowerCase() === spelling,
           )
         : undefined;
+    const foldedMatches =
+        !exactMatch && folded
+            ? people?.filter(
+                  (person) => foldPersonSearch(person.displayName) === folded,
+              )
+            : undefined;
     const selectedPerson = (people ?? []).find(
         (person) => person.id === selectedPersonId,
     );
-    const personToSelect = selectedPerson ?? exactMatch;
+    const personToSelect =
+        selectedPerson ??
+        exactMatch ??
+        (foldedMatches?.length === 1 ? foldedMatches[0] : undefined);
+    const ambiguous = !personToSelect && (foldedMatches?.length ?? 0) > 1;
     const canSubmit =
-        people !== null && Boolean(personToSelect || trimmedQuery);
+        people !== null &&
+        Boolean(personToSelect || (trimmedQuery && !ambiguous));
     const createsPerson = canSubmit && !personToSelect;
 
-    async function submit() {
-        if (!canSubmit || submitting) return;
+    async function submit(person = personToSelect) {
+        if (
+            people === null ||
+            (!person && (!trimmedQuery || ambiguous)) ||
+            submitting
+        )
+            return;
         setSubmitting(true);
         const saved = await onPick(
-            personToSelect
-                ? { personId: personToSelect.id }
-                : { displayName: trimmedQuery },
+            person ? { personId: person.id } : { displayName: trimmedQuery },
         );
         setSubmitting(false);
         if (saved) onClose();
@@ -247,6 +261,7 @@ export function SpeakerPicker({
                         setQuery(value);
                         setSelectedPersonId(null);
                     }}
+                    onSubmitQuery={(person) => void submit(person)}
                     disabled={submitting}
                     selection={{
                         id: personToSelect?.id ?? personId,

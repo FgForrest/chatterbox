@@ -860,9 +860,7 @@ describe("person sharing controls", () => {
         expect(
             await screen.findByText("Invited to folder Local planning"),
         ).toBeTruthy();
-        expect(
-            screen.getByRole("option", { name: /Demo New.*Add/ }),
-        ).toBeTruthy();
+        expect(screen.getByRole("option", { name: /Demo New/ })).toBeTruthy();
         expect(
             screen
                 .getByRole("option", { name: /Demo Pending/ })
@@ -981,7 +979,10 @@ describe("person sharing controls", () => {
         expect(
             await screen.findByText("Already sees it through Research"),
         ).toBeTruthy();
-        expect(screen.queryByRole("option", { name: /Add/ })).toBeNull();
+        expect(screen.getByRole("button", { name: "Add" })).toHaveProperty(
+            "disabled",
+            true,
+        );
         expect(
             screen
                 .getByRole("option", { name: /Lena Fischer/ })
@@ -1124,6 +1125,51 @@ describe("person sharing controls", () => {
         await waitFor(() =>
             expect(navigator.clipboard.writeText).toHaveBeenCalledOnce(),
         );
+    });
+
+    it("stages a colleague on Enter and sends only from the separate Add button", async () => {
+        requests.mockImplementation(async (path: string) =>
+            path.includes("/people")
+                ? Response.json({
+                      people: [
+                          {
+                              id: "receiver",
+                              name: "Jitka Dvořáková",
+                              email: "jitka@example.com",
+                          },
+                      ],
+                  })
+                : Response.json({ shares, folderAudience }),
+        );
+        render(
+            <PersonShareDialog
+                itemId="audio"
+                kind="audio"
+                title="Interview"
+                open
+                onOpenChange={vi.fn()}
+            />,
+        );
+        const search = screen.getByRole("combobox", {
+            name: "Colleague's name or email",
+        });
+        fireEvent.change(search, { target: { value: "Jitka" } });
+        await screen.findByRole("option", { name: /Jitka Dvořáková/ });
+        fireEvent.keyDown(search, { key: "Enter" });
+        expect(
+            requests.mock.calls.filter(([, init]) => init?.method === "POST"),
+        ).toHaveLength(0);
+        const add = screen.getByRole("button", { name: "Add" });
+        expect(add).toHaveProperty("disabled", false);
+        fireEvent.click(add);
+        expect(requests).toHaveBeenCalledWith(
+            "/api/items/audio/shares",
+            expect.objectContaining({
+                method: "POST",
+                body: JSON.stringify({ receiverIds: ["receiver"] }),
+            }),
+        );
+        await waitFor(() => expect(add).toHaveProperty("disabled", true));
     });
 
     it("keeps inactive sharing history manageable after Organization publication", async () => {

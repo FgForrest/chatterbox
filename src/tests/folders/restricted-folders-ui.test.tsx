@@ -27,7 +27,10 @@ import { RecordingFolderTags } from "@/components/recordings/recording-folder-ta
 import { FolderNoAccess } from "@/components/sharing/folder-access-request";
 import { FolderRestrictionDialog } from "@/components/sharing/folder-restriction-dialog";
 import { RestrictedAudienceDialog } from "@/components/sharing/restricted-audience-dialog";
-import { RestrictedAudiencePicker } from "@/components/sharing/restricted-audience-picker";
+import {
+    type AudiencePerson,
+    RestrictedAudiencePicker,
+} from "@/components/sharing/restricted-audience-picker";
 import { RestrictedFolderProvider } from "@/components/sharing/restricted-folder-context";
 import { SharedFolderIcon } from "@/components/sharing/shared-folder-icon";
 import {
@@ -1107,6 +1110,46 @@ it("cancelling open filing keeps the item unfiled", async () => {
     expect(screen.getByText("not filed")).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalled();
 });
+it("keeps staged audience members out of repeat searches and removes them from their chips", async () => {
+    const people = [
+        { id: "staged", name: "Jitka Dvořáková", email: "jitka@example.com" },
+        { id: "other", name: "Jitka Šedá", email: "other@example.com" },
+    ];
+    fetchMock.mockImplementation(async () => json({ people }));
+    function Picker() {
+        const [selected, setSelected] = useState<AudiencePerson[]>([]);
+        return (
+            <RestrictedAudiencePicker
+                selected={selected}
+                onChange={setSelected}
+            />
+        );
+    }
+    mount(<Picker />);
+    const search = screen.getByRole("combobox", {
+        name: "Colleague's name or email",
+    });
+    fireEvent.change(search, { target: { value: "Jitka" } });
+    fireEvent.click(
+        await screen.findByRole("option", { name: /Jitka Dvořáková/ }),
+    );
+    const remove = screen.getByRole("button", {
+        name: "Remove Jitka Dvořáková",
+    });
+    fireEvent.change(search, { target: { value: "jitk" } });
+    await screen.findByRole("option", { name: /Jitka Šedá/ });
+    expect(
+        screen.queryByRole("option", { name: /Jitka Dvořáková/ }),
+    ).toBeNull();
+    fireEvent.click(remove);
+    expect(
+        screen.queryByRole("button", { name: "Remove Jitka Dvořáková" }),
+    ).toBeNull();
+    expect(
+        screen.getByRole("option", { name: /Jitka Dvořáková/ }),
+    ).toBeTruthy();
+});
+
 it("caps each audience selection at twenty additional people", () => {
     mount(
         <RestrictedAudiencePicker

@@ -85,3 +85,37 @@ it("can still pick a thing in mixed mode while excluding the source person", asy
         }),
     );
 });
+
+it("highlights an exact thing above a prefix-matching person for Enter", async () => {
+    fetchMock
+        .mockResolvedValueOnce(
+            Response.json({
+                people: [{ id: "person", displayName: "Jitka Cedarwood" }],
+            }),
+        )
+        .mockResolvedValueOnce(
+            Response.json({
+                entities: [
+                    {
+                        id: "thing",
+                        name: "Cedar",
+                        typeKey: "company",
+                        scope: "org",
+                    },
+                ],
+            }),
+        );
+    const onPick = vi.fn();
+    render(<RecordPicker onPick={onPick} />);
+    await screen.findByText("Cedar");
+    const search = screen.getByRole("combobox");
+    fireEvent.change(search, { target: { value: "Cedar" } });
+    expect(screen.getAllByRole("option")).toHaveLength(2);
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onPick).toHaveBeenCalledWith(
+        expect.objectContaining({
+            id: "thing",
+            kind: "entity",
+        }),
+    );
+});

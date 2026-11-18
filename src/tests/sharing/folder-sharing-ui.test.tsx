@@ -384,9 +384,8 @@ describe("folder person sharing UI", () => {
                 expect(search).toHaveProperty("disabled", false),
             );
             fireEvent.change(search, { target: { value: "Jitka" } });
-            fireEvent.click(
-                await view.findByRole("option", { name: /Jitka.*Add/ }),
-            );
+            fireEvent.click(await view.findByRole("option", { name: /Jitka/ }));
+            fireEvent.click(view.getByRole("button", { name: "Add" }));
             await waitFor(() => {
                 expect(
                     screen.getAllByText(

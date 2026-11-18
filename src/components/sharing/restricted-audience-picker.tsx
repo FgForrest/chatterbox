@@ -80,17 +80,11 @@ export function RestrictedAudiencePicker({
                 excludedIds={[
                     ...excludedUserIds,
                     ...fixed.map((person) => person.id),
+                    ...selected.map((person) => person.id),
                 ]}
                 selection={{
-                    ids: selected.map((person) => person.id),
-                    onToggle: (person) => {
-                        onChange(
-                            selected.some((entry) => entry.id === person.id)
-                                ? selected.filter(
-                                      (entry) => entry.id !== person.id,
-                                  )
-                                : [...selected, person],
-                        );
+                    onSelect: (person) => {
+                        onChange([...selected, person]);
                         setQuery("");
                     },
                 }}

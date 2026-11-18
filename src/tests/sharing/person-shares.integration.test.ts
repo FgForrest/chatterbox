@@ -543,6 +543,33 @@ describe.skipIf(!url)("person shares (PostgreSQL)", () => {
         expect(await findShareRecipients(owner, "vorak")).toEqual([]);
     });
 
+    it("returns the exact email first when ten prefix matches would fill the result limit", async () => {
+        await database.db.insert(users).values(
+            Array.from({ length: 10 }, (_, index) => ({
+                id: `email-prefix-${index}`,
+                name: `Alder ${index}`,
+                email: `lena${index}@example.com`,
+            })),
+        );
+        const response = await peopleRoute(
+            new Request(
+                "http://localhost/api/shares/people?q=LENA%40EXAMPLE.COM",
+                {
+                    headers: { "x-test-user": owner },
+                },
+            ),
+        );
+        expect(response.status).toBe(200);
+        const result = await response.json();
+        expect(result.people).toHaveLength(10);
+        expect(
+            result.people.map((person: { id: string }) => person.id),
+        ).toEqual([
+            receiver,
+            ...Array.from({ length: 9 }, (_, index) => `email-prefix-${index}`),
+        ]);
+    });
+
     it.each([
         "hosted",
         "local",

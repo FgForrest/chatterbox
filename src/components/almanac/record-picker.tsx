@@ -10,6 +10,7 @@ import {
 } from "@/components/people/people-search-list";
 import { useVocabularyLabels } from "@/lib/knowledge/vocabulary-labels";
 import { getPasswordManagerAttributes } from "@/lib/password-manager";
+import { foldPersonSearch } from "@/lib/people/name-search";
 
 /** A person or a thing, as the picker offers it. */
 export interface PickedRecord {
@@ -121,6 +122,8 @@ export function RecordPicker({
     const emptyLabel = i18n("Nobody and nothing of that name");
 
     if (offersPeople) {
+        const people = offered.filter((record) => record.kind === "person");
+        const search = foldPersonSearch(query);
         const things = offered
             .filter((record) => record.kind === "entity")
             .map((record) => ({
@@ -130,7 +133,26 @@ export function RecordPicker({
                     : 1,
             }))
             .filter(({ score }) => score > 0)
-            .sort((a, b) => b.score - a.score);
+            .sort((a, b) => b.score - a.score)
+            .map(({ record }) => ({
+                id: record.id,
+                label: record.name,
+                icon: (
+                    <Building2
+                        className="size-3.5 shrink-0 text-muted-foreground"
+                        aria-hidden
+                    />
+                ),
+                detail: detail(record),
+                onSelect: () => onPick(record),
+            }));
+        const exactThing =
+            search &&
+            !people.some((person) => foldPersonSearch(person.name) === search)
+                ? things.find(
+                      (thing) => foldPersonSearch(thing.label) === search,
+                  )
+                : undefined;
         return (
             <PeopleSearchList
                 framed
@@ -139,21 +161,11 @@ export function RecordPicker({
                 emptyLabel={emptyLabel}
                 query={query}
                 onQueryChange={setQuery}
-                people={offered.filter((record) => record.kind === "person")}
+                people={people}
                 selection={{ onSelect: onPick }}
                 personDetail={detail}
-                trailingEntries={things.map(({ record }) => ({
-                    id: record.id,
-                    label: record.name,
-                    icon: (
-                        <Building2
-                            className="size-3.5 shrink-0 text-muted-foreground"
-                            aria-hidden
-                        />
-                    ),
-                    detail: detail(record),
-                    onSelect: () => onPick(record),
-                }))}
+                preferredEntry={exactThing}
+                trailingEntries={things.filter((thing) => thing !== exactThing)}
             />
         );
     }

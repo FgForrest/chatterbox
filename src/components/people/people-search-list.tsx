@@ -9,6 +9,7 @@ import {
     useCallback,
     useEffect,
     useMemo,
+    useRef,
     useState,
 } from "react";
 import { getPasswordManagerAttributes } from "@/lib/password-manager";
@@ -59,6 +60,7 @@ export interface PeopleSearchListProps<T extends PeopleListPerson> {
     peopleHeading?: string;
     leadingEntries?: readonly PeopleListEntry[];
     trailingEntries?: readonly PeopleListEntry[];
+    preferredEntry?: PeopleListEntry;
     create?: {
         label: (name: string) => string;
         onSelect: (name: string) => void;
@@ -71,6 +73,7 @@ export interface PeopleSearchListProps<T extends PeopleListPerson> {
     loadingLabel?: string;
     query?: string;
     onQueryChange?: (query: string) => void;
+    onSubmitQuery?: (person?: T) => void;
     disabled?: boolean;
     autoFocus?: boolean;
     framed?: boolean;
@@ -138,6 +141,7 @@ export function PeopleSearchList<T extends PeopleListPerson>({
     peopleHeading,
     leadingEntries = [],
     trailingEntries = [],
+    preferredEntry,
     create,
     personDetail,
     personDisabled,
@@ -147,6 +151,7 @@ export function PeopleSearchList<T extends PeopleListPerson>({
     loadingLabel,
     query: controlledQuery,
     onQueryChange,
+    onSubmitQuery,
     disabled = false,
     autoFocus = true,
     framed = false,
@@ -196,30 +201,38 @@ export function PeopleSearchList<T extends PeopleListPerson>({
 
     const personValue = (id: string) => `person:${id}`;
     const entryValue = (id: string) => `entry:${id}`;
-    const availablePeople = [...pinned, ...contextual, ...others]
-        .filter((person) => !personDisabled?.(person))
-        .map((person) => personValue(person.id));
+    const availablePeople = [...pinned, ...contextual, ...others].filter(
+        (person) => !personDisabled?.(person),
+    );
     const enabledLeading = leadingEntries.filter((entry) => !entry.disabled);
     const enabledTrailing = trailingEntries.filter((entry) => !entry.disabled);
     const offerCreate = Boolean(create && trimmedQuery);
+    const preferredValue =
+        preferredEntry && !preferredEntry.disabled
+            ? entryValue(preferredEntry.id)
+            : undefined;
     const values = disabled
         ? []
         : [
+              ...(preferredValue ? [preferredValue] : []),
               ...enabledLeading.map((entry) => entryValue(entry.id)),
-              ...availablePeople,
+              ...availablePeople.map((person) => personValue(person.id)),
               ...enabledTrailing.map((entry) => entryValue(entry.id)),
               ...(offerCreate ? ["create"] : []),
           ];
     const [active, setActive] = useState("");
+    const navigatedQuery = useRef<string | null>(null);
     const activeValue = values.includes(active)
         ? active
-        : trimmedQuery
-          ? (availablePeople[0] ??
-            (offerCreate
-                ? "create"
-                : enabledTrailing[0] && entryValue(enabledTrailing[0].id)) ??
-            "")
-          : (values[0] ?? "");
+        : preferredValue && values.includes(preferredValue)
+          ? preferredValue
+          : trimmedQuery
+            ? ((availablePeople[0] && personValue(availablePeople[0].id)) ??
+              (offerCreate
+                  ? "create"
+                  : enabledTrailing[0] && entryValue(enabledTrailing[0].id)) ??
+              "")
+            : (values[0] ?? "");
     const [activeId, setActiveId] = useState<string>();
     const activeOptionRef = useCallback((item: HTMLDivElement | null) => {
         setActiveId(item?.id);
@@ -267,6 +280,7 @@ export function PeopleSearchList<T extends PeopleListPerson>({
                 aria-checked={Boolean(selected(person.id))}
                 disabled={disabled || personDisabled?.(person)}
                 onSelect={() => {
+                    navigatedQuery.current = null;
                     if (selection && "ids" in selection)
                         selection.onToggle(person);
                     else selection?.onSelect(person);
@@ -296,6 +310,8 @@ export function PeopleSearchList<T extends PeopleListPerson>({
     return (
         <Command
             shouldFilter={false}
+            disablePointerSelection={Boolean(onSubmitQuery)}
+            vimBindings={!onSubmitQuery}
             value={activeValue}
             onValueChange={setActive}
             label={searchLabel}
@@ -319,6 +335,7 @@ export function PeopleSearchList<T extends PeopleListPerson>({
                 disabled={disabled}
                 value={query}
                 onValueChange={(value) => {
+                    navigatedQuery.current = null;
                     setActive("");
                     setQuery(value);
                     onQueryChange?.(value);
@@ -332,7 +349,49 @@ export function PeopleSearchList<T extends PeopleListPerson>({
                         : "mb-2 rounded border bg-background",
                 )}
             >
-                <input type="search" aria-activedescendant={activeId} />
+                <input
+                    type="search"
+                    aria-activedescendant={activeId}
+                    onKeyDown={(event) => {
+                        if (event.key === "Home" || event.key === "End") {
+                            event.stopPropagation();
+                        }
+                        if (
+                            !onSubmitQuery ||
+                            disabled ||
+                            event.nativeEvent.isComposing ||
+                            event.keyCode === 229
+                        )
+                            return;
+                        if (event.key === "Enter") {
+                            event.preventDefault();
+                            const person =
+                                navigatedQuery.current === query
+                                    ? availablePeople.find(
+                                          (person) =>
+                                              personValue(person.id) ===
+                                              activeValue,
+                                      )
+                                    : undefined;
+                            onSubmitQuery(person);
+                        } else if (
+                            (event.key === "ArrowDown" ||
+                                event.key === "ArrowUp") &&
+                            navigatedQuery.current !== query &&
+                            values.length > 0
+                        ) {
+                            event.preventDefault();
+                            navigatedQuery.current = query;
+                            setActive(
+                                values[
+                                    event.key === "ArrowDown"
+                                        ? 0
+                                        : values.length - 1
+                                ],
+                            );
+                        }
+                    }}
+                />
             </Command.Input>
             <Command.List
                 label={searchLabel}
@@ -345,6 +404,7 @@ export function PeopleSearchList<T extends PeopleListPerson>({
                     framed ? "max-h-56 p-1" : "max-h-[60vh]",
                 )}
             >
+                {preferredEntry && renderEntry(preferredEntry)}
                 {leadingEntries.map(renderEntry)}
                 {pinned.map(renderPerson)}
                 {context && contextual.length > 0 && (
@@ -391,6 +451,7 @@ export function PeopleSearchList<T extends PeopleListPerson>({
                     (!search || searching) &&
                     matches.length === 0 &&
                     trailingEntries.length === 0 &&
+                    !preferredEntry &&
                     !offerCreate &&
                     (trimmedQuery || leadingEntries.length === 0) && (
                         <output className="block px-3 py-2 text-sm text-muted-foreground">

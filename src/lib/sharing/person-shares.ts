@@ -484,5 +484,5 @@ export async function findShareRecipients(userId: string, query: string) {
     const term = query.trim();
     if (term.length < 2 || term.length > 100) return [];
     const terms = personSearchWords(term);
-    return terms.length ? searchShareRecipients(userId, terms) : [];
+    return terms.length ? searchShareRecipients(userId, term, terms) : [];
 }

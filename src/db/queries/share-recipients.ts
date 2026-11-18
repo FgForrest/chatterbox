@@ -46,8 +46,10 @@ function startsWithWords(column: AnyColumn, terms: readonly string[]) {
 /** Search the active colleague directory, excluding the caller. */
 export function searchShareRecipients(
     userId: string,
+    query: string,
     terms: readonly string[],
 ) {
+    const exactEmail = sql`lower(${users.email}) = lower(${query})`;
     return db
         .select({ id: users.id, name: users.name, email: users.email })
         .from(users)
@@ -56,11 +58,16 @@ export function searchShareRecipients(
                 ne(users.id, userId),
                 activeShareRecipientCondition(),
                 or(
+                    exactEmail,
                     startsWithWords(users.name, terms),
                     startsWithWords(users.email, terms),
                 ),
             ),
         )
-        .orderBy(asc(users.name), asc(users.id))
+        .orderBy(
+            sql`case when ${exactEmail} then 0 else 1 end`,
+            asc(users.name),
+            asc(users.id),
+        )
         .limit(10);
 }

@@ -88,6 +88,54 @@ describe("SpeakerPicker matching", () => {
         });
     });
 
+    it("resolves an exact spelling before considering folded matches", async () => {
+        stubPeople([
+            person("plain", "Jose Novák"),
+            person("accented", "José Novák"),
+        ]);
+        const { onPick } = await renderAndType("JOSÉ NOVÁK");
+        fireEvent.click(screen.getByRole("button", { name: "Select" }));
+        expect(onPick).toHaveBeenCalledWith({ personId: "accented" });
+    });
+
+    it("requires a row choice for an ambiguous folded match instead of creating a duplicate", async () => {
+        stubPeople([
+            person("plain", "Jose Novák"),
+            person("accented", "José Novák"),
+        ]);
+        const { onPick } = await renderAndType("Jose Novak");
+        expect(screen.queryByRole("button", { name: "Create" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Select" })).toHaveProperty(
+            "disabled",
+            true,
+        );
+        expect(screen.queryByRole("option", { name: /Create/ })).toBeNull();
+        fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+        expect(onPick).not.toHaveBeenCalled();
+
+        fireEvent.click(screen.getByRole("option", { name: "Jose Novák" }));
+        fireEvent.click(screen.getByRole("button", { name: "Select" }));
+        expect(onPick).toHaveBeenCalledWith({ personId: "plain" });
+    });
+
+    it("uses a unique folded match", async () => {
+        stubPeople([person("accented", "José Novák")]);
+        const { onPick } = await renderAndType("Jose Novak");
+        fireEvent.click(screen.getByRole("button", { name: "Select" }));
+        expect(onPick).toHaveBeenCalledWith({ personId: "accented" });
+    });
+
+    it("submits an explicitly selected ambiguous match on Enter", async () => {
+        stubPeople([
+            person("plain", "Jose Novák"),
+            person("accented", "José Novák"),
+        ]);
+        const { onPick } = await renderAndType("Jose Novak");
+        fireEvent.click(screen.getByRole("option", { name: "José Novák" }));
+        fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+        expect(onPick).toHaveBeenCalledWith({ personId: "accented" });
+    });
+
     it("changes the action to Create for an unknown name", async () => {
         stubPeople([person("p-1", "Petra")]);
         const { onPick } = await renderAndType("Jan");

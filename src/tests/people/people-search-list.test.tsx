@@ -86,6 +86,19 @@ it("filters on case- and accent-insensitive word starts in the name or email", (
     expect(screen.queryByRole("option")).toBeNull();
 });
 
+it.each([
+    "Home",
+    "End",
+])("leaves %s to the search input and still navigates results with arrows", (key) => {
+    render(<PeopleSearchList people={[second, first]} />);
+    const input = searchField();
+    const [initial, next] = screen.getAllByRole("option");
+    expect(fireEvent.keyDown(input, { key })).toBe(true);
+    expect(input.getAttribute("aria-activedescendant")).toBe(initial.id);
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input.getAttribute("aria-activedescendant")).toBe(next.id);
+});
+
 it("excludes people even when pinned and offers creation with the trimmed query", () => {
     const onCreate = vi.fn();
     render(
