@@ -15,23 +15,6 @@ import { PlaybackProvider } from "@/components/playback/playback-context";
 import * as speechSamples from "@/lib/transcript/speech-samples";
 import { createTestPlayback } from "@/tests/helpers/playback";
 
-vi.mock("@/components/people/speaker-picker", () => ({
-    SpeakerPicker: ({
-        onPick,
-        onClose,
-    }: {
-        onPick: (choice: { personId: string }) => Promise<boolean>;
-        onClose: () => void;
-    }) => (
-        <button
-            type="button"
-            onClick={() => void onPick({ personId: "p2" }).then(onClose)}
-        >
-            Pick Jitka
-        </button>
-    ),
-}));
-
 const text =
     "The meeting has enough words for a useful uninterrupted speech sample today.";
 const turns = [
@@ -80,6 +63,14 @@ function review(frame: "inline" | "dialog", reviewTurns = turns) {
         item("speaker_2"),
     ];
     const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === "/api/people") {
+            return Response.json({
+                people: [
+                    { id: "p2", displayName: "Jitka Dvořáková" },
+                    { id: "p5", displayName: "Jitka Dvořáková Veselá" },
+                ],
+            });
+        }
         if (init?.method === "PATCH") {
             const input = JSON.parse(String(init.body));
             items = items.map((row) =>
@@ -228,7 +219,12 @@ describe.each([
         fireEvent.click(
             within(row).getByRole("button", { name: "Choose a person…" }),
         );
-        fireEvent.click(screen.getByText("Pick Jitka"));
+        const search = await screen.findByRole("combobox", {
+            name: "Who is Speaker 2?",
+        });
+        await screen.findByRole("option", { name: "Jitka Dvořáková" });
+        fireEvent.change(search, { target: { value: "Jitka Dvořáková" } });
+        fireEvent.keyDown(search, { key: "Enter" });
         const chosen = await screen.findByRole("checkbox", {
             name: "Accept Speaker 2 as Jitka Dvořáková",
         });
@@ -248,6 +244,39 @@ describe.each([
             ).toHaveProperty("checked", true),
         );
         expect(screen.getByText("3 of 3 speakers confirmed")).toBeTruthy();
+    });
+    it.each([
+        { navigate: false, choice: { displayName: "Jitka" } },
+        { navigate: true, choice: { personId: "p2" } },
+    ])("submits the typed name or explicitly navigated row (navigate=$navigate)", async ({
+        navigate,
+        choice,
+    }) => {
+        const { fetch } = review(frame);
+        const noName = await screen.findByRole("checkbox", {
+            name: "Accept Speaker 2 as ?",
+        });
+        fireEvent.click(
+            within(noName.closest(".grid") as HTMLElement).getByRole("button", {
+                name: "Choose a person…",
+            }),
+        );
+        const search = await screen.findByRole("combobox", {
+            name: "Who is Speaker 2?",
+        });
+        await screen.findByRole("option", { name: "Jitka Dvořáková" });
+        fireEvent.change(search, { target: { value: "Jitka" } });
+        if (navigate) fireEvent.keyDown(search, { key: "ArrowDown" });
+        fireEvent.keyDown(search, { key: "Enter" });
+        await waitFor(() =>
+            expect(
+                fetch.mock.calls
+                    .filter(([, init]) => init?.method === "PATCH")
+                    .map(([, init]) => JSON.parse(String(init?.body))),
+            ).toEqual([
+                expect.objectContaining({ choice, decision: "accepted" }),
+            ]),
+        );
     });
     it("plays bounded samples with progress, quote and pause, and bounds the name evidence", async () => {
         const { playback, emit } = review(frame);

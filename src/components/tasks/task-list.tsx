@@ -10,6 +10,7 @@ import { RoutedProposalsInbox } from "@/components/tasks/routed-proposals-inbox"
 import {
     AddTaskTrigger,
     TaskAssigneeSelect,
+    TaskListLoadError,
     TaskStateSelect,
 } from "@/components/tasks/task-list-controls";
 import { TaskRow } from "@/components/tasks/task-row";
@@ -81,6 +82,7 @@ export function TaskList({
     };
     const {
         tasks,
+        error,
         reload,
         update,
         merge,
@@ -89,7 +91,8 @@ export function TaskList({
         folders,
         filterFolders,
         selectedPrivate,
-        sortedAssignees,
+        visibleAssignees,
+        selectedAssigneeLabel,
     } = useTaskListData({
         tab,
         state,
@@ -209,7 +212,8 @@ export function TaskList({
                 {tab !== "mine" && (
                     <TaskAssigneeSelect
                         assignee={assignee}
-                        assignees={sortedAssignees}
+                        assignees={visibleAssignees}
+                        selectedLabel={selectedAssigneeLabel}
                         onChange={(value) => setParam("assignee", value)}
                     />
                 )}
@@ -291,15 +295,18 @@ export function TaskList({
                         onAdded={onAdded}
                     />
                 )}
+                {error && <TaskListLoadError retry={() => void reload()} />}
                 {tasks === null ? (
                     <li className="flex items-center gap-2 p-8 text-sm text-muted-foreground">
                         <Loader2 className="size-4 animate-spin" />
                         {i18n("Loading tasks…")}
                     </li>
                 ) : tasks.length === 0 ? (
-                    <li className="p-8 text-center text-sm text-muted-foreground">
-                        {i18n("Nothing here.")}
-                    </li>
+                    !error && (
+                        <li className="p-8 text-center text-sm text-muted-foreground">
+                            {i18n("Nothing here.")}
+                        </li>
+                    )
                 ) : (
                     tasks.map((task) => (
                         <TaskRow

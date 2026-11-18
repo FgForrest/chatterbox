@@ -1,7 +1,14 @@
 "use client";
 
-import { useExtracted, useLocale } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useExtracted } from "next-intl";
+import {
+    useCallback,
+    useEffect,
+    useMemo,
+    useReducer,
+    useRef,
+    useState,
+} from "react";
 import { toast } from "sonner";
 import {
     announceTasksChanged,
@@ -14,9 +21,17 @@ import { localToday } from "@/components/tasks/task-fields";
 import { useTaskMergeFailure } from "@/components/tasks/task-merge-feedback";
 import { useOrgEvents } from "@/hooks/use-org-events";
 import { useTaskFolderTree } from "@/hooks/use-task-folder-tree";
+import { tabEventOrigin } from "@/lib/events/tab-origin";
 import { descendantFolderIds } from "@/lib/folders/hierarchy";
 import { privateTreeFolders } from "@/lib/folders/private-tree";
 import { taskFilterFolders } from "@/lib/tasks/folder-filter";
+import {
+    createTaskListState,
+    type TaskListPatch,
+    type TaskListScope,
+    taskListReducer,
+    taskListView,
+} from "@/lib/tasks/list-state";
 import type {
     TaskAssignee,
     TaskChange,
@@ -57,18 +72,18 @@ export function useTaskListData({
     filterFolders?: boolean;
 }) {
     const i18n = useExtracted();
-    const locale = useLocale();
     const showMergeFailure = useTaskMergeFailure();
-    const [openCount, setOpenCount] = useState<number | null>(null);
-    const [error, setError] = useState(false);
     const folderScope = `${tab}:${allOrganization}`;
     const [taskFolders, setTaskFolders] = useState(new Map<string, string[]>());
     const folderCache = useRef(taskFolders);
-    const [tasks, setTasks] = useState<TaskListItem[] | null>(null);
     const ownInserts = useRef(
         new Map<
             string,
-            { task: TaskListItem; query: string | null; reconciled: boolean }
+            {
+                task: TaskListItem;
+                scope: TaskListScope | null;
+                reconciled: boolean;
+            }
         >(),
     );
     const loadRequest = useRef(0);
@@ -76,23 +91,40 @@ export function useTaskListData({
     const folders = initialFolders ?? loadedFolders;
     const privateFolders = privateTreeFolders(folders);
     const selectedPrivate = privateFolders.find((entry) => entry.id === folder);
-    const ownMatchesFolder = (task: TaskListItem) =>
+    const ownMatchesFolder = (task: TaskView): boolean =>
         folder === ALL ||
         !task.own ||
-        (selectedPrivate &&
-            (selectedPrivate.kind === "private" ||
-                (task.folder &&
-                    descendantFolderIds(privateFolders, selectedPrivate.id).has(
-                        task.folder.id,
-                    ))));
-    const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
-    const assigneeNames = useRef(new Map<string, string>());
-    const assigneeRequest = useRef(0);
-    const sortedAssignees = useMemo(
-        () =>
-            [...assignees].sort((a, b) => a.name.localeCompare(b.name, locale)),
-        [assignees, locale],
+        Boolean(
+            selectedPrivate &&
+                (selectedPrivate.kind === "private" ||
+                    (task.folder &&
+                        descendantFolderIds(
+                            privateFolders,
+                            selectedPrivate.id,
+                        ).has(task.folder.id))),
+        );
+    const [assignees, setAssignees] = useState<{
+        search: string;
+        options: TaskAssignee[];
+    } | null>(null);
+    const [assigneeNames, setAssigneeNames] = useState(
+        new Map<string, string>(),
     );
+    const assigneeRequest = useRef(0);
+    const assigneeSearch = useMemo(() => {
+        const params = new URLSearchParams();
+        if (tab === "all") params.set("tab", "all");
+        else if (allOrganization) params.set("organization", "true");
+        if (folder !== ALL) params.set("folder", folder);
+        return params.size ? `?${params}` : "";
+    }, [tab, allOrganization, folder]);
+    const visibleAssignees =
+        assignees?.search === assigneeSearch ? assignees.options : [];
+    const selectedAssigneeName = assigneeNames.get(assignee);
+    const selectedAssigneeLabel =
+        assignee === ALL || assignee === "none"
+            ? undefined
+            : (selectedAssigneeName ?? i18n("Assignee"));
     const query = useMemo(() => {
         const search = new URLSearchParams({ tab, state, sort });
         if (allOrganization) search.set("organization", "true");
@@ -115,143 +147,178 @@ export function useTaskListData({
         filterFolders,
     ]);
 
-    const currentQuery = useRef(query);
-    currentQuery.current = query;
+    const scope = useMemo(() => ({ query, state }), [query, state]);
+    const [list, dispatch] = useReducer(
+        taskListReducer,
+        scope,
+        createTaskListState,
+    );
+    if (list.scope !== scope) dispatch({ type: "reset", scope });
+    const currentScope = useRef(scope);
+    currentScope.current = scope;
+    const versions = useRef(new Map<string, number>());
+    const saves = useRef(new Map<string, Promise<boolean>>());
+    const confirmTask = useCallback((row: TaskView) => {
+        if (row.version < (versions.current.get(row.id) ?? row.version)) return;
+        versions.current.set(row.id, row.version);
+        const insert = ownInserts.current.get(row.id);
+        if (insert)
+            ownInserts.current.set(row.id, {
+                ...insert,
+                task: { ...insert.task, ...row },
+            });
+    }, []);
 
     const loadAssignees = useCallback(async () => {
         if (tab === "mine") return;
         const request = ++assigneeRequest.current;
         try {
             const response = await fetch(
-                `/api/tasks/assignees${tab === "all" ? "?tab=all" : allOrganization ? "?organization=true" : ""}`,
+                `/api/tasks/assignees${assigneeSearch}`,
             );
             if (!response.ok) throw new Error();
             const body = (await response.json()) as {
                 assignees: TaskAssignee[];
             };
             if (request !== assigneeRequest.current) return;
-            for (const person of body.assignees) {
-                assigneeNames.current.set(person.personId, person.name);
-            }
-            if (
-                assignee !== ALL &&
-                assignee !== "none" &&
-                !body.assignees.some((person) => person.personId === assignee)
-            ) {
-                let name = assigneeNames.current.get(assignee);
-                if (!name) {
-                    const personResponse = await fetch(
-                        `/api/people/${encodeURIComponent(assignee)}`,
-                    );
-                    if (personResponse.ok) {
-                        const { person } = (await personResponse.json()) as {
-                            person: { displayName: string };
-                        };
-                        name = person.displayName;
-                        assigneeNames.current.set(assignee, name);
-                    }
-                }
-                body.assignees.push({
-                    personId: assignee,
-                    name: name ?? i18n("Assignee"),
-                });
-            }
-            if (request === assigneeRequest.current)
-                setAssignees(body.assignees);
+            const names = body.assignees.map(
+                ({ personId, name }) => [personId, name] as const,
+            );
+            setAssigneeNames((previous) => new Map([...previous, ...names]));
+            setAssignees({ search: assigneeSearch, options: body.assignees });
         } catch {
-            return;
+            if (request === assigneeRequest.current)
+                setAssignees((current) =>
+                    current?.search === assigneeSearch
+                        ? current
+                        : { search: assigneeSearch, options: [] },
+                );
         }
-    }, [tab, assignee, i18n, allOrganization]);
+    }, [tab, assigneeSearch]);
 
     useEffect(() => {
+        void revision;
+        void assignee;
         void loadAssignees();
         return () => {
             assigneeRequest.current++;
         };
-    }, [loadAssignees]);
+    }, [loadAssignees, assignee, revision]);
 
-    const load = useCallback(
-        async (options?: { preserveOwnInserts?: boolean }) => {
-            if (query !== currentQuery.current) return;
-            const request = ++loadRequest.current;
-            setError(false);
-            const reconciled = options?.preserveOwnInserts
-                ? []
-                : [...ownInserts.current]
-                      .filter(([, entry]) => entry.reconciled)
-                      .map(([id]) => id);
-            const insertedRows = () =>
-                [...ownInserts.current.values()]
-                    .filter((entry) => entry.query === query)
-                    .map((entry) => entry.task);
-            try {
-                const taskQuery = new URLSearchParams(query);
-                const needsFolders =
-                    filterFolders && !folderCache.current.has(folderScope);
-                if (!needsFolders) taskQuery.delete("folders");
-                const openQuery = new URLSearchParams(query);
-                openQuery.delete("folders");
-                openQuery.set("state", "open");
-                const [response, openResponse] = await Promise.all([
-                    fetch(`/api/tasks?${taskQuery}`),
-                    countOpen && state !== "open" && state !== "all"
-                        ? fetch(`/api/tasks?${openQuery}`)
-                        : Promise.resolve(null),
-                ]);
-                if (!response.ok || (openResponse && !openResponse.ok))
-                    throw new Error();
-                const body = (await response.json()) as {
-                    tasks: TaskListItem[];
-                    folderIds?: string[];
+    const loadedAssigneeSearch = assignees?.search;
+    useEffect(() => {
+        if (
+            tab === "mine" ||
+            assignee === ALL ||
+            assignee === "none" ||
+            selectedAssigneeName ||
+            loadedAssigneeSearch !== assigneeSearch
+        )
+            return;
+        const controller = new AbortController();
+        void fetch(`/api/people/${encodeURIComponent(assignee)}`, {
+            signal: controller.signal,
+        })
+            .then(async (response) => {
+                if (!response.ok) return;
+                const { person } = (await response.json()) as {
+                    person: { displayName: string };
                 };
-                const openBody = openResponse
-                    ? ((await openResponse.json()) as { tasks: TaskListItem[] })
-                    : body;
-                if (
-                    query !== currentQuery.current ||
-                    request !== loadRequest.current
-                )
-                    return;
-                for (const id of reconciled) ownInserts.current.delete(id);
-                const inserts = insertedRows();
-                const insertedIds = new Set(inserts.map((task) => task.id));
-                const rows = [
-                    ...inserts,
-                    ...body.tasks.filter((task) => !insertedIds.has(task.id)),
-                ];
-                versions.current = new Map(
-                    rows.map((task) => [task.id, task.version]),
-                );
-                setTasks(rows);
-                if (needsFolders) {
-                    folderCache.current = new Map(folderCache.current).set(
-                        folderScope,
-                        body.folderIds ?? [],
+                if (!controller.signal.aborted)
+                    setAssigneeNames((names) =>
+                        names.has(assignee)
+                            ? names
+                            : new Map(names).set(assignee, person.displayName),
                     );
-                    setTaskFolders(folderCache.current);
-                }
-                setOpenCount(
-                    openBody.tasks.filter((task) => task.status === "open")
-                        .length,
+            })
+            .catch(() => {});
+        return () => controller.abort();
+    }, [
+        tab,
+        assignee,
+        selectedAssigneeName,
+        loadedAssigneeSearch,
+        assigneeSearch,
+    ]);
+
+    const load = useCallback(async () => {
+        if (scope !== currentScope.current) return;
+        const request = ++loadRequest.current;
+        dispatch({ type: "loading", scope });
+        for (const [id, entry] of ownInserts.current) {
+            if (entry.reconciled && entry.scope !== scope)
+                ownInserts.current.delete(id);
+        }
+        try {
+            const taskQuery = new URLSearchParams(query);
+            const needsFolders =
+                filterFolders && !folderCache.current.has(folderScope);
+            if (!needsFolders) taskQuery.delete("folders");
+            const openQuery = new URLSearchParams(query);
+            openQuery.delete("folders");
+            openQuery.set("state", "open");
+            const [response, openResponse] = await Promise.all([
+                fetch(`/api/tasks?${taskQuery}`),
+                countOpen && state !== "open" && state !== "all"
+                    ? fetch(`/api/tasks?${openQuery}`)
+                    : Promise.resolve(null),
+            ]);
+            if (!response.ok || (openResponse && !openResponse.ok))
+                throw new Error();
+            const body = (await response.json()) as {
+                tasks: TaskListItem[];
+                folderIds?: string[];
+            };
+            const openBody = openResponse
+                ? ((await openResponse.json()) as { tasks: TaskListItem[] })
+                : null;
+            if (
+                scope !== currentScope.current ||
+                request !== loadRequest.current
+            )
+                return;
+            const openRows =
+                openBody?.tasks.filter((row) => row.status === "open") ?? null;
+            for (const row of [...body.tasks, ...(openRows ?? [])])
+                confirmTask(row);
+            dispatch({
+                type: "loaded",
+                scope,
+                rows: body.tasks,
+                inserts: [...ownInserts.current.values()]
+                    .filter((entry) => entry.scope === scope)
+                    .map((entry) => entry.task),
+                openRows,
+            });
+            if (needsFolders) {
+                folderCache.current = new Map(folderCache.current).set(
+                    folderScope,
+                    body.folderIds ?? [],
                 );
-            } catch {
-                if (
-                    query !== currentQuery.current ||
-                    request !== loadRequest.current
-                )
-                    return;
-                setError(true);
-                setTasks(insertedRows());
-                toast.error(i18n("Could not load your tasks"));
+                setTaskFolders(folderCache.current);
             }
-        },
-        [query, i18n, state, countOpen, filterFolders, folderScope],
-    );
+        } catch {
+            if (
+                scope !== currentScope.current ||
+                request !== loadRequest.current
+            )
+                return;
+            dispatch({ type: "loadFailed", scope });
+            toast.error(i18n("Could not load your tasks"));
+        }
+    }, [
+        query,
+        scope,
+        i18n,
+        state,
+        countOpen,
+        filterFolders,
+        folderScope,
+        confirmTask,
+    ]);
 
     useEffect(() => {
         void revision;
-        setTasks(null);
-        setOpenCount(null);
         void load();
         return () => {
             loadRequest.current++;
@@ -265,58 +332,64 @@ export function useTaskListData({
             .catch(() => {});
     }, [markSeen]);
 
-    const reload = useCallback(
-        (options?: { preserveOwnInserts?: boolean }) => {
-            if (query !== currentQuery.current) return Promise.resolve([]);
-            folderCache.current = new Map();
-            setTaskFolders(folderCache.current);
-            return Promise.all([load(options), loadAssignees()]);
-        },
-        [query, load, loadAssignees],
-    );
+    const reload = useCallback(() => {
+        if (scope !== currentScope.current) return Promise.resolve([]);
+        folderCache.current = new Map();
+        setTaskFolders(folderCache.current);
+        return Promise.all([load(), loadAssignees()]);
+    }, [scope, load, loadAssignees]);
     const latestReload = useRef(reload);
     latestReload.current = reload;
 
-    useOrgEvents(true, () => void reload());
-
-    const versions = useRef(new Map<string, number>());
-    const pending = useRef(new Map<string, Promise<void>>());
+    useOrgEvents(true, (event) => {
+        if (event.type === "recording" && event.origin === tabEventOrigin())
+            return;
+        void reload();
+    });
 
     const update = (
         task: TaskListItem,
         change: Omit<TaskChange, "version">,
         optimistic: Partial<TaskView>,
+        group?: RecordingFolder,
     ) => {
-        setTasks(
-            (current) =>
-                current
-                    ?.map((row) =>
-                        row.id === task.id ? { ...row, ...optimistic } : row,
-                    )
-                    .filter(ownMatchesFolder) ?? null,
-        );
-        const run = (pending.current.get(task.id) ?? Promise.resolve())
+        const id = task.id;
+        const patch: TaskListPatch = {
+            fields: optimistic,
+            retain:
+                change.status !== undefined && change.status !== task.status
+                    ? { group }
+                    : undefined,
+        };
+        dispatch({ type: "patch", scope, id, patch });
+        const run = (saves.current.get(id) ?? Promise.resolve())
             .then(async () => {
-                const saved = await changeTask(task.id, {
+                if (!saves.current.has(id)) return false;
+                const saved = await changeTask(id, {
                     ...change,
-                    version: versions.current.get(task.id) ?? task.version,
+                    version: Math.max(
+                        task.version,
+                        versions.current.get(id) ?? task.version,
+                    ),
                 });
-                versions.current.set(task.id, saved.version);
-                if (pending.current.get(task.id) === run) {
-                    setTasks(
-                        (current) =>
-                            current?.map((row) =>
-                                row.id === task.id ? { ...row, ...saved } : row,
-                            ) ?? null,
-                    );
-                }
-                if (
+                if (!saves.current.has(id)) return false;
+                confirmTask(saved);
+                dispatch({
+                    type: "settlePatch",
+                    scope,
+                    id,
+                    patch,
+                    saved,
+                });
+                return (
                     change.assigneePersonId !== undefined ||
-                    change.folderId !== undefined
-                )
-                    await latestReload.current();
+                    change.folderId !== undefined ||
+                    scope !== currentScope.current
+                );
             })
-            .catch(async (error: unknown) => {
+            .catch((error: unknown) => {
+                if (!saves.current.has(id)) return false;
+                dispatch({ type: "settlePatch", scope, id, patch });
                 toast.error(
                     error instanceof TaskRequestError && error.conflict
                         ? i18n("Someone changed this meanwhile. Reloaded.")
@@ -324,15 +397,15 @@ export function useTaskListData({
                           ? error.message
                           : i18n("Could not save the task"),
                 );
-                versions.current.clear();
-                await latestReload.current();
+                return true;
             })
             .finally(() => {
-                if (pending.current.get(task.id) === run) {
-                    pending.current.delete(task.id);
-                }
+                if (saves.current.get(id) === run) saves.current.delete(id);
             });
-        pending.current.set(task.id, run);
+        saves.current.set(id, run);
+        void run.then((shouldReload) => {
+            if (shouldReload) void latestReload.current();
+        });
     };
 
     const merge = async (
@@ -340,22 +413,29 @@ export function useTaskListData({
         targetTaskId: string,
         options?: TaskMergeOptions,
     ) => {
-        const snapshot = tasks;
-        setTasks(
-            (current) => current?.filter((row) => row.id !== task.id) ?? null,
-        );
+        const id = task.id;
+        dispatch({ type: "merge", scope, id });
         try {
-            const result = await mergeTaskIntoTarget(
-                task.id,
-                targetTaskId,
-                options,
-            );
+            const { mergeOwnerNotified, ...survivor } =
+                await mergeTaskIntoTarget(id, targetTaskId, options);
+            const deletedId = survivor.id === id ? targetTaskId : id;
+            ownInserts.current.delete(deletedId);
+            versions.current.delete(deletedId);
+            saves.current.delete(deletedId);
+            confirmTask(survivor);
+            dispatch({
+                type: "mergeSaved",
+                scope: currentScope.current,
+                id,
+                deletedId,
+                survivor,
+            });
             announceTasksChanged();
             await latestReload.current();
-            return { ownerNotified: result.mergeOwnerNotified };
+            return { ownerNotified: mergeOwnerNotified };
         } catch (error) {
-            if (query === currentQuery.current) setTasks(snapshot);
-            else await latestReload.current();
+            dispatch({ type: "mergeFailed", scope, id });
+            if (scope !== currentScope.current) await latestReload.current();
             showMergeFailure(error);
             return false;
         }
@@ -363,48 +443,46 @@ export function useTaskListData({
 
     const onReconciled = (temporaryId: string, task: TaskListItem | null) => {
         const entry = ownInserts.current.get(temporaryId);
-        if (task && entry)
-            ownInserts.current.set(temporaryId, {
-                ...entry,
-                task,
-                reconciled: true,
-            });
-        else ownInserts.current.delete(temporaryId);
+        ownInserts.current.delete(temporaryId);
         versions.current.delete(temporaryId);
-        if (task) versions.current.set(task.id, task.version);
-        setTasks((current) => {
-            const remaining = (current ?? []).filter(
-                (row) => row.id !== temporaryId && row.id !== task?.id,
-            );
-            return task &&
-                entry?.query === currentQuery.current &&
-                ownMatchesFolder(task)
-                ? [task, ...remaining]
-                : remaining;
+        const current = currentScope.current;
+        const show =
+            task &&
+            ownMatchesFolder(task) &&
+            entry?.scope?.query === current.query;
+        if (task) {
+            confirmTask(task);
+            if (entry)
+                ownInserts.current.set(task.id, {
+                    task,
+                    scope: show ? current : null,
+                    reconciled: true,
+                });
+        }
+        dispatch({
+            type: "reconcile",
+            scope: current,
+            id: temporaryId,
+            row: show ? task : undefined,
         });
-        if (task && filterFolders)
-            void latestReload.current({ preserveOwnInserts: true });
+        if (task && filterFolders) void latestReload.current();
     };
     const onAdded = (task: TaskListItem) => {
+        const matchesFolder = ownMatchesFolder(task);
         ownInserts.current.set(task.id, {
             task,
-            query: ownMatchesFolder(task) ? query : null,
+            scope: matchesFolder ? scope : null,
             reconciled: false,
         });
-        versions.current.set(task.id, task.version);
-        setTasks((current) =>
-            ownMatchesFolder(task) ? [task, ...(current ?? [])] : current,
-        );
+        if (matchesFolder) dispatch({ type: "insert", scope, row: task });
     };
+
+    const { tasks, openCount } = taskListView(list, ownMatchesFolder);
 
     return {
         tasks,
-        openCount:
-            state === "open" || state === "all"
-                ? (tasks?.filter((task) => task.status === "open").length ??
-                  null)
-                : openCount,
-        error,
+        openCount,
+        error: list.error,
         reload,
         update,
         merge,
@@ -434,6 +512,7 @@ export function useTaskListData({
               )
             : [],
         selectedPrivate,
-        sortedAssignees,
+        visibleAssignees,
+        selectedAssigneeLabel,
     };
 }

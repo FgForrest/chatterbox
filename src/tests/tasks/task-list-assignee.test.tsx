@@ -10,6 +10,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { TaskList } from "@/components/tasks/task-list";
+import type { OrgClientEvent } from "@/lib/events/types";
 import type {
     TaskAssignee,
     TaskChange,
@@ -21,7 +22,7 @@ const { navigation, translate, orgEvent, changeTask } = vi.hoisted(() => ({
     navigation: { params: new URLSearchParams(), replace: vi.fn() },
     translate: (text: string | { message: string }) =>
         typeof text === "string" ? text : text.message,
-    orgEvent: { current: null as (() => void) | null },
+    orgEvent: { current: null as ((event: OrgClientEvent) => void) | null },
     changeTask: vi.fn(),
 }));
 
@@ -35,8 +36,11 @@ vi.mock("next-intl", () => ({
     useLocale: () => "cs-CZ",
 }));
 vi.mock("@/hooks/use-org-events", () => ({
-    useOrgEvents: (_enabled: boolean, callback: () => void) => {
-        orgEvent.current = callback;
+    useOrgEvents: (
+        enabled: boolean,
+        callback: (event: OrgClientEvent) => void,
+    ) => {
+        if (enabled) orgEvent.current = callback;
     },
 }));
 vi.mock("@/components/tasks/routed-proposals-inbox", () => ({
@@ -75,11 +79,11 @@ vi.mock("@/components/tasks/task-row", () => ({
 
 const firstPerson: TaskAssignee = {
     personId: "person-1",
-    name: "Čira Cloudfern",
+    name: "Petr Bureš",
 };
 const secondPerson: TaskAssignee = {
     personId: "person-2",
-    name: "Hela Thistlemere",
+    name: "Adam Zelený",
 };
 const item = {
     audioAvailable: true,
@@ -131,7 +135,9 @@ const task: TaskListItem = {
 
 let assignees: TaskAssignee[];
 let tasks: TaskListItem[];
-let fetchMock: ReturnType<typeof vi.fn>;
+let fetchMock: ReturnType<
+    typeof vi.fn<(input: RequestInfo | URL) => Promise<Response>>
+>;
 
 beforeEach(() => {
     navigation.params = new URLSearchParams("tab=tracked");
@@ -142,12 +148,15 @@ beforeEach(() => {
     HTMLElement.prototype.scrollIntoView = vi.fn();
     fetchMock = vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url === "/api/tasks/assignees") return Response.json({ assignees });
+        if (url.startsWith("/api/tasks/assignees"))
+            return Response.json({ assignees });
         if (url.startsWith("/api/tasks?")) return Response.json({ tasks });
         if (url === "/api/folders") return Response.json({ folders: [] });
         if (url === "/api/tasks/pending") return Response.json({});
         if (url === "/api/people/person-1")
-            return Response.json({ person: { displayName: firstPerson.name } });
+            return Response.json({
+                person: { displayName: firstPerson.name, self: true },
+            });
         return Response.json({}, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -185,20 +194,35 @@ it("marks new tasks as seen once when the Tasks page opens", async () => {
     });
 });
 
-it("offers server assignees in locale order after All assignees and No assignee", async () => {
+it("offers fixed choices, the viewer and then assignees in surname order", async () => {
+    assignees = [
+        secondPerson,
+        { personId: "viewer", name: "Ema Žulová", self: true },
+        { personId: "person-3", name: "Jitka Dvořáková" },
+        firstPerson,
+    ];
     render(<TaskList organization={false} />);
     await waitFor(() =>
         expect(fetchMock).toHaveBeenCalledWith("/api/tasks/assignees"),
     );
     await openAssignee();
-    expect(
-        screen.getAllByRole("option").map((option) => option.textContent),
-    ).toEqual([
-        "All assignees",
-        "No assignee",
-        firstPerson.name,
-        secondPerson.name,
+    const options = screen.getAllByRole("option");
+    expect(options.map((option) => option.getAttribute("data-value"))).toEqual([
+        "entry:all",
+        "entry:none",
+        "person:viewer",
+        "person:person-1",
+        "person:person-3",
+        "person:person-2",
     ]);
+    expect(options[0].textContent).toBe("All assignees");
+    expect(options[1].textContent).toBe("No assignee");
+    fireEvent.change(screen.getByRole("combobox", { name: "Search people" }), {
+        target: { value: "BURES" },
+    });
+    expect(
+        screen.queryByRole("option", { name: secondPerson.name }),
+    ).toBeNull();
     fireEvent.click(screen.getByRole("option", { name: firstPerson.name }));
     expect(navigation.replace).toHaveBeenCalledWith(
         "/tasks?tab=tracked&assignee=person-1",
@@ -290,18 +314,21 @@ it("refreshes assignees on Organization events and retains the selected person",
     fetchMock.mockClear();
     assignees = [secondPerson];
     await act(async () => {
-        orgEvent.current?.();
+        orgEvent.current?.({ type: "tree" });
     });
     expect(fetchMock).toHaveBeenCalledWith("/api/tasks/assignees");
     expect(fetchMock).toHaveBeenCalledWith(
         expect.stringContaining("assignee=person-1"),
     );
+    expect(
+        screen.getByRole("combobox", { name: "Assignee" }).textContent,
+    ).toContain(firstPerson.name);
     await openAssignee();
-    expect(screen.getByRole("option", { name: firstPerson.name })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: firstPerson.name })).toBeNull();
 });
 
 it("resolves a bookmarked person who no longer has tasks", async () => {
-    assignees = [];
+    assignees = [{ personId: "other", name: "Ema Abelová" }];
     navigation.params.set("assignee", "person-1");
     render(<TaskList organization={false} />);
     await waitFor(() =>
@@ -309,7 +336,15 @@ it("resolves a bookmarked person who no longer has tasks", async () => {
             screen.getByRole("combobox", { name: "Assignee" }).textContent,
         ).toContain(firstPerson.name),
     );
-    expect(fetchMock).toHaveBeenCalledWith("/api/people/person-1");
+    expect(fetchMock).toHaveBeenCalledWith(
+        "/api/people/person-1",
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    await openAssignee();
+    expect(screen.getAllByRole("option")[2].getAttribute("data-value")).toBe(
+        "person:other",
+    );
+    expect(screen.queryByRole("option", { name: firstPerson.name })).toBeNull();
 });
 
 it("reloads tasks and options after a saved assignee change", async () => {
@@ -351,7 +386,7 @@ it.each([
         "tab=all&folder=folder-1&assignee=person-1",
     );
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
-        if (String(input) === "/api/tasks/assignees?tab=all")
+        if (String(input) === "/api/tasks/assignees?tab=all&folder=folder-1")
             return Response.json({ assignees });
         if (String(input).startsWith("/api/tasks?"))
             return Response.json({ tasks: [] });
@@ -367,9 +402,46 @@ it.each([
     expect(fetchMock).toHaveBeenCalledWith(
         "/api/tasks?tab=all&state=open&sort=created&folders=true&folder=folder-1&assignee=person-1",
     );
-    expect(fetchMock).toHaveBeenCalledWith("/api/tasks/assignees?tab=all");
+    expect(fetchMock).toHaveBeenCalledWith(
+        "/api/tasks/assignees?tab=all&folder=folder-1",
+    );
     expect(screen.queryByRole("button", { name: "Mine" }) === null).toBe(
         organization,
+    );
+});
+
+it("reloads Followed options for a different folder and keeps the selected name", async () => {
+    navigation.params = new URLSearchParams(
+        "tab=tracked&folder=folder-1&assignee=person-1&state=done&due=none",
+    );
+    const view = render(<TaskList organization={false} />);
+    await waitFor(() =>
+        expect(
+            screen.getByRole("combobox", { name: "Assignee" }).textContent,
+        ).toContain(firstPerson.name),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+        "/api/tasks/assignees?folder=folder-1",
+    );
+    const newPerson = { personId: "person-3", name: "Jitka Dvořáková" };
+    assignees = [newPerson];
+    navigation.params.set("folder", "folder-2");
+    view.rerender(<TaskList organization={false} />);
+    await waitFor(() =>
+        expect(
+            screen.getByRole("combobox", { name: "Assignee" }).textContent,
+        ).toContain(firstPerson.name),
+    );
+    await openAssignee();
+    expect(
+        await screen.findByRole("option", { name: newPerson.name }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("option", { name: firstPerson.name })).toBeNull();
+    expect(
+        screen.queryByRole("option", { name: secondPerson.name }),
+    ).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith(
+        "/api/tasks/assignees?folder=folder-2",
     );
 });
 
@@ -433,4 +505,66 @@ it("chooses and clears the folder filter while retaining other URL filters", asy
         "/tasks?tab=all&state=done&due=none&sort=due",
         { scroll: false },
     );
+});
+
+it("clears a missing selection even when the folder options fail to refresh", async () => {
+    navigation.params = new URLSearchParams(
+        "tab=tracked&folder=folder-1&assignee=person-1",
+    );
+    const view = render(<TaskList organization={false} />);
+    const trigger = () => screen.getByRole("combobox", { name: "Assignee" });
+    await waitFor(() =>
+        expect(trigger().textContent).toContain(firstPerson.name),
+    );
+
+    assignees = [secondPerson];
+    navigation.params.set("folder", "folder-2");
+    view.rerender(<TaskList organization={false} />);
+    await openAssignee();
+    await screen.findByRole("option", { name: secondPerson.name });
+    fireEvent.click(screen.getByRole("option", { name: "All assignees" }));
+
+    const fetchOptions = fetchMock.getMockImplementation();
+    if (!fetchOptions) throw new Error("Missing fetch mock");
+    fetchMock.mockImplementation((input: RequestInfo | URL) =>
+        String(input).startsWith("/api/tasks/assignees")
+            ? Promise.resolve(new Response(null, { status: 500 }))
+            : fetchOptions(input),
+    );
+    navigation.params.delete("assignee");
+    view.rerender(<TaskList organization={false} />);
+    await openAssignee();
+    expect(
+        screen.getByRole("option", { name: secondPerson.name }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("option", { name: firstPerson.name })).toBeNull();
+});
+
+it("lets the Tasks page retry an initial failure and keeps rows on a failed refresh", async () => {
+    const original = fetchMock.getMockImplementation();
+    if (!original) throw new Error("Missing fetch mock");
+    let failTasks = true;
+    fetchMock.mockImplementation((input: RequestInfo | URL) =>
+        failTasks && String(input).startsWith("/api/tasks?")
+            ? Promise.resolve(new Response(null, { status: 503 }))
+            : original(input),
+    );
+    render(<TaskList organization={false} />);
+    expect((await screen.findByRole("alert")).textContent).toContain(
+        "Could not load your tasks",
+    );
+    expect(screen.queryByText("Nothing here.")).toBeNull();
+
+    tasks = [task];
+    failTasks = false;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await screen.findByText(task.text);
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    failTasks = true;
+    await act(async () => orgEvent.current?.({ type: "tree" }));
+    expect(screen.getByRole("alert").textContent).toContain(
+        "Could not load your tasks",
+    );
+    expect(screen.getByText(task.text)).toBeTruthy();
 });

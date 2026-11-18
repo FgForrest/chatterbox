@@ -1,11 +1,11 @@
 ---
 title: Active creators may restrict their Organization folders alongside curators
 date: 2026-11-11
-updated: 2026-11-11 21:40
+updated: 2026-11-12 06:50
 status: accepted
 kind: feature
 issues: [404]
-prs: []
+prs: [405]
 areas: [src/lib/folders, src/db/queries/folder-restriction-contacts.ts, src/components/sharing, src/components/dashboard/folder-tree.tsx]
 supersedes: [2026-11-10-restricted-organization-folders]
 superseded-by: []
@@ -69,3 +69,4 @@ Shared self-host creators can now withdraw their folder's items from the Organiz
 ## Timeline
 
 - **2026-11-11**: maintainer accepts creator restriction authority and member-visible discovery in issue #404.
+- **2026-11-12**: merged into `dev` as PR #405.

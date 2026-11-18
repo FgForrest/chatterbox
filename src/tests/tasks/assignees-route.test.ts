@@ -61,8 +61,11 @@ describe("task assignee routes", () => {
         });
     });
 
-    it("serves the authenticated viewer's assignees", async () => {
-        const assignees = [{ personId: "person-1", name: "Tova Quill" }];
+    it("serves the authenticated viewer's assignees with only the self flag added", async () => {
+        const assignees = [
+            { personId: "person-1", name: "Tova Quill", self: true },
+            { personId: "person-2", name: "Neri Bramble", self: false },
+        ];
         listTrackedAssignees.mockResolvedValue(assignees);
         const request = new Request("http://localhost/api/tasks/assignees");
         const response = await getAssignees(request);
@@ -73,6 +76,7 @@ describe("task assignee routes", () => {
             viewer,
             false,
             "followed",
+            null,
         );
     });
 
@@ -104,12 +108,35 @@ describe("task assignee routes", () => {
         );
     });
 
-    it("loads All assignees without losing the authenticated viewer", async () => {
+    it.each([
+        "followed",
+        "all",
+    ] as const)("loads %s assignees for the requested folder", async (tab) => {
         const response = await getAssignees(
-            new Request("http://localhost/api/tasks/assignees?tab=all"),
+            new Request(
+                `http://localhost/api/tasks/assignees?tab=${tab}&folder=folder-1&state=done&due=week`,
+            ),
         );
         expect(response.status).toBe(200);
-        expect(listTrackedAssignees).toHaveBeenCalledWith(viewer, false, "all");
+        expect(listTrackedAssignees).toHaveBeenCalledWith(
+            viewer,
+            false,
+            tab,
+            "folder-1",
+        );
+    });
+
+    it("treats an empty folder like the tasks route does", async () => {
+        const response = await getAssignees(
+            new Request("http://localhost/api/tasks/assignees?tab=all&folder="),
+        );
+        expect(response.status).toBe(200);
+        expect(listTrackedAssignees).toHaveBeenCalledWith(
+            viewer,
+            false,
+            "all",
+            null,
+        );
     });
 
     it.each([

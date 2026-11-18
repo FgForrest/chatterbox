@@ -13,10 +13,8 @@ import {
     waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-    type PickablePerson,
-    SpeakerPicker,
-} from "@/components/people/speaker-picker";
+import type { PickablePerson } from "@/components/people/people-search-list";
+import { SpeakerPicker } from "@/components/people/speaker-picker";
 
 function person(id: string, displayName: string): PickablePerson {
     return { id, displayName, primaryEmail: null };
@@ -82,12 +80,60 @@ describe("SpeakerPicker matching", () => {
         stubPeople([person("p-1", "Jan"), person("p-2", "Petra")]);
         const { onPick } = await renderAndType("Pe");
 
-        fireEvent.click(screen.getByRole("button", { name: "Petra" }));
+        fireEvent.click(screen.getByRole("option", { name: "Petra" }));
         fireEvent.click(screen.getByRole("button", { name: "Select" }));
 
         await waitFor(() => {
             expect(onPick).toHaveBeenCalledWith({ personId: "p-2" });
         });
+    });
+
+    it("resolves an exact spelling before considering folded matches", async () => {
+        stubPeople([
+            person("plain", "Jose Novák"),
+            person("accented", "José Novák"),
+        ]);
+        const { onPick } = await renderAndType("JOSÉ NOVÁK");
+        fireEvent.click(screen.getByRole("button", { name: "Select" }));
+        expect(onPick).toHaveBeenCalledWith({ personId: "accented" });
+    });
+
+    it("requires a row choice for an ambiguous folded match instead of creating a duplicate", async () => {
+        stubPeople([
+            person("plain", "Jose Novák"),
+            person("accented", "José Novák"),
+        ]);
+        const { onPick } = await renderAndType("Jose Novak");
+        expect(screen.queryByRole("button", { name: "Create" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Select" })).toHaveProperty(
+            "disabled",
+            true,
+        );
+        expect(screen.queryByRole("option", { name: /Create/ })).toBeNull();
+        fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+        expect(onPick).not.toHaveBeenCalled();
+
+        fireEvent.click(screen.getByRole("option", { name: "Jose Novák" }));
+        fireEvent.click(screen.getByRole("button", { name: "Select" }));
+        expect(onPick).toHaveBeenCalledWith({ personId: "plain" });
+    });
+
+    it("uses a unique folded match", async () => {
+        stubPeople([person("accented", "José Novák")]);
+        const { onPick } = await renderAndType("Jose Novak");
+        fireEvent.click(screen.getByRole("button", { name: "Select" }));
+        expect(onPick).toHaveBeenCalledWith({ personId: "accented" });
+    });
+
+    it("submits an explicitly selected ambiguous match on Enter", async () => {
+        stubPeople([
+            person("plain", "Jose Novák"),
+            person("accented", "José Novák"),
+        ]);
+        const { onPick } = await renderAndType("Jose Novak");
+        fireEvent.click(screen.getByRole("option", { name: "José Novák" }));
+        fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+        expect(onPick).toHaveBeenCalledWith({ personId: "accented" });
     });
 
     it("changes the action to Create for an unknown name", async () => {
@@ -99,6 +145,45 @@ describe("SpeakerPicker matching", () => {
         await waitFor(() => {
             expect(onPick).toHaveBeenCalledWith({ displayName: "Jan" });
         });
+    });
+
+    it("pins the viewer only among eligible Organization people and keeps the dialog actions", async () => {
+        stubPeople([
+            {
+                ...person("private", "Zita Bílá"),
+                scope: "personal",
+                self: true,
+            },
+            { ...person("viewer", "Ema Žulová"), scope: "org", self: true },
+            { ...person("colleague", "Vít Bílý"), scope: "org" },
+        ]);
+        const onMarkUnknown = vi.fn().mockResolvedValue(true);
+        const props = {
+            label: "Speaker 0",
+            personId: "viewer",
+            onMarkUnknown,
+            onClose: vi.fn(),
+            onPick: vi.fn(),
+        };
+        const view = render(<SpeakerPicker {...props} />);
+        await screen.findByText("Zita Bílá");
+        view.rerender(<SpeakerPicker {...props} organizationOnly />);
+        expect(screen.queryByText("Zita Bílá")).toBeNull();
+        expect(
+            screen
+                .getAllByRole("option")
+                .map((row) => row.getAttribute("data-value")),
+        ).toEqual(["person:viewer", "person:colleague"]);
+        expect(
+            screen
+                .getByRole("link", { name: "Open in Almanac" })
+                .getAttribute("href"),
+        ).toBe("/almanac/viewer");
+        fireEvent.click(
+            screen.getByRole("button", { name: "Unknown speaker" }),
+        );
+        await waitFor(() => expect(props.onClose).toHaveBeenCalledOnce());
+        expect(onMarkUnknown).toHaveBeenCalledOnce();
     });
 
     it("closes without changes from Cancel", async () => {

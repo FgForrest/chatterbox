@@ -851,13 +851,21 @@ describe("person sharing controls", () => {
         expect(
             screen.getAllByRole("button", { name: "Manage folder sharing" }),
         ).toHaveLength(1);
-        fireEvent.change(screen.getByRole("searchbox"), {
-            target: { value: "demo" },
-        });
+        fireEvent.change(
+            screen.getByRole("combobox", { name: "Colleague's name or email" }),
+            {
+                target: { value: "demo" },
+            },
+        );
         expect(
             await screen.findByText("Invited to folder Local planning"),
         ).toBeTruthy();
-        expect(screen.getAllByRole("button", { name: "Add" })).toHaveLength(1);
+        expect(screen.getByRole("option", { name: /Demo New/ })).toBeTruthy();
+        expect(
+            screen
+                .getByRole("option", { name: /Demo Pending/ })
+                .getAttribute("aria-disabled"),
+        ).toBe("true");
         fireEvent.click(
             screen.getByRole("button", { name: "Manage folder sharing" }),
         );
@@ -962,13 +970,24 @@ describe("person sharing controls", () => {
             />,
         );
         await screen.findByText("Through folder Research");
-        fireEvent.change(screen.getByRole("searchbox"), {
-            target: { value: "lena" },
-        });
+        fireEvent.change(
+            screen.getByRole("combobox", { name: "Colleague's name or email" }),
+            {
+                target: { value: "lena" },
+            },
+        );
         expect(
             await screen.findByText("Already sees it through Research"),
         ).toBeTruthy();
-        expect(screen.queryByRole("button", { name: "Add" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Add" })).toHaveProperty(
+            "disabled",
+            true,
+        );
+        expect(
+            screen
+                .getByRole("option", { name: /Lena Fischer/ })
+                .getAttribute("aria-disabled"),
+        ).toBe("true");
     });
 
     it("unfiles an extra filing without ending the direct share", async () => {
@@ -1108,6 +1127,51 @@ describe("person sharing controls", () => {
         );
     });
 
+    it("stages a colleague on Enter and sends only from the separate Add button", async () => {
+        requests.mockImplementation(async (path: string) =>
+            path.includes("/people")
+                ? Response.json({
+                      people: [
+                          {
+                              id: "receiver",
+                              name: "Jitka Dvořáková",
+                              email: "jitka@example.com",
+                          },
+                      ],
+                  })
+                : Response.json({ shares, folderAudience }),
+        );
+        render(
+            <PersonShareDialog
+                itemId="audio"
+                kind="audio"
+                title="Interview"
+                open
+                onOpenChange={vi.fn()}
+            />,
+        );
+        const search = screen.getByRole("combobox", {
+            name: "Colleague's name or email",
+        });
+        fireEvent.change(search, { target: { value: "Jitka" } });
+        await screen.findByRole("option", { name: /Jitka Dvořáková/ });
+        fireEvent.keyDown(search, { key: "Enter" });
+        expect(
+            requests.mock.calls.filter(([, init]) => init?.method === "POST"),
+        ).toHaveLength(0);
+        const add = screen.getByRole("button", { name: "Add" });
+        expect(add).toHaveProperty("disabled", false);
+        fireEvent.click(add);
+        expect(requests).toHaveBeenCalledWith(
+            "/api/items/audio/shares",
+            expect.objectContaining({
+                method: "POST",
+                body: JSON.stringify({ receiverIds: ["receiver"] }),
+            }),
+        );
+        await waitFor(() => expect(add).toHaveProperty("disabled", true));
+    });
+
     it("keeps inactive sharing history manageable after Organization publication", async () => {
         shares = [share("declined"), share("removed", 1)];
         header(true, false, true);
@@ -1120,7 +1184,11 @@ describe("person sharing controls", () => {
         expect(
             screen.queryByRole("button", { name: "Invite again" }),
         ).toBeNull();
-        expect(screen.queryByRole("searchbox")).toBeNull();
+        expect(
+            screen.queryByRole("combobox", {
+                name: "Colleague's name or email",
+            }),
+        ).toBeNull();
     });
 
     it("uses singular recipient counts for one colleague", async () => {
