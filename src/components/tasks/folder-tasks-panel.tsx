@@ -9,6 +9,7 @@ import { OwnTaskForm } from "@/components/tasks/own-task-form";
 import {
     AddTaskTrigger,
     TaskAssigneeSelect,
+    TaskListLoadError,
     TaskStateSelect,
 } from "@/components/tasks/task-list-controls";
 import { TaskRow } from "@/components/tasks/task-row";
@@ -81,6 +82,7 @@ export function FolderTasksPanel({
         onReconciled,
         selectedPrivate,
         sortedAssignees,
+        selectedAssigneeLabel,
         openCount,
     } = useTaskListData({
         tab,
@@ -99,17 +101,24 @@ export function FolderTasksPanel({
         ids.add(assignment.folderId);
         placements.set(assignment.recordingId, ids);
     }
-    const groups = new Map<string, TaskListItem[]>();
+    const groups = new Map<
+        string,
+        { folder: RecordingFolder; rows: TaskListItem[] }
+    >(ordered.map((entry) => [entry.id, { folder: entry, rows: [] }]));
     for (const task of tasks ?? []) {
-        const group = task.own
-            ? ordered.find((entry) => entry.id === task.folder?.id)
-            : ordered.find(
-                  (entry) =>
-                      task.recording &&
-                      placements.get(task.recording.id)?.has(entry.id),
-              );
-        const id = group?.id ?? folder.id;
-        groups.set(id, [...(groups.get(id) ?? []), task]);
+        const groupFolder =
+            task.retainedGroup ??
+            (task.own
+                ? ordered.find((entry) => entry.id === task.folder?.id)
+                : ordered.find(
+                      (entry) =>
+                          task.recording &&
+                          placements.get(task.recording.id)?.has(entry.id),
+                  )) ??
+            folder;
+        const group = groups.get(groupFolder.id);
+        if (group) group.rows.push(task);
+        else groups.set(groupFolder.id, { folder: groupFolder, rows: [task] });
     }
     const tabs = [
         ...(!isOrgAccount
@@ -186,6 +195,7 @@ export function FolderTasksPanel({
                         <TaskAssigneeSelect
                             assignee={assignee}
                             assignees={sortedAssignees}
+                            selectedLabel={selectedAssigneeLabel}
                             onChange={setAssignee}
                         />
                     )}
@@ -219,14 +229,7 @@ export function FolderTasksPanel({
                         onReconciled={onReconciled}
                     />
                 )}
-                {error && (
-                    <li className="space-y-2 p-4" role="alert">
-                        <p>{i18n("Could not load your tasks")}</p>
-                        <Button variant="outline" onClick={() => void reload()}>
-                            {i18n("Try again")}
-                        </Button>
-                    </li>
-                )}
+                {error && <TaskListLoadError retry={() => void reload()} />}
                 {tasks === null ? (
                     <li className="flex items-center gap-2 p-8 text-sm text-muted-foreground">
                         <Loader2 className="size-4 animate-spin" />
@@ -248,21 +251,19 @@ export function FolderTasksPanel({
                         </li>
                     )
                 ) : (
-                    ordered
-                        .filter((entry) => groups.has(entry.id))
-                        .map((entry) => (
+                    [...groups.values()]
+                        .filter(({ rows }) => rows.length > 0)
+                        .map(({ folder: entry, rows }) => (
                             <li key={entry.id}>
                                 <h3 className="flex items-center gap-2 bg-muted/30 px-3 py-2 text-sm font-medium">
                                     <SharedFolderIcon folder={entry} />
                                     <span>
                                         {folderDisplayPath(entry, byId, label)}
                                     </span>
-                                    <HeadingCount>
-                                        {groups.get(entry.id)?.length}
-                                    </HeadingCount>
+                                    <HeadingCount>{rows.length}</HeadingCount>
                                 </h3>
                                 <ul className="divide-y">
-                                    {groups.get(entry.id)?.map((task) => (
+                                    {rows.map((task) => (
                                         <TaskRow
                                             key={task.id}
                                             task={task}
@@ -276,7 +277,12 @@ export function FolderTasksPanel({
                                                 task.recording?.view === "org"
                                             }
                                             onChange={(change, optimistic) =>
-                                                update(task, change, optimistic)
+                                                update(
+                                                    task,
+                                                    change,
+                                                    optimistic,
+                                                    entry,
+                                                )
                                             }
                                             onMerge={(targetTaskId, options) =>
                                                 merge(

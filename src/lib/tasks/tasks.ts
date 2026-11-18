@@ -11,6 +11,7 @@ import {
     lt,
     lte,
     ne,
+    not,
     notExists,
     or,
     type SQL,
@@ -53,10 +54,7 @@ import { descendantFolderIds } from "@/lib/folders/hierarchy";
 import { privateTreeFolders } from "@/lib/folders/private-tree";
 import { nudge } from "@/lib/jobs/nudge";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
-import {
-    recordingSharedCondition,
-    visibleOwnerCondition,
-} from "@/lib/knowledge/org-people";
+import { recordingSharedCondition } from "@/lib/knowledge/org-people";
 import { assertOrgScopeWritable } from "@/lib/org/config";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { hasAudio } from "@/lib/recordings/audio-availability";
@@ -3304,10 +3302,10 @@ export async function listTrackedAssignees(
     folderId?: string | null,
 ): Promise<TaskAssignee[]> {
     const conditions = taskTabConditions(viewer, tab, organization);
+    conditions.push(not(taskReceived(viewer, ANY_TASK_ITEM)));
     if (folderId) {
         conditions.push(
             await taskFolderCondition(viewer, folderId, tab === "all"),
-            visibleOwnerCondition(people.userId, viewer.userId),
         );
     }
     const rows = await db

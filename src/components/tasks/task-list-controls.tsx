@@ -3,6 +3,7 @@
 import { Plus } from "lucide-react";
 import { useExtracted } from "next-intl";
 import type { RefObject } from "react";
+import { Button } from "@/components/ui/button";
 import {
     Select,
     SelectContent,
@@ -45,24 +46,34 @@ export function TaskStateSelect({
 export function TaskAssigneeSelect({
     assignee,
     assignees,
+    selectedLabel,
     onChange,
 }: {
     assignee: string;
     assignees: TaskAssignee[];
+    selectedLabel?: string;
     onChange: (value: string) => void;
 }) {
     const i18n = useExtracted();
+    const allLabel = i18n("All assignees");
+    const noneLabel = i18n("No assignee");
     return (
         <Select value={assignee} onValueChange={(value) => onChange(value)}>
             <SelectTrigger
                 className="h-8 w-48 text-xs"
                 aria-label={i18n("Assignee")}
             >
-                <SelectValue />
+                <SelectValue>
+                    {assignee === ALL
+                        ? allLabel
+                        : assignee === "none"
+                          ? noneLabel
+                          : selectedLabel}
+                </SelectValue>
             </SelectTrigger>
             <SelectContent>
-                <SelectItem value={ALL}>{i18n("All assignees")}</SelectItem>
-                <SelectItem value="none">{i18n("No assignee")}</SelectItem>
+                <SelectItem value={ALL}>{allLabel}</SelectItem>
+                <SelectItem value="none">{noneLabel}</SelectItem>
                 {assignees.map((person) => (
                     <SelectItem key={person.personId} value={person.personId}>
                         {person.name}
@@ -70,6 +81,19 @@ export function TaskAssigneeSelect({
                 ))}
             </SelectContent>
         </Select>
+    );
+}
+
+/** Inline failure state shared by the task lists. */
+export function TaskListLoadError({ retry }: { retry: () => void }) {
+    const i18n = useExtracted();
+    return (
+        <li className="space-y-2 p-4" role="alert">
+            <p>{i18n("Could not load your tasks")}</p>
+            <Button variant="outline" onClick={retry}>
+                {i18n("Try again")}
+            </Button>
+        </li>
     );
 }
 
