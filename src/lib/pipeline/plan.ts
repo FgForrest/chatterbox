@@ -530,14 +530,24 @@ function planShareBlock(
     return true;
 }
 
+function shareHeld(facts: PipelineFacts): boolean {
+    return Boolean(
+        facts.share?.cutJobActive ||
+            trimHolds(facts.phases.trim) ||
+            facts.phases.share?.jobId ||
+            facts.phases.share?.state === "failed",
+    );
+}
+
+function shareAwaitsConfirmation(facts: PipelineFacts): boolean {
+    return Boolean(facts.manualOnly && facts.share?.confirmationRequired);
+}
+
 function planShare(facts: PipelineFacts, actions: PipelineAction[]): void {
     if (facts.categorization.intendedFolderIds.length === 0) return;
-    if (facts.share?.cutJobActive) return;
-    if (trimHolds(facts.phases.trim)) return;
-    if (facts.phases.share?.jobId || facts.phases.share?.state === "failed")
-        return;
+    if (shareHeld(facts)) return;
     if ((facts.phases.share?.generation ?? -1) >= facts.generation) return;
-    if (facts.manualOnly && facts.share?.confirmationRequired) {
+    if (shareAwaitsConfirmation(facts)) {
         if (
             !phaseMatches(
                 facts.phases.share,
@@ -863,11 +873,8 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
         !facts.item.deleted &&
         facts.categorization.intendedFolderIds.length > 0 &&
         facts.share?.problems.some(isShareReviewProblem) &&
-        !facts.share.cutJobActive &&
-        !trimHolds(facts.phases.trim) &&
-        !facts.phases.share?.jobId &&
-        facts.phases.share?.state !== "failed" &&
-        !(facts.manualOnly && facts.share.confirmationRequired) &&
+        !shareHeld(facts) &&
+        !shareAwaitsConfirmation(facts) &&
         !plan.actions.some(
             (action) =>
                 action.type === "completeCategorization" ||
