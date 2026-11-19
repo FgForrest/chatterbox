@@ -195,7 +195,8 @@
 
     function promptArrowTarget(width, outerWidth, pinned, cardRight) {
         // Chrome exposes no toolbar layout, so these offsets approximate the icon and puzzle button positions.
-        const x = width - (outerWidth - width > 40 ? 0 : pinned ? 150 : 110);
+        const toolbarOffset = pinned ? 150 : 110;
+        const x = outerWidth - width > 40 ? width : width - toolbarOffset;
         return width >= 720 && x - cardRight >= 42 ? x : null;
     }
 
@@ -273,6 +274,13 @@
         return node("img", { class: "logo", src: "data:image/png;base64,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", alt: "" });
     }
 
+    function promptHowKey({ pinned, agendaPanel, policyRequired, blinking }) {
+        if (agendaPanel) return pinned ? "agendaPanelIcon" : "agendaPanelIconUnpinned";
+        if (policyRequired) return pinned ? "meetingPromptPolicyPinned" : "meetingPromptPolicyUnpinned";
+        if (!pinned) return "meetingPromptHowUnpinned";
+        return blinking ? "meetingPromptHowPinned" : "meetingPromptHowPinnedBadge";
+    }
+
     function renderPromptMain({ pinned, agendaPanel, policyRequired, shortcut, blinkUntil }) {
         const app = t("appName");
         const direct = !agendaPanel && !policyRequired;
@@ -282,16 +290,14 @@
             promptBlinkUntil = blinkUntil;
             blinkCopyTimer = setTimeout(() => clearBlinkCopy(blinkUntil), remaining);
         }
-        const howKey = agendaPanel ? (pinned ? "agendaPanelIcon" : "agendaPanelIconUnpinned") :
-            policyRequired ? (pinned ? "meetingPromptPolicyPinned" : "meetingPromptPolicyUnpinned") :
-                !pinned ? "meetingPromptHowUnpinned" : blinking ? "meetingPromptHowPinned" : "meetingPromptHowPinnedBadge";
-        const how = node("p", { id: "how" }, [t(howKey, app)]);
+        const how = node("p", { id: "how" }, [t(promptHowKey({ pinned, agendaPanel, policyRequired, blinking }), app)]);
         const shortcutHint = (key) => direct && shortcut
             ? [" ", t(key), " ", node("kbd", {}, [shortcut]), "."]
             : [];
         if (pinned) {
-            const detail = direct ? [t("meetingPromptStartsNow"), ...shortcutHint("meetingPromptPinnedShortcut")] :
-                agendaPanel ? [t("agendaPanelCloseHint")] : [];
+            let detail = [];
+            if (direct) detail = [t("meetingPromptStartsNow"), ...shortcutHint("meetingPromptPinnedShortcut")];
+            else if (agendaPanel) detail = [t("agendaPanelCloseHint")];
             return node("div", { class: "prompt-main pinned" }, [
                 node("div", { class: "toolbar-icon", "aria-hidden": "true" }, [
                     logo(), node("span", { class: "toolbar-badge" }, ["REC?"]),
