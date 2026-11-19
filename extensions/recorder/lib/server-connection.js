@@ -50,6 +50,7 @@ export async function reportConnection(auth, error, { config = false } = {}) {
         detail: isConnectionError(error) ? error.detail : null,
         checkedAt: Date.now(),
         config,
+        ...(config && error?.kind === "server" ? { configError: error.message } : {}),
     };
     try {
         if (observer) await observer(outcome);
@@ -58,7 +59,9 @@ export async function reportConnection(auth, error, { config = false } = {}) {
 }
 
 export function connectionNotice(connection, { recording = false, starting = false } = {}) {
-    if (!connection || connection.state === "ok") return null;
+    if (!connection) return null;
+    if (connection.state === "ok")
+        return connection.configError ? { message: connection.configError, detail: "" } : null;
     const { state, detail } = connection;
     const app = t("appName");
     return {

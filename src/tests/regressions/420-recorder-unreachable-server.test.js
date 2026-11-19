@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+    AGENDA_CACHE_KEY,
+    refreshAgendas,
+} from "../../../extensions/recorder/lib/agendas.js";
+import {
     abortSession,
     completeSession,
     createSession,
@@ -9,12 +13,14 @@ import {
     setSessionAgenda,
     uploadChunk,
 } from "../../../extensions/recorder/lib/api.js";
+import { createLocalSession } from "../../../extensions/recorder/lib/chunk-store.js";
 import { ALARMS } from "../../../extensions/recorder/lib/constants.js";
 import {
     NEXT_MEETING_KEY,
     refreshNextMeeting,
 } from "../../../extensions/recorder/lib/next-meeting.js";
 import { refreshServerConfig } from "../../../extensions/recorder/lib/pairing.js";
+import { connectionNotice } from "../../../extensions/recorder/lib/server-connection.js";
 
 const h = vi.hoisted(() => {
     const local = {};
@@ -101,7 +107,10 @@ const h = vi.hoisted(() => {
             onRemoved: event("removed"),
             contains: async () => true,
         },
-        windows: { onRemoved: event("window-removed") },
+        windows: {
+            get: async (id) => ({ id }),
+            onRemoved: event("window-removed"),
+        },
         tabCapture: { getMediaStreamId: (_options, done) => done("stream") },
         offscreen: { createDocument: vi.fn(noop), closeDocument: vi.fn(noop) },
     });
@@ -111,15 +120,18 @@ const h = vi.hoisted(() => {
 vi.mock("../../../extensions/recorder/lib/token-vault.js", () => ({
     readToken: async () => "op_test",
 }));
-vi.mock("../../../extensions/recorder/lib/chunk-store.js", () => ({
-    createLocalSession: async (id, value) => h.meta.set(id, value),
-    readLocalMeta: async (id) => h.meta.get(id),
-    deleteLocalSession: async (id) => h.meta.delete(id),
-    listLocalSessions: async () => [...h.meta.keys()],
-    listChunkIndices: async (id) => h.chunks.get(id) ?? [],
-    readChunk: async () => new Blob(["encrypted"]),
-    totalBufferedBytes: async () => 0,
-}));
+vi.mock(
+    "../../../extensions/recorder/lib/chunk-store.js",
+    async (importOriginal) => ({
+        deleteLocalSession: (await importOriginal()).deleteLocalSession,
+        createLocalSession: vi.fn(async (id, value) => h.meta.set(id, value)),
+        readLocalMeta: vi.fn(async (id) => h.meta.get(id)),
+        listLocalSessions: async () => [...h.meta.keys()],
+        listChunkIndices: async (id) => h.chunks.get(id) ?? [],
+        readChunk: async () => new Blob(["encrypted"]),
+        totalBufferedBytes: async () => 0,
+    }),
+);
 vi.mock("../../../extensions/recorder/lib/meeting-prompt.js", () => ({
     hasMeetingPromptAccess: async () => true,
     injectMeetingPrompt: async () => {},
@@ -161,6 +173,7 @@ const stopEvent = () =>
         vi.fn(),
     );
 let fetchMock;
+let removeEntry;
 
 beforeEach(() => {
     vi.clearAllMocks();
@@ -174,9 +187,21 @@ beforeEach(() => {
         encryptedApiKey: { nonce: [1, 2, 3] },
         serverDefaults: { encryptedRecordingProtocol: 1 },
     });
+    removeEntry = vi.fn(async (id) => {
+        if (!h.meta.has(id) && !h.chunks.has(id)) {
+            throw new DOMException("Directory is absent", "NotFoundError");
+        }
+        h.meta.delete(id);
+        h.chunks.delete(id);
+    });
     vi.stubGlobal("navigator", {
         onLine: true,
         permissions: { query: async () => ({ state: "granted" }) },
+        storage: {
+            getDirectory: async () => ({
+                getDirectoryHandle: async () => ({ removeEntry }),
+            }),
+        },
     });
     chrome.runtime.getContexts.mockResolvedValue([]);
     fetchMock = vi.spyOn(globalThis, "fetch");
@@ -270,6 +295,36 @@ describe("recorder request outcomes", () => {
             Response.json({ error: "Sign in to continue" }),
         );
         await expect(call()).rejects.toMatchObject({
+            kind: "unreachable",
+            detail: { kind: "foreign-response", httpStatus: 200 },
+        });
+    });
+
+    it.each([
+        undefined,
+        null,
+        0,
+        Number.MAX_SAFE_INTEGER,
+    ])("accepts a released session with truncated_at_chunk=%s", async (truncatedAtChunk) => {
+        const session = {
+            id: "session-one",
+            status: "completed",
+            recording_id: "recording-one",
+            ...(truncatedAtChunk !== undefined && {
+                truncated_at_chunk: truncatedAtChunk,
+            }),
+        };
+        fetchMock.mockResolvedValueOnce(Response.json(session));
+        await expect(getSession(auth, session.id)).resolves.toEqual(session);
+    });
+
+    it("rejects invalid truncation in the job-only Complete fallback", async () => {
+        fetchMock.mockResolvedValueOnce(
+            Response.json({ job_id: "fake-job", truncated_at_chunk: {} }),
+        );
+        await expect(
+            completeSession(auth, "session-one", {}),
+        ).rejects.toMatchObject({
             kind: "unreachable",
             detail: { kind: "foreign-response", httpStatus: 200 },
         });
@@ -393,13 +448,57 @@ function respondToRecovery(url, init) {
     if (url.endsWith("/config")) return config();
     if (url.endsWith("/session-one"))
         return Response.json(
-            init.method === "DELETE" ? { success: true } : { status: "open" },
+            init.method === "DELETE"
+                ? { success: true }
+                : { id: "session-one", status: "open" },
         );
     if (url.includes("/chunks/")) return Response.json({ index: 0 });
     return Response.json({ job_id: "job-one" });
 }
 
 describe("recorder worker outage recovery", () => {
+    it.each([
+        ["tab", "offscreen", true],
+        ["desktop", "desktop-recorder", false],
+    ])("keeps Stop retryable when the %s capture host fails to acknowledge", async (captureMode, target, rejects) => {
+        buffer();
+        Object.assign(h.session.recordingState, {
+            captureMode,
+            captureWindowId: 5,
+        });
+        h.tabs.set(tab.id, tab);
+        h.session.armedTabs = { [tab.id]: { meetingTarget: tab.url } };
+        const sender =
+            captureMode === "tab"
+                ? { id: "test", url: tab.url, tab, frameId: 0 }
+                : popup;
+        const stop = () =>
+            send("stop-recording", { sessionId: "session-one" }, sender);
+        const deliver = vi
+            .spyOn(chrome.runtime, "sendMessage")
+            .mockImplementation(async (message) => {
+                if (message.target === target && message.type === "stop") {
+                    if (rejects) throw new Error("No receiving end");
+                    return undefined;
+                }
+                return { ok: true };
+            });
+        try {
+            expect(await stop()).toMatchObject({ ok: false });
+            expect(h.session.recordingState.stopped).toBe(false);
+            deliver.mockResolvedValue({ ok: true });
+            expect(await stop()).toEqual({ ok: true });
+            expect(
+                deliver.mock.calls.filter(
+                    ([message]) =>
+                        message.target === target && message.type === "stop",
+                ),
+            ).toHaveLength(2);
+        } finally {
+            deliver.mockReset();
+        }
+    });
+
     it.each([
         "timeout",
         "proxy",
@@ -408,13 +507,17 @@ describe("recorder worker outage recovery", () => {
         chrome.runtime.getContexts.mockResolvedValue([
             { documentUrl: "chrome-extension://test/offscreen/offscreen.html" },
         ]);
+        const uploadStarted = Promise.withResolvers();
         if (failure === "timeout") {
             vi.useFakeTimers();
-            fetchMock.mockImplementation(() => new Promise(() => {}));
+            fetchMock.mockImplementation((url) => {
+                if (url.includes("/chunks/")) uploadStarted.resolve();
+                return new Promise(() => {});
+            });
         } else fetchMock.mockImplementation(async () => foreign(403));
         h.listeners.message({ type: "chunk-ready" }, {}, vi.fn());
         if (failure === "timeout") {
-            await vi.advanceTimersByTimeAsync(0);
+            await uploadStarted.promise;
             await vi.advanceTimersByTimeAsync(120_000);
         }
         await vi.waitFor(() =>
@@ -498,6 +601,7 @@ describe("recorder worker outage recovery", () => {
                 return Response.json({ job_id: "job-one" });
             if (url.endsWith("/session-one") && h.session.recordingState.jobId)
                 return Response.json({
+                    id: "session-one",
                     status: "completed",
                     recording_id: "recording-one",
                 });
@@ -524,6 +628,229 @@ describe("recorder worker outage recovery", () => {
                 payload: { tabId: tab.id, noticeAcknowledgedAt: "now" },
             }),
         ).toMatchObject({ ok: true, sessionId: "session-new" });
+    });
+
+    it("reconciles a startup buffer automatically after an enveloped config 503", async () => {
+        buffer({ stopped: true });
+        delete h.session.recordingState;
+        fetchMock.mockImplementation(async () => foreign(502));
+        h.listeners.startup();
+        await vi.waitFor(() => expect(h.alarms.has(alarm)).toBe(true));
+        expect(h.session.recordingState.reconcilePending).toBe(true);
+        fetchMock.mockImplementation(async (url, init) =>
+            url.endsWith("/config")
+                ? apiError(503, "ACCESS_UNVERIFIABLE")
+                : respondToRecovery(url, init),
+        );
+        await h.listeners.alarm({ name: alarm });
+        expect(connectionNotice(h.session.serverConnection)?.message).toBe(
+            "Server refused",
+        );
+        await vi.waitFor(() => {
+            expect(h.session.recordingState).toMatchObject({
+                reconcilePending: false,
+                uploaded: [0],
+                jobId: "job-one",
+            });
+        });
+        expect(connectionNotice(h.session.serverConnection)?.message).toBe(
+            "Server refused",
+        );
+        expect(h.alarms.get(alarm)).toEqual({ periodInMinutes: 0.5 });
+    });
+
+    it("paces config probes after a config refusal, a Calendar proxy error, and agenda success", async () => {
+        vi.useFakeTimers();
+        h.local.serverDefaults.agendas = true;
+        h.local.serverDefaults.nextMeeting = true;
+        chrome.runtime.getContexts.mockResolvedValue([
+            { documentUrl: popup.url },
+        ]);
+        fetchMock.mockImplementation(async () => foreign(502));
+        await expect(refreshServerConfig()).rejects.toMatchObject({
+            kind: "unreachable",
+        });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(h.alarms.has(alarm)).toBe(true);
+
+        const agendaReply = Promise.withResolvers();
+        const probe = vi.fn(() =>
+            probe.mock.calls.length < 4
+                ? apiError(503, "ACCESS_UNVERIFIABLE")
+                : config(),
+        );
+        const calendar = vi.fn(() => foreign(502));
+        const agendas = vi.fn(async () => {
+            await agendaReply.promise;
+            return Response.json({ data: [] });
+        });
+        fetchMock.mockImplementation(async (url) => {
+            if (url.endsWith("/config")) return probe();
+            if (url.endsWith("/meetings/next")) return calendar();
+            return agendas();
+        });
+        await h.listeners.alarm({ name: alarm });
+        await vi.advanceTimersByTimeAsync(0);
+        const backgroundCallsOnRefusal =
+            calendar.mock.calls.length + agendas.mock.calls.length;
+
+        const next = refreshNextMeeting();
+        const rows = refreshAgendas();
+        try {
+            await next;
+            expect(h.session.serverConnection.state).toBe("unreachable");
+        } finally {
+            agendaReply.resolve();
+            await rows;
+        }
+        await vi.advanceTimersByTimeAsync(0);
+        expect(probe).toHaveBeenCalledOnce();
+        expect(backgroundCallsOnRefusal).toBe(0);
+        expect(h.session.serverConnection).toMatchObject({
+            state: "ok",
+            configError: "Server refused",
+        });
+        await h.listeners.alarm({ name: alarm });
+        expect(probe).toHaveBeenCalledTimes(2);
+    });
+
+    it("drains an in-flight first text edit and a queued folder after shortcut Stop", async () => {
+        buffer();
+        Object.assign(h.session.recordingState, {
+            recordingFolderOverride: true,
+            uploaded: [0],
+        });
+        Object.assign(h.local.serverDefaults, {
+            agendas: true,
+            agendaText: 1,
+            sessionAgenda: true,
+            recordingFolderOverride: true,
+        });
+        const text = {
+            field: "point:point-one:note",
+            update: "edit",
+            stateVector: "version",
+            version: 2,
+        };
+        const posted = Promise.withResolvers();
+        const reply = Promise.withResolvers();
+        const complete = vi.fn(() =>
+            Response.json({
+                id: "session-one",
+                status: "completing",
+                job_id: null,
+            }),
+        );
+        fetchMock.mockImplementation(async (url, init) => {
+            if (url.endsWith("/text")) {
+                posted.resolve(JSON.parse(init.body));
+                await reply.promise;
+                return Response.json(text);
+            }
+            if (url.endsWith("/agendas/agenda-one"))
+                return Response.json({
+                    id: "agenda-one",
+                    title: "Acme review",
+                    own: true,
+                    permissions: { edit: true },
+                });
+            if (url.endsWith("/complete"))
+                return complete(JSON.parse(init.body));
+            return Response.json({
+                id: "session-one",
+                status: "completing",
+                job_id: null,
+            });
+        });
+        const edit = send(
+            "edit-agenda",
+            {
+                agendaId: "agenda-one",
+                sessionId: "session-one",
+                tabId: 7,
+                edit: { path: "/text", body: text },
+            },
+            panel,
+        );
+        try {
+            await expect(posted.promise).resolves.toEqual(text);
+            const folder = send("set-recording-folder", {
+                sessionId: "session-one",
+                folderId: "folder-one",
+                folderLabel: "Acme",
+                folderScope: "personal",
+            });
+            await h.listeners.command("toggle-recording");
+            expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+                expect.objectContaining({ target: "offscreen", type: "stop" }),
+            );
+            stopEvent();
+            await vi.waitFor(() =>
+                expect(h.session.recordingState.stopped).toBe(true),
+            );
+            expect(complete).not.toHaveBeenCalled();
+            reply.resolve();
+            await expect(edit).resolves.toMatchObject({
+                ok: true,
+                saved: text,
+            });
+            await expect(folder).resolves.toEqual({ ok: true });
+            await vi.waitFor(() =>
+                expect(complete).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        agendaId: "agenda-one",
+                        folderId: "folder-one",
+                    }),
+                ),
+            );
+            await send("check-finalization");
+            expect(complete).toHaveBeenCalledOnce();
+        } finally {
+            reply.resolve();
+        }
+    });
+
+    it("bounds each metadata drain and retries finalization after the queue settles", async () => {
+        vi.useFakeTimers();
+        buffer();
+        h.session.recordingState.uploaded = [0];
+        h.local.serverDefaults.agendas = true;
+        const lookup = Promise.withResolvers();
+        const complete = vi.fn(() => Response.json({ job_id: "job-one" }));
+        fetchMock.mockImplementation(async (url, init) => {
+            if (url.endsWith("/agendas/agenda-one")) return lookup.promise;
+            if (url.endsWith("/complete")) return complete();
+            return respondToRecovery(url, init);
+        });
+        const edit = send(
+            "edit-agenda",
+            {
+                sessionId: "session-one",
+                tabId: 7,
+                agendaId: "agenda-one",
+            },
+            panel,
+        );
+        try {
+            await send("stop-recording");
+            stopEvent();
+            await vi.advanceTimersByTimeAsync(10_000);
+            expect(h.alarms.get(ALARMS.uploadRetry)).toEqual({
+                delayInMinutes: 0.5,
+            });
+            expect(complete).not.toHaveBeenCalled();
+        } finally {
+            lookup.resolve(
+                Response.json({
+                    id: "agenda-one",
+                    title: "Acme review",
+                    permissions: { edit: true },
+                }),
+            );
+            await edit;
+        }
+        await h.listeners.alarm({ name: ALARMS.uploadRetry });
+        expect(complete).toHaveBeenCalledOnce();
     });
 
     it.each([
@@ -632,15 +959,168 @@ describe("recorder worker outage recovery", () => {
         expect(h.session.recordingState).toBeUndefined();
     });
 
-    it("clears stale state when a second Discard finds no buffer", async () => {
+    it.each([
+        true,
+        false,
+    ])("clears stale state after Discard finds missing metadata (chunks remain: %s)", async (hasChunks) => {
         buffer({ stopped: true });
         h.session.recordingState.reconcilePending = true;
         h.meta.delete("buffer-one");
+        if (!hasChunks) h.chunks.delete("buffer-one");
         expect(
             await send("discard-buffer", { bufferId: "buffer-one" }, options),
         ).toEqual({ ok: true });
         expect(h.session.recordingState).toBeUndefined();
+        expect(h.chunks.has("buffer-one")).toBe(false);
         expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("keeps the buffer when Discard receives an empty Abort response", async () => {
+        buffer({ stopped: true });
+        fetchMock.mockImplementation(async (url, init) =>
+            init.method === "DELETE"
+                ? new Response(null, { status: 204 })
+                : respondToRecovery(url, init),
+        );
+        const discard = () =>
+            send("discard-buffer", { bufferId: "buffer-one" }, options);
+        expect(await discard()).toMatchObject({ ok: false, connection: true });
+        expect(h.meta.has("buffer-one")).toBe(true);
+        expect(h.session.serverConnection.detail).toEqual({
+            kind: "foreign-response",
+            httpStatus: 204,
+        });
+        fetchMock.mockImplementation(async (...args) =>
+            respondToRecovery(...args),
+        );
+        expect(await discard()).toEqual({ ok: true });
+        expect(h.meta.has("buffer-one")).toBe(false);
+    });
+
+    it("keeps Discard retryable when local deletion fails after the server aborts", async () => {
+        buffer({ stopped: true });
+        let aborted = false;
+        fetchMock.mockImplementation(async (url, init) => {
+            if (init.method === "DELETE") aborted = true;
+            else if (aborted)
+                return Response.json({ id: "session-one", status: "aborted" });
+            return respondToRecovery(url, init);
+        });
+        removeEntry.mockRejectedValueOnce(
+            new DOMException(
+                "Directory could not be deleted",
+                "NoModificationAllowedError",
+            ),
+        );
+        const discard = () =>
+            send("discard-buffer", { bufferId: "buffer-one" }, options);
+        const state = structuredClone(h.session.recordingState);
+        expect(await discard()).toEqual({
+            ok: false,
+            error: "Directory could not be deleted",
+        });
+        expect(h.session.recordingState).toEqual(state);
+        expect(h.chunks.get("buffer-one")).toEqual([0]);
+        expect(await discard()).toEqual({ ok: true });
+        expect(h.session.recordingState).toBeUndefined();
+        expect(h.chunks.has("buffer-one")).toBe(false);
+    });
+
+    it.each([
+        "folder",
+        "agenda",
+    ])("waits for an open %s metadata writer before Discard removes the audio", async (kind) => {
+        vi.useFakeTimers();
+        buffer();
+        Object.assign(h.session.recordingState, {
+            recordingFolderOverride: true,
+            uploaded: [0],
+        });
+        Object.assign(h.local.serverDefaults, {
+            recordingFolderOverride: true,
+            agendas: true,
+        });
+        fetchMock.mockImplementation(async (url, init) =>
+            url.endsWith("/agendas/agenda-one")
+                ? Response.json({
+                      id: "agenda-one",
+                      title: "Acme review",
+                      permissions: { edit: true },
+                  })
+                : respondToRecovery(url, init),
+        );
+        const opened = Promise.withResolvers();
+        const release = Promise.withResolvers();
+        let writing = false;
+        vi.mocked(createLocalSession).mockImplementationOnce(
+            async (id, meta) => {
+                writing = true;
+                opened.resolve();
+                await release.promise;
+                h.meta.set(id, meta);
+                writing = false;
+            },
+        );
+        const remove = removeEntry.getMockImplementation();
+        removeEntry.mockImplementation(async (...args) => {
+            if (writing)
+                throw new DOMException(
+                    "Metadata writer is open",
+                    "NoModificationAllowedError",
+                );
+            await remove(...args);
+        });
+        const write =
+            kind === "folder"
+                ? send("set-recording-folder", {
+                      sessionId: "session-one",
+                      folderId: "folder-one",
+                  })
+                : send(
+                      "select-agenda",
+                      {
+                          sessionId: "session-one",
+                          agendaId: "agenda-one",
+                          tabId: 7,
+                      },
+                      panel,
+                  );
+        let discard;
+        try {
+            await Promise.race([
+                opened.promise,
+                write.then(() => {
+                    throw new Error(
+                        "The write finished before opening the metadata writer",
+                    );
+                }),
+            ]);
+            expect(await send("stop-recording")).toEqual({ ok: true });
+            stopEvent();
+            await vi.advanceTimersByTimeAsync(10_000);
+            expect(h.alarms.has(ALARMS.uploadRetry)).toBe(true);
+            discard = send(
+                "discard-buffer",
+                { bufferId: "buffer-one" },
+                options,
+            );
+            await vi.advanceTimersByTimeAsync(0);
+            expect(
+                fetchMock.mock.calls.some(
+                    ([, init]) => init.method === "DELETE",
+                ),
+            ).toBe(true);
+            expect(removeEntry).not.toHaveBeenCalled();
+            expect(h.chunks.get("buffer-one")).toEqual([0]);
+        } finally {
+            release.resolve();
+            await Promise.all([write, discard]);
+        }
+        expect(await discard).toEqual({ ok: true });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(h.meta.has("buffer-one")).toBe(false);
+        expect(h.chunks.has("buffer-one")).toBe(false);
+        expect(h.session.recordingState).toBeUndefined();
     });
 
     it.each([
@@ -683,7 +1163,156 @@ describe("recorder worker outage recovery", () => {
         expect(await send("check-finalization")).toEqual({ ok: true });
         expect(h.meta.has("buffer-one")).toBe(true);
         expect(h.session.recordingState.state).toBe("finalizing");
+        expect(h.session.recordingState.uploadNotice).toBe(
+            "accessUnverifiable",
+        );
         expect(h.alarms.get(ALARMS.uploadRetry)).toEqual({ delayInMinutes: 1 });
+        fetchMock.mockImplementation(async () =>
+            Response.json({
+                id: "session-one",
+                status: "completing",
+                job_id: null,
+            }),
+        );
+        await send("check-finalization");
+        expect(h.session.recordingState.uploadNotice).toBeNull();
+    });
+
+    it.each([
+        "polling",
+        "startup",
+    ])("shows completion during %s even if local cleanup fails", async (source) => {
+        vi.useFakeTimers();
+        buffer({ stopped: true });
+        fetchMock.mockImplementation(async (url) =>
+            url.endsWith("/config")
+                ? config()
+                : Response.json({
+                      id: "session-one",
+                      status: "completed",
+                      recording_id: "recording-one",
+                  }),
+        );
+        removeEntry.mockRejectedValueOnce(
+            new DOMException(
+                "Directory could not be deleted",
+                "NoModificationAllowedError",
+            ),
+        );
+        let check;
+        if (source === "startup") {
+            delete h.session.recordingState;
+            h.listeners.startup();
+        } else {
+            Object.assign(h.session.recordingState, {
+                state: "finalizing",
+                jobId: "job-one",
+            });
+            check = send("check-finalization");
+        }
+        await vi.advanceTimersByTimeAsync(0);
+        expect(h.session.recordingState.state).toBe("completed");
+        expect(h.chunks.get("buffer-one")).toEqual([0]);
+        await vi.advanceTimersByTimeAsync(4000);
+        await check;
+        expect(h.session.recordingState).toBeUndefined();
+    });
+
+    it.each([
+        { recording_id: 7 },
+        { recording_id: "" },
+        { recording_id: "   " },
+        { id: undefined, recording_id: "recording-one" },
+        { id: "wrong-session", recording_id: "recording-one" },
+        { recording_id: "recording-one", truncated_at_chunk: {} },
+        { recording_id: "recording-one", truncated_at_chunk: -1 },
+        { recording_id: "recording-one", truncated_at_chunk: 1.5 },
+        {
+            recording_id: "recording-one",
+            truncated_at_chunk: Number.MAX_SAFE_INTEGER + 1,
+        },
+    ])("preserves encrypted audio on malformed completion %j", async (invalid) => {
+        vi.useFakeTimers();
+        buffer({ stopped: true });
+        Object.assign(h.session.recordingState, {
+            state: "finalizing",
+            jobId: "job-one",
+        });
+        fetchMock.mockImplementation(async () =>
+            Response.json({
+                id: "session-one",
+                status: "completed",
+                ...invalid,
+            }),
+        );
+        const check = send("check-finalization");
+        await vi.advanceTimersByTimeAsync(4000);
+        expect(await check).toEqual({ ok: true });
+        expect(h.meta.has("buffer-one")).toBe(true);
+        expect(h.session.recordingState.state).toBe("finalizing");
+        expect(h.session.serverConnection).toMatchObject({
+            state: "unreachable",
+            detail: { kind: "foreign-response", httpStatus: 200 },
+        });
+        const discarded = await send(
+            "discard-buffer",
+            { bufferId: "buffer-one" },
+            options,
+        );
+        expect(discarded).toMatchObject({ ok: false, connection: true });
+        expect(h.meta.has("buffer-one")).toBe(true);
+    });
+
+    it("keeps the buffer on a completed session with a null recording ID", async () => {
+        buffer({ stopped: true });
+        Object.assign(h.session.recordingState, {
+            state: "finalizing",
+            jobId: "job-one",
+        });
+        fetchMock.mockImplementation(async () =>
+            Response.json({
+                id: "session-one",
+                status: "completed",
+                recording_id: null,
+            }),
+        );
+        await send("check-finalization");
+        expect(h.meta.has("buffer-one")).toBe(true);
+        expect(h.session.recordingState.state).toBe("error");
+        expect(h.session.serverConnection.state).toBe("ok");
+        expect(
+            await send("discard-buffer", { bufferId: "buffer-one" }, options),
+        ).toMatchObject({ ok: false });
+        expect(h.meta.has("buffer-one")).toBe(true);
+    });
+
+    it("only polls a startup session confirmed to be completing without a job ID", async () => {
+        buffer({ stopped: true });
+        delete h.session.recordingState;
+        fetchMock.mockImplementation(async (url) =>
+            url.endsWith("/config")
+                ? config()
+                : Response.json({
+                      id: "session-one",
+                      status: "completing",
+                      job_id: null,
+                  }),
+        );
+        h.listeners.startup();
+        await vi.waitFor(() =>
+            expect(h.alarms.has(ALARMS.uploadRetry)).toBe(true),
+        );
+        await h.listeners.alarm({ name: ALARMS.uploadRetry });
+        await send("check-finalization");
+        expect(
+            fetchMock.mock.calls.filter(([url]) =>
+                url.endsWith("/session-one"),
+            ),
+        ).toHaveLength(3);
+        expect(
+            fetchMock.mock.calls.some(([url]) => url.endsWith("/complete")),
+        ).toBe(false);
+        expect(h.meta.has("buffer-one")).toBe(true);
     });
 
     it("shows an unavailable start and starts from the same consenting meeting after recovery", async () => {
@@ -725,6 +1354,7 @@ describe("recorder worker outage recovery", () => {
         const agenda = {
             id: "agenda-one",
             title: "Acme review",
+            start: null,
             roomBound: true,
         };
         fetchMock.mockImplementation(async () =>
@@ -747,5 +1377,79 @@ describe("recorder worker outage recovery", () => {
         expect(fetchMock).toHaveBeenCalledTimes(calls);
         expect(h.session["agenda-route:7"].agendaIds).toEqual(["agenda-one"]);
         expect(h.session[NEXT_MEETING_KEY]).toEqual(meeting);
+    });
+
+    it.each([
+        [401, "UNAUTHORIZED"],
+        [403, "FORBIDDEN"],
+    ])("returns and displays the config refusal after Retry now returns HTTP %s", async (status, code) => {
+        fetchMock.mockImplementation(async () => foreign(403));
+        await expect(refreshServerConfig()).rejects.toMatchObject({
+            kind: "unreachable",
+        });
+        fetchMock.mockImplementation(async () => apiError(status, code));
+        expect(await send("recorder-connection-retry")).toMatchObject({
+            ok: false,
+            error: expect.any(String),
+        });
+        expect(connectionNotice(h.session.serverConnection)?.message).toBe(
+            "Server refused",
+        );
+        fetchMock.mockImplementation(async () => config());
+        expect(await send("recorder-connection-retry")).toEqual({ ok: true });
+        expect(connectionNotice(h.session.serverConnection)).toBeNull();
+    });
+
+    it.each([
+        { error: "Sign in to continue" },
+        { data: [{}] },
+    ])("does not clear the Calendar, agenda reminder or toolbar cache on foreign JSON %j", async (body) => {
+        Object.assign(h.local.serverDefaults, {
+            agendas: true,
+            nextMeeting: true,
+            agendaRooms: 1,
+        });
+        h.tabs.set(tab.id, tab);
+        const agenda = {
+            id: "agenda-one",
+            title: "Acme review",
+            start: null,
+            roomBound: true,
+            timeSet: true,
+        };
+        const meeting = {
+            eventId: "event-one",
+            title: "Acme review",
+            start: "2026-11-19T10:00:00Z",
+            end: "2026-11-19T11:00:00Z",
+            joinUrl: `${tab.url}?authuser=recorder%40example.com`,
+            accountEmail: "recorder@example.com",
+            agendaId: agenda.id,
+        };
+        fetchMock.mockImplementation(async (url) =>
+            Response.json({
+                data: url.endsWith("/meetings/next") ? meeting : [agenda],
+            }),
+        );
+        const cachedMeeting = await refreshNextMeeting({ force: true });
+        await refreshAgendas({ force: true });
+        const cachedAgendas = structuredClone(h.session[AGENDA_CACHE_KEY]);
+        await h.listeners["tab-updated"](tab.id, { status: "complete" }, tab);
+        h.session["agenda-match:7"].at = 0;
+        fetchMock.mockImplementation(async () => Response.json(body));
+        await h.listeners["tab-updated"](tab.id, { status: "complete" }, tab);
+        expect(h.session["agenda-route:7"].agendaIds).toEqual([agenda.id]);
+        expect(h.session.serverConnection.state).toBe("unreachable");
+        h.session.serverConnection.state = "ok";
+        await expect(refreshAgendas({ force: true })).rejects.toMatchObject({
+            kind: "unreachable",
+        });
+        expect(h.session[AGENDA_CACHE_KEY]).toEqual(cachedAgendas);
+        h.session.serverConnection.state = "ok";
+        expect(await refreshNextMeeting({ force: true })).toEqual(
+            cachedMeeting,
+        );
+        expect(h.session[NEXT_MEETING_KEY]).toEqual(cachedMeeting);
+        expect(h.session.serverConnection.state).toBe("unreachable");
     });
 });

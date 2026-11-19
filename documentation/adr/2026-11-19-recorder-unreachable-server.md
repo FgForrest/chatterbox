@@ -1,7 +1,7 @@
 ---
 title: The recorder preserves encrypted buffers when its server is unreachable
 date: 2026-11-19
-updated: 2026-11-19 14:53
+updated: 2026-11-19 17:33
 status: accepted
 kind: fix
 issues: [420]
@@ -57,14 +57,25 @@ recording key. This keeps the original encryption protocol and key ownership rul
   status of a foreign answer separately. A caller abort stays a cancellation.
 - `extensions/recorder/service-worker.js` tracks reachability per pairing in session storage. It
   uses a 30-second alarm and the released `GET /api/v1/recorder/config` route to resume work after
-  a connection returns. Encrypted audio remains buffered until the server confirms completion.
+  a connection returns. Encrypted audio remains buffered until the server confirms completion with
+  a response naming the same session id and a non-empty recording id. A body without that shape is
+  treated like a foreign answer, and Discard deletes the buffer only after the server's
+  `{"success":true}` and a successful local deletion.
+- An enveloped refusal of the config probe proves the server is reachable: its message stays visible,
+  recording work (uploads, finalize polling, buffered reconciliation) resumes, and Calendar and agenda
+  refreshes keep their own schedule. Probes stay paced by the alarm.
+- Stop answers with a failure when the capture host does not acknowledge it, so every Stop control
+  stays enabled and can be pressed again. Finalize waits for queued folder and agenda writes for at
+  most 10 seconds before it completes the session.
 - The panel renders its last loaded agenda read-only while offline. Background match and Calendar
   requests use their caches until recovery.
 
 ## Verification
 
-- `src/tests/regressions/420-recorder-unreachable-server.test.js` covers 21 request and worker cases,
-  including a silent timeout, proxy errors, interrupted capture, startup recovery and cache routing.
+- `src/tests/regressions/420-recorder-unreachable-server.test.js` covers request and worker cases,
+  including a silent timeout, proxy errors, interrupted capture, startup recovery, cache routing,
+  malformed completion bodies, a failed Stop delivery, a config refusal during recovery and a
+  metadata write racing Discard.
 - `src/tests/recorder/error-envelope.test.ts` pins 401 and 429 replies for recorder config and session
   creation, plus a direct 404 error response. Panel and folder tests cover cache retention.
 - Headless Chromium reached a local API stub, displayed the 30-second timeout and an HTML 403,
@@ -75,6 +86,11 @@ recording key. This keeps the original encryption protocol and key ownership rul
 
 Self-hosted and hosted servers use the same extension behavior. The change uses the existing
 permission and recorder endpoints, and it needs no schema or deployment changes.
+
+Known edge cases left open in #422: a Stop that lands before the capture host starts, a crashed
+offscreen document in tab mode, a second idempotent Complete after an ambiguous proxy answer, two
+agenda draft and link races during Stop or an agenda switch, and validation of the remaining agenda
+and config acknowledgements.
 
 ## Related work
 

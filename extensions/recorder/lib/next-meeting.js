@@ -59,6 +59,21 @@ export function refreshNextMeeting({ opened = false, force = false } = {}) {
     return refreshing;
 }
 
+function isNextMeetingResponse(body) {
+    if (body?.data === null)
+        return body.reason === undefined ||
+            ["hosted", "not_configured", "not_connected", "no_calendar_scope", "calendar_unavailable"].includes(body.reason);
+    const meeting = body?.data;
+    return typeof meeting?.eventId === "string" && Boolean(meeting.eventId) &&
+        typeof meeting.title === "string" &&
+        typeof meeting.start === "string" && Number.isFinite(Date.parse(meeting.start)) &&
+        typeof meeting.end === "string" && Number.isFinite(Date.parse(meeting.end)) &&
+        typeof meeting.accountEmail === "string" && Boolean(meeting.accountEmail) &&
+        (meeting.agendaId == null || typeof meeting.agendaId === "string") &&
+        typeof meeting.joinUrl === "string" && Boolean(meetingRoom(meeting.joinUrl)) &&
+        new URL(meeting.joinUrl).searchParams.get("authuser") === meeting.accountEmail;
+}
+
 async function refreshNow(opened, force) {
     const settings = await getSettings();
     if (!supportsNextMeeting(settings)) {
@@ -79,16 +94,10 @@ async function refreshNow(opened, force) {
             {},
             supportsNextMeeting,
             settings,
-            { timeoutMs: 10000 },
+            { timeoutMs: 10000, validate: isNextMeetingResponse },
         );
         const body = await response.json();
-        data =
-            body.data &&
-            meetingRoom(body.data.joinUrl) &&
-            new URL(body.data.joinUrl).searchParams.get("authuser") ===
-                body.data.accountEmail
-                ? body.data
-                : null;
+        data = body.data;
         reason = body.reason;
     } catch (error) {
         if (isConnectionError(error)) return cached;
