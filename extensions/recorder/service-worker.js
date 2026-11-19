@@ -215,7 +215,15 @@ const POPUP_URL = "popup/popup.html";
 const DEFAULT_TITLE = t("extensionName");
 const OPFS_WARN_BYTES = 1024 * 1024 * 1024; // 1 GiB of unsent audio.
 const NUDGE_PREFIX = "nudge:";
-const promptIcon = createPromptIconBlink(agendaRoutesLoaded, clearPromptBlinkCopy);
+const ARMED_BADGE = { text: "REC?", color: "#d33" };
+const RECORDING_BADGE = { text: "REC", color: "#d33" };
+const EMPTY_BADGE = { text: "" };
+const MIC_BADGE = { text: "MIC!", color: "#b45309" };
+const tabBadgeUpdates = new Map();
+const promptIcon = createPromptIconBlink(agendaRoutesLoaded, clearPromptBlinkCopy, {
+    paintBadge: (tabId, highlighted, isCurrent) => queueTabBadge(tabId, () => highlighted ? EMPTY_BADGE : ARMED_BADGE, isCurrent),
+    restoreBadge: restorePromptBadge,
+});
 const COMPLETION_PREFIX = "completed:";
 const COMPLETION_DISPLAY_MS = 3500;
 const CONNECTION_ALARM = "recorder-connection-probe";
@@ -466,31 +474,54 @@ async function resetState() {
     // evaluation put the armed badge back if the tab is still in a meeting.
     if (previous.tabId != null) {
         await syncMeetingBanner(previous.tabId);
-        await safe(chrome.action.setBadgeText({ tabId: previous.tabId, text: "" }));
+        await queueTabBadge(previous.tabId, () => EMPTY_BADGE);
         await safe(chrome.action.setTitle({ tabId: previous.tabId, title: DEFAULT_TITLE }));
         await reevaluateTab(previous.tabId);
     }
 }
 
 async function updateRecordingBadge(state) {
-    const recording =
-        state.state === STATE.recording || state.state === STATE.finalizing;
-    if (state.tabId != null) {
-        await safe(
-            chrome.action.setBadgeText({
-                tabId: state.tabId,
-                text: recording ? "REC" : "",
-            }),
-        );
-        if (recording) {
-            await safe(
-                chrome.action.setBadgeBackgroundColor({
-                    tabId: state.tabId,
-                    color: "#d33",
-                }),
-            );
-        }
+    const { tabId } = state;
+    if (tabId == null) return;
+    if (hasRecordingBadge(state)) {
+        const badge = queueTabBadge(tabId, () => RECORDING_BADGE);
+        void promptIcon.stop(tabId, true);
+        await badge;
+        return;
     }
+    await queueTabBadge(
+        tabId,
+        async () => (await getArmed())[tabId] ? ARMED_BADGE : EMPTY_BADGE,
+        () => !promptIcon.isBlinking(tabId),
+    );
+}
+
+function hasRecordingBadge(state) {
+    return state?.state === STATE.recording || state?.state === STATE.finalizing;
+}
+
+function queueTabBadge(tabId, getBadge, isCurrent = () => true) {
+    const update = (tabBadgeUpdates.get(tabId) ?? Promise.resolve()).then(async () => {
+        if (!isCurrent()) return;
+        const badge = await getBadge();
+        if (!badge || !isCurrent()) return;
+        await safe(chrome.action.setBadgeText({ tabId, text: badge.text }));
+        if (badge.color && isCurrent()) {
+            await safe(chrome.action.setBadgeBackgroundColor({ tabId, color: badge.color }));
+        }
+    }).catch(() => {});
+    tabBadgeUpdates.set(tabId, update);
+    return update.finally(() => {
+        if (tabBadgeUpdates.get(tabId) === update) tabBadgeUpdates.delete(tabId);
+    });
+}
+
+function restorePromptBadge(tabId, isCurrent) {
+    return queueTabBadge(tabId, async () => {
+        const [state, armed] = await Promise.all([getState(), getArmed()]);
+        if (state.tabId === tabId && hasRecordingBadge(state)) return RECORDING_BADGE;
+        if (armed[tabId]) return ARMED_BADGE;
+    }, isCurrent);
 }
 
 // ---- Offscreen document ------------------------------------------------
@@ -2010,8 +2041,7 @@ async function applyArmedUi(tabId, platform, mode, promptVisible = false) {
             popup: agendaTabs.has(tabId) || mode === "auto" || promptVisible ? "" : POPUP_URL,
         }),
     );
-    await safe(chrome.action.setBadgeText({ tabId, text: "REC?" }));
-    await safe(chrome.action.setBadgeBackgroundColor({ tabId, color: "#d33" }));
+    await restorePromptBadge(tabId, () => !promptIcon.isBlinking(tabId));
     await safe(
         chrome.action.setTitle({
             tabId,
@@ -2053,7 +2083,7 @@ async function disarm(tabId) {
     await sendMeetingBanner(tabId, { view: "hidden" });
     await chrome.notifications.clear(`${NUDGE_PREFIX}${tabId}`).catch(() => {});
     await safe(chrome.action.setPopup({ tabId, popup: agendaTabs.has(tabId) ? "" : POPUP_URL }));
-    await safe(chrome.action.setBadgeText({ tabId, text: "" }));
+    await queueTabBadge(tabId, () => EMPTY_BADGE);
     await safe(chrome.action.setTitle({ tabId, title: DEFAULT_TITLE }));
 }
 
@@ -2134,9 +2164,7 @@ async function evaluateTab(tab) {
     await disarm(tab.id);
     const micMissing = settings.dataUseAcknowledgedAt && !settings.micReminderDismissed &&
         (await microphonePermission()) !== "granted";
-    await safe(chrome.action.setBadgeText({ tabId: tab.id, text: micMissing ? "MIC!" : "" }));
-    if (micMissing)
-        await safe(chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: "#b45309" }));
+    await queueTabBadge(tab.id, () => micMissing ? MIC_BADGE : EMPTY_BADGE);
 }
 
 async function reevaluateTab(tabId) {

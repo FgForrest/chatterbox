@@ -5,7 +5,7 @@ updated: 2026-11-19 17:33
 status: accepted
 kind: fix
 issues: [420]
-prs: []
+prs: [423]
 areas: [extensions/recorder, src/app/api/v1/recorder, src/app/api/v1/recording-sessions]
 supersedes: []
 superseded-by: []

@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getSession } from "../../../extensions/recorder/lib/api.js";
+import {
+    completeSession,
+    getSession,
+} from "../../../extensions/recorder/lib/api.js";
 import {
     listChunkIndices,
     listLocalSessions,
@@ -254,6 +257,10 @@ async function start() {
 
 describe("meeting prompt toolbar icon", () => {
     const tabId = 7;
+    const offscreen = {
+        id: "test",
+        url: "chrome-extension://test/offscreen/offscreen.html",
+    };
     const normal = expect.objectContaining({
         tabId,
         path: expect.objectContaining({ 16: "icons/icon-16.png" }),
@@ -265,6 +272,11 @@ describe("meeting prompt toolbar icon", () => {
         }),
         tabId,
     });
+    const expectBadge = (text) =>
+        expect(chrome.action.setBadgeText).toHaveBeenLastCalledWith({
+            tabId,
+            text,
+        });
 
     beforeEach(() => {
         vi.stubGlobal(
@@ -310,35 +322,142 @@ describe("meeting prompt toolbar icon", () => {
         expect(chrome.action.setIcon).toHaveBeenLastCalledWith(
             image("#f35f6d"),
         );
+        expectBadge("");
+        expect(
+            chrome.action.setIcon.mock.invocationCallOrder.at(-1),
+        ).toBeLessThan(
+            chrome.action.setBadgeText.mock.invocationCallOrder.at(-1),
+        );
+        await message({ type: "meeting-banner-ready" });
+        expectBadge("");
+        chrome.action.setBadgeBackgroundColor.mockClear();
         await vi.advanceTimersByTimeAsync(600);
         expect(chrome.action.setIcon).toHaveBeenLastCalledWith(image("#000"));
+        expectBadge("REC?");
+        expect(chrome.action.setBadgeBackgroundColor).toHaveBeenLastCalledWith({
+            tabId,
+            color: "#d33",
+        });
         await vi.advanceTimersByTimeAsync(600);
         expect(chrome.action.setIcon).toHaveBeenLastCalledWith(
             image("#f35f6d"),
         );
-        await vi.advanceTimersByTimeAsync(18_800);
+        expectBadge("");
+        await vi.advanceTimersByTimeAsync(18_600);
+        chrome.action.setBadgeText.mockClear();
+        await vi.advanceTimersByTimeAsync(200);
         expect(chrome.action.setIcon).toHaveBeenLastCalledWith(normal);
-        expect(chrome.action.setBadgeText).toHaveBeenLastCalledWith({
-            tabId,
-            text: "REC?",
-        });
+        expectBadge("REC?");
         const frames = chrome.action.setIcon.mock.calls.length;
         await arm();
         await vi.advanceTimersByTimeAsync(25_000);
         expect(chrome.action.setIcon).toHaveBeenCalledTimes(frames);
     });
 
+    it("keeps the prompt blinking through non-recording state writes", async () => {
+        vi.useFakeTimers();
+        const blinkUntil = Date.now() + 20_000;
+        await arm();
+        await vi.advanceTimersByTimeAsync(0);
+        expectBadge("");
+        h.session.recordingState = {
+            tabId,
+            state: "error",
+            startConnectionError: true,
+        };
+        chrome.action.setBadgeText.mockClear();
+        h.listeners.message(
+            { type: "levels", micDb: -30, systemDb: -20 },
+            offscreen,
+        );
+        await vi.advanceTimersByTimeAsync(0);
+        expect(h.session.recordingState.levels).toEqual({
+            micDb: -30,
+            systemDb: -20,
+        });
+        expect(chrome.tabs.sendMessage).not.toHaveBeenCalledWith(
+            tabId,
+            { type: "meeting-banner-blink-stopped", blinkUntil },
+            { frameId: 0 },
+        );
+        expect(chrome.action.setBadgeText).not.toHaveBeenCalled();
+        await message({ type: "meeting-banner-ready" });
+        expect(chrome.tabs.sendMessage).toHaveBeenLastCalledWith(
+            tabId,
+            expect.objectContaining({ view: "prompt", blinkUntil }),
+            { frameId: 0 },
+        );
+        await vi.advanceTimersByTimeAsync(600);
+        expect(chrome.action.setIcon).toHaveBeenLastCalledWith(image("#000"));
+        expectBadge("REC?");
+        await vi.advanceTimersByTimeAsync(600);
+        expect(chrome.action.setIcon).toHaveBeenLastCalledWith(
+            image("#f35f6d"),
+        );
+        expectBadge("");
+        await vi.advanceTimersByTimeAsync(18_800);
+        expect(chrome.action.setIcon).toHaveBeenLastCalledWith(normal);
+        expectBadge("REC?");
+
+        chrome.action.setBadgeText.mockClear();
+        h.listeners.message(
+            { type: "levels", micDb: -40, systemDb: -20 },
+            offscreen,
+        );
+        await vi.advanceTimersByTimeAsync(0);
+        expectBadge("REC?");
+    });
+
+    it("clears REC when a recording finishes on a non-armed tab", async () => {
+        vi.useFakeTimers();
+        h.tabs.set(tabId, { ...meeting, url: "https://example.com/" });
+        expect(
+            await message(
+                {
+                    type: "start-recording",
+                    payload: { tabId, noticeAcknowledgedAt: "yes" },
+                },
+                extension,
+            ),
+        ).toMatchObject({ ok: true, sessionId: "session-1" });
+        expect(h.session.armedTabs?.[tabId]).toBeUndefined();
+        expectBadge("REC");
+
+        h.session.recordingState.uploaded = [0];
+        completeSession.mockResolvedValueOnce({ status: "completed" });
+        getSession.mockResolvedValueOnce({
+            status: "completed",
+            recording_id: "recording-1",
+        });
+        h.listeners.message(
+            {
+                type: "recording-stopped",
+                sessionId: "session-1",
+                chunkCount: 1,
+            },
+            offscreen,
+        );
+        await vi.advanceTimersByTimeAsync(0);
+        expect(h.session.recordingState.state).toBe("completed");
+        expectBadge("");
+        await vi.advanceTimersByTimeAsync(3_900);
+        expect(h.session.recordingState).toBeUndefined();
+    });
+
     it.each([
-        "hide",
-        "dismiss",
-        "recording",
-        "navigation",
-        "tab close",
-    ])("restores without further ticks on %s", async (reason) => {
+        ["hide", "REC?"],
+        ["dismiss", "REC?"],
+        ["recording", "REC"],
+        ["navigation", ""],
+        ["microphone reminder", "MIC!"],
+        ["tab close", ""],
+    ])("restores without further ticks on %s", async (reason, badge) => {
         vi.useFakeTimers();
         await arm();
         await vi.advanceTimersByTimeAsync(0);
         expect(chrome.action.setIcon).toHaveBeenCalledWith(image("#f35f6d"));
+        expectBadge("");
+        chrome.action.setBadgeText.mockClear();
         switch (reason) {
             case "hide":
                 h.visible = false;
@@ -363,7 +482,13 @@ describe("meeting prompt toolbar icon", () => {
                 );
                 expect(h.session.recordingState.state).toBe("recording");
                 break;
+            case "microphone reminder":
             case "navigation":
+                if (reason === "microphone reminder") {
+                    navigator.permissions.query.mockResolvedValueOnce({
+                        state: "denied",
+                    });
+                }
                 h.tabs.set(tabId, { ...meeting, url: "https://example.com" });
                 await h.listeners.updated(
                     tabId,
@@ -378,24 +503,71 @@ describe("meeting prompt toolbar icon", () => {
         }
         await vi.advanceTimersByTimeAsync(0);
         expect(chrome.action.setIcon).toHaveBeenLastCalledWith(normal);
+        expectBadge(badge);
         const frames = chrome.action.setIcon.mock.calls.length;
+        const badges = chrome.action.setBadgeText.mock.calls.length;
         await vi.advanceTimersByTimeAsync(25_000);
         expect(chrome.action.setIcon).toHaveBeenCalledTimes(frames);
+        expect(chrome.action.setBadgeText).toHaveBeenCalledTimes(badges);
+    });
+
+    it("keeps REC when a highlighted badge write is in flight at recording start", async () => {
+        vi.useFakeTimers();
+        const highlightedWrite = Promise.withResolvers();
+        const applied = [];
+        let delayed = false;
+        const setBadge = chrome.action.setBadgeText.getMockImplementation();
+        chrome.action.setBadgeText.mockImplementation(async ({ text }) => {
+            if (text === "" && !delayed) {
+                delayed = true;
+                await highlightedWrite.promise;
+            }
+            applied.push(text);
+        });
+        try {
+            await arm();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(delayed).toBe(true);
+            const recording = message(
+                {
+                    type: "start-recording",
+                    payload: {
+                        tabId,
+                        platformHint: "google-meet",
+                        noticeAcknowledgedAt: "yes",
+                    },
+                },
+                extension,
+            );
+            await vi.advanceTimersByTimeAsync(600);
+            highlightedWrite.resolve();
+            await recording;
+            await vi.advanceTimersByTimeAsync(25_000);
+            expect(h.session.recordingState.state).toBe("recording");
+            expect(applied.at(-1)).toBe("REC");
+            expect(applied.slice(applied.indexOf("REC"))).not.toContain("REC?");
+        } finally {
+            highlightedWrite.resolve();
+            chrome.action.setBadgeText.mockImplementation(setBadge);
+        }
     });
 
     it("skips unpinned prompts and re-syncs only visible prompts when pin state changes", async () => {
         chrome.action.getUserSettings.mockResolvedValue({ isOnToolbar: false });
         await arm();
+        expect(chrome.action.setBadgeText.mock.calls).toEqual([
+            [{ tabId, text: "REC?" }],
+            [{ tabId, text: "REC?" }],
+        ]);
         h.tabs.set(8, { ...meeting, id: 8, audible: false });
         await h.listeners.updated(8, { status: "complete" }, h.tabs.get(8));
         expect(chrome.action.setIcon).not.toHaveBeenCalled();
         chrome.tabs.sendMessage.mockClear();
         chrome.action.getUserSettings.mockResolvedValue({ isOnToolbar: true });
         h.listeners.pinChanged({ isOnToolbar: true });
-        await vi.waitFor(() =>
-            expect(chrome.action.setIcon).toHaveBeenLastCalledWith(
-                image("#f35f6d"),
-            ),
+        await vi.waitFor(() => expectBadge(""));
+        expect(chrome.action.setIcon).toHaveBeenLastCalledWith(
+            image("#f35f6d"),
         );
         expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
             tabId,
@@ -409,9 +581,8 @@ describe("meeting prompt toolbar icon", () => {
         );
         chrome.action.getUserSettings.mockResolvedValue({ isOnToolbar: false });
         h.listeners.pinChanged({ isOnToolbar: false });
-        await vi.waitFor(() =>
-            expect(chrome.action.setIcon).toHaveBeenLastCalledWith(normal),
-        );
+        await vi.waitFor(() => expectBadge("REC?"));
+        expect(chrome.action.setIcon).toHaveBeenLastCalledWith(normal);
         expect(chrome.tabs.sendMessage).toHaveBeenLastCalledWith(
             tabId,
             expect.objectContaining({ view: "prompt", pinned: false }),
@@ -507,11 +678,13 @@ describe("meeting prompt toolbar icon", () => {
     it("clears the blink instructions when Chrome rejects an icon update", async () => {
         vi.useFakeTimers();
         const blinkUntil = Date.now() + 20_000;
+        await arm();
+        await vi.advanceTimersByTimeAsync(0);
+        expectBadge("");
         chrome.action.setIcon.mockRejectedValueOnce(
             new Error("Could not update icon"),
         );
-        await arm();
-        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(600);
         expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
             tabId,
             expect.objectContaining({ view: "prompt", blinkUntil }),
@@ -522,6 +695,7 @@ describe("meeting prompt toolbar icon", () => {
             { type: "meeting-banner-blink-stopped", blinkUntil },
             { frameId: 0 },
         );
+        expectBadge("REC?");
         const frames = chrome.action.setIcon.mock.calls.length;
         await vi.advanceTimersByTimeAsync(20_000);
         expect(chrome.action.setIcon).toHaveBeenCalledTimes(frames);
@@ -538,9 +712,14 @@ describe("meeting prompt toolbar icon", () => {
             },
         });
         const clearCopy = vi.fn(async () => {});
+        await chrome.action.setBadgeText({ tabId, text: "" });
         const restored = createPromptIconBlink(
             Promise.resolve({ ...h.session }),
             clearCopy,
+            {
+                restoreBadge: (id) =>
+                    chrome.action.setBadgeText({ tabId: id, text: "REC?" }),
+            },
         );
         expect(await restored.reserve(tabId, () => true)).toBeNull();
         expect(chrome.action.setIcon).toHaveBeenCalledTimes(2);
@@ -551,6 +730,10 @@ describe("meeting prompt toolbar icon", () => {
         expect(h.session["prompt-icon:8"]).toBeUndefined();
         expect(clearCopy).toHaveBeenCalledExactlyOnceWith(tabId, blinkUntil);
         expect(h.session["prompt-icon:7"]).toBe(blinkUntil);
+        expect(chrome.action.setBadgeText).toHaveBeenCalledWith({
+            tabId,
+            text: "REC?",
+        });
         await restored.stop(tabId);
     });
 });

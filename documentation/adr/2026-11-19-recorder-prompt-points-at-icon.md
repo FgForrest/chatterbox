@@ -1,11 +1,11 @@
 ---
 title: Point the meeting prompt at the toolbar and blink the pinned recorder icon
 date: 2026-11-19
-updated: 2026-11-19 17:23
+updated: 2026-11-19 21:36
 status: accepted
 kind: fix
 issues: [421]
-prs: []
+prs: [424]
 areas: [extensions/recorder/content-meeting.js, extensions/recorder/service-worker.js, extensions/recorder/lib/prompt-icon.js]
 supersedes: []
 superseded-by: []
@@ -51,7 +51,9 @@ estimate in a future design.
 
 - `content-meeting.js` draws the arrow in the closed shadow root and recomputes it on resize.
 - `lib/prompt-icon.js` pre-renders the two frames and blinks for up to 20 seconds. Session storage
-  records tab overrides so a new worker can restore them after suspension.
+  records tab overrides so a new worker can restore them after suspension. Chrome draws the REC?
+  badge over most of the 16 px icon. The highlighted frame hides the badge to expose the whole
+  highlight, and the normal frame shows REC?.
 - The worker sends the blink deadline with the prompt. The card says "click the blinking icon" only
   until then, and afterwards (or when Chrome cannot blink the icon) points at the icon with the REC?
   badge, so the copy never promises a blink that is not happening.
@@ -61,17 +63,23 @@ estimate in a future design.
 ## Verification
 
 - Recorder tests in `src/tests/recorder/meeting-banner.test.js` and
-  `src/tests/recorder/meeting-prompt-worker.test.js` cover geometry and the eight icon lifecycle
-  cases, including a worker restart.
-- Headless Chromium 159 against a stub meeting page and API produced eight screenshots, including
-  both pin states in both colour schemes. It verified live pin changes, corner targeting after a
-  200 px reduction in viewport width, reduced motion, the agenda card and the HTTP 403 notice.
+  `src/tests/recorder/meeting-prompt-worker.test.js` cover geometry and the icon and badge lifecycle,
+  including an in-flight badge write at recording start. The worker-restart test covers the icon
+  repair with a stubbed badge restore.
+- Headless Chromium 159 against a stub meeting page and API verified both pin states in both
+  colour schemes, live pin changes, corner targeting after a 200 px reduction in viewport width,
+  reduced motion, the agenda card and the HTTP 403 notice.
   Chrome accepted both icon frames and restored the normal icon on unpin, dismissal and navigation.
+- Headed Chromium on Xvfb showed the highlighted icon without a badge, the normal icon with REC?,
+  and the normal icon with REC? after 20 seconds. On a 40 × 40 px toolbar crop, the summed absolute
+  RGB difference between the two visible frames rose from 20,542 to 133,503, matching the prototype.
 
 ## Consequences & open follow-ups
 
-The arrow's aim varies with toolbar layout. On narrow viewports the card carries the instructions
-on its own. The ring uses a static outline when the user prefers reduced motion.
+The arrow's aim varies with toolbar layout. In a 1280 px headed window with one pinned extension
+it pointed at the icon and, when unpinned, at the puzzle button. A temporary sign-in chip moved the
+icon about 260 px to the left, and each further pinned extension moves it too, which is why the
+blink marks the exact spot. On narrow viewports the card carries the instructions on its own. The ring uses a static outline when the user prefers reduced motion.
 
 ## Related work
 
@@ -81,3 +89,5 @@ on its own. The ring uses a static outline when the user prefers reduced motion.
 ## Timeline
 
 - **2026-11-19** The maintainer approved E and F for issue #421.
+- **2026-11-19** After a real toolbar showed the REC? badge hiding the highlight, the maintainer chose
+  to alternate the badge with the highlighted frame and kept the 20-second window.
