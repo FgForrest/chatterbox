@@ -1,14 +1,14 @@
 ---
 title: Curators get a duplicate queue in the Almanac and every folder shows its knowledge read-only
 date: 2026-10-22
-updated: 2026-10-23 13:35
-status: accepted
+updated: 2026-11-18 19:39
+status: superseded
 kind: feature
 issues: [240]
 prs: [244, 247, 275]
 areas: [src/app/(app)/almanac, src/lib/knowledge/name-match.ts, src/lib/knowledge/people.ts, src/lib/knowledge/entities.ts, src/components/almanac/merge-target-picker.tsx, src/db/queries/almanac-usage.ts, src/lib/knowledge/duplicate-score.ts, src/lib/knowledge/duplicates.ts, src/components/almanac/care-queue.tsx, src/lib/knowledge/read-folder-knowledge.ts, src/components/dashboard/folder-knowledge-panel.tsx, src/lib/transcription/almanac-terms.ts, src/lib/learn/correction-pass.ts, src/lib/authz/curator.ts]
 supersedes: []
-superseded-by: []
+superseded-by: [2026-11-18-remove-per-share-review-from-care]
 relates: [2026-10-22-organization-almanac-grows-on-share, 2026-10-21-curators-manage-organization-almanac, 2026-10-01-name-matching-across-word-forms]
 ---
 
@@ -21,6 +21,8 @@ curators have to keep a growing Organization Almanac clean. Issue #240 plans thr
 the knowledge each folder contributes, including what the models receive; and the rest of the
 problem queue. Decided on 2026-10-22 from a design page. PR 2 merged as #244 and PR 1 as #247;
 PR 3 is #275 (2026-10-23).
+
+**Superseded in part** by [Remove per-share review from Care](2026-11-18-remove-per-share-review-from-care.md). The per-share queue, its review action and its contribution to the Care badge are removed. The rest of this decision still holds, including provenance and safe undo through folder Knowledge flags.
 
 ## Why
 

@@ -1,7 +1,7 @@
 ---
 title: Owners finish reviews before recordings are shared with the Organization
 date: 2026-11-18
-updated: 2026-11-18 21:42
+updated: 2026-11-19 07:44
 status: accepted
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: []
 areas: [src/lib/sharing, src/lib/pipeline, src/lib/tasks, src/lib/learn, src/app/(app)/almanac/review]
 supersedes: [2026-09-30-learn, 2026-10-19-processing-profiles-and-workflow, 2026-10-21-curators-manage-organization-almanac, 2026-10-21-tasks-accepted-automatically, 2026-10-22-organization-almanac-grows-on-share, 2026-10-22-owner-edits-shared-recording, 2026-10-22-owner-reviews-tasks-sharing-ungated, 2026-11-02-quick-finish-of-reviews]
 superseded-by: []
-relates: []
+relates: [2026-11-18-remove-per-share-review-from-care]
 ---
 
 # Owners finish reviews before recordings are shared with the Organization
@@ -90,6 +90,7 @@ and Summary links, including opening Summary without starting another job.
 - [The owner edits a shared recording](2026-10-22-owner-edits-shared-recording.md) cancelled and restarted open private Learn at publication. That still applies when an open run can reach publication, including for mail.
 - [Owner reviews tasks, sharing ungated](2026-10-22-owner-reviews-tasks-sharing-ungated.md) is superseded for first-time Organization recording shares. Accepted tasks still reach assignees directly.
 - [Quick finish of reviews](2026-11-02-quick-finish-of-reviews.md) is superseded for ungated recording shares and for curator quick finish skipping the owner’s task review. The remaining rules for applying and deferring suggestions still hold.
+- [Remove per-share review from Care](2026-11-18-remove-per-share-review-from-care.md) is the other half of trusting owners: curators no longer check each share's Almanac additions.
 
 ## Timeline
 

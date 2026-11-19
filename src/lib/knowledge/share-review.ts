@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, exists, gte, inArray, isNull, ne } from "drizzle-orm";
 import { db } from "@/db";
 import {
     lockCareRecords,
@@ -50,53 +50,13 @@ export interface SharedAdditionsGroup {
     item: { id: string; title: string } | null;
     sharer: string | null;
     createdAt: string;
-    reviewedAt: string | null;
     undoneAt: string | null;
     additions: ShareAddition[];
     nextOffset: number | null;
 }
-export interface SharedAdditionsPage {
-    groups: SharedAdditionsGroup[];
-    nextOffset: number | null;
-    openCount: number;
-}
 export interface ShareUndoResult {
     removed: string[];
     kept: { id: string; reason: KeptReason }[];
-}
-
-function recent() {
-    return new Date(Date.now() - 14 * 86400000);
-}
-
-/** Number of recent, unreviewed share groups that actually added knowledge. */
-export async function shareReviewCount(actorId: string): Promise<number> {
-    const scope = await requireCareCurator(actorId);
-    const rows = await db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(almanacShareEvents)
-        .where(
-            and(
-                eq(almanacShareEvents.userId, scope),
-                gte(almanacShareEvents.createdAt, recent()),
-                isNull(almanacShareEvents.reviewedAt),
-                isNull(almanacShareEvents.undoneAt),
-                sql`exists (${db
-                    .select({ id: almanacShareChanges.id })
-                    .from(almanacShareChanges)
-                    .where(
-                        and(
-                            eq(almanacShareChanges.userId, scope),
-                            eq(
-                                almanacShareChanges.eventId,
-                                almanacShareEvents.id,
-                            ),
-                            eq(almanacShareChanges.added, true),
-                        ),
-                    )})`,
-            ),
-        );
-    return rows[0]?.count ?? 0;
 }
 
 async function additionLabels(
@@ -253,79 +213,84 @@ async function additionLabels(
 }
 
 /** Show only the item's current Organization view, never the sharer's private title after withdrawal. */
-export async function listSharedAdditions(
+export async function getSharedAdditions(
     actorId: string,
-    offset = 0,
-    eventId?: string,
+    eventId: string,
     additionOffset = 0,
-): Promise<SharedAdditionsPage> {
+): Promise<SharedAdditionsGroup> {
     const scope = await requireCareCurator(actorId);
-    const events = await db
-        .select()
+    const [event] = await db
+        .select({
+            id: almanacShareEvents.id,
+            itemId: almanacShareEvents.itemId,
+            sharedByUserId: almanacShareEvents.sharedByUserId,
+            createdAt: almanacShareEvents.createdAt,
+            undoneAt: almanacShareEvents.undoneAt,
+        })
         .from(almanacShareEvents)
         .where(
             and(
                 eq(almanacShareEvents.userId, scope),
-                eventId
-                    ? eq(almanacShareEvents.id, eventId)
-                    : gte(almanacShareEvents.createdAt, recent()),
-                sql`exists (${db
-                    .select({ id: almanacShareChanges.id })
-                    .from(almanacShareChanges)
-                    .where(
-                        and(
-                            eq(almanacShareChanges.userId, scope),
-                            eq(
-                                almanacShareChanges.eventId,
-                                almanacShareEvents.id,
+                eq(almanacShareEvents.id, eventId),
+                exists(
+                    db
+                        .select({ id: almanacShareChanges.id })
+                        .from(almanacShareChanges)
+                        .where(
+                            and(
+                                eq(almanacShareChanges.userId, scope),
+                                eq(almanacShareChanges.eventId, eventId),
+                                eq(almanacShareChanges.added, true),
                             ),
-                            eq(almanacShareChanges.added, true),
                         ),
-                    )})`,
+                ),
             ),
         )
-        .orderBy(desc(almanacShareEvents.createdAt), almanacShareEvents.id)
-        .offset(offset)
-        .limit(eventId ? 1 : 21);
-    if (eventId && !events.length)
+        .limit(1);
+    if (!event)
         throw new AppError(ErrorCode.NOT_FOUND, "Share event not found", 404);
-    const groups: SharedAdditionsGroup[] = [];
-    for (const event of events.slice(0, 20)) {
-        const changes = await db
-            .select()
-            .from(almanacShareChanges)
-            .where(
-                and(
-                    eq(almanacShareChanges.userId, scope),
-                    eq(almanacShareChanges.eventId, event.id),
-                    eq(almanacShareChanges.added, true),
-                ),
-            )
-            .orderBy(almanacShareChanges.id)
-            .offset(additionOffset)
-            .limit(101);
-        const [item] = event.itemId
-            ? await db
-                  .select({ id: chatterItems.id, title: chatterItems.title })
-                  .from(chatterItems)
-                  .where(
-                      and(
-                          eq(chatterItems.id, event.itemId),
-                          isNull(chatterItems.deletedAt),
-                          recordingSharedCondition(chatterItems.id),
-                      ),
-                  )
-                  .limit(1)
-            : [];
-        const [sharer] = event.sharedByUserId
-            ? await db
-                  .select({ name: users.name })
-                  .from(users)
-                  .where(eq(users.id, event.sharedByUserId))
-                  .limit(1)
-            : [];
-        const labels = await additionLabels(scope, changes.slice(0, 100));
-        const additions = changes.slice(0, 100).map((row) => ({
+    const changes = await db
+        .select()
+        .from(almanacShareChanges)
+        .where(
+            and(
+                eq(almanacShareChanges.userId, scope),
+                eq(almanacShareChanges.eventId, event.id),
+                eq(almanacShareChanges.added, true),
+            ),
+        )
+        .orderBy(almanacShareChanges.id)
+        .offset(additionOffset)
+        .limit(101);
+    const [item] = event.itemId
+        ? await db
+              .select({ id: chatterItems.id, title: chatterItems.title })
+              .from(chatterItems)
+              .where(
+                  and(
+                      eq(chatterItems.id, event.itemId),
+                      isNull(chatterItems.deletedAt),
+                      recordingSharedCondition(chatterItems.id),
+                  ),
+              )
+              .limit(1)
+        : [];
+    const [sharer] = event.sharedByUserId
+        ? await db
+              .select({ name: users.name })
+              .from(users)
+              .where(eq(users.id, event.sharedByUserId))
+              .limit(1)
+        : [];
+    const page = changes.slice(0, 100);
+    const labels = await additionLabels(scope, page);
+    return {
+        id: event.id,
+        item: item ? { id: item.id, title: decryptText(item.title) } : null,
+        sharer: sharer?.name ?? null,
+        createdAt: event.createdAt.toISOString(),
+        undoneAt: event.undoneAt?.toISOString() ?? null,
+        additions: page.map((row) => ({
             id: row.id,
             kind: row.kind,
             targetId: row.targetId,
@@ -334,65 +299,9 @@ export async function listSharedAdditions(
             label: labels.get(row.id) ?? null,
             removedAt: row.removedAt?.toISOString() ?? null,
             keptReason: row.keptReason,
-        }));
-        groups.push({
-            id: event.id,
-            item: item ? { id: item.id, title: decryptText(item.title) } : null,
-            sharer: sharer?.name ?? null,
-            createdAt: event.createdAt.toISOString(),
-            reviewedAt: event.reviewedAt?.toISOString() ?? null,
-            undoneAt: event.undoneAt?.toISOString() ?? null,
-            additions,
-            nextOffset: changes.length > 100 ? additionOffset + 100 : null,
-        });
-    }
-    return {
-        groups,
-        nextOffset: events.length > 20 ? offset + 20 : null,
-        openCount: await shareReviewCount(actorId),
+        })),
+        nextOffset: changes.length > 100 ? additionOffset + 100 : null,
     };
-}
-
-/** A curator has reviewed a share's additions; the item stays shared. */
-export async function reviewShare(
-    actorId: string,
-    eventId: string,
-): Promise<void> {
-    const scope = await requireCareCurator(actorId);
-    await db.transaction(async (tx) => {
-        await lockOrgPeople(tx);
-        await requireCareCurator(actorId);
-        const [row] = await tx
-            .update(almanacShareEvents)
-            .set({ reviewedAt: new Date(), reviewedByUserId: actorId })
-            .where(
-                and(
-                    eq(almanacShareEvents.userId, scope),
-                    eq(almanacShareEvents.id, eventId),
-                    isNull(almanacShareEvents.reviewedAt),
-                ),
-            )
-            .returning({ id: almanacShareEvents.id });
-        if (!row) {
-            const [existing] = await tx
-                .select({ id: almanacShareEvents.id })
-                .from(almanacShareEvents)
-                .where(
-                    and(
-                        eq(almanacShareEvents.userId, scope),
-                        eq(almanacShareEvents.id, eventId),
-                    ),
-                )
-                .limit(1);
-            if (!existing)
-                throw new AppError(
-                    ErrorCode.NOT_FOUND,
-                    "Share event not found",
-                    404,
-                );
-        }
-        await bumpScopeInTx(tx, [scope]);
-    });
 }
 
 async function currentRow(
@@ -687,8 +596,6 @@ export async function undoShareAdditions(
                 .set({
                     undoneAt: new Date(),
                     undoneByUserId: actorId,
-                    reviewedAt: event.reviewedAt ?? new Date(),
-                    reviewedByUserId: event.reviewedByUserId ?? actorId,
                 })
                 .where(
                     and(

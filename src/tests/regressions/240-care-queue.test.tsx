@@ -6,6 +6,7 @@ import {
     render,
     screen,
     waitFor,
+    within,
 } from "@testing-library/react";
 import type * as NextIntl from "next-intl";
 import type { TranslationValues } from "use-intl/core";
@@ -213,7 +214,6 @@ const shareGroup: SharedAdditionsGroup = {
     item: null,
     sharer: "Jitka Dvořáková",
     createdAt: "2026-10-22T10:00:00Z",
-    reviewedAt: null,
     undoneAt: null,
     nextOffset: 100,
     additions: [addition("addition", "Nela Starling")],
@@ -252,29 +252,14 @@ it("asks before deleting one addition or undoing a share, and restores the rows 
         ).toBe(false),
     );
     expect(screen.queryByText("Removed")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
-    await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(2));
-    await waitFor(() =>
-        expect(
-            screen
-                .getByRole("button", { name: "Mark reviewed" })
-                .hasAttribute("disabled"),
-        ).toBe(false),
-    );
     expect(mocks.refresh).not.toHaveBeenCalled();
 });
 it("pages a share's additions", async () => {
     mocks.fetch.mockResolvedValue(
         Response.json({
-            groups: [
-                {
-                    ...shareGroup,
-                    nextOffset: null,
-                    additions: [addition("second", "Velnaro")],
-                },
-            ],
+            ...shareGroup,
             nextOffset: null,
-            openCount: 1,
+            additions: [addition("second", "Velnaro")],
         }),
     );
     render(<ShareAdditionsGroupCard group={shareGroup} onChanged={vi.fn()} />, {
@@ -296,22 +281,18 @@ it("never shows flags or fixes without curator-only data", () => {
     expect(screen.queryByText(/open problem/)).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
 });
-it("loads each new Care section and keeps the duplicate section", async () => {
-    mocks.fetch.mockImplementation(async (url) =>
-        Response.json(
-            String(url).includes("shares")
-                ? { groups: [], nextOffset: null, openCount: 0 }
-                : {
-                      problems: [problem],
-                      nextOffset: null,
-                      counts: {
-                          fact_conflict: 1,
-                          correction_conflict: 0,
-                          thin: 0,
-                      },
-                      limited: false,
-                  },
-        ),
+it("shows the four Care sections and loads their fixes", async () => {
+    mocks.fetch.mockImplementation(async () =>
+        Response.json({
+            problems: [problem],
+            nextOffset: null,
+            counts: {
+                fact_conflict: 1,
+                correction_conflict: 0,
+                thin: 0,
+            },
+            limited: false,
+        }),
     );
     render(
         <CareQueue
@@ -320,112 +301,49 @@ it("loads each new Care section and keeps the duplicate section", async () => {
         />,
         { wrapper },
     );
+    const sections = within(
+        screen.getByRole("navigation", { name: "Problem types" }),
+    );
+    expect(sections.getAllByRole("button")).toHaveLength(4);
     for (const name of [
         "Conflicting facts",
         "Corrections pointing two ways",
         "Thin records",
     ]) {
         fireEvent.click(
-            screen.getByRole("button", { name: new RegExp(`^${name}`) }),
+            sections.getByRole("button", { name: new RegExp(`^${name}`) }),
         );
         expect(await screen.findByText("Velnaro")).toBeTruthy();
     }
-    fireEvent.click(screen.getByRole("button", { name: /^New from sharing/ }));
-    expect(
-        await screen.findByText(/Shares made before the upgrade/),
-    ).toBeTruthy();
     fireEvent.click(
-        screen.getByRole("button", { name: /^Possible duplicates/ }),
+        sections.getByRole("button", { name: /^Possible duplicates/ }),
     );
     expect(screen.getByRole("button", { name: "People" })).toBeTruthy();
 });
-it("shows per-share additions, review links, safe undo outcomes and the private-title fallback", async () => {
-    mocks.fetch.mockImplementation(async (_url, init) =>
-        init?.method === "POST"
-            ? Response.json({
-                  removed: ["addition"],
-                  kept: [{ id: "other", reason: "later_share" }],
-              })
-            : Response.json({
-                  groups: [
-                      {
-                          id: "share",
-                          item: null,
-                          sharer: "Jitka Dvořáková",
-                          createdAt: "2026-10-22T10:00:00Z",
-                          reviewedAt: null,
-                          undoneAt: null,
-                          nextOffset: null,
-                          additions: [
-                              {
-                                  id: "addition",
-                                  kind: "person",
-                                  targetId: "person",
-                                  personId: "person",
-                                  entityId: null,
-                                  label: "Nela Starling",
-                                  removedAt: null,
-                                  keptReason: null,
-                              },
-                              {
-                                  id: "other",
-                                  kind: "entity",
-                                  targetId: "term",
-                                  personId: null,
-                                  entityId: "term",
-                                  label: "Velnaro",
-                                  removedAt: null,
-                                  keptReason: null,
-                              },
-                          ],
-                      },
-                  ],
-                  nextOffset: null,
-                  openCount: 1,
-              }),
-    );
-    render(
-        <CareQueue
-            initial={{ candidates: [], limited: false, nextCursor: null }}
-            sessionKey="curator"
+
+it("shows a folder share as a neutral line, not as an open problem", () => {
+    const { container } = render(
+        <FolderCareFlags
+            care={{
+                problems: [],
+                duplicates: [],
+                shareRefs: [
+                    { id: "subject", kind: "record", eventId: "share" },
+                    { id: "subject", kind: "record", eventId: "earlier" },
+                ],
+            }}
+            recordId="subject"
+            onChanged={vi.fn()}
         />,
         { wrapper },
     );
-    fireEvent.click(screen.getByRole("button", { name: /^New from sharing/ }));
-    expect(await screen.findByText("Item no longer shared")).toBeTruthy();
-    expect(
-        screen
-            .getAllByRole("link", { name: "Review record" })[0]
-            .getAttribute("href"),
-    ).toBe("/almanac/person");
-    fireEvent.click(
-        screen.getByRole("button", {
-            name: "Undo all additions from this share",
-        }),
-    );
-    expect(await screen.findByText("Kept: used by a later share")).toBeTruthy();
-    expect(screen.getByText("Removed 1; kept 1.")).toBeTruthy();
+    expect(screen.getByText("Added by 2 shares")).toBeTruthy();
+    expect(screen.queryByText(/open problem/)).toBeNull();
+    expect(container.querySelectorAll("details")).toHaveLength(1);
 });
-it("loads a share fix only when its folder flag is expanded", async () => {
-    mocks.fetch.mockResolvedValue(
-        Response.json({
-            groups: [
-                {
-                    id: "share",
-                    item: null,
-                    sharer: "Jitka Dvořáková",
-                    createdAt: "2026-10-22T10:00:00Z",
-                    reviewedAt: null,
-                    undoneAt: null,
-                    nextOffset: null,
-                    additions: [],
-                },
-            ],
-            nextOffset: null,
-            openCount: 1,
-        }),
-    );
-    const { container } = render(
+
+function mountFolderShareFlag() {
+    return render(
         <FolderCareFlags
             care={{
                 problems: [],
@@ -439,11 +357,58 @@ it("loads a share fix only when its folder flag is expanded", async () => {
         />,
         { wrapper },
     );
-    expect(mocks.fetch).not.toHaveBeenCalled();
+}
+
+function expandFolderShareFlag(container: HTMLElement) {
     const details = container.querySelector("details");
     if (!details) throw new Error("missing flag");
     details.open = true;
     fireEvent(details, new Event("toggle"));
+}
+
+it("shows a folder share's additions, record links, safe undo outcomes and the private-title fallback", async () => {
+    mocks.fetch.mockImplementation(async (_url, init) =>
+        init?.method === "POST"
+            ? Response.json({
+                  removed: ["addition"],
+                  kept: [{ id: "other", reason: "later_share" }],
+              })
+            : Response.json({
+                  ...shareGroup,
+                  nextOffset: null,
+                  additions: [
+                      addition("addition", "Nela Starling"),
+                      {
+                          ...addition("other", "Velnaro"),
+                          kind: "entity",
+                          personId: null,
+                          entityId: "term",
+                      },
+                  ],
+              }),
+    );
+    const { container } = mountFolderShareFlag();
+    expandFolderShareFlag(container);
+    expect(await screen.findByText("Item no longer shared")).toBeTruthy();
+    expect(
+        screen
+            .getAllByRole("link", { name: "Review record" })[0]
+            .getAttribute("href"),
+    ).toBe("/almanac/addition");
+    expect(screen.getAllByRole("button")).toHaveLength(3);
+    fireEvent.click(
+        screen.getByRole("button", {
+            name: "Undo all additions from this share",
+        }),
+    );
+    expect(await screen.findByText("Kept: used by a later share")).toBeTruthy();
+    expect(screen.getByText("Removed 1; kept 1.")).toBeTruthy();
+});
+it("loads a share fix only when its folder flag is expanded", async () => {
+    mocks.fetch.mockResolvedValue(Response.json(shareGroup));
+    const { container } = mountFolderShareFlag();
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expandFolderShareFlag(container);
     expect(await screen.findByText("Item no longer shared")).toBeTruthy();
     expect(String(mocks.fetch.mock.calls[0][0])).toContain("eventId=share");
 });

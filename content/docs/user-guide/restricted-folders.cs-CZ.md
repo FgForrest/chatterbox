@@ -33,6 +33,6 @@ Při zařazení uzavřené položky do otevřené organizační složky se Klepn
 
 ## Almanach a kopie
 
-Z uzavřeného umístění se Almanach Organizace nic neučí. Fakta, jména řečníků a Učení zůstávají vlastníkovi. Jiné otevřené umístění může položku nadále běžně sdílet. Otevření složky spustí běžnou cestu sdílení. Opětovné uzavření nemůže odvolat osoby a věci už přidané do Almanachu Organizace ani kopie, které si lidé stáhli. Kurátoři mohou dřívější přírůstky projít v **Almanach → Péče → Nové ze sdílení**.
+Z uzavřeného umístění se Almanach Organizace nic neučí. Fakta, jména řečníků a Učení zůstávají vlastníkovi. Jiné otevřené umístění může položku nadále běžně sdílet. Otevření složky spustí běžnou cestu sdílení. Opětovné uzavření nemůže odvolat osoby a věci už přidané do Almanachu Organizace ani kopie, které si lidé stáhli. Pokud jsou dotčené záznamy Organizace ve složce stále vidět, mohou kurátoři nedávné přírůstky odstranit přes řádek **Přidáno … sdílením** v panelu [**Znalosti**](almanac.md#folder-knowledge).
 
 Exporty organizačních složek uzavřený obsah vynechají. Již zapsané sledované kopie se odeberou. Čekající nebo zablokované odebrání zůstane viditelné v nastavení exportu a je nutné ho zopakovat nebo opravit. Služební účty uzavřené složky nevidí. E-mail na adresu složky se přijímá jen od jejího okruhu. Osobní zálohy vlastníka uchovají uzavřené položky a jejich umístění. Archiv Organizace uchová strom a okruh, své vlastní položky a zveřejněné položky členů.
