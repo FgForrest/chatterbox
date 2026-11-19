@@ -12,6 +12,7 @@
         save,
         saveOnRefresh = save,
         t,
+        saveImmediately = false,
     }) {
         let readOnly = false;
         const optionPrefix =
@@ -39,9 +40,8 @@
                 folderLabel: remembered?.label ?? null,
                 folderScope: remembered?.scope ?? null,
             };
-            saving = saving.catch(() => {}).then(() =>
-                (refresh ? saveOnRefresh : save)(settings),
-            );
+            const saver = refresh ? saveOnRefresh : save;
+            saving = saveImmediately ? saver(settings) : saving.catch(() => {}).then(() => saver(settings));
             return saving;
         }
 
@@ -288,6 +288,7 @@
         save,
         saveOnRefresh = save,
         t,
+        saveImmediately = false,
     }) {
         const node = (tag, suffix, className, attributes = {}) => {
             const element = document.createElement(tag);
@@ -328,6 +329,7 @@
             save: (settings) => persistFolder(settings, save),
             saveOnRefresh: (settings) => persistFolder(settings, saveOnRefresh),
             t,
+            saveImmediately,
         });
         async function persistFolder(settings, saver) {
             try {
@@ -389,6 +391,7 @@
                     t,
                     save: (folder) => saveFolder(folder),
                     saveOnRefresh: (folder) => saveFolder(folder, false),
+                    saveImmediately: true,
                 });
                 current = state;
                 const next = JSON.stringify([

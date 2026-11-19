@@ -31,6 +31,56 @@ function supportsAgendaPath(settings, path) {
     return supportsAgendas(settings) && (!/\/text(?:\?|$)/.test(path) || settings.serverDefaults?.agendaText === 1) && (!/\/(?:presence|people|invitations)(?:\/|\?|$)/.test(path) || settings.serverDefaults?.agendaRooms === 1);
 }
 
+function isOptionalDate(value) {
+    return value == null || (typeof value === "string" && Number.isFinite(Date.parse(value)));
+}
+
+function isAgendaList(body) {
+    return Array.isArray(body?.data) && body.data.every(row =>
+        typeof row?.id === "string" && Boolean(row.id) &&
+        typeof row.title === "string" && row.start !== undefined &&
+        isOptionalDate(row.start) && isOptionalDate(row.end) &&
+        (row.timeSet === undefined || typeof row.timeSet === "boolean") &&
+        (row.roomBound === undefined || typeof row.roomBound === "boolean") &&
+        (row.chosenBy === undefined || (Array.isArray(row.chosenBy) &&
+            row.chosenBy.every(person => person && typeof person.self === "boolean"))));
+}
+
+function isAgendaMatch(body) {
+    return isAgendaList(body) &&
+        (body.restricted === undefined || typeof body.restricted === "boolean") &&
+        (body.invitations === undefined || (Array.isArray(body.invitations) &&
+            body.invitations.every(invitation => typeof invitation?.id === "string" &&
+                typeof invitation.agendaId === "string" && typeof invitation.title === "string" &&
+                Number.isSafeInteger(invitation.version))));
+}
+
+function agendaResponseValidator(path) {
+    const [route, query] = path.split("?");
+    if (!route) return isAgendaList;
+    if (route === "/match") return isAgendaMatch;
+    const id = /^\/([^/]+)$/.exec(route)?.[1];
+    if (id && route !== "/presence") {
+        return body => (body?.unchanged === true && new URLSearchParams(query).has("since") &&
+                Number.isSafeInteger(body.version)) ||
+            (body?.id === decodeURIComponent(id) && typeof body.title === "string" &&
+                typeof body.permissions?.edit === "boolean");
+    }
+}
+
+/** Save a panel edit using the same agenda routes inside and outside a capture. */
+export function saveAgendaEdit(id, path, body) {
+    const text = path === "/text";
+    if (!text && !/^\/(?:points|tasks)\/[^/?#]+$/.test(path)) throw new Error(t("agendaFailed"));
+    return agendaRequest(`/${encodeURIComponent(id)}${path}`, {
+        method: text ? "POST" : "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    }, text ? { validate: result => result?.field === body.field &&
+        typeof result.update === "string" && typeof result.stateVector === "string" &&
+        Number.isSafeInteger(result.version) } : undefined);
+}
+
 /** Call an agenda route only after capability detection. */
 export async function agendaRequest(path = "", init = {}, options) {
     const settings = await getSettings();
@@ -40,7 +90,7 @@ export async function agendaRequest(path = "", init = {}, options) {
         init,
         (value) => supportsAgendaPath(value, path),
         settings,
-        options,
+        { validate: agendaResponseValidator(path), ...options },
     );
     const body = await response.json();
     const current = await getSettings();
@@ -86,7 +136,7 @@ export async function matchAgendaRoom(tabUrl, now = Date.now(), init = {}, optio
     }
     const body = await agendaRequest(`/match?${query}`, init, options);
     const rooms = settings.serverDefaults?.agendaRooms === 1 && Boolean(tabUrl && meetCode(tabUrl));
-    const data = Array.isArray(body.data) ? body.data : [];
+    const data = body.data;
     return {
         data: rooms ? data.filter(row => row.roomBound === true || currentAgendas([row], now).length) : currentAgendas(data, now),
         restricted: rooms && body.restricted === true,
@@ -196,7 +246,7 @@ async function refreshAgendasNow({ force = false } = {}) {
         ) !== JSON.stringify(identity)
     )
         return;
-    const agendas = (Array.isArray(body.data) ? body.data : []).filter(
+    const agendas = body.data.filter(
         (row) => row.timeSet,
     );
     await chrome.storage.session.set({
@@ -371,7 +421,7 @@ export function canChooseRecordingAgenda(state) {
     return Boolean(
         state.sessionId &&
             ((state.state === "recording" && !state.stopped) ||
-                (state.state === "error" && state.stopped && !state.jobId)),
+                (state.state === "error" && state.stopped && !state.jobId && !state.serverCompleting)),
     );
 }
 

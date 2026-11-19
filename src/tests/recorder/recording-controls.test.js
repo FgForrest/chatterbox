@@ -199,10 +199,14 @@ describe.each([
                 state: "finalizing",
                 chunkCount: 4,
                 uploaded: [0, 1, 2, 3],
+                uploadNotice: "Access could not be verified",
             },
         });
         await settle();
         expect(el("view-finalizing").hidden).toBe(false);
+        expect(el("processing-status").textContent).toContain(
+            "Access could not be verified",
+        );
         listener({
             type: "state",
             state: {
@@ -226,8 +230,9 @@ describe.each([
             "agendaUnavailable",
         );
     });
-    it("sends Stop while the agenda text save is still pending", async () => {
+    it("sends Stop while agenda and folder saves are still pending", async () => {
         const saving = Promise.withResolvers();
+        h.wait = saving.promise;
         const beforeAction = vi.fn(() => saving.promise);
         widget = await mountRecordingControls(document.body, {
             variant,

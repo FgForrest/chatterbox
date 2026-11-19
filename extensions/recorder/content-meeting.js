@@ -347,7 +347,10 @@
         const retry = button("connection-retry", "", [t("connectionRetry")]);
         retry.addEventListener("click", async () => {
             retry.disabled = true;
-            try { await send({ type: "recorder-connection-retry" }); }
+            try {
+                const response = await send({ type: "recorder-connection-retry" });
+                if (response?.error && !el("meeting-connection")) showError(new Error(response.error));
+            }
             catch (error) { showError(error); }
             finally { retry.disabled = false; }
         });
@@ -494,7 +497,6 @@
             el("stop").addEventListener("click", async () => {
                 el("stop").disabled = true;
                 try {
-                    await recordingFolder.saved();
                     const response = await send({
                         type: "stop-recording",
                         sessionId: currentState.sessionId,
@@ -544,7 +546,7 @@
         }
         if (
             message.view === "stopped" &&
-            !message.connection && stoppedSession === message.state?.sessionId
+            !message.connection && !message.state?.uploadNotice && stoppedSession === message.state?.sessionId
         )
             return;
         clearTimeout(hideTimer);
@@ -574,6 +576,10 @@
                 );
                 if (message.view === "waiting") status.textContent = label;
                 if (message.view === "stopped" && message.connection) status.textContent = t("uploadingRecording");
+                if (message.view === "stopped" && message.state?.uploadNotice) {
+                    const stage = message.state.state === "finalizing" ? "processingRecording" : "uploadingRecording";
+                    status.textContent = `${t(stage)} ${message.state.uploadNotice}`;
+                }
             }
             surface.append(status);
             if (isError) {
@@ -583,7 +589,7 @@
                 close.addEventListener("click", dismiss);
                 surface.append(close);
             }
-            if (message.view === "stopped" && !message.connection) {
+            if (message.view === "stopped" && !message.connection && !message.state?.uploadNotice) {
                 stoppedSession = message.state?.sessionId;
                 hideTimer = setTimeout(hide, 3500);
             }

@@ -130,10 +130,10 @@ function renderState(state) {
             String(total),
         ]);
         if (processing) {
-            document.getElementById("picker-processing-status").textContent = t(
-                "uploadComplete",
-                String(total),
-            );
+            const uploadedStatus = t("uploadComplete", String(total));
+            document.getElementById("picker-processing-status").textContent = state.uploadNotice
+                ? `${uploadedStatus} ${state.uploadNotice}`
+                : uploadedStatus;
             const startedAt = state.finalizingAt ?? new Date().toISOString();
             const tick = () => {
                 document.getElementById("picker-processing-elapsed").textContent = t(
@@ -235,7 +235,6 @@ cancel.addEventListener("click", async () => {
 });
 
 stop.addEventListener("click", async () => {
-    await recordingFolder.saved();
     stop.disabled = true;
     status.textContent = t("finishing");
     const response = await chrome.runtime.sendMessage({ type: "stop-recording" });

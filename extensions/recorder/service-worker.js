@@ -27,6 +27,7 @@ import {
     openAgendaWindow,
     refreshAgendas,
     remindAgenda,
+    saveAgendaEdit,
     scheduleAgendaReminders,
     supportsAgendas,
     shouldLinkEditedAgenda,
@@ -218,6 +219,7 @@ const promptIcon = createPromptIconBlink(agendaRoutesLoaded, clearPromptBlinkCop
 const COMPLETION_PREFIX = "completed:";
 const COMPLETION_DISPLAY_MS = 3500;
 const CONNECTION_ALARM = "recorder-connection-probe";
+const METADATA_DRAIN_MS = 10_000;
 const CONNECTION_PAGES = [POPUP_URL, "agenda/agenda.html", "options/options.html", "picker/picker.html"];
 let connectionUpdates = Promise.resolve();
 let connectionProbe;
@@ -236,20 +238,29 @@ async function updateServerConnection({ config, ...outcome }) {
     if (!settings.dataUseAcknowledgedAt || !settings.hasApiKey || !sameConnection(settings, outcome)) return;
     const previous = await readServerConnection(settings);
     if (previous && previous.checkedAt > outcome.checkedAt) return;
+    const configError = config && outcome.state === "ok" ? outcome.configError : previous?.configError;
     const changed = previous?.state !== outcome.state ||
+        previous?.configError !== configError ||
         JSON.stringify(previous?.detail) !== JSON.stringify(outcome.detail);
     await chrome.storage.session.set({
         [SERVER_CONNECTION_KEY]: {
             ...outcome,
+            ...(configError ? { configError } : {}),
             since: previous?.state === outcome.state ? previous.since : outcome.checkedAt,
         },
     });
     if (outcome.state !== "ok") {
         void ensureConnectionAlarm().catch(() => {});
         if (changed) void syncConnectionBanners().catch(() => {});
-    } else if (previous && previous.state !== "ok") {
-        const probe = connectionProbe ?? (config ? null : probeConnection());
-        void Promise.resolve(probe).then(() => recoverConnection(settings)).catch(() => {});
+        return;
+    }
+    if (configError && changed) {
+        void ensureConnectionAlarm().catch(() => {});
+        void syncConnectionBanners().catch(() => {});
+    }
+    if (previous && (previous.state !== "ok" || (previous.configError && !configError))) {
+        const probe = connectionProbe ?? (config || configError ? null : probeConnection());
+        void Promise.resolve(probe).catch(() => {}).then(() => recoverConnection(settings)).catch(() => {});
     }
 }
 
@@ -271,24 +282,30 @@ async function connectionHasWaiters() {
         contexts.some(({ documentUrl }) => CONNECTION_PAGES.some((path) => isExtensionPage(documentUrl, path))));
 }
 
+async function needsConnectionProbe() {
+    const connection = await readServerConnection();
+    return Boolean(connection && (connection.state !== "ok" || connection.configError));
+}
+
 async function ensureConnectionAlarm() {
-    if (!(await serverUnavailable()) || !(await connectionHasWaiters())) return;
+    if (!(await needsConnectionProbe()) || !(await connectionHasWaiters())) return;
     if (!(await chrome.alarms.get(CONNECTION_ALARM))) {
         await chrome.alarms.create(CONNECTION_ALARM, { periodInMinutes: 0.5 });
     }
 }
 
 function probeConnection() {
-    connectionProbe ??= refreshServerConfig().catch(() => false).finally(() => { connectionProbe = null; });
+    connectionProbe ??= refreshServerConfig().finally(() => { connectionProbe = null; });
     return connectionProbe;
 }
 
 async function recoverConnection(expected) {
     await startupReconciliation?.catch(() => {});
     const settings = await getSettings();
-    if (!settings.dataUseAcknowledgedAt || !settings.hasApiKey ||
-        !sameConnection(expected, settings) || await serverUnavailable(settings)) return;
-    await chrome.alarms.clear(CONNECTION_ALARM);
+    if (!settings.dataUseAcknowledgedAt || !settings.hasApiKey || !sameConnection(expected, settings)) return;
+    const connection = await readServerConnection(settings);
+    if (connection?.state !== "ok") return;
+    if (!connection.configError) await chrome.alarms.clear(CONNECTION_ALARM);
     const state = await getState();
     const upload = async () => {
         if (state.sessionId && state.state !== STATE.completed) {
@@ -306,17 +323,23 @@ async function recoverConnection(expected) {
     };
     await Promise.allSettled([
         upload(),
-        refreshNextMeeting({ force: true }),
-        refreshAgendas({ force: true }),
+        ...(!connection.configError ? [
+            refreshNextMeeting({ force: true }),
+            refreshAgendas({ force: true }),
+        ] : []),
         syncConnectionBanners(),
     ]);
+}
+
+function isPollingFinalization(state) {
+    return state.state === STATE.finalizing && Boolean(state.serverCompleting || state.jobId);
 }
 
 async function resumeUploadWork() {
     const state = await getState();
     if (await serverUnavailable()) return;
     if (state.reconcilePending) return reconcileBufferedRecordings();
-    if (state.sessionId && state.state === STATE.finalizing && state.jobId) {
+    if (state.sessionId && isPollingFinalization(state)) {
         const settings = await getSettings();
         await pollFinalization(state, {
             serverUrl: settings.serverUrl,
@@ -387,6 +410,7 @@ const IDLE_STATE = Object.freeze({
     uploadNotice: null,
     recoverablePrefix: null,
     jobId: null,
+    serverCompleting: false,
     finalizingAt: null,
     recordingUrl: null,
     partial: false,
@@ -404,14 +428,15 @@ async function getState() {
 
 let stateUpdates = Promise.resolve();
 
-function setState(patch) {
-    const update = stateUpdates.catch(() => {}).then(() => writeState(patch));
+function setState(patch, owner) {
+    const update = stateUpdates.catch(() => {}).then(() => writeState(patch, owner));
     stateUpdates = update;
     return update;
 }
 
-async function writeState(patch) {
+async function writeState(patch, owner) {
     const current = await getState();
+    if (owner && !sameUploadOwner(current, owner)) return;
     const next = { ...current, ...patch };
     await chrome.storage.session.set({ [STATE_KEY]: next });
     chrome.runtime.sendMessage({ type: "state", state: next }).catch(() => {});
@@ -849,6 +874,7 @@ async function startCapturedRecording({
             stopReason: "user",
             uploaded: [],
             jobId: null,
+            serverCompleting: false,
             finalizingAt: null,
             captureMode,
             captureWindowId,
@@ -955,45 +981,55 @@ function isLiveCapture(state) {
 async function stopRecording(reason = "user", expected = null) {
     const state = await getState();
     if (expected && (state.tabId !== expected.tabId || state.sessionId !== expected.sessionId)) throw new Error(t("unrecognizedSender"));
-    if (!isLiveCapture(state)) return;
+    if (!isLiveCapture(state)) return { ok: true };
     if (state.tabId != null) {
         await chrome.alarms.clear(`${ALARMS.quietPrefix}${state.tabId}`);
     }
     await setState({ stopReason: reason });
-    if (state.captureMode === "desktop") {
-        await messageDesktop("stop", state.pickerRequestId).catch(() =>
-            handleDesktopWindowClosed(state.captureWindowId),
-        );
-    } else {
-        await messageOffscreen("stop").catch(() => {});
+    const desktop = state.captureMode === "desktop";
+    const response = await (desktop
+        ? messageDesktop("stop", state.pickerRequestId)
+        : messageOffscreen("stop")).catch(() => null);
+    if (response?.ok === true) return { ok: true };
+    if (desktop) {
+        await reconcileDesktopWindow();
+        if (!isLiveCapture(await getState())) return { ok: true };
     }
-    // The capture host reports the final chunk count after its last write.
+    return { ok: false, error: response?.error || t("somethingWrong") };
 }
 
 let metaUpdates = Promise.resolve();
-let folderUpdates = Promise.resolve();
+let recordingMetadataUpdates = Promise.resolve();
 
-function updateLocalMeta(bufferId, patch) {
+function updateLocalMeta(bufferId, patch, owner) {
     const update = metaUpdates.catch(() => {}).then(async () => {
         const meta = await readLocalMeta(bufferId);
         if (!meta) throw new Error(t("recoveryUnavailable"));
         const { agendaTitle: _title, ...persistentPatch } = patch;
         const { agendaTitle: _previousTitle, ...persistentMeta } = meta;
-        await createLocalSession(bufferId, { ...persistentMeta, ...persistentPatch });
+        const next = { ...persistentMeta, ...persistentPatch };
+        if (owner) {
+            if (!sameUploadOwner(await getState(), owner)) return false;
+            await createLocalSession(bufferId, next, { create: false });
+        } else {
+            await createLocalSession(bufferId, next);
+        }
+        return true;
     });
     metaUpdates = update;
     return update;
 }
 
 async function applyRecordingFolder(state, folder, remember = true) {
-    await updateLocalMeta(state.bufferId ?? state.sessionId, folder);
-    await setState(folder);
+    if (!(await updateLocalMeta(state.bufferId ?? state.sessionId, folder, state)) ||
+        !(await setState(folder, state))) return false;
     if (remember) await saveSettings(folder);
+    return true;
 }
 
 function updateRecordingFolder(message, sender) {
     const requestedState = getState().catch(() => null);
-    const update = folderUpdates.catch(() => {}).then(async () => {
+    const update = recordingMetadataUpdates.then(async () => {
         const state = await getState();
         const popup = [POPUP_URL, "agenda/agenda.html"].some((path) => sender.url?.split("?")[0] === chrome.runtime.getURL(path));
         const pickerUrl = chrome.runtime.getURL("picker/picker.html");
@@ -1018,10 +1054,10 @@ function updateRecordingFolder(message, sender) {
                 ? message.folderLabel : null,
             folderScope: message.folderId && ["personal", "org"].includes(message.folderScope) ? message.folderScope : null,
         };
-        await applyRecordingFolder(state, folder, message.remember !== false);
+        if (!(await applyRecordingFolder(state, folder, message.remember !== false))) throw new Error(t("folderChangeFailed"));
         return { ok: true };
     });
-    folderUpdates = update.catch(() => {});
+    recordingMetadataUpdates = update.catch(() => {});
     return update;
 }
 
@@ -1052,7 +1088,7 @@ async function healStoppedUpload() {
     const state = await getState();
     if (
         !state.sessionId || !state.stopped || state.blocked ||
-        !(state.state === STATE.recording || (state.state === STATE.finalizing && !state.jobId))
+        !(state.state === STATE.recording || (state.state === STATE.finalizing && !isPollingFinalization(state)))
     ) return false;
     await pumpUploads();
     return true;
@@ -1185,10 +1221,23 @@ function finalize(truncatedAtChunk = null) {
 }
 
 async function finalizeOnce(truncatedAtChunk) {
-    await folderUpdates;
     const state = await getState();
     if (!state.sessionId || !state.stopped) return;
-    if (state.state === STATE.finalizing && state.jobId) return;
+    if (isPollingFinalization(state)) return;
+    const metadata = recordingMetadataUpdates;
+    let timer;
+    const drained = await Promise.race([
+        metadata.then(() => true),
+        new Promise(resolve => { timer = setTimeout(() => resolve(false), METADATA_DRAIN_MS); }),
+    ]);
+    clearTimeout(timer);
+    if (!drained) {
+        await ensureUploadRetryAlarm();
+        void metadata.then(pumpUploads).catch(() => {});
+        return;
+    }
+    const ready = await getState();
+    if (!sameUploadOwner(ready, state)) return;
 
     await setState({
         state: STATE.finalizing,
@@ -1202,10 +1251,10 @@ async function finalizeOnce(truncatedAtChunk) {
             ...(truncatedAtChunk ? { truncatedAtChunk } : {}),
             endedAt: new Date().toISOString(),
             stopReason: state.stopReason,
-            ...agendaCompletion(settings, state),
+            ...agendaCompletion(settings, ready),
             ...(settings.serverDefaults?.recordingFolderOverride === true &&
-                state.recordingFolderOverride === true
-                ? { folderId: state.folderId ?? null }
+                ready.recordingFolderOverride === true
+                ? { folderId: ready.folderId ?? null }
                 : {}),
         };
         let result;
@@ -1221,7 +1270,7 @@ async function finalizeOnce(truncatedAtChunk) {
                     folderId: state.startFolderId ?? null,
                     folderLabel: state.startFolderLabel ?? null,
                     folderScope: state.startFolderScope ?? null,
-                }, !state.agendaExplicit || !state.agendaId);
+                }, !ready.agendaExplicit || !ready.agendaId);
             } else {
                 throw error;
             }
@@ -1229,7 +1278,11 @@ async function finalizeOnce(truncatedAtChunk) {
         if (!sameUploadOwner(await getState(), state)) return;
         const agendaUnavailable = result.agenda?.attached === false && result.agenda.reason === "unavailable";
         if (agendaUnavailable) await updateLocalMeta(state.bufferId ?? state.sessionId, { agendaUnavailable });
-        await setState({ jobId: result.job_id ?? null, agendaUnavailable });
+        await setState({
+            jobId: result.job_id ?? null,
+            serverCompleting: result.status === "completing" || result.status === "completed",
+            agendaUnavailable,
+        });
 
         await pollFinalization(state, auth);
     } catch (error) {
@@ -1285,6 +1338,7 @@ async function pollFinalization(state, auth) {
         } else if (isConnectionError(error)) {
             await ensureConnectionAlarm();
         } else {
+            await setState({ uploadNotice: retryErrorMessage(error, t("finalizeFailed")) });
             await ensureUploadRetryAlarm(Math.max(1, (error?.retryAfterSeconds ?? 0) / 60));
         }
     }
@@ -1306,26 +1360,31 @@ async function reconcileServerSession(sessionId, auth) {
 
 async function reconcileServerSessionOnce(sessionId, auth) {
     const remote = await getSession(auth, sessionId);
+    const state = await getState();
+    if (state.sessionId !== sessionId || state.state === STATE.completed) return;
     if (remote.status === "completing") {
+        const jobId = remote.job_id ?? state.jobId ?? null;
+        if (!state.serverCompleting || state.jobId !== jobId || state.uploadNotice)
+            await setState({ serverCompleting: true, jobId, uploadNotice: null });
         await ensureUploadRetryAlarm();
         return;
     }
     if (remote.status === "completed") {
-        if (!remote.recording_id) {
+        if (typeof remote.recording_id !== "string" || !remote.recording_id.trim()) {
             await setState({
                 state: STATE.error,
+                blocked: true,
                 error: "Server confirmed completion without a recording ID",
             });
             return;
         }
-        const state = await getState();
-        if (state.sessionId !== sessionId || state.state === STATE.completed) return;
         const url = new URL("/dashboard", auth.serverUrl);
         url.searchParams.set("recording", remote.recording_id);
         const recordingUrl = url.href;
-        await deleteLocalSession(state.bufferId ?? sessionId);
+        await safe(deleteLocalSession(state.bufferId ?? sessionId));
         await setState({
             state: STATE.completed,
+            uploadNotice: null,
             recordingUrl,
             partial: Boolean(remote.truncated_at_chunk),
         });
@@ -1436,8 +1495,8 @@ async function prepareRecordingAgenda(tabId, shownAgendaId) {
 function handleAgendaMessage(message, sender) {
     if (!["select-agenda", "edit-agenda"].includes(message.type)) return handleAgendaMessageNow(message, sender);
     const requestedState = message.sessionId ? getState().catch(() => null) : null;
-    const update = folderUpdates.catch(() => {}).then(async () => handleAgendaMessageNow(message, sender, await requestedState));
-    folderUpdates = update.catch(() => {});
+    const update = recordingMetadataUpdates.then(async () => handleAgendaMessageNow(message, sender, await requestedState));
+    recordingMetadataUpdates = update.catch(() => {});
     return update;
 }
 
@@ -1474,6 +1533,31 @@ async function handleAgendaMessageNow(message, sender, requestedState = null) {
             (selected.target === target || selected.target === "null") && Date.now() - selected.at < 15 * 60000;
         return { ok: true, agendas, ...(binding ? { selectedAgenda: agendas[0] ?? null } : hasSelection ? { selectedAgenda: selected.agenda } : {}) };
     }
+    const edit = message.type === "edit-agenda" ? message.edit : null;
+    let saved;
+    if (edit) {
+        if (!isExtensionPage(sender.url, "agenda/agenda.html") ||
+            typeof message.agendaId !== "string" || !message.agendaId ||
+            typeof edit.path !== "string" || !edit.body || typeof edit.body !== "object")
+            throw new Error(t("agendaFailed"));
+        saved = await saveAgendaEdit(message.agendaId, edit.path, edit.body);
+        const state = await getState();
+        const canLink = state.agendaId
+            ? state.agendaId !== message.agendaId && !state.agendaOwn
+            : !state.agendaExplicit;
+        if (!canLink || !wasQueuedDuringCapture(requestedState, state) ||
+            message.sessionId !== state.sessionId || message.tabId !== state.tabId) return { ok: true, saved };
+    }
+    try {
+        const agenda = await linkRecordingAgenda(message, settings, tab, requestedState);
+        return { ok: true, agenda, saved };
+    } catch (error) {
+        if (!edit) throw error;
+        return { ok: true, saved, linkError: t("agendaFailed") };
+    }
+}
+
+async function linkRecordingAgenda(message, settings, tab, requestedState) {
     let agenda = null;
     if (message.agendaId != null) {
         agenda = await agendaRequest(`/${encodeURIComponent(message.agendaId)}`);
@@ -1482,18 +1566,20 @@ async function handleAgendaMessageNow(message, sender, requestedState = null) {
     }
     const state = await getState();
     if (message.sessionId) {
-        const metadataState = state.state === STATE.recording && state.stopped && wasQueuedDuringCapture(requestedState, state)
-            ? { ...state, stopped: false } : state;
+        const metadataState = state.stopped && wasQueuedDuringCapture(requestedState, state) &&
+            (state.state === STATE.recording || (state.state === STATE.error && state.blocked))
+            ? { ...state, state: STATE.recording, stopped: false } : state;
         if (state.sessionId !== message.sessionId || !canChooseRecordingAgenda(metadataState)) throw new Error(t("agendaFailed"));
-        if (message.type === "edit-agenda" && (message.tabId !== state.tabId || !shouldLinkEditedAgenda(metadataState, agenda))) return { ok: true, agenda };
-        if (settings.serverDefaults?.sessionAgenda === true && metadataState.state === STATE.recording && !metadataState.stopped) {
-            await setSessionAgenda({ serverUrl: settings.serverUrl, connectionId: settings.connectionId, apiKey: await readToken() }, state.sessionId, agenda?.id ?? null);
-        }
+        if (message.type === "edit-agenda" && (message.tabId !== state.tabId || !shouldLinkEditedAgenda(metadataState, agenda))) return agenda;
+        const announce = settings.serverDefaults?.sessionAgenda === true && metadataState.state === STATE.recording;
+        const announceAgenda = async () => setSessionAgenda({ serverUrl: settings.serverUrl, connectionId: settings.connectionId, apiKey: await readToken() }, state.sessionId, agenda?.id ?? null);
+        if (announce && !message.edit) await announceAgenda();
         const patch = { agendaId: agenda?.id ?? null, agendaTitle: agenda?.title ?? null, agendaOwn: agenda?.own === true, agendaExplicit: true,
             folderId: settings.folderId, folderLabel: settings.folderLabel, folderScope: settings.folderScope,
             ...agendaFolder(agenda) };
-        await updateLocalMeta(state.bufferId ?? state.sessionId, patch);
-        await setState(patch);
+        if (!(await updateLocalMeta(state.bufferId ?? state.sessionId, patch, state)) ||
+            !(await setState(patch, state))) throw new Error(t("agendaFailed"));
+        if (announce && message.edit && !state.stopped) await announceAgenda();
     } else {
         const target = JSON.stringify(meetingTarget(tab?.url));
         await chrome.storage.session.set({ [AGENDA_SELECTION_KEY]: { serverUrl: settings.serverUrl, connectionId: settings.connectionId, target, at: Date.now(), agenda, explicit: true } });
@@ -1502,7 +1588,7 @@ async function handleAgendaMessageNow(message, sender, requestedState = null) {
         const binding = await joinedMeeting(tab, settings);
         if (binding) await chrome.storage.session.set({ [`meeting-tab:${tab.id}`]: { ...binding, agendaId: agenda?.id ?? null } });
     }
-    return { ok: true, agenda };
+    return agenda;
 }
 
 async function resolvePanelAgenda(message, sender, meeting, opened) {
@@ -1834,8 +1920,7 @@ async function handleMeetingBannerMessage(message, sender) {
     }
     if (message.type === "stop-recording") {
         if (state.tabId !== tabId || state.sessionId !== message.sessionId) throw new Error(t("unrecognizedSender"));
-        await stopRecording("user", { tabId, sessionId: message.sessionId });
-        return { ok: true };
+        return stopRecording("user", { tabId, sessionId: message.sessionId });
     }
     if (message.type === "set-recording-folder") {
         if (state.tabId !== tabId) throw new Error(t("unrecognizedSender"));
@@ -2294,7 +2379,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         return;
     }
     if (alarm.name === CONNECTION_ALARM) {
-        if (await serverUnavailable() && await connectionHasWaiters()) await probeConnection();
+        if (await needsConnectionProbe() && await connectionHasWaiters()) await probeConnection().catch(() => {});
         else await chrome.alarms.clear(CONNECTION_ALARM);
         return;
     }
@@ -2319,7 +2404,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         }
         const tab = await chrome.tabs.get(tabId).catch(() => null);
         if (tab?.audible) return; // sound came back; a new quiet clock will start
-        await stopRecording("auto-quiet");
+        if (!(await stopRecording("auto-quiet")).ok) return;
         await notify(
             t("recordingStopped"),
             t("recordingStoppedBody"),
@@ -2527,9 +2612,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             if (!page && !(banner && await validMeetingBannerSender(sender))) return { ok: false };
             if (message.type === "recorder-connection-outcome") await queueConnectionOutcome(message.outcome);
             else if (message.type === "recorder-connection-watch") await ensureConnectionAlarm();
-            else await probeConnection();
+            else if (!(await probeConnection())) return { ok: false, error: t("connectFirst") };
             return { ok: true };
-        })().then(sendResponse, () => sendResponse({ ok: false }));
+        })().then(sendResponse, (error) => sendResponse({
+            ok: false,
+            error: error?.message ?? t("recoveryUnavailable"),
+        }));
         return true;
     }
 
@@ -2555,7 +2643,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case "room-agendas":
         case "edit-agenda":
             handleAgendaMessage(message, sender).then(sendResponse)
-                .catch(() => sendResponse({ ok: false, error: t("agendaFailed") }));
+                .catch(error => sendResponse({
+                    ok: false,
+                    error: t("agendaFailed"),
+                    ...(message.edit ? { kind: error?.kind, status: error?.status } : {}),
+                }));
             return true;
         case "resume-recording":
             resumeRecording(message, sender)
@@ -2634,7 +2726,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case "stop-recording":
             stopRecording(message.reason ?? "user")
-                .then(() => sendResponse({ ok: true }))
+                .then(sendResponse)
                 .catch((error) =>
                     sendResponse({ ok: false, error: error?.message ?? String(error) }),
                 );
@@ -2653,7 +2745,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 .then(async (state) => {
                     if (await serverUnavailable()) return;
                     if (await healStoppedUpload()) return;
-                    if (state.state !== STATE.finalizing || !state.sessionId || !state.jobId) {
+                    if (!state.sessionId || !isPollingFinalization(state)) {
                         return;
                     }
                     const settings = await getSettings();
@@ -2869,6 +2961,7 @@ async function retryUploadOnce() {
         await setState({
             state: STATE.finalizing,
             jobId: remote.job_id ?? null,
+            serverCompleting: true,
             finalizingAt: new Date().toISOString(),
             error: null,
             uploadNotice: null,
@@ -2898,6 +2991,7 @@ async function retryUploadOnce() {
         recoverablePrefix: null,
         state: STATE.error,
         jobId: null,
+        serverCompleting: false,
         error: null,
         uploadNotice: null,
     });
@@ -2994,6 +3088,7 @@ async function retryBufferOnce(bufferId) {
                 sessionId: serverSessionId,
                 bufferId,
                 jobId: remote.job_id ?? null,
+                serverCompleting: true,
                 finalizingAt: new Date().toISOString(),
             });
             await pollFinalization(await getState(), auth);
@@ -3016,7 +3111,7 @@ async function discardSession(sessionId) {
             sessionId,
         ).catch(() => {});
     }
-    if (sessionId) await deleteLocalSession(state.bufferId ?? sessionId);
+    if (sessionId) await safe(deleteLocalSession(state.bufferId ?? sessionId));
     await resetState();
 }
 
@@ -3030,17 +3125,16 @@ async function discardBufferOnce(bufferId) {
         throw new Error("Stop recording before discarding its buffer");
     }
     const meta = await readLocalMeta(bufferId);
-    if (!meta) {
-        if ((state.bufferId ?? state.sessionId) === bufferId) await resetState();
-        return;
-    }
     const settings = await getSettings();
-    if (meta.serverUrl === settings.serverUrl && settings.hasApiKey) {
+    if (meta && meta.serverUrl === settings.serverUrl && settings.hasApiKey) {
         const auth = { serverUrl: settings.serverUrl, connectionId: settings.connectionId, apiKey: await readToken() };
         try {
             const remote = await getSession(auth, meta.serverSessionId ?? bufferId);
             if (remote.status === "completing") {
                 throw new Error("Wait for server finalization before discarding");
+            }
+            if (remote.status === "completed" && remote.recording_id === null) {
+                throw new Error(t("recoveryUnavailable"));
             }
             if (remote.status === "open" || remote.status === "failed") {
                 await abortSession(auth, meta.serverSessionId ?? bufferId);
@@ -3051,7 +3145,8 @@ async function discardBufferOnce(bufferId) {
             }
         }
     }
-    await deleteLocalSession(bufferId);
+    metaUpdates = metaUpdates.catch(() => {}).then(() => deleteLocalSession(bufferId));
+    await metaUpdates;
     const latest = await getState();
     if ((latest.bufferId ?? latest.sessionId) === bufferId) await resetState();
 }
@@ -3222,6 +3317,7 @@ async function reconcileBufferedRecordingsOnce() {
                 sessionId: serverSessionId,
                 bufferId: sessionId,
                 jobId: session.job_id,
+                serverCompleting: true,
                 finalizingAt: new Date().toISOString(),
             });
             await ensureUploadRetryAlarm();
@@ -3285,7 +3381,7 @@ chrome.runtime.onInstalled.addListener(() => {
 
 void ensureConnectionAlarm().catch(() => {});
 void getState().then(async (state) => {
-    if (state.state === STATE.finalizing && state.sessionId && state.jobId) {
+    if (state.sessionId && isPollingFinalization(state)) {
         await ensureUploadRetryAlarm();
     } else if (state.reconcilePending) {
         await resumeUploadWork();

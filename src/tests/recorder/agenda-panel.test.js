@@ -44,6 +44,13 @@ const el = (id) =>
     document.getElementById(id === "retry" ? "agenda-retry" : id);
 const settle = () => vi.advanceTimersByTimeAsync(0);
 
+function saveAgendaEdit(id, path, body) {
+    return request(`/${id}${path}`, {
+        method: path === "/text" ? "POST" : "PATCH",
+        body: JSON.stringify(body),
+    });
+}
+
 beforeEach(async () => {
     vi.useFakeTimers();
     onChanges = [];
@@ -172,7 +179,20 @@ beforeEach(async () => {
                 },
             },
         },
-        runtime: { sendMessage: vi.fn(async () => ({ ok: true })) },
+        runtime: {
+            sendMessage: vi.fn(async ({ type, agendaId, edit }) =>
+                type === "edit-agenda"
+                    ? {
+                          ok: true,
+                          saved: await saveAgendaEdit(
+                              agendaId,
+                              edit.path,
+                              edit.body,
+                          ),
+                      }
+                    : { ok: true },
+            ),
+        },
         tabs: { create: vi.fn(async () => {}) },
     });
 });
@@ -207,6 +227,7 @@ async function start(doc = document, tabId = 7) {
         "supportsAgendaRooms",
         "mountRoomCards",
         "isConnectionError",
+        "saveAgendaEdit",
         `return (async () => { ${source} })();`,
     );
     await run(
@@ -246,6 +267,7 @@ async function start(doc = document, tabId = 7) {
             return cards;
         },
         isConnectionError,
+        saveAgendaEdit,
     );
 }
 
@@ -825,11 +847,12 @@ describe("live panel collaboration", () => {
         ).not.toBeNull();
         expect(document.getElementById("prep")).toBeNull();
     });
-    it("links the edited agenda after a successful tick during recording", async () => {
+    it("registers a tick with the worker to save it and link the agenda during recording", async () => {
         session.recordingState = {
             state: "recording",
             sessionId: "session-one",
             agendaId: null,
+            tabId: 7,
             startedAt: new Date().toISOString(),
         };
         await start();
@@ -840,6 +863,7 @@ describe("live panel collaboration", () => {
             agendaId: "agenda-one",
             sessionId: "session-one",
             tabId: 7,
+            edit: { path: "/points/p1", body: { version: 2, discussed: true } },
         });
     });
     it("reuses the shared CRDT binding, keeps a focused textarea/caret, and flushes its materialized version before ticking", async () => {
@@ -1656,4 +1680,88 @@ it.each([
         expect(el("status").textContent).toBe(t("agendaDraftLost"));
     }
     doc.destroy();
+});
+
+it.each([
+    false,
+    true,
+])("flushes the old agenda draft before following a new automatic match (transient failure: %s)", async (transientFailure) => {
+    settings.serverDefaults = { agendas: true, agendaText: 1, agendaRooms: 1 };
+    settings.dataUseAcknowledgedAt = "now";
+    settings.hasApiKey = true;
+    data.textProtocol = 1;
+    session[agendaPanelKey(7)].roomAutomatic = true;
+    let matchId = "agenda-one";
+    chrome.runtime.sendMessage.mockImplementation(async ({ type }) =>
+        type === "room-agendas"
+            ? {
+                  ok: true,
+                  data: [{ id: matchId }],
+                  restricted: false,
+                  invitations: [],
+              }
+            : { ok: true, retryAfterMs: 30_000 },
+    );
+    const doc = new Y.Doc();
+    const state = () => ({
+        field: "point:p1:note",
+        update: Buffer.from(Y.encodeStateAsUpdate(doc)).toString("base64"),
+        stateVector: Buffer.from(Y.encodeStateVector(doc)).toString("base64"),
+        version: 1,
+    });
+    let refuse = transientFailure;
+    const persistDraft = vi.fn((body) => {
+        if (refuse)
+            throw Object.assign(new Error("Try again"), { status: 503 });
+        Y.applyUpdate(doc, Buffer.from(JSON.parse(body).update, "base64"));
+        return state();
+    });
+    request.mockImplementation(async (path, init) => {
+        if (path.startsWith("/agenda-two"))
+            return {
+                ...structuredClone(data),
+                id: "agenda-two",
+                title: "Next planning",
+            };
+        if (path.endsWith("/text")) return persistDraft(init.body);
+        if (path.includes("/text?")) return state();
+        return structuredClone(data);
+    });
+    try {
+        await start();
+        el("points").querySelector(".link").click();
+        await settle();
+        const note = el("points").querySelector("textarea");
+        note.value = "Save this to the first agenda";
+        note.dispatchEvent(new Event("input"));
+        controlOptions.onConnection(true);
+        await settle();
+        matchId = "agenda-two";
+        controlOptions.onConnection(false);
+        await settle();
+        if (transientFailure) {
+            expect(el("title").textContent).toBe("Acme review");
+            expect(el("points").textContent).toContain(
+                "Save this to the first agenda",
+            );
+            expect(el("status").textContent).not.toBe(t("agendaDraftLost"));
+            refuse = false;
+            el("retry").click();
+            await settle();
+        }
+        expect(doc.getText("text").toString()).toBe(
+            "Save this to the first agenda",
+        );
+        expect(el("title").textContent).toBe("Next planning");
+        expect(el("agenda-error").hidden).toBe(true);
+        expect(
+            request.mock.calls.findIndex(
+                ([path]) => path === "/agenda-one/text",
+            ),
+        ).toBeLessThan(
+            request.mock.calls.findIndex(([path]) => path === "/agenda-two"),
+        );
+    } finally {
+        doc.destroy();
+    }
 });

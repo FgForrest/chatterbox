@@ -38,6 +38,21 @@ function hasSessionStatus(body) {
     return ["open", "completing", "completed", "failed", "aborted"].includes(body?.status);
 }
 
+function isValidTruncation(value) {
+    return value == null || (Number.isSafeInteger(value) && value >= 0);
+}
+
+function isSessionResponse(body, sessionId) {
+    return hasSessionStatus(body) && body.id === sessionId &&
+        (body.recording_id === null ||
+            (typeof body.recording_id === "string" && Boolean(body.recording_id.trim())) ||
+            (body.status !== "completed" && body.recording_id === undefined)) &&
+        (body.job_id == null || (typeof body.job_id === "string" && Boolean(body.job_id.trim()))) &&
+        isValidTruncation(body.truncated_at_chunk) &&
+        (body.received_chunks === undefined ||
+            (Array.isArray(body.received_chunks) && body.received_chunks.every(index => Number.isSafeInteger(index) && index >= 0)));
+}
+
 /**
  * @param {{serverUrl: string, apiKey: string, connectionId?: string|null}} auth
  * @param {string} path
@@ -100,7 +115,7 @@ export async function request(auth, path, init = {}, timeoutMs = 30_000, options
         } else if (error instanceof TypeError || error?.name === "AbortError") {
             error = connectionError("network");
         }
-        await reportConnection(auth, error);
+        await reportConnection(auth, error, { config: path === "/api/v1/recorder/config" });
         throw error;
     } finally {
         clearTimeout(timer);
@@ -157,7 +172,7 @@ export async function getSession(auth, sessionId) {
         `/api/v1/recording-sessions/${sessionId}`,
         undefined,
         undefined,
-        { validate: hasSessionStatus },
+        { validate: (body) => isSessionResponse(body, sessionId) },
     );
     return response.json();
 }
@@ -189,7 +204,10 @@ export async function completeSession(auth, sessionId, body) {
             body: JSON.stringify(body),
         },
         undefined,
-        { validate: (body) => hasSessionStatus(body) || (typeof body?.job_id === "string" && Boolean(body.job_id)) },
+        { validate: (body) => isSessionResponse(body, sessionId) ||
+            (body?.id === undefined && body?.status === undefined &&
+                typeof body?.job_id === "string" && Boolean(body.job_id.trim()) &&
+                isValidTruncation(body.truncated_at_chunk)) },
     );
     return response.json();
 }
@@ -201,7 +219,8 @@ export async function completeSession(auth, sessionId, body) {
 export async function abortSession(auth, sessionId) {
     await request(auth, `/api/v1/recording-sessions/${sessionId}`, {
         method: "DELETE",
-    }, undefined, { allowEmpty: true, validate: (body) => body?.success === true });
+    }, undefined, { validate: (body) => body?.success === true &&
+        (body.id === undefined || body.id === sessionId) });
 }
 
 /**

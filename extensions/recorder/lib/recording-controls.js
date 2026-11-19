@@ -326,10 +326,10 @@ export async function mountRecordingControls(
         el("finalizing-progress-fill").style.width = `${percent}%`;
         renderUploadStatus(state, "finalizing-status");
         if (processing) {
-            el("processing-status").textContent = t(
-                "uploadComplete",
-                String(total),
-            );
+            const uploadedStatus = t("uploadComplete", String(total));
+            el("processing-status").textContent = state.uploadNotice
+                ? `${uploadedStatus} ${state.uploadNotice}`
+                : uploadedStatus;
             const startedAt = state.finalizingAt ?? new Date().toISOString();
             const tick = () => {
                 el("processing-elapsed").textContent = t(
@@ -452,7 +452,6 @@ export async function mountRecordingControls(
 
     el("stop").addEventListener("click", async () => {
         if (!unavailable) void beforeAction().catch(() => {});
-        await recordingFolder.saved();
         await sendMessage({ type: "stop-recording", reason: "user" });
     });
 

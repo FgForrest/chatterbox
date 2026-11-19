@@ -258,8 +258,13 @@ export function bindAgendaTextInput(
             input.readOnly = paused || !initialized || originalReadOnly;
         },
         materializedVersion: () => materializedVersion,
-        resync: () =>
-            initialized ? connect().then(() => flush()) : Promise.resolve(true),
+        resync: ({ retryRefusal = false } = {}) =>
+            initialized
+                ? connect().then(() => {
+                      if (retryRefusal) refused = false;
+                      return flush();
+                  })
+                : Promise.resolve(true),
         destroy() {
             if (disposed) return;
             input.removeEventListener("focus", focus);

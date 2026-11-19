@@ -6,6 +6,7 @@ import {
     agendaPanelKey,
     agendaRequest,
     canChooseRecordingAgenda,
+    saveAgendaEdit,
     supportsAgendas,
 } from "../lib/agendas.js";
 import { localizeDocument, t } from "../lib/i18n.js";
@@ -175,9 +176,9 @@ function clearLive() {
     textPaused = false;
 }
 
-function syncText() {
+function syncText(retryRefusal = false) {
     return Promise.all(
-        Array.from(bindings.values(), (binding) => binding.resync().catch(showError)),
+        Array.from(bindings.values(), (binding) => binding.resync({ retryRefusal }).catch(showError)),
     );
 }
 
@@ -189,15 +190,21 @@ async function flushText() {
     ).every(Boolean);
 }
 
-async function editedAgenda(id = detail?.id) {
-    if (state.state !== "recording" || state.stopped || !id) return;
+async function saveEdit(id, path, body) {
+    if (!recording() || state.tabId !== context.tabId) return saveAgendaEdit(id, path, body);
     const response = await chrome.runtime.sendMessage({
         type: "edit-agenda",
         agendaId: id,
         sessionId: state.sessionId,
         tabId: context.tabId,
+        edit: { path, body },
     });
-    if (!response?.ok) throw new Error(t("agendaFailed"));
+    if (!response?.ok) throw Object.assign(new Error(t("agendaFailed")), {
+        kind: response?.kind,
+        status: response?.status,
+    });
+    if (response.linkError) showError();
+    return response.saved;
 }
 
 function bindField(input, field, value) {
@@ -225,11 +232,6 @@ function bindField(input, field, value) {
     input.value = value ?? "";
     if (protocol && !input.disabled) {
         const id = detail.id;
-        let editedSession;
-        input.addEventListener("input", () => {
-            editedSession =
-                state.state === "recording" ? state.sessionId : null;
-        });
         const binding = bindAgendaTextInput(
             input,
             field,
@@ -238,21 +240,12 @@ function bindField(input, field, value) {
                     agendaRequest(
                         `/${encodeURIComponent(id)}/text?field=${encodeURIComponent(key)}`,
                     ),
-                send: (body) =>
-                    agendaRequest(`/${encodeURIComponent(id)}/text`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify(body),
-                    }),
+                send: (body) => saveEdit(id, "/text", body),
             },
             {
                 onValue: (value) => {
                     input.value = value;
                     updateNote(input);
-                },
-                onSaved: () => {
-                    if (editedSession && editedSession === state.sessionId)
-                        void editedAgenda(id).catch(showError);
                 },
                 onError: () => showError(),
             },
@@ -316,7 +309,7 @@ function editable() {
     );
 }
 
-async function mutate(path, method, body, optimistic) {
+async function mutate(path, body, optimistic) {
     if (saving || unavailable) return;
     if (!(await flushText())) {
         showError();
@@ -340,14 +333,9 @@ async function mutate(path, method, body, optimistic) {
     optimistic();
     render();
     try {
-        await agendaRequest(`/${encodeURIComponent(agendaId)}${path}`, {
-            method,
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-        });
-        await editedAgenda(agendaId);
         el("status").textContent = "";
         el("agenda-error").hidden = true;
+        await saveEdit(agendaId, path, body);
     } catch (error) {
         if (version !== generation) return;
         detail = previous;
@@ -524,7 +512,6 @@ function renderPoint(point, depth = 0) {
             () =>
                 void mutate(
                     `/points/${encodeURIComponent(point.id)}`,
-                    "PATCH",
                     { version: point.version, discussed: check.checked },
                     () => {
                         point.discussedAt = check.checked
@@ -564,7 +551,6 @@ function renderPoint(point, depth = 0) {
         (value) =>
             void mutate(
                 `/points/${encodeURIComponent(point.id)}`,
-                "PATCH",
                 { version: point.version, note: value || null },
                 () => {
                     point.note = value;
@@ -654,7 +640,6 @@ function render() {
                     const status = check.checked ? "done" : "open";
                     void mutate(
                         `/tasks/${encodeURIComponent(task.id)}`,
-                        "PATCH",
                         { version: task.version, status },
                         () => {
                             task.status = status;
@@ -767,9 +752,33 @@ function renderRecording() {
     el("cancel-choice").hidden = !choosing;
 }
 
+async function flushRetainedText() {
+    const retained = textPaused || hasPendingDraft();
+    if (!retained) return true;
+    const retryRefusal = textPaused;
+    if (retryRefusal) {
+        for (const binding of bindings.values()) binding.setPaused(false);
+    }
+    await syncText(retryRefusal);
+    if (unavailable) return false;
+    if (hasPendingDraft()) {
+        const wasChoosing = choosing;
+        choosing = false;
+        render();
+        choosing = wasChoosing;
+        showError();
+        return false;
+    }
+    textPaused = false;
+    if (el("status").textContent === t("agendaFailed")) el("agenda-error").hidden = true;
+    return true;
+}
+
 async function loadDetail(id, poll = false) {
     if (unavailable) return;
     const version = ++generation;
+    const switching = detail?.id && detail.id !== id;
+    if (switching && (!(await flushRetainedText()) || version !== generation)) return;
     try {
         const since =
             poll && detail?.id === id
@@ -780,18 +789,13 @@ async function loadDetail(id, poll = false) {
         );
         reconciledAt = Date.now();
         if (version !== generation) return;
-        if (detail?.id && detail.id !== id) {
+        const resumingText = textPaused;
+        if (resumingText && (!(await flushRetainedText()) || version !== generation)) return;
+        if (switching) {
             clearLive();
             openNotes.clear();
         }
         if (!next.unchanged) detail = next;
-        const resumingText = textPaused;
-        if (resumingText) {
-            for (const binding of bindings.values()) binding.setPaused(false);
-            await syncText();
-            if (version !== generation) return;
-            textPaused = false;
-        }
         if (el("status").textContent === t("agendaLoadError"))
             el("agenda-error").hidden = true;
         render();
@@ -967,6 +971,7 @@ async function restore(poll = false) {
         if (unavailable) return;
         const agendaId = currentAgendaId();
         if (choosing) {
+            if (!(await flushRetainedText())) return;
             if (agendaId && detail?.id !== agendaId) await loadDetail(agendaId);
             await choices();
         } else if (agendaId) {
@@ -974,6 +979,7 @@ async function restore(poll = false) {
             renderRoom();
         }
         else {
+            if (!(await flushRetainedText())) return;
             clearLive();
             detail = null;
             controls?.folder(settings);
@@ -1050,7 +1056,12 @@ el("retry").addEventListener("click", async () => {
                     choose: !selected,
                 },
             });
-        } else await restore();
+        } else {
+            if (hasPendingDraft() && !unavailable) {
+                await syncText(true);
+            }
+            await restore();
+        }
     } catch (error) {
         showError(error, true);
     }
@@ -1124,13 +1135,15 @@ controls = await mountRecordingControls(el("recorder-controls"), {
         if (settings) {
             if (changedRoom) {
                 generation += 1;
-                clearLive();
+                if (!hasPendingDraft()) clearLive();
                 room = { data: [], restricted: false, invitations: [] };
                 roomPeople = [];
                 if (context.roomAutomatic) {
                     context.agendaIds = [];
-                    detail = null;
-                    renderNone();
+                    if (!hasPendingDraft()) {
+                        detail = null;
+                        renderNone();
+                    }
                 }
             }
             heartbeat.update(unavailable ? {} : settings ?? {}, currentTab, presenceAgendaId());
