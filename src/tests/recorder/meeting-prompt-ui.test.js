@@ -125,6 +125,23 @@ describe("meeting prompt popup offer", () => {
 });
 
 describe("meeting prompt options and setup switches", () => {
+    it("keeps both extension catalogs in parity and names the picker action in Options", () => {
+        const catalog = (locale) =>
+            JSON.parse(
+                readFileSync(
+                    `extensions/recorder/_locales/${locale}/messages.json`,
+                    "utf8",
+                ),
+            );
+        const english = catalog("en");
+        const czech = catalog("cs");
+        expect(Object.keys(english).sort()).toEqual(Object.keys(czech).sort());
+        for (const messages of [english, czech]) {
+            expect(messages.autoIntro.message).toContain(
+                messages.meetingPromptDialog.message,
+            );
+        }
+    });
     it("uses the existing three-step setup and synchronizes both switches on grant and removal", async () => {
         document.body.innerHTML = readFileSync(
             "extensions/recorder/options/options.html",
