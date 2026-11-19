@@ -405,8 +405,7 @@ function updateNote(note) {
 function appendNote(row, meta, field, value, label, canEdit, legacySave) {
     const previous = fieldNodes.get(field);
     if (!canEdit) {
-        const binding = bindings.get(field);
-        if (binding && (textPaused || !binding.hasPendingChanges())) value = previous.value;
+        if (bindings.has(field)) value = previous.value;
         if (value)
             row.append(
                 renderLinkedText(text("p", "", "hint note-readonly"), value),

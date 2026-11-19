@@ -36,7 +36,16 @@ let recording = false;
 let completed = false;
 let elapsedTimer;
 let finalizationTimer;
-const connectionNotice = mountConnectionNotice(status);
+let currentState;
+let unavailable = true;
+const connectionNotice = mountConnectionNotice(status, {
+    onConnection(connection) {
+        const next = Boolean(connection && connection.state !== "ok");
+        if (unavailable === next) return;
+        unavailable = next;
+        renderFolder();
+    },
+});
 window.addEventListener("pagehide", connectionNotice.destroy, { once: true });
 
 function showError(error) {
@@ -68,14 +77,20 @@ function formatElapsed(startedAt) {
     return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+function renderFolder() {
+    if (currentState)
+        recordingFolder.render(currentState, { refresh: !unavailable });
+}
+
 function renderState(state) {
     if (state.state === STATE.idle && completed) {
         window.close();
         return;
     }
     if (state.pickerRequestId !== requestId) return;
+    currentState = state;
     connectionNotice.update({ recording: recording && !state.stopped, starting: state.startConnectionError || state.connecting });
-    recordingFolder.render(state);
+    renderFolder();
     if (state.connecting) status.textContent = t("connectionConnecting", t("appNameInstrumental", t("appName")));
     else if (recording && !state.stopped) status.textContent = state.uploadNotice ?? t("recording");
 

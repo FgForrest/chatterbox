@@ -8,6 +8,7 @@ import {
     agendaRequest,
     clearAgendas,
     currentAgendas,
+    matchAgendaRoom,
     matchAgendas,
     openAgendaPanel,
     refreshAgendas,
@@ -461,6 +462,27 @@ describe("pairing identity", () => {
 });
 
 describe("reminder refresh regressions", () => {
+    it.each([
+        ["list", () => refreshAgendas({ force: true }), { data: [{}] }],
+        ["match", () => matchAgendaRoom(), "<html>Sign in</html>"],
+        [
+            "match metadata",
+            () => matchAgendaRoom(),
+            { data: [meeting], invitations: [{}] },
+        ],
+    ])("rejects a foreign 200 from %s and preserves cached agendas", async (_route, load, body) => {
+        await refreshAgendas();
+        const cached = structuredClone(session[AGENDA_CACHE_KEY]);
+        await vi.advanceTimersByTimeAsync(1);
+        fetch.mockResolvedValueOnce(Response.json(body));
+
+        await expect(load()).rejects.toMatchObject({
+            kind: "unreachable",
+            detail: { kind: "foreign-response", httpStatus: 200 },
+        });
+        expect(session[AGENDA_CACHE_KEY]).toEqual(cached);
+    });
+
     it("limits routine refreshes to once per 30 minutes and allows a popup refresh", async () => {
         await refreshAgendas();
         await refreshAgendas();
@@ -517,13 +539,19 @@ describe("reminder refresh regressions", () => {
 
 describe("point and task edits", () => {
     it.each([
-        ["/points/p 1", { id: "p 1", version: 3, discussed: true }],
-        ["/points/p1", { success: true }],
-        ["/tasks/t1", { id: "t1", status: "done" }],
-    ])("accepts the released server answer to %s", async (path, answer) => {
+        [
+            "points",
+            "point 1 / draft",
+            { id: "point 1 / draft", version: 3, discussed: true },
+        ],
+        ["points", "p1", { success: true }],
+        ["tasks", "t1", { id: "t1", status: "done" }],
+    ])("accepts the released server answer for %s/%s", async (kind, id, answer) => {
         fetch.mockResolvedValueOnce(Response.json(answer));
         await expect(
-            saveAgendaEdit("one", path.replace(" ", "%20"), { version: 2 }),
+            saveAgendaEdit("one", `/${kind}/${encodeURIComponent(id)}`, {
+                version: 2,
+            }),
         ).resolves.toEqual(answer);
         expect(fetch.mock.calls[0][1].method).toBe("PATCH");
     });
