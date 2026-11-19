@@ -373,6 +373,35 @@ describe.each(["field", "pill"])("folder chip %s", (variant) => {
             folderScope: "org",
         });
     });
+    it.each([
+        { ok: false, status: 502 },
+        { ok: false, kind: "unreachable" },
+        { ok: false, status: 403, error: "Forbidden" },
+    ])("keeps the remembered folder and reports a failed lookup %j", async (lookup) => {
+        const save = vi.fn();
+        const container = mount();
+        const field = createFolderField({
+            container,
+            request: async ({ id }) =>
+                id ? lookup : { ok: true, folders: [] },
+            save,
+            t,
+            variant,
+        });
+        fields.push(field);
+        await act(async () =>
+            field.reset({
+                folderId: "work",
+                folderLabel: "Organization / Planning",
+                folderScope: "org",
+            }),
+        );
+        await field.saved();
+        expect(trigger().textContent).toBe("Planning");
+        expect(container.textContent).toContain(t("folderSearchFailed"));
+        expect(container.textContent).not.toContain(t("folderUnavailable"));
+        expect(save).not.toHaveBeenCalled();
+    });
     it("renders unknown scopes as private and learns the scope on refresh", async () => {
         const save = vi.fn();
         const field = createFolderField({
