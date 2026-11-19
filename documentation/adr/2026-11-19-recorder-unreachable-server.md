@@ -89,8 +89,8 @@ permission and recorder endpoints, and it needs no schema or deployment changes.
 
 Known edge cases left open in #422: a Stop that lands before the capture host starts, a crashed
 offscreen document in tab mode, a second idempotent Complete after an ambiguous proxy answer, two
-agenda draft and link races during Stop or an agenda switch, and validation of the remaining agenda
-and config acknowledgements.
+agenda draft and link races during Stop or an agenda switch, and type checks inside the config
+response's `features`.
 
 ## Related work
 

@@ -12,6 +12,7 @@ import {
     openAgendaPanel,
     refreshAgendas,
     remindAgenda,
+    saveAgendaEdit,
     supportsAgendas,
 } from "../../../extensions/recorder/lib/agendas.js";
 import { refreshServerConfig } from "../../../extensions/recorder/lib/pairing.js";
@@ -511,6 +512,31 @@ describe("reminder refresh regressions", () => {
         });
         await vi.advanceTimersByTimeAsync(5000);
         await assertion;
+    });
+});
+
+describe("point and task edits", () => {
+    it.each([
+        ["/points/p 1", { id: "p 1", version: 3, discussed: true }],
+        ["/points/p1", { success: true }],
+        ["/tasks/t1", { id: "t1", status: "done" }],
+    ])("accepts the released server answer to %s", async (path, answer) => {
+        fetch.mockResolvedValueOnce(Response.json(answer));
+        await expect(
+            saveAgendaEdit("one", path.replace(" ", "%20"), { version: 2 }),
+        ).resolves.toEqual(answer);
+        expect(fetch.mock.calls[0][1].method).toBe("PATCH");
+    });
+    it.each([
+        ["/points/p1", { error: "Sign in to continue" }],
+        ["/points/p1", { id: "other" }],
+        ["/tasks/t1", { success: true }],
+        ["/tasks/t1", { status: "ok" }],
+    ])("treats a foreign 200 answer to %s as unreachable", async (path, answer) => {
+        fetch.mockResolvedValueOnce(Response.json(answer));
+        await expect(
+            saveAgendaEdit("one", path, { version: 2 }),
+        ).rejects.toMatchObject({ kind: "unreachable" });
     });
 });
 

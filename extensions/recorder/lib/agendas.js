@@ -59,6 +59,12 @@ function agendaResponseValidator(path) {
     const [route, query] = path.split("?");
     if (!route) return isAgendaList;
     if (route === "/match") return isAgendaMatch;
+    const edited = /^\/[^/]+\/(points|tasks)\/([^/]+)$/.exec(route);
+    if (edited) {
+        const [, kind, itemId] = edited;
+        return body => body?.id === decodeURIComponent(itemId) ||
+            (kind === "points" && body?.success === true);
+    }
     const id = /^\/([^/]+)$/.exec(route)?.[1];
     if (id && route !== "/presence") {
         return body => (body?.unchanged === true && new URLSearchParams(query).has("since") &&
