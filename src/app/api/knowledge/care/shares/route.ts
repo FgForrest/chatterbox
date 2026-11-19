@@ -5,8 +5,7 @@ import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { requireCareCurator } from "@/lib/knowledge/care-access";
 import { jsonBody } from "@/lib/knowledge/route-helpers";
 import {
-    listSharedAdditions,
-    reviewShare,
+    getSharedAdditions,
     undoShareAdditions,
 } from "@/lib/knowledge/share-review";
 
@@ -15,8 +14,7 @@ export const GET = apiHandler(async (request) => {
     await requireCareCurator(session.user.id);
     const query = z
         .object({
-            offset: z.coerce.number().int().min(0).max(10000).default(0),
-            eventId: z.string().min(1).max(64).optional(),
+            eventId: z.string().min(1).max(64),
             additionOffset: z.coerce
                 .number()
                 .int()
@@ -28,9 +26,8 @@ export const GET = apiHandler(async (request) => {
     if (!query.success)
         throw new AppError(ErrorCode.INVALID_INPUT, "Invalid share query", 400);
     return NextResponse.json(
-        await listSharedAdditions(
+        await getSharedAdditions(
             session.user.id,
-            query.data.offset,
             query.data.eventId,
             query.data.additionOffset,
         ),
@@ -43,7 +40,7 @@ export const POST = apiHandler(async (request) => {
     const body = z
         .object({
             eventId: z.string().min(1).max(64),
-            action: z.enum(["review", "undo", "delete"]),
+            action: z.enum(["undo", "delete"]),
             additionId: z.string().min(1).max(64).optional(),
         })
         .safeParse(await jsonBody(request));
@@ -56,10 +53,6 @@ export const POST = apiHandler(async (request) => {
             "Invalid share action",
             400,
         );
-    if (body.data.action === "review") {
-        await reviewShare(session.user.id, body.data.eventId);
-        return NextResponse.json({ reviewed: true });
-    }
     return NextResponse.json(
         await undoShareAdditions(
             session.user.id,

@@ -4,10 +4,7 @@ import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
 import { ShareAdditionsGroupCard } from "@/components/almanac/share-additions-list";
 import { Button } from "@/components/ui/button";
-import type {
-    SharedAdditionsGroup,
-    SharedAdditionsPage,
-} from "@/lib/knowledge/share-review";
+import type { SharedAdditionsGroup } from "@/lib/knowledge/share-review";
 
 export function FolderShareFix({
     eventId,
@@ -29,9 +26,8 @@ export function FolderShareFix({
         )
             .then(async (response) => {
                 if (!response.ok) throw new Error();
-                const page: SharedAdditionsPage = await response.json();
-                if (!controller.signal.aborted)
-                    setGroup(page.groups[0] ?? null);
+                const group: SharedAdditionsGroup = await response.json();
+                if (!controller.signal.aborted) setGroup(group);
             })
             .catch(() => {
                 if (!controller.signal.aborted) setError(true);

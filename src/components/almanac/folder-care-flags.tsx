@@ -37,7 +37,7 @@ export function FolderCareFlags({
         care?.shareRefs?.filter((ref) =>
             ref.kind === "record" ? ref.id === recordId : ref.id === factId,
         ) ?? [];
-    const [expanded, setExpanded] = useState(false);
+    const [sharesExpanded, setSharesExpanded] = useState(false);
     const [dirty, setDirty] = useState(false);
     if (!problems.length && !duplicates.length && !shares.length) return null;
     function resolved(key: string) {
@@ -45,48 +45,59 @@ export function FolderCareFlags({
         onChanged();
     }
     return (
-        <details
-            className="mt-2 space-y-2"
-            onToggle={(event) => {
-                const open = event.currentTarget.open;
-                setExpanded(open);
-                if (!open && dirty) {
-                    setDirty(false);
-                    onChanged();
-                }
-            }}
-        >
-            <summary className="cursor-pointer text-xs font-medium text-amber-700 dark:text-amber-300">
-                {i18n(
-                    "{count, plural, one {# open problem} other {# open problems}}",
-                    {
-                        count:
-                            problems.length + duplicates.length + shares.length,
-                    },
-                )}
-            </summary>
-            {expanded &&
-                shares.map((ref) => (
-                    <FolderShareFix
-                        key={ref.eventId}
-                        eventId={ref.eventId}
-                        onChanged={() => setDirty(true)}
-                    />
-                ))}
-            {problems.map((problem) => (
-                <CareProblemCard
-                    key={problem.key}
-                    problem={problem}
-                    onResolved={() => resolved(problem.key)}
-                />
-            ))}
-            {duplicates.map((candidate) => (
-                <DuplicateFixCard
-                    key={candidate.key}
-                    candidate={candidate}
-                    onResolved={() => resolved(candidate.key)}
-                />
-            ))}
-        </details>
+        <>
+            {(problems.length > 0 || duplicates.length > 0) && (
+                <details className="mt-2 space-y-2">
+                    <summary className="cursor-pointer text-xs font-medium text-amber-700 dark:text-amber-300">
+                        {i18n(
+                            "{count, plural, one {# open problem} other {# open problems}}",
+                            { count: problems.length + duplicates.length },
+                        )}
+                    </summary>
+                    {problems.map((problem) => (
+                        <CareProblemCard
+                            key={problem.key}
+                            problem={problem}
+                            onResolved={() => resolved(problem.key)}
+                        />
+                    ))}
+                    {duplicates.map((candidate) => (
+                        <DuplicateFixCard
+                            key={candidate.key}
+                            candidate={candidate}
+                            onResolved={() => resolved(candidate.key)}
+                        />
+                    ))}
+                </details>
+            )}
+            {shares.length > 0 && (
+                <details
+                    className="mt-2 space-y-2"
+                    onToggle={(event) => {
+                        const open = event.currentTarget.open;
+                        setSharesExpanded(open);
+                        if (!open && dirty) {
+                            setDirty(false);
+                            onChanged();
+                        }
+                    }}
+                >
+                    <summary className="cursor-pointer text-xs text-muted-foreground">
+                        {i18n(
+                            "{count, plural, one {Added by # share} other {Added by # shares}}",
+                            { count: shares.length },
+                        )}
+                    </summary>
+                    {sharesExpanded &&
+                        shares.map((ref) => (
+                            <FolderShareFix
+                                key={ref.eventId}
+                                eventId={ref.eventId}
+                                onChanged={() => setDirty(true)}
+                            />
+                        ))}
+                </details>
+            )}
+        </>
     );
 }

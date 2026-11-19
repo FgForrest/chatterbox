@@ -77,12 +77,7 @@ import {
 import { restoreCareArchive } from "@/lib/knowledge/restore-care";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { shareEventInTx } from "@/lib/knowledge/share-provenance";
-import {
-    listSharedAdditions,
-    reviewShare,
-    shareReviewCount,
-    undoShareAdditions,
-} from "@/lib/knowledge/share-review";
+import { undoShareAdditions } from "@/lib/knowledge/share-review";
 import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
 import type { StorageProvider } from "@/lib/storage/types";
 import {
@@ -385,7 +380,12 @@ withDatabase("Care queue with Organization provenance", () => {
         expect(changes.map((row) => row.targetId).sort()).toEqual(
             [person.id, assignee.id].sort(),
         );
-        const result = await undoShareAdditions("curator", eventId);
+        const response = await call(shareAction, "curator", {
+            eventId,
+            action: "undo",
+        });
+        expect(response.status).toBe(200);
+        const result = await response.json();
         expect(result.removed).toHaveLength(2);
         expect(result.kept).toEqual([]);
         expect(await db().select().from(people)).toEqual([]);
@@ -396,6 +396,8 @@ withDatabase("Care queue with Organization provenance", () => {
         const [event] = await db().select().from(almanacShareEvents);
         expect(event?.undoneByUserId).toBe("curator");
         expect(event?.undoneAt).toBeInstanceOf(Date);
+        expect(event?.reviewedAt).toBeNull();
+        expect(event?.reviewedByUserId).toBeNull();
     });
     it("timestamps a share at publication rather than transaction start", async () => {
         await audio();
@@ -481,18 +483,17 @@ withDatabase("Care queue with Organization provenance", () => {
             await undo;
         }
     });
-    it("reviews a share and deletes one addition through the shares route", async () => {
+    it("rejects the retired action and deletes one addition through the shares route", async () => {
         const { event, person } = await speaker();
         const [addition] = await db()
             .select()
             .from(almanacShareChanges)
             .where(eq(almanacShareChanges.targetId, person.id));
-        const reviewed = await call(shareAction, "curator", {
+        const retired = await call(shareAction, "curator", {
             eventId: event.id,
             action: "review",
         });
-        expect(reviewed.status).toBe(200);
-        expect(await shareReviewCount("curator")).toBe(0);
+        expect(retired.status).toBe(400);
         expect(
             (
                 await call(shareAction, "curator", {
@@ -780,22 +781,24 @@ withDatabase("Care queue with Organization provenance", () => {
             ),
         ).toHaveLength(1);
     });
-    it("does not expose a title after withdrawal and counts unreviewed groups only", async () => {
+    it("requires a share event ID and hides its item title after withdrawal", async () => {
         const { event } = await speaker();
-        expect(await shareReviewCount("curator")).toBe(1);
-        expect(
-            (await listSharedAdditions("curator")).groups[0]?.item?.title,
-        ).toBe("Recording audio");
+        const query = `?eventId=${encodeURIComponent(event.id)}`;
+        expect((await call(shares)).status).toBe(400);
+        const shared = await call(shares, "curator", undefined, query);
+        expect(shared.status).toBe(200);
+        expect(await shared.json()).toMatchObject({
+            id: event.id,
+            item: { title: "Recording audio" },
+        });
         await unshareRecording("member", "audio", { withdraw: true });
         await db()
             .update(chatterItems)
             .set({ title: encryptText("Private renamed title") })
             .where(eq(chatterItems.id, "audio"));
-        expect(
-            (await listSharedAdditions("curator")).groups[0]?.item,
-        ).toBeNull();
-        await reviewShare("curator", event.id);
-        expect(await shareReviewCount("curator")).toBe(0);
+        const withdrawn = await call(shares, "curator", undefined, query);
+        expect(withdrawn.status).toBe(200);
+        expect(await withdrawn.json()).toMatchObject({ item: null });
     });
     it("detects single-valued conflicts, retires losing facts with evidence intact, and excludes private and multi-valued facts", async () => {
         const { subject, a, b, problem } = await conflict();
@@ -1635,16 +1638,56 @@ withDatabase("Care queue with Organization provenance", () => {
                 .where(eq(knowledgeEntities.id, target.id)),
         ).toHaveLength(1);
     });
-    it("sums duplicates, unreviewed shares and other open problems, and returns curator-only folder flags", async () => {
-        const { person } = await speaker();
+    it("counts duplicates and other Care problems while flagging shares only for curators in folders", async () => {
+        const { event, person } = await speaker();
+        expect(await careCount("curator")).toBe(0);
+        for (const displayName of ["Zavi Duspektor", "Zavi Duspektar"]) {
+            await createPerson({ userId: "org", displayName });
+        }
         const { subject } = await conflict();
         expect(await careCount("curator")).toBe(2);
-        expect(
-            (await folderCareFor("curator", [subject.id])).care?.problems,
-        ).toHaveLength(1);
+        await db()
+            .update(almanacShareEvents)
+            .set({ reviewedAt: new Date(), reviewedByUserId: "curator" })
+            .where(eq(almanacShareEvents.id, event.id));
+        const { care } = await folderCareFor("curator", [
+            subject.id,
+            person.id,
+        ]);
+        expect(care?.problems).toHaveLength(1);
+        expect(care?.shareRefs).toEqual([
+            { id: person.id, kind: "record", eventId: event.id },
+        ]);
         expect(await folderCareFor("member", [subject.id, person.id])).toEqual(
             {},
         );
+    });
+    it("lists every recent share that added a folder record, newest first", async () => {
+        const { event, person } = await speaker();
+        const later = {
+            ...event,
+            id: "later-share",
+            createdAt: new Date(event.createdAt.getTime() + 60_000),
+        };
+        await db().insert(almanacShareEvents).values(later);
+        const changes = await db()
+            .select()
+            .from(almanacShareChanges)
+            .where(eq(almanacShareChanges.eventId, event.id));
+        await db()
+            .insert(almanacShareChanges)
+            .values(
+                changes.map((change, index) => ({
+                    ...change,
+                    id: `later-change-${index}`,
+                    eventId: later.id,
+                })),
+            );
+        const { care } = await folderCareFor("curator", [person.id]);
+        expect(care?.shareRefs).toEqual([
+            { id: person.id, kind: "record", eventId: later.id },
+            { id: person.id, kind: "record", eventId: event.id },
+        ]);
     });
     it("round-trips decisions using semantic content after re-encryption; private archives exclude them", async () => {
         const { a, problem } = await conflict();
@@ -1763,19 +1806,26 @@ withDatabase("Care queue with Organization provenance", () => {
                 },
             },
         ],
-    ] as const)("authorizes %s for curator and Organization account, denies members and returns 404 without Organization", async (_name, handler, body) => {
-        expect((await call(handler, "member", body)).status).toBe(403);
+    ] as const)("authorizes %s for curator and Organization account, denies members and returns 404 without Organization", async (name, handler, body) => {
+        const query = name === "shares" ? "?eventId=missing" : "";
+        expect((await call(handler, "member", body, query)).status).toBe(403);
         const admittedStatus =
-            _name === "fix" ? 409 : _name === "share action" ? 404 : 200;
-        expect((await call(handler, "curator", body)).status).toBe(
+            name === "fix"
+                ? 409
+                : name === "share action" || name === "shares"
+                  ? 404
+                  : 200;
+        expect((await call(handler, "curator", body, query)).status).toBe(
             admittedStatus,
         );
-        expect((await call(handler, "org", body)).status).toBe(admittedStatus);
+        expect((await call(handler, "org", body, query)).status).toBe(
+            admittedStatus,
+        );
         mockEnv.IS_HOSTED = true;
-        expect((await call(handler, "curator", body)).status).toBe(404);
+        expect((await call(handler, "curator", body, query)).status).toBe(404);
         mockEnv.IS_HOSTED = false;
         mockEnv.SELF_HOST_MODE = "local";
-        expect((await call(handler, "curator", body)).status).toBe(404);
+        expect((await call(handler, "curator", body, query)).status).toBe(404);
     });
     it("excludes recent, unused, multi-mention, fact-bearing and private records from thin suggestions", async () => {
         const first = await audio();
@@ -1885,7 +1935,7 @@ withDatabase("Care queue with Organization provenance", () => {
             (await undoShareAdditions("curator", event?.id ?? "")).kept,
         ).toEqual([expect.objectContaining({ reason: "changed" })]);
     });
-    it("deletes one addition without changing the other additions or the share's review state", async () => {
+    it("deletes one addition without changing the other additions or marking the share undone", async () => {
         const transcript = await audio();
         const a = await createPerson({
             userId: "member",
@@ -1919,7 +1969,8 @@ withDatabase("Care queue with Organization provenance", () => {
         expect((await db().select().from(people)).map((row) => row.id)).toEqual(
             [b.id],
         );
-        expect(await shareReviewCount("curator")).toBe(1);
+        const [remaining] = await db().select().from(almanacShareEvents);
+        expect(remaining?.undoneAt).toBeNull();
     });
     it("rejects private provenance ids and private problem targets on every write", async () => {
         await audio();
@@ -1965,7 +2016,7 @@ withDatabase("Care queue with Organization provenance", () => {
         });
         expect(await response.json()).toEqual({ restored: 0, skipped: 1 });
     });
-    it("flags every displayed record even when its share is beyond the first page of groups", async () => {
+    it("flags recent share additions for every displayed record", async () => {
         const records = await db()
             .insert(people)
             .values(
