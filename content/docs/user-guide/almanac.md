@@ -56,7 +56,7 @@ Click **Preview** to see what will be added before anything is saved:
 
 ![What waits for review](images/almanac-review.png)
 
-**Review** collects item reviews waiting for you: [Learn](learn.md) runs and proposed tasks from a recording or mail. The badge on **Almanac** counts these item reviews. Task changes routed to you because only you may apply them wait under **Tasks → Proposals for you**, with their own navigation badge. See [Routed proposals](summaries-and-tasks.md#routed-proposals).
+**Review** collects [Learn](learn.md) runs and proposed tasks from recordings and mail you own, in the private and Organization views. Curators also see relations suggested by members. The badge on **Almanac** counts these item reviews. Task changes routed to you because only you may apply them wait under **Tasks → Proposals for you**, with their own navigation badge. See [Routed proposals](summaries-and-tasks.md#routed-proposals).
 
 ## Care: possible duplicates
 

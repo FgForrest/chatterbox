@@ -2,17 +2,34 @@
  * What a recording needs before it can join the Organization.
  *
  * Pure, so the share transaction and the client explaining a refusal read
- * the same rules. The share runs it on the Organization's copies, so what
- * gets published is exactly what passed.
+ * the same rules for the owner's content before it is published.
  */
 
 import type { AttributionStatus } from "@/lib/knowledge/attribution";
 
+export type ShareReviewProblem =
+    | { kind: "learn_unfinished" }
+    | { kind: "tasks_unreviewed"; waiting: "summary" | "review" };
+
 export type ShareGateProblem =
+    | ShareReviewProblem
     | { kind: "no_transcript" }
     | { kind: "unresolved_speakers"; source: string; labels: string[] };
 
+/** Whether the gate points to the recording owner's Learn or task review. */
+export function isShareReviewProblem(
+    problem: ShareGateProblem,
+): problem is ShareReviewProblem {
+    return (
+        problem.kind === "learn_unfinished" ||
+        problem.kind === "tasks_unreviewed"
+    );
+}
+
 export interface ShareGateInput {
+    learnUnfinished?: boolean;
+    tasksUnreviewed?: boolean;
+    summaryUnfinished?: boolean;
     transcripts: { id: string; source: string; labels: readonly string[] }[];
     attributions: {
         transcriptionId: string;
@@ -52,5 +69,11 @@ export function evaluateShareGate(input: ShareGateInput): ShareGateProblem[] {
             });
         }
     }
+    if (input.learnUnfinished) problems.push({ kind: "learn_unfinished" });
+    if (input.tasksUnreviewed || input.summaryUnfinished)
+        problems.push({
+            kind: "tasks_unreviewed",
+            waiting: input.tasksUnreviewed ? "review" : "summary",
+        });
     return problems;
 }

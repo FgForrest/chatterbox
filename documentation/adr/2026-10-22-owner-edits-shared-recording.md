@@ -1,14 +1,14 @@
 ---
 title: The owner keeps editing a recording shared with the Organization, as a curator of that recording
 date: 2026-10-22
-updated: 2026-10-22 22:30
-status: accepted
+updated: 2026-11-18 21:03
+status: superseded
 kind: feature
 issues: []
 prs: [221]
 areas: [src/lib/sharing/writer-rule.ts, src/lib/sharing/writer.ts, src/lib/learn/sharing.ts, src/lib/pipeline/driver.ts, src/lib/pipeline/effective-profile.ts]
 supersedes: [2026-09-30-shared-recording-edited-by-organization]
-superseded-by: []
+superseded-by: [2026-11-18-owner-review-before-share]
 relates: [2026-10-22-pipeline-steps-settle-their-jobs, 2026-09-23-shared-organization-scope, 2026-10-22-organization-almanac-grows-on-share, 2026-10-19-one-widget-for-recordings-and-mail]
 ---
 
@@ -20,6 +20,8 @@ review Learn, correct the transcript. These writes land in the Organization scop
 curator's would. Other members stay read-only. The owner's processing pipeline keeps running
 after sharing, and a Learn run that started privately is cancelled and restarted on the
 Organization scope. Shipped in PR #221.
+
+**Superseded in part** by [owner review before sharing](2026-11-18-owner-review-before-share.md). First-time Organization recording shares now wait for required private Learn. Cancellation and restart still apply where publication can proceed with a private run open, including mail. Owners and curators keep the shared content rights described here.
 
 The rest of the earlier sharing model stands, so this record is complete on its own:
 

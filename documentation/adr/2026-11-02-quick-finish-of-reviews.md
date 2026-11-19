@@ -1,14 +1,14 @@
 ---
 title: Untouched reviews can be skipped without rejection, with task state scoped to the item and view
 date: 2026-11-02
-updated: 2026-11-02 19:53
-status: proposed
+updated: 2026-11-18 21:03
+status: superseded
 kind: feature
 issues: []
 prs: []
 areas: [src/lib/tasks, src/lib/learn/review.ts, src/lib/learn/learn-job-handler.ts, src/db/schema.ts, src/components/learn, src/components/tasks, src/components/pipeline/workflow-widget.tsx, src/hooks/use-deferred-review-commit.ts]
 supersedes: [2026-10-22-owner-reviews-tasks-sharing-ungated, 2026-10-20-learn-review-one-column, 2026-09-30-learn, 2026-10-02-almanac-guided-transcript-correction]
-superseded-by: []
+superseded-by: [2026-11-18-owner-review-before-share]
 relates: []
 ---
 
@@ -16,7 +16,11 @@ relates: []
 
 A reviewer can leave Learn after confirming speakers, or skip Task review, without teaching the app
 that the other suggestions are wrong. Finish remains final, including with zero selected. The
-implementation is unmerged; this record is proposed.
+implementation was unmerged when this record was proposed.
+
+**Superseded in part** by [owner review before sharing](2026-11-18-owner-review-before-share.md). First-time Organization
+sharing of a recording now waits for the owner to finish or skip both reviews where applicable.
+Only an owner can skip the subsequent task review as part of Learn quick finish. The other skip, undo, and rejection rules still hold.
 
 ## Why
 

@@ -23,6 +23,7 @@ import { DELETE as handler17DELETE } from "@/app/api/recordings/[id]/review/dism
 import { POST as handler18POST } from "@/app/api/recordings/[id]/review/finish/route";
 import { PATCH as handler19PATCH } from "@/app/api/recordings/[id]/review/items/[itemId]/route";
 import { PATCH as touchLearnReviewRoute } from "@/app/api/recordings/[id]/review/route";
+import { POST as skipFailedLearnRoute } from "@/app/api/recordings/[id]/review/skip/route";
 import {
     DELETE as handler21DELETE,
     PATCH as handler21PATCH,
@@ -54,6 +55,11 @@ import { POST as handler32POST } from "@/app/api/recordings/[id]/transcription/f
 import { POST as declineTrim } from "@/app/api/recordings/[id]/trim-proposal/route";
 
 export const personWriteRoutes = [
+    {
+        path: "recordings/[id]/review/skip/route.ts",
+        method: "POST",
+        handler: skipFailedLearnRoute,
+    },
     {
         path: "recordings/[id]/trim-proposal/route.ts",
         method: "POST",

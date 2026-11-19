@@ -372,10 +372,7 @@ export default async function DashboardPage() {
     const ownTranscriptions = viewerIsOrgAccount ? [] : userTranscriptions;
     const summaryIds = new Set(userSummaryRows.map((r) => r.recordingId));
     const transcriptIds = new Set(ownTranscriptions.map((t) => t.recordingId));
-    const reviewIds = await recordingsNeedingReview(
-        session.user.id,
-        viewerIsOrgAccount,
-    );
+    const reviewIds = await recordingsNeedingReview(session.user.id);
 
     // Content fields are encrypted at rest; decrypt server-side (this is
     // an RSC — client never sees a key) before serializing for the

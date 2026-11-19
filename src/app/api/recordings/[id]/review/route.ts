@@ -44,7 +44,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     const review = await loadReview(access, requestedReviewSource(request));
     const quickFinish =
         profile && review.run?.status === "ready"
-            ? await learnQuickFinishPolicy(access)
+            ? await learnQuickFinishPolicy(access, actorUserId)
             : { automaticSummary: false, skipTasks: false };
     return NextResponse.json({
         ...review,

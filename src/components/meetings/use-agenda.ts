@@ -230,7 +230,8 @@ export function useAgenda(
                                   }
                                 : null;
                         const refusal = failure
-                            ? (folderRefusal(failure) ?? shareRefusal(failure))
+                            ? (folderRefusal(failure) ??
+                              shareRefusal(failure)?.message)
                             : null;
                         setConflict(conflicted && !staleSuggestion && !refusal);
                         toast.error(

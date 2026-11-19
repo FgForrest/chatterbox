@@ -27,7 +27,7 @@ An item's header shows its folder path and **Visible to**, with audience avatars
 
 A curator chooses **Restrict…** on an open Organization folder. The preview lists item owners who join the initial audience, items withdrawn from the Organization, earlier Almanac additions that stay and affected exports. Large folders show **Restricting…** while withdrawal completes. If interrupted, a curator can retry; the existing audience is kept and can be extended.
 
-A manager or curator chooses **Open to the whole Organization…** to lift the restriction. The preview distinguishes items shared immediately from items waiting for their owner to finish speaker naming or other share requirements. Waiting items remain visible to their current audience. Cancelling their pending placement withdraws that filing. Organization retention starts after each item's 30-day grace; the preview shows its estimated end and items retention will reach.
+A manager or curator chooses **Open to the whole Organization…** to lift the restriction. The preview distinguishes items shared immediately from items waiting for their owner to finish speaker naming, Learn, or task review. Waiting items remain visible to their current audience. Cancelling their pending placement withdraws that filing. Organization retention starts after each item's 30-day grace; the preview shows its estimated end and items retention will reach.
 
 Filing a restricted item into an open Organization folder asks **Share with the whole Organization?**. Speaker names and facts reach the Organization Almanac, and the item stays in the restricted folder too.
 

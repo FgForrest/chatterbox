@@ -21,7 +21,17 @@
  * is applied to that record. What refers to one left unticked is skipped.
  */
 
-import { and, count, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import {
+    and,
+    count,
+    desc,
+    eq,
+    inArray,
+    isNull,
+    not,
+    or,
+    sql,
+} from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
@@ -67,7 +77,10 @@ import {
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
 import { domainLookupHash, lookupHash } from "@/lib/knowledge/lookup-hash";
 import { matchNames } from "@/lib/knowledge/name-match";
-import { lockOrgPeopleShared } from "@/lib/knowledge/org-people";
+import {
+    lockOrgPeopleShared,
+    recordingSharedCondition,
+} from "@/lib/knowledge/org-people";
 import { createPersonInTx } from "@/lib/knowledge/people";
 import { readableScopes } from "@/lib/knowledge/scope";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
@@ -90,6 +103,7 @@ import {
 } from "@/lib/knowledge/vocabulary";
 import { releaseAutoLearnHold } from "@/lib/learn/auto-learn";
 import { queueCorrectionPassInTx } from "@/lib/learn/correction-pass-queue";
+import { clearAutoLearnHoldInTx } from "@/lib/learn/hold";
 import { settleDeadLearnRuns } from "@/lib/learn/learn-job";
 import { llmRendering } from "@/lib/learn/llm-input";
 import type {
@@ -119,7 +133,7 @@ import { isInternalMailAddress } from "@/lib/mail/internal-address";
 import { assertOwnScopeWritable, getOrgUserId } from "@/lib/org/config";
 import { gatherFacts } from "@/lib/pipeline/facts";
 import { planAdvance } from "@/lib/pipeline/plan";
-import { markLearnReleasedInTx } from "@/lib/pipeline/state";
+import { markLearnReleasedInTx, updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import {
     loadItemProfileRevision,
@@ -137,6 +151,7 @@ import {
     writerRefusalError,
 } from "@/lib/sharing/writer";
 import { markTaskReviewInTx } from "@/lib/tasks/review-state";
+import { readPreferredTranscriptInput } from "@/lib/transcription/read-source";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import { emitEvent } from "@/lib/webhooks/emit";
 
@@ -178,6 +193,8 @@ export interface ReviewView {
         finishedAt: string | null;
         /** Why a failed run failed (`ErrorCode`). */
         errorCode: string | null;
+        skipAvailable?: boolean;
+        ownerSkipped?: boolean;
         reviewChanged?: boolean;
         /** Counts carried from the owner’s finished private review on share. */
         sharedReview?: {
@@ -237,6 +254,110 @@ export function requestedReviewSource(
     return source === "plaud" || source === "riffado" ? source : undefined;
 }
 
+/** Skip the failed private run shown to the owner, for this transcript revision only. */
+export async function skipFailedLearn(
+    access: RecordingViewContext,
+    actorUserId: string,
+    runId: string,
+): Promise<void> {
+    const { recordingId: itemId, ownerUserId: userId } = access;
+    if (
+        actorUserId !== userId ||
+        access.kind !== "audio" ||
+        access.view !== "private" ||
+        access.shared
+    )
+        throw new AppError(ErrorCode.FORBIDDEN, "You may not skip Learn", 403);
+
+    await db.transaction(async (tx) => {
+        const [recording] = await tx
+            .select({ id: recordings.id })
+            .from(recordings)
+            .where(
+                and(
+                    eq(recordings.id, itemId),
+                    eq(recordings.userId, userId),
+                    isNull(recordings.deletedAt),
+                ),
+            )
+            .for("update");
+        if (!recording) throw reviewNotFound();
+        const [item] = await tx
+            .select({ id: chatterItems.id })
+            .from(chatterItems)
+            .where(
+                and(
+                    eq(chatterItems.id, itemId),
+                    eq(chatterItems.userId, userId),
+                    isNull(chatterItems.deletedAt),
+                    not(recordingSharedCondition(chatterItems.id)),
+                ),
+            );
+        if (!item) throw reviewNotFound();
+        const input = await readPreferredTranscriptInput(itemId, userId, tx);
+        if (!input) throw reviewNotFound();
+        const [run] = await tx
+            .select({
+                id: learnRuns.id,
+                status: learnRuns.status,
+                inputs: learnRuns.inputs,
+                jobId: learnRuns.jobId,
+            })
+            .from(learnRuns)
+            .where(
+                and(
+                    eq(learnRuns.itemId, itemId),
+                    eq(learnRuns.userId, userId),
+                    eq(learnRuns.view, "private"),
+                    eq(learnRuns.transcriptionId, input.contentId),
+                    eq(learnRuns.transcriptRevision, input.contentRevision),
+                ),
+            )
+            .orderBy(desc(learnRuns.createdAt), desc(learnRuns.id))
+            .limit(1)
+            .for("update");
+        if (run?.id !== runId) throw reviewNotFound();
+        if (run.status === "cancelled" && run.inputs?.ownerSkipped === true)
+            return;
+        if (run.status !== "failed") throw reviewNotFound();
+
+        const now = new Date();
+        await tx
+            .update(learnRuns)
+            .set({
+                status: "cancelled",
+                inputs: { ...run.inputs, ownerSkipped: true },
+                finishedAt: now,
+                updatedAt: now,
+            })
+            .where(and(eq(learnRuns.id, runId), eq(learnRuns.userId, userId)));
+        await clearAutoLearnHoldInTx(tx, itemId, userId);
+        const advance = await requestAdvanceInTx(tx, {
+            itemId,
+            userId,
+            view: "private",
+            reason: "learn-settled",
+        });
+        if (!advance) throw reviewNotFound();
+        await updatePhaseInTx(
+            tx,
+            itemId,
+            "private",
+            userId,
+            "learn",
+            {
+                state: "skipped",
+                reason: "owner_skipped",
+                generation: advance.requestedGeneration,
+                inputs: input,
+                at: now.toISOString(),
+            },
+            run.jobId ?? undefined,
+        );
+    });
+    nudge();
+}
+
 /**
  * The run a review is about: the latest in the recording's view, on the
  * transcript of `source` when one is given (each transcript has its own).
@@ -273,7 +394,7 @@ async function latestRun(access: RecordingViewContext, source?: ReviewSource) {
                 source ? eq(transcriptions.source, source) : undefined,
             ),
         )
-        .orderBy(desc(learnRuns.createdAt))
+        .orderBy(desc(learnRuns.createdAt), desc(learnRuns.id))
         .limit(1);
     return row?.run ?? null;
 }
@@ -311,6 +432,16 @@ export async function loadReview(
     if (!run) {
         return { run: null, items: [], names: {}, types: {}, relations: {} };
     }
+    const preferred =
+        run.status === "failed" &&
+        access.kind === "audio" &&
+        access.view === "private" &&
+        !access.shared
+            ? await readPreferredTranscriptInput(
+                  access.recordingId,
+                  access.ownerUserId,
+              )
+            : null;
     const summary = {
         id: run.id,
         status: run.status,
@@ -318,6 +449,12 @@ export async function loadReview(
         createdAt: run.createdAt.toISOString(),
         finishedAt: run.finishedAt?.toISOString() ?? null,
         errorCode: run.errorCode,
+        skipAvailable:
+            preferred !== null &&
+            preferred.contentId === run.transcriptionId &&
+            preferred.contentRevision === run.transcriptRevision,
+        ownerSkipped:
+            run.status === "cancelled" && run.inputs?.ownerSkipped === true,
         reviewChanged: run.inputs?.reviewChanged === true,
         ...(run.view === "org" &&
         typeof run.inputs?.promotedFromRunId === "string"
@@ -872,7 +1009,7 @@ export async function finishReview(
         readScopes,
         quick ? false : profile.settings.steps.learn.correctAfterLearn,
         quick,
-        quick ? await learnQuickFinishPolicy(access) : undefined,
+        quick ? await learnQuickFinishPolicy(access, actorUserId) : undefined,
     );
     nudge();
     // The last review done releases what automatic Learn held back, unless
@@ -2225,7 +2362,7 @@ function finishInTx(
                   )
                 : false;
         if (quick) {
-            if (quickPolicy?.skipTasks)
+            if (actorUserId === run.userId && quickPolicy?.skipTasks)
                 await markTaskReviewInTx(
                     tx,
                     { itemId: run.itemId, userId: run.userId, view: run.view },
@@ -2302,6 +2439,7 @@ function finishInTx(
 /** The current item profile determines what a quick exit can promise. */
 export async function learnQuickFinishPolicy(
     access: RecordingViewContext,
+    actorUserId: string,
 ): Promise<{ automaticSummary: boolean; skipTasks: boolean }> {
     const facts = await gatherFacts(
         access.recordingId,
@@ -2339,7 +2477,10 @@ export async function learnQuickFinishPolicy(
     }).actions.some((action) => action.type === "queueSummary");
     return {
         automaticSummary,
-        skipTasks: automaticSummary && facts.profile?.tasksEnabled === true,
+        skipTasks:
+            actorUserId === access.ownerUserId &&
+            automaticSummary &&
+            facts.profile?.tasksEnabled === true,
     };
 }
 

@@ -1,7 +1,7 @@
 ---
 title: Remove per-share review from Care
 date: 2026-11-18
-updated: 2026-11-18 19:48
+updated: 2026-11-19 07:44
 status: accepted
 kind: fix
 issues: []
@@ -9,7 +9,7 @@ prs: []
 areas: [src/components/almanac/care-queue.tsx, src/lib/knowledge/care-summary.ts, src/lib/knowledge/share-review.ts, src/db/queries/almanac-share.ts, src/app/api/knowledge/care/shares/route.ts]
 supersedes: [2026-10-22-almanac-curator-desk]
 superseded-by: []
-relates: []
+relates: [2026-11-18-owner-review-before-share]
 ---
 
 # Remove per-share review from Care
@@ -72,7 +72,7 @@ The maintainer chose option B. Care directs curator time to specific problems. R
 ## Related work
 
 - This partially supersedes the per-share queue, badge contribution and review action in the curator desk decision. Folder flags, provenance and undo still apply. [Curator desk](2026-10-22-almanac-curator-desk.md)
-- A separate change is planned to require owners to finish Learn and task review before sharing and to show those reviews only to owners. It will have its own decision record.
+- [Owners finish reviews before recordings are shared with the Organization](2026-11-18-owner-review-before-share.md) requires owners to finish Learn and task review before a recording is first shared and shows those reviews only to owners.
 
 ## Timeline
 

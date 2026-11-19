@@ -39,6 +39,7 @@ import {
 import { useLearnApiErrorMessage } from "@/components/learn/review-error";
 import {
     announceLearnReviewsChanged,
+    onLearnReviewsChanged,
     onRelearnItem,
 } from "@/components/learn/review-events";
 import {
@@ -80,6 +81,7 @@ import { HeadingCount } from "@/components/ui/heading-count";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { useDeferredReviewCommit } from "@/hooks/use-deferred-review-commit";
+import { useSkipFailedLearn } from "@/hooks/use-skip-failed-learn";
 import { followJob } from "@/lib/jobs/client";
 import {
     isPlaceholderSpeakerLabel,
@@ -163,6 +165,8 @@ interface ReviewState {
         id: string;
         status: string;
         errorCode?: string | null;
+        skipAvailable?: boolean;
+        ownerSkipped?: boolean;
         reviewChanged?: boolean;
         /** Counts carried from the owner’s finished private review on share. */
         sharedReview?: {
@@ -929,11 +933,27 @@ export function LearnWidget({
         speakerAccent(speakingOrder.indexOf(speakerKey(label)));
 
     const status = state?.run?.status;
+    const ownerSkipped = state?.run?.ownerSkipped === true;
+    const { skip, skipping } = useSkipFailedLearn(recordingId);
+    useEffect(() => {
+        if (status === "failed")
+            return onLearnReviewsChanged(() => void load());
+    }, [load, status]);
+    const skipAction =
+        status === "failed" && state?.run?.skipAvailable && !running
+            ? () => {
+                  if (!state.run) return;
+                  void skip(state.run.id).then((skipped) => {
+                      if (skipped) setResultsOpen(false);
+                  });
+              }
+            : undefined;
     const ready = status === "ready" && !deferred.hidden;
     const finished = status === "finished";
     const sharedReview = finished ? state?.run?.sharedReview : undefined;
     const stopped = status === "cancelled" || status === "superseded";
-    const failed = status === "failed" || (stopped && !showTrigger);
+    const failed =
+        status === "failed" || (stopped && !showTrigger && !ownerSkipped);
     const count = (state?.items ?? []).filter(needsLearnReview).length;
     const selectionTotal = (state?.items ?? []).filter(
         (item) =>
@@ -1308,7 +1328,7 @@ export function LearnWidget({
             );
     if (
         deferred.hidden ||
-        (!state?.available && !ready && !finished && !failed)
+        (!state?.available && !ready && !finished && !failed && !ownerSkipped)
     )
         return null;
 
@@ -1359,7 +1379,15 @@ export function LearnWidget({
     }
 
     let trigger: ReactNode = null;
-    if (finished && !running && !showTrigger) {
+    if (ownerSkipped && !running && !showTrigger) {
+        trigger = (
+            <LearnWorkflowLine
+                id={resolvedWidgetId}
+                title={i18n("Learn review skipped")}
+                finished
+            />
+        );
+    } else if (finished && !running && !showTrigger) {
         trigger = null;
     } else if ((finished || failed) && !running) {
         if (showTrigger) {
@@ -1392,6 +1420,8 @@ export function LearnWidget({
                     onRetry={
                         failed && state?.available ? startLearn : undefined
                     }
+                    onSkip={skipAction}
+                    skipping={skipping}
                 />
             );
         }
@@ -2319,6 +2349,8 @@ export function LearnWidget({
                             ? (forget) => void learn(forget)
                             : undefined
                     }
+                    onSkip={skipAction}
+                    skipping={skipping}
                 />
             )}
             {picking && (

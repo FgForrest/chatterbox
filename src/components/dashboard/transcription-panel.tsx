@@ -21,6 +21,7 @@ import {
 } from "@/components/people/speaker-tags";
 import { ProvenanceLine } from "@/components/pipeline/provenance-line";
 import {
+    useLinkedRecordingWidget,
     useWorkflowWidgetOpen,
     WorkflowWidget,
     WorkflowWidgetLine,
@@ -109,6 +110,7 @@ export interface TranscriptOption {
 
 interface TranscriptionPanelProps {
     recording: Recording;
+    itemLinkQuery?: string;
     /** Back-compat single transcript. Used only when `transcripts` is absent. */
     transcription?: Transcription;
     /** All transcripts for the recording, one per source, primary first. When
@@ -199,6 +201,7 @@ export function transcriptSpeakerTags(
 
 export function TranscriptionPanel({
     recording,
+    itemLinkQuery,
     transcription,
     transcripts,
     isTranscribing,
@@ -214,6 +217,9 @@ export function TranscriptionPanel({
     const i18n = useExtracted();
     const name = useProductName();
     const transcriptList = toTranscriptList(transcripts, transcription);
+    const linkedWidget = useLinkedRecordingWidget(recording.id, itemLinkQuery);
+    const linkedTaskReview =
+        linkedWidget === "tasks" && (processing?.taskReviewWaiting ?? 0) > 0;
     const serverTranscriptionJob = processing?.jobs.transcription ?? null;
     const serverHasTranscript = processing?.outputs.transcript === true;
     const transcriptionRunning =
@@ -246,7 +252,13 @@ export function TranscriptionPanel({
         useState(false);
     const activeTranscript =
         transcriptList.find((t) => t.source === activeSource) ??
+        (linkedWidget === "learn"
+            ? preferredTranscript(transcriptList)
+            : undefined) ??
         transcriptList[0];
+    const showSummary =
+        Boolean(activeTranscript?.text) &&
+        (!widgets || widgets.summary.visible || linkedWidget === "summary");
     useEffect(() => {
         cut?.setActiveTurns(activeTranscript?.turns ?? null);
     }, [cut?.setActiveTurns, activeTranscript?.turns]);
@@ -590,7 +602,9 @@ export function TranscriptionPanel({
         [attributionKey],
     );
     const defaultSummarySource: SummarySource =
-        activeTranscript?.source === "plaud" ? "plaud" : "riffado";
+        activeTranscript?.source === "plaud" && linkedWidget !== "summary"
+            ? "plaud"
+            : "riffado";
     const [summarySelection, setSummarySelection] = useState<{
         recordingId: string;
         source: SummarySource;
@@ -1222,44 +1236,50 @@ export function TranscriptionPanel({
                     </SpeakerAccentContext>
                 )}
 
-            {activeTranscript?.text &&
-                (!widgets || widgets.summary.visible) && (
-                    <div className="contents">
-                        <SummaryWidget
-                            itemId={recording.id}
-                            onResummarizeReady={setResummarizeAction}
-                            kind="audio"
-                            canChange={!readOnly}
-                            contentText={summaryTranscript?.text}
-                            canSummarize={Boolean(
-                                summaryTranscript ||
-                                    (orgView && transcriptList.length > 0),
-                            )}
-                            view={view}
-                            source={summarySource}
-                            canSwitchSource={canHavePlaudSummary}
-                            onSourceChange={(source) =>
-                                setSummarySelection({
-                                    recordingId: recording.id,
-                                    source,
-                                })
-                            }
-                            sourceLabel={name}
-                            speakerAttributions={summarySpeakerAttributions}
-                            speakerLabels={summarySpeakerTags.map(
-                                (speaker) => speaker.speaker,
-                            )}
-                            widget={widgets?.summary}
-                            taskWidget={widgets?.taskReview}
-                            workflowVisible={widgets?.workflowVisible ?? false}
-                            profileName={processing?.profile?.name}
-                            widgetId={`recording-summary-${recording.id}`}
-                            taskWidgetId={`recording-task-review-${recording.id}`}
-                            learnHold={learnSummaryHold}
-                            refreshKey={followUpRevision}
-                        />
-                    </div>
-                )}
+            {(showSummary || linkedTaskReview) && (
+                <div className="contents">
+                    <SummaryWidget
+                        itemId={recording.id}
+                        onResummarizeReady={
+                            showSummary ? setResummarizeAction : undefined
+                        }
+                        kind="audio"
+                        canChange={!readOnly}
+                        contentText={summaryTranscript?.text}
+                        canSummarize={Boolean(
+                            summaryTranscript ||
+                                (orgView && transcriptList.length > 0),
+                        )}
+                        view={view}
+                        source={summarySource}
+                        canSwitchSource={canHavePlaudSummary}
+                        onSourceChange={(source) =>
+                            setSummarySelection({
+                                recordingId: recording.id,
+                                source,
+                            })
+                        }
+                        sourceLabel={name}
+                        speakerAttributions={summarySpeakerAttributions}
+                        speakerLabels={summarySpeakerTags.map(
+                            (speaker) => speaker.speaker,
+                        )}
+                        widget={widgets?.summary}
+                        showSummary={showSummary}
+                        taskWidget={
+                            linkedTaskReview && widgets
+                                ? { ...widgets.taskReview, visible: true }
+                                : widgets?.taskReview
+                        }
+                        workflowVisible={widgets?.workflowVisible ?? false}
+                        profileName={processing?.profile?.name}
+                        widgetId={`recording-summary-${recording.id}`}
+                        taskWidgetId={`recording-task-review-${recording.id}`}
+                        learnHold={learnSummaryHold}
+                        refreshKey={followUpRevision}
+                    />
+                </div>
+            )}
         </div>
     );
 }

@@ -1,76 +1,58 @@
-/**
- * Where a Learn review waits, for the lists that point at it: the
- * recordings with a run ready for review, and how many. A review is the
- * owner's in either scope, and the organization account's on shared ones.
- */
-
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { chatterItems, learnRuns } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
-import { sharedItemCondition } from "@/lib/sharing/shared";
+import { learnRunCurrentScope } from "@/lib/learn/learn-open";
+import { getOrgUserId } from "@/lib/org/config";
 
-function waitingFor(viewerUserId: string, viewerIsOrgAccount: boolean) {
-    return viewerIsOrgAccount
-        ? and(eq(learnRuns.view, "org"), eq(learnRuns.status, "ready"))
-        : and(
-              eq(learnRuns.userId, viewerUserId),
-              eq(learnRuns.status, "ready"),
-          );
+async function waitingFor(viewerUserId: string) {
+    return and(
+        eq(chatterItems.userId, viewerUserId),
+        eq(learnRuns.userId, viewerUserId),
+        eq(learnRuns.status, "ready"),
+        isNull(chatterItems.deletedAt),
+        learnRunCurrentScope(await getOrgUserId()),
+    );
 }
 
-/** The recordings with a review waiting for the viewer. */
+/** The viewer's items with a Learn review waiting. */
 export async function recordingsNeedingReview(
     viewerUserId: string,
-    viewerIsOrgAccount: boolean,
 ): Promise<Set<string>> {
     const rows = await db
         .selectDistinct({ recordingId: learnRuns.itemId })
         .from(learnRuns)
-        .where(waitingFor(viewerUserId, viewerIsOrgAccount));
+        .innerJoin(chatterItems, eq(chatterItems.id, learnRuns.itemId))
+        .where(await waitingFor(viewerUserId));
     return new Set(rows.map((row) => row.recordingId));
 }
 
-/** How many reviews wait for the viewer. */
+/** How many of the viewer's items have a Learn review waiting. */
 export async function pendingReviewCount(
     viewerUserId: string,
-    viewerIsOrgAccount: boolean,
 ): Promise<number> {
     const [row] = await db
         .select({
             count: sql<number>`count(distinct ${learnRuns.itemId})::int`,
         })
         .from(learnRuns)
-        .where(waitingFor(viewerUserId, viewerIsOrgAccount));
+        .innerJoin(chatterItems, eq(chatterItems.id, learnRuns.itemId))
+        .where(await waitingFor(viewerUserId));
     return row?.count ?? 0;
 }
 
-/**
- * The recordings a review waits on for the viewer, newest first, with
- * their names: the viewer's own; for the organization account, those
- * shared now, in the same query, so one withdrawn meanwhile is not named.
- */
-export async function reviewQueue(
-    viewerUserId: string,
-    viewerIsOrgAccount: boolean,
-): Promise<{ id: string; filename: string; startTime: Date }[]> {
+/** The viewer's pending Learn reviews, newest item first. */
+export async function reviewQueue(viewerUserId: string) {
     const rows = await db
         .selectDistinct({
             id: chatterItems.id,
             filename: chatterItems.title,
             startTime: chatterItems.occurredAt,
+            view: learnRuns.view,
         })
         .from(learnRuns)
         .innerJoin(chatterItems, eq(chatterItems.id, learnRuns.itemId))
-        .where(
-            and(
-                waitingFor(viewerUserId, viewerIsOrgAccount),
-                isNull(chatterItems.deletedAt),
-                viewerIsOrgAccount
-                    ? sharedItemCondition(viewerUserId)
-                    : eq(chatterItems.userId, viewerUserId),
-            ),
-        )
+        .where(await waitingFor(viewerUserId))
         .orderBy(desc(chatterItems.occurredAt));
     return rows.map((row) => ({ ...row, filename: decryptText(row.filename) }));
 }

@@ -1,14 +1,14 @@
 ---
 title: A finished private Learn review becomes Organization knowledge on share, without asking; curators clean up
 date: 2026-10-22
-updated: 2026-10-28 13:20
+updated: 2026-11-18 21:03
 status: superseded
 kind: feature
 issues: [240]
 prs: [248]
 areas: [src/lib/knowledge/share-knowledge.ts, src/lib/sharing/share-names.ts, src/lib/learn/sharing.ts, src/components/learn/learn-widget.tsx, src/app/(app)/almanac]
 supersedes: []
-superseded-by: [2026-10-28-item-knowledge-uses-folder-panel]
+superseded-by: [2026-10-28-item-knowledge-uses-folder-panel, 2026-11-18-owner-review-before-share]
 relates: [2026-10-21-curators-manage-organization-almanac, 2026-10-22-owner-edits-shared-recording, 2026-10-22-almanac-curator-desk]
 ---
 
@@ -19,6 +19,8 @@ what they confirmed becomes Organization knowledge, with no confirmation step an
 review, and the item's Organization view counts Learn as done. The Organization Almanac is meant to
 grow "organically"; a few curators clean it up afterwards with dedicated tools (issue #240, three
 PRs). Decided on 2026-10-22 and merged the same day as PR #248.
+
+**Superseded in part** by [owner review before sharing](2026-11-18-owner-review-before-share.md). A recording’s first Organization share waits for its required private Learn. Cancel-and-restart still applies when publication is allowed with an open private run, including mail. Promotion and receipts for finished reviews still hold.
 
 **Superseded in part** by [item Knowledge uses the folder panel](2026-10-28-item-knowledge-uses-folder-panel.md): completed Learn results and share receipt counts now live in item Knowledge instead of a finished detail card. Promotion, receipts, matching, withdrawal and curator permissions remain unchanged.
 

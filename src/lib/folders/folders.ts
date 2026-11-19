@@ -21,6 +21,7 @@ import {
     chatterItems,
     folderExportConfigurations,
     folderShares,
+    itemProcessing,
     mailPendingShares,
     meetingAgendas,
     receivedFolderAttachments,
@@ -70,8 +71,12 @@ import {
     isOrgScopeEnabled,
 } from "@/lib/org/config";
 import { notifyOrgChange } from "@/lib/org/events";
+import { effectiveManualOnly } from "@/lib/pipeline/effective-profile";
+import { recordIntendedPlacementInTx } from "@/lib/pipeline/share-intent";
+import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { bindPlacementProfileInTx } from "@/lib/profiles/placement-binding";
+import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
 import { recordingJobSubject } from "@/lib/sharing/access";
 import {
     endFolderSharesInTx,
@@ -79,7 +84,10 @@ import {
     notifyFolderSharesChanged,
     sharedFolderIds,
 } from "@/lib/sharing/folder-shares";
-import { loadShareGate } from "@/lib/sharing/load-share-gate";
+import {
+    loadShareGate,
+    placementNeedsAutomaticReview,
+} from "@/lib/sharing/load-share-gate";
 import type { ShareGateProblem } from "@/lib/sharing/share-gate";
 import {
     publishSpeakerNamesInTx,
@@ -1829,6 +1837,94 @@ export async function pruneRedundantAssignmentsInTx(
     }
 }
 
+async function deferUnprofiledRecordingInTx(
+    tx: Tx,
+    input: {
+        ownerUserId: string;
+        itemId: string;
+        folderId: string;
+        orgUserId: string;
+        canReadRestricted?: boolean;
+    },
+): Promise<boolean> {
+    const { itemId, ownerUserId, folderId, orgUserId } = input;
+    const ownedProcessing = and(
+        eq(itemProcessing.itemId, itemId),
+        eq(itemProcessing.userId, ownerUserId),
+        eq(itemProcessing.view, "private"),
+    );
+    const [current] = await tx
+        .select()
+        .from(itemProcessing)
+        .where(ownedProcessing);
+    if (
+        !current ||
+        current.profileId ||
+        current.phases.categorize?.placementProfile ||
+        current.phases.categorize?.profileChoice === "manual" ||
+        current.phases.categorize?.reason === "legacy" ||
+        effectiveManualOnly(current)
+    )
+        return false;
+    const resolution = await resolveProfileForPlacements({
+        ownerUserId,
+        itemId,
+        channel: "audio",
+        folderIds: [folderId],
+        view: "org",
+        executor: tx,
+        isCurator: false,
+        organizationUserId: orgUserId,
+        ignoreItemAssignment: true,
+        seedProfiles: false,
+        throwOnUnavailable: false,
+    });
+    if (resolution.status !== "resolved" || resolution.manualOnly) return false;
+    const {
+        id: profileId,
+        currentRevisionId: profileRevisionId,
+        settings,
+    } = resolution.profile;
+    if (
+        !profileRevisionId ||
+        !(await placementNeedsAutomaticReview(
+            tx,
+            itemId,
+            ownerUserId,
+            settings,
+            current,
+        ))
+    )
+        return false;
+
+    await recordIntendedPlacementInTx(tx, {
+        ownerUserId,
+        itemId,
+        folderId,
+        canCurate: input.canReadRestricted ?? false,
+        requestPipeline: false,
+    });
+    await tx
+        .update(itemProcessing)
+        .set({ profileId, profileRevisionId, manualOnly: false })
+        .where(ownedProcessing);
+    const advance = await requestAdvanceInTx(tx, {
+        itemId,
+        userId: ownerUserId,
+        view: "private",
+        reason: "categorized",
+    });
+    if (!advance) throw folderNotFound();
+    await updatePhaseInTx(tx, itemId, "private", ownerUserId, "categorize", {
+        state: "done",
+        reason: "categorized",
+        profileChoice: "placement",
+        generation: advance.requestedGeneration,
+        at: new Date().toISOString(),
+    });
+    return true;
+}
+
 /**
  * Share an owner's item into one Organization folder in the caller's
  * transaction. Takes the Organization tree, people and item locks in the
@@ -1844,6 +1940,7 @@ export async function shareItemToOrganizationFolderInTx(
         folderId: string;
         orgUserId: string;
         canReadRestricted?: boolean;
+        directFiling?: boolean;
         taskTargets?: TaskTargetChanges;
     },
 ): Promise<ShareGateProblem[]> {
@@ -1859,6 +1956,7 @@ export async function shareItemToOrganizationFolderInTx(
     const [folder] = await tx
         .select({
             id: recordingFolders.id,
+            parentId: recordingFolders.parentId,
             restrictedAt: recordingFolders.restrictedAt,
             restrictingAt: recordingFolders.restrictingAt,
         })
@@ -1966,6 +2064,14 @@ export async function shareItemToOrganizationFolderInTx(
         input.orgUserId,
         tx,
     );
+    if (
+        !wasShared &&
+        kind === "audio" &&
+        folder.parentId !== null &&
+        input.directFiling &&
+        (await deferUnprofiledRecordingInTx(tx, input))
+    )
+        return [];
     const problems = wasShared
         ? []
         : kind === "mail"
@@ -2107,6 +2213,7 @@ export async function addRecordingToFolder(input: {
                     folderId: target.folder.id,
                     orgUserId: target.ownerId,
                     canReadRestricted,
+                    directFiling: true,
                     taskTargets,
                 });
             }
@@ -2823,6 +2930,7 @@ export async function moveRecordingBetweenFolders(input: {
                     folderId: to.folder.id,
                     orgUserId: to.ownerId,
                     canReadRestricted: canCurate,
+                    directFiling: true,
                     taskTargets,
                 });
                 if (problems.length)

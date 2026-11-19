@@ -462,10 +462,12 @@ export function CategorizePanel({
                 if (response.status === 403 || response.status === 409)
                     onStale?.();
                 const error = await parseApiError(response);
+                const share = shareRefusal(error, data.itemId);
                 toast.error(
                     folderRefusal(error) ??
-                        shareRefusal(error) ??
+                        share?.message ??
                         i18n("The item could not be filed."),
+                    { action: share?.action },
                 );
                 return;
             }

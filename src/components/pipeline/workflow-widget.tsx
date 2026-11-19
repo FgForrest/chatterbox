@@ -55,7 +55,7 @@ export interface WorkflowWidgetProps {
     collapseLabel?: string;
     expandLabel?: string;
     open?: boolean;
-    onOpenChange?: (open: boolean) => void;
+    onOpenChange?: (open: boolean, fromLink?: boolean) => void;
     title: ReactNode;
     helpLink?: ReactNode;
     description?: ReactNode;
@@ -131,11 +131,15 @@ function focusWidgetHeading(id: string): void {
 }
 
 /** Open a workflow widget, then scroll to its rendered frame and focus its heading. */
-export function openWidget(id: string, source?: string): void {
+export function openWidget(
+    id: string,
+    source?: string,
+    fromLink = false,
+): void {
     flushSync(() => {
         window.dispatchEvent(
             new CustomEvent(OPEN_WORKFLOW_WIDGET_EVENT, {
-                detail: { id, ...(source ? { source } : {}) },
+                detail: { id, source, fromLink },
             }),
         );
     });
@@ -157,7 +161,7 @@ export function openWidget(id: string, source?: string): void {
 /** Listen for the shared workflow-widget open event for one widget id. */
 export function useWorkflowWidgetOpen(
     id: string | undefined,
-    onOpen?: (source?: string) => void,
+    onOpen?: (source?: string, fromLink?: boolean) => void,
 ): void {
     const openRef = useRef(onOpen);
     openRef.current = onOpen;
@@ -165,17 +169,61 @@ export function useWorkflowWidgetOpen(
         if (!id) return;
         const handleOpen = (event: Event) => {
             const detail = (
-                event as CustomEvent<{ id?: unknown; source?: unknown }>
+                event as CustomEvent<{
+                    id?: unknown;
+                    source?: unknown;
+                    fromLink?: boolean;
+                }>
             ).detail;
             if (detail?.id !== id) return;
-            if (typeof detail.source === "string")
-                openRef.current?.(detail.source);
-            else openRef.current?.();
+            openRef.current?.(
+                typeof detail.source === "string" ? detail.source : undefined,
+                detail.fromLink,
+            );
         };
         window.addEventListener(OPEN_WORKFLOW_WIDGET_EVENT, handleOpen);
         return () =>
             window.removeEventListener(OPEN_WORKFLOW_WIDGET_EVENT, handleOpen);
     }, [id]);
+}
+
+const recordingWidgets = {
+    learn: "recording-learn-review",
+    tasks: "recording-task-review",
+    summary: "recording-summary",
+} as const;
+
+/** Open the widget requested by an item link once its data and frame have loaded. */
+export function useLinkedRecordingWidget(itemId: string, query?: string) {
+    const params = new URLSearchParams(query);
+    const target =
+        params.get("recording") === itemId ? params.get("widget") : null;
+    const widget =
+        target === "learn" || target === "tasks" || target === "summary"
+            ? target
+            : null;
+    const id = widget ? `${recordingWidgets[widget]}-${itemId}` : null;
+    useEffect(() => {
+        if (!id) return;
+        let frame: number | undefined;
+        const openWhenMounted = () => {
+            if (!document.getElementById(id) || frame !== undefined) return;
+            frame = requestAnimationFrame(() => {
+                frame = undefined;
+                if (!document.getElementById(id)) return;
+                observer.disconnect();
+                openWidget(id, undefined, true);
+            });
+        };
+        const observer = new MutationObserver(openWhenMounted);
+        observer.observe(document.body, { childList: true, subtree: true });
+        openWhenMounted();
+        return () => {
+            observer.disconnect();
+            if (frame !== undefined) cancelAnimationFrame(frame);
+        };
+    }, [id]);
+    return widget;
 }
 
 function WidgetHeader({
@@ -360,7 +408,11 @@ export function WorkflowWidget(props: WorkflowWidgetProps) {
         dialogLine,
         inlineLine,
     } = props;
-    const handleOpen = useCallback(() => onOpenChange?.(true), [onOpenChange]);
+    const handleOpen = useCallback(
+        (_source?: string, fromLink?: boolean) =>
+            onOpenChange?.(true, fromLink),
+        [onOpenChange],
+    );
     useWorkflowWidgetOpen(id, handleOpen);
     useEffect(() => {
         if (!open) return;

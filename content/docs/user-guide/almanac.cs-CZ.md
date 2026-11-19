@@ -68,7 +68,7 @@ Kliknutím na **Náhled** se zobrazí, co bude přidáno, než cokoliv uložíte
 
 ![Co čeká na kontrolu](images/almanac-review.png)
 
-**Kontrola** shromažďuje kontroly položek čekající na Vaše posouzení: běhy [Učení](learn.md) a navržené úkoly z nahrávky nebo pošty. Odznak na **Almanachu** tyto kontroly položek počítá. Změny úkolů předané Vám proto, že je můžete použít pouze Vy, čekají pod **Úkoly → Návrhy pro vás** a mají vlastní odznak v navigaci. Viz [Směrované návrhy](summaries-and-tasks.md#routed-proposals).
+**Kontrola** shromažďuje běhy [Učení](learn.md) a návrhy úkolů pouze z Vašich vlastních nahrávek a e-mailů, v soukromém pohledu i v pohledu Organizace. Kurátorům se tu dál zobrazují vztahy navržené členy. Odznak na **Almanachu** tyto kontroly položek počítá. Změny úkolů předané Vám proto, že je můžete použít pouze Vy, čekají pod **Úkoly → Návrhy pro vás** a mají vlastní odznak v navigaci. Viz [Směrované návrhy](summaries-and-tasks.md#routed-proposals).
 
 <span id="care-possible-duplicates" />
 

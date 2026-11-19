@@ -66,7 +66,12 @@ describe("Waiting for review links", () => {
 
     it("opens a mail Learn review in the dashboard pane", async () => {
         vi.mocked(reviewQueue).mockResolvedValue([
-            { id: "mail / 1", filename: "Budget reply", startTime: new Date() },
+            {
+                id: "mail / 1",
+                filename: "Budget reply",
+                startTime: new Date(),
+                view: "private",
+            },
         ]);
 
         render(await ReviewQueuePage());
@@ -78,18 +83,14 @@ describe("Waiting for review links", () => {
 
     it("deep-links both Organization review sections to their items", async () => {
         vi.mocked(userCuratesOrganizationNow).mockResolvedValue(true);
-        vi.mocked(reviewQueue).mockImplementation(
-            async (_userId, organization) =>
-                organization
-                    ? [
-                          {
-                              id: "mail-1",
-                              filename: "Shared mail",
-                              startTime: new Date(),
-                          },
-                      ]
-                    : [],
-        );
+        vi.mocked(reviewQueue).mockResolvedValue([
+            {
+                id: "mail-1",
+                filename: "Shared mail",
+                startTime: new Date(),
+                view: "org",
+            },
+        ]);
         vi.mocked(recordingsAwaitingTaskReview).mockResolvedValue([
             {
                 recordingId: "rec-1",
@@ -114,15 +115,20 @@ describe("Waiting for review links", () => {
     });
     it("keeps a curator's private reviews and task links alongside shared ones", async () => {
         vi.mocked(userCuratesOrganizationNow).mockResolvedValue(true);
-        vi.mocked(reviewQueue).mockImplementation(
-            async (_userId, organization) => [
-                {
-                    id: organization ? "shared" : "private",
-                    filename: organization ? "Shared review" : "Private review",
-                    startTime: new Date(),
-                },
-            ],
-        );
+        vi.mocked(reviewQueue).mockResolvedValue([
+            {
+                id: "shared",
+                filename: "Shared review",
+                startTime: new Date(),
+                view: "org",
+            },
+            {
+                id: "private",
+                filename: "Private review",
+                startTime: new Date(),
+                view: "private",
+            },
+        ]);
         vi.mocked(recordingsAwaitingTaskReview).mockResolvedValue([
             {
                 recordingId: "private-task",
@@ -145,7 +151,6 @@ describe("Waiting for review links", () => {
             "/dashboard?recording=private",
             "/dashboard?recording=private-task",
         ]);
-        expect(reviewQueue).toHaveBeenCalledWith("user-1", false);
-        expect(reviewQueue).toHaveBeenCalledWith("org", true);
+        expect(reviewQueue).toHaveBeenCalledExactlyOnceWith("user-1");
     });
 });

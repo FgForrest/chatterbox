@@ -4,6 +4,7 @@ export interface ItemDetailOptions {
     evidenceSegment?: number | string;
     evidenceStart?: number | string;
     evidenceEnd?: number | string;
+    widget?: "learn" | "tasks" | "summary";
 }
 
 /** Build the dashboard URL that opens an audio or mail item. */
@@ -19,6 +20,7 @@ export function itemDetailHref(
         "evidenceSegment",
         "evidenceStart",
         "evidenceEnd",
+        "widget",
     ] as const) {
         const value = options[key];
         if (value !== undefined) query.set(key, String(value));

@@ -485,31 +485,9 @@ const turns = [
     });
 
     it("carries a skip into the Organization, restricts it to reviewers, and keeps Finish settled after withdrawal", async () => {
-        const orgUserId = await ensureOrgAccount();
-        if (!orgUserId) throw new Error("No Organization fixture");
-        await db()
-            .insert(transcriptSpeakers)
-            .values(
-                turns.map((turn) => ({
-                    userId: OWNER,
-                    transcriptionId: transcriptId,
-                    label: turn.speaker,
-                    source: "user" as const,
-                    status: "confirmed" as const,
-                    markedUnknown: true,
-                })),
-            );
         await store([proposal("Shared draft")]);
         await skipTaskReview(viewer, ITEM);
-        const [folder] = await db()
-            .select({ id: recordingFolders.id })
-            .from(recordingFolders)
-            .where(eq(recordingFolders.userId, orgUserId));
-        await addRecordingToFolder({
-            userId: OWNER,
-            recordingId: ITEM,
-            folderId: folder.id,
-        });
+        const orgUserId = await share();
         expect(
             (await listRecordingTasks(viewer, ITEM))?.taskReviewSkipped,
         ).toBe(true);
@@ -530,7 +508,10 @@ const turns = [
             id: orgUserId,
             email: "org@example.test",
         });
-        await acceptReview(org, ITEM);
+        await expect(acceptReview(org, ITEM)).rejects.toMatchObject({
+            statusCode: 404,
+        });
+        await acceptReview(viewer, ITEM);
         await unshareRecording(OWNER, ITEM, { withdraw: true });
         expect(
             (await listRecordingTasks(viewer, ITEM))?.taskReviewSkipped,
@@ -670,6 +651,24 @@ const turns = [
             .select({ id: recordingFolders.id })
             .from(recordingFolders)
             .where(eq(recordingFolders.userId, orgUserId));
+        const [processing] = await db()
+            .select({ phases: itemProcessing.phases })
+            .from(itemProcessing)
+            .where(eq(itemProcessing.itemId, ITEM));
+        await db()
+            .update(itemProcessing)
+            .set({
+                phases: {
+                    ...processing?.phases,
+                    summary: {
+                        state: "done",
+                        reason: "generated",
+                        generation: 0,
+                        at: new Date().toISOString(),
+                    },
+                },
+            })
+            .where(eq(itemProcessing.itemId, ITEM));
         await addRecordingToFolder({
             userId: OWNER,
             recordingId: ITEM,
@@ -844,6 +843,48 @@ const turns = [
         expect(await db().select().from(knowledgeFactEvidence)).toHaveLength(1);
         expect(await held()).toBeNull();
     });
+    it("lets a curator quick-finish Learn while leaving the owner's task proposals in review", async () => {
+        const actorUserId = await share();
+        const phases = (await state()).phases;
+        delete phases.summary;
+        await db()
+            .update(itemProcessing)
+            .set({ phases })
+            .where(
+                and(
+                    eq(itemProcessing.itemId, ITEM),
+                    eq(itemProcessing.view, "private"),
+                ),
+            );
+        const { access, run } = await ready([], {
+            actorUserId,
+            scopeUserId: actorUserId,
+            view: "org",
+        });
+        expect(await learnQuickFinishPolicy(access, OWNER)).toEqual({
+            automaticSummary: true,
+            skipTasks: true,
+        });
+        expect(await learnQuickFinishPolicy(access, actorUserId)).toEqual({
+            automaticSummary: true,
+            skipTasks: false,
+        });
+        await expect(
+            finishReview(access, actorUserId, {
+                quick: true,
+                actsForOrganization: true,
+                runId: run.id,
+            }),
+        ).resolves.toMatchObject({ status: "finished" });
+        await store([proposal("Send the agenda")]);
+        expect(await listRecordingTasks(viewer, ITEM)).toMatchObject({
+            taskReviewSkipped: false,
+            proposals: [{ text: "Send the agenda" }],
+        });
+        expect(await recordingsAwaitingTaskReview(viewer)).toMatchObject([
+            { recordingId: ITEM },
+        ]);
+    });
     it.each([
         "gone",
         "lost curator",
@@ -969,7 +1010,7 @@ const turns = [
             },
         ]);
         const expected = mode === "first";
-        expect(await learnQuickFinishPolicy(access)).toEqual({
+        expect(await learnQuickFinishPolicy(access, OWNER)).toEqual({
             automaticSummary: expected,
             skipTasks: expected,
         });

@@ -26,7 +26,7 @@ Smazání složky natrvalo zastaví její adresy i adresy podsložek. Klepna př
 
 ## Složky Organizace
 
-Složky Organizace mají adresy začínající jménem organizace (`acme-weekly@…`). Psát na ně může kterýkoli kolega, v **Komu** nebo **Kopie** (ne ve **Skryté kopii**). E-mail zůstává nejprve soukromý a daná složka je jeho zamýšleným umístěním v Organizaci. Profil Organizace proběhne v soukromém pohledu a Klepna e-mail automaticky nasdílí po dokončení kontroly Učení. Kontrola úkolů sdílení nezdržuje. Při volbě **Bez automatického zpracování** nabízí řádek složek místo toho **Sdílet nyní** a pruh pracovního postupu čeká na Vás.
+Složky Organizace mají adresy začínající jménem organizace (`acme-weekly@…`). Psát na ně může kterýkoli kolega, v **Komu** nebo **Kopie** (ne ve **Skryté kopii**). E-mail zůstává nejprve soukromý a daná složka je jeho zamýšleným umístěním v Organizaci. Profil Organizace běží v soukromém pohledu. Pokud automatické Učení pozastaví zpracování, Klepna s automatickým zařazením čeká na kontrolu Učení až 72 hodin. Pro poštu neplatí podmínky sdílení. Ruční zařazení do otevřené složky Organizace nasdílí e-mail ihned a ukončí případnou otevřenou soukromou kontrolu Učení. Automatické sdílení také ukončí soukromou kontrolu, pokud je při sdílení ještě otevřená. Návrhy úkolů může zkontrolovat pouze vlastník e-mailu. Při volbě **Bez automatického zpracování** nabízí řádek složek místo toho **Sdílet nyní** a pruh pracovního postupu čeká na Vás.
 
 Sdílet můžete i jakýkoli jiný svůj e-mail, když ho zařadíte do složky Organizace. Kolegové sdílený e-mail čtou i s přílohami a formátovanou podobou; smazat ho nebo stáhnout původní zprávu můžete jen vy.
 

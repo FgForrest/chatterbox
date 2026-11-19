@@ -344,7 +344,7 @@ describeWithDatabase("finishing a Learn review (PostgreSQL)", () => {
         expect(await review.json()).toMatchObject({
             run: { id: ready, status: "ready" },
         });
-        expect(await pendingReviewCount(OWNER, false)).toBe(1);
+        expect(await pendingReviewCount(OWNER)).toBe(1);
     });
 
     async function janAndOrion() {

@@ -1361,6 +1361,59 @@ describe("LearnReview", () => {
             expect(
                 screen.queryByRole("button", { name: "Re-learn" }),
             ).toBeNull();
+            expect(screen.queryByRole("button", { name: "Skip" })).toBeNull();
+        });
+
+        it.each([
+            true,
+            false,
+        ])("offers Skip alongside retry for a skippable failure (dialog trigger: %s)", async (showTrigger) => {
+            const failed = {
+                ...NONE,
+                run: { id: "run-1", status: "failed", skipAvailable: true },
+            };
+            const fetch = respond({
+                [REVIEW]: inTurn(failed, {
+                    ...NONE,
+                    run: {
+                        id: "run-1",
+                        status: "cancelled",
+                        ownerSkipped: true,
+                    },
+                }),
+                "POST /api/recordings/rec-1/review/skip": { changed: true },
+            });
+            render(
+                <LearnWidget
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                    showTrigger={showTrigger}
+                />,
+            );
+            if (showTrigger)
+                fireEvent.click(
+                    await screen.findByRole("button", { name: "Learn failed" }),
+                );
+            const skip = await screen.findByRole("button", { name: "Skip" });
+            expect(
+                screen.getByRole("button", {
+                    name: showTrigger ? "Re-learn" : "Try again",
+                }),
+            ).toBeTruthy();
+            fireEvent.click(skip);
+            await waitFor(() => {
+                expect(fetch).toHaveBeenCalledWith(
+                    "/api/recordings/rec-1/review/skip",
+                    expect.objectContaining({
+                        method: "POST",
+                        body: JSON.stringify({ runId: "run-1" }),
+                    }),
+                );
+                expect(
+                    screen.queryByRole("button", { name: "Skip" }),
+                ).toBeNull();
+            });
         });
 
         it.each([

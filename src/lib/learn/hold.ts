@@ -33,6 +33,7 @@ export async function isHeldForLearn(recordingId: string): Promise<boolean> {
 export async function clearAutoLearnHoldInTx(
     tx: Tx,
     recordingId: string,
+    ownerUserId: string,
 ): Promise<void> {
     await tx
         .update(chatterItems)
@@ -40,6 +41,7 @@ export async function clearAutoLearnHoldInTx(
         .where(
             and(
                 eq(chatterItems.id, recordingId),
+                eq(chatterItems.userId, ownerUserId),
                 isNotNull(chatterItems.summaryDueAt),
             ),
         );
@@ -49,6 +51,7 @@ export async function clearAutoLearnHoldInTx(
 export async function riffadoRecordingOfInTx(
     tx: Tx,
     transcriptionId: string,
+    ownerUserId: string,
 ): Promise<string | null> {
     const [row] = await tx
         .select({ recordingId: transcriptions.recordingId })
@@ -56,6 +59,7 @@ export async function riffadoRecordingOfInTx(
         .where(
             and(
                 eq(transcriptions.id, transcriptionId),
+                eq(transcriptions.userId, ownerUserId),
                 eq(transcriptions.source, "riffado"),
             ),
         )

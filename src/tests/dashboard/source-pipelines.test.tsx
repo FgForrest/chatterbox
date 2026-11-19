@@ -377,6 +377,136 @@ describe("independent transcript and summary pipelines", () => {
         expect(summaryOptions.at(-1)?.summarySource).toBe("riffado");
     });
 
+    it("opens the linked automatic summary before the workflow reaches it, with Plaud still selected for the transcript", async () => {
+        const base = completedProcessing();
+        render(
+            <TranscriptionPanel
+                recording={{
+                    id: "rec-focus",
+                    filename: "Meeting.ogg",
+                    duration: 60_000,
+                    filesize: 1024,
+                    startTime: new Date(0).toISOString(),
+                    deviceSn: "local",
+                }}
+                itemLinkQuery="recording=rec-focus&widget=summary"
+                transcripts={[
+                    { source: "plaud", text: "Plaud text" },
+                    { source: "riffado", text: "Custom text" },
+                ]}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+                processing={processingFixture({
+                    ...base,
+                    phases: { categorize: base.phases.categorize },
+                    outputs: { transcript: true, learn: false, summary: false },
+                })}
+            />,
+        );
+        expect(screen.getByTestId("transcript-source").textContent).toBe(
+            "plaud",
+        );
+        expect(summaryOptions.at(-1)).toMatchObject({
+            summarySource: "riffado",
+            transcriptionText: "Custom text",
+        });
+        await waitFor(() =>
+            expect(document.activeElement).toBe(
+                screen.getByRole("heading", { name: "Summary" }),
+            ),
+        );
+    });
+
+    it("opens the owner's linked task review before a summary exists", async () => {
+        const base = completedProcessing();
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async (url: string) =>
+                Response.json(
+                    url === "/api/recordings/rec-focus/tasks"
+                        ? {
+                              canEdit: true,
+                              reviewed: false,
+                              tasks: [],
+                              updates: [],
+                              matches: [],
+                              proposals: [
+                                  {
+                                      id: "task-proposal",
+                                      text: "Send the draft",
+                                      version: 0,
+                                      status: "proposed",
+                                      ticked: true,
+                                      canEdit: true,
+                                      assignee: null,
+                                      dueDate: null,
+                                      duePhrase: null,
+                                      quote: null,
+                                      evidenceStartMs: null,
+                                      evidenceText: null,
+                                      evidenceProvenance: null,
+                                  },
+                              ],
+                          }
+                        : { speakers: [] },
+                ),
+            ),
+        );
+        render(
+            <TranscriptionPanel
+                recording={{
+                    id: "rec-focus",
+                    filename: "Meeting.ogg",
+                    duration: 60_000,
+                    filesize: 1024,
+                    startTime: new Date(0).toISOString(),
+                    deviceSn: "local",
+                }}
+                itemLinkQuery="recording=rec-focus&widget=tasks"
+                transcripts={[{ source: "riffado", text: "Send the draft." }]}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+                processing={processingFixture({
+                    ...base,
+                    phases: { categorize: base.phases.categorize },
+                    outputs: { transcript: true, learn: false, summary: false },
+                    taskReviewWaiting: 1,
+                })}
+            />,
+        );
+        const review = await screen.findByRole("heading", {
+            name: /Task review/,
+        });
+        await waitFor(() => expect(document.activeElement).toBe(review));
+        expect(screen.getByDisplayValue("Send the draft")).toBeTruthy();
+        expect(screen.queryByRole("heading", { name: "Summary" })).toBeNull();
+    });
+
+    it("selects the preferred transcript for a Learn link when Plaud is listed first", () => {
+        render(
+            <TranscriptionPanel
+                recording={{
+                    id: "rec-focus",
+                    filename: "Meeting.ogg",
+                    duration: 60_000,
+                    filesize: 1024,
+                    startTime: new Date(0).toISOString(),
+                    deviceSn: "local",
+                }}
+                itemLinkQuery="recording=rec-focus&widget=learn"
+                transcripts={[
+                    { source: "plaud", text: "Plaud text" },
+                    { source: "riffado", text: "Custom text" },
+                ]}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+            />,
+        );
+        expect(screen.getByTestId("transcript-source").textContent).toBe(
+            "riffado",
+        );
+    });
+
     it("mounts the speaker tags afresh for a new text, not for a refetch", () => {
         const recording = {
             id: "rec-1",

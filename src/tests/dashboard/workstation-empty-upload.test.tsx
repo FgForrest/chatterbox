@@ -1443,6 +1443,22 @@ describe("Workstation selection history", () => {
         expect(window.location.hash).toBe("#section");
     });
 
+    it("opens the phone detail for a linked widget and clears the link on selection", () => {
+        window.history.replaceState(
+            { mobileView: "list" },
+            "",
+            "/dashboard?recording=first&widget=learn",
+        );
+        render(<Workstation {...props} />);
+        expect(window.history.state.mobileView).toBe("detail");
+        expect(screen.getByTestId("item-link-query").textContent).toBe(
+            "recording=first&widget=learn",
+        );
+        fireEvent.click(screen.getByRole("button", { name: second.filename }));
+        expect(screen.getByTestId("item-link-query").textContent).toBe("");
+        expect(window.location.search).toBe("?recording=second");
+    });
+
     it("restores selections on Back and Forward without replaying the linked position", async () => {
         window.history.replaceState(
             {},
