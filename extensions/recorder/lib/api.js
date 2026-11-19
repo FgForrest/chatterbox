@@ -4,92 +4,107 @@
 // paired server URL. Errors surface the server's JSON envelope message when
 // there is one.
 
-import { t } from "./i18n.js";
+import { connectionError, reportConnection } from "./server-connection.js";
 
-async function readError(response) {
-    try {
-        const body = await response.json();
-        if (body && typeof body.error === "string") {
-            const details =
-                body.details && typeof body.details === "object"
-                    ? body.details
-                    : null;
-            return {
-                message: body.error,
-                code: typeof body.code === "string" ? body.code : null,
-                field:
-                    typeof body.field === "string"
-                        ? body.field
-                        : typeof details?.field === "string"
-                          ? details.field
-                          : null,
-            };
-        }
-    } catch (error) {
-        if (error?.name === "TimeoutError" || error?.name === "AbortError") {
-            throw error;
-        }
-        // fall through
-    }
-    return { message: `Request failed (${response.status})`, code: null, field: null };
+function retryAfterSeconds(response) {
+    const value = response.headers.get("Retry-After");
+    if (!value) return null;
+    const seconds = Number(value);
+    const fromDate = (Date.parse(value) - Date.now()) / 1000;
+    if (Number.isFinite(seconds)) return seconds;
+    return Number.isFinite(fromDate) ? Math.max(0, fromDate) : null;
+}
+
+function responseError(response, body) {
+    const error = !response.ok && typeof body?.error === "string" && typeof body.code === "string"
+        ? Object.assign(new Error(body.error), {
+            kind: "server",
+            status: response.status,
+            code: body.code,
+            field: typeof body.field === "string" ? body.field :
+                typeof body.details?.field === "string" ? body.details.field : null,
+        })
+        : connectionError("foreign-response", { httpStatus: response.status });
+    const retryAfter = retryAfterSeconds(response);
+    if (retryAfter !== null) error.retryAfterSeconds = retryAfter;
+    return error;
+}
+
+function isObject(body) {
+    return body !== null && typeof body === "object" && !Array.isArray(body);
+}
+
+function hasSessionStatus(body) {
+    return ["open", "completing", "completed", "failed", "aborted"].includes(body?.status);
 }
 
 /**
- * @param {{serverUrl: string, apiKey: string}} auth
+ * @param {{serverUrl: string, apiKey: string, connectionId?: string|null}} auth
  * @param {string} path
  * @param {RequestInit} [init]
  * @param {number} [timeoutMs]
- * @param {{connectTimeoutOnly?: boolean}} [options]
+ * @param {{connectTimeoutOnly?: boolean, allowEmpty?: boolean, timeoutMs?: number, validate?: (body: unknown) => boolean}} [options]
  */
-export async function request(auth, path, init = {}, timeoutMs = 30_000, { connectTimeoutOnly = false } = {}) {
+export async function request(auth, path, init = {}, timeoutMs = 30_000, options = {}) {
+    const { connectTimeoutOnly = false, allowEmpty = false, validate } = options;
+    timeoutMs = options.timeoutMs ?? timeoutMs;
     const headers = new Headers(init.headers ?? {});
     headers.set("Authorization", `Bearer ${auth.apiKey}`);
-    const controller = connectTimeoutOnly ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(new DOMException("Connection timed out", "TimeoutError")), timeoutMs) : null;
-    const timeout = controller?.signal ?? AbortSignal.timeout(timeoutMs);
+    const controller = new AbortController();
+    const timeout = controller.signal;
     const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
-    function mapRequestError(error) {
-        return timeout.aborted && signal.reason === timeout.reason
-            ? new Error(t("requestTimedOut"))
-            : error;
-    }
-    try {
+    const timer = setTimeout(() => controller.abort(new DOMException("Request timed out", "TimeoutError")), timeoutMs);
+    let abort;
+    async function fetchResponse() {
+        signal.throwIfAborted();
         const response = await fetch(`${auth.serverUrl}${path}`, {
             ...init,
             headers,
             signal,
         });
-        if (!response.ok) {
-            const { message, code, field } = await readError(response);
-            const error = new Error(message);
-            error.status = response.status;
-            error.code = code;
-            error.field = field;
-            const retryAfter = response.headers.get("Retry-After");
-            if (retryAfter) {
-                const seconds = Number(retryAfter);
-                const dateSeconds = (Date.parse(retryAfter) - Date.now()) / 1000;
-                error.retryAfterSeconds = Number.isFinite(seconds)
-                    ? seconds
-                    : Number.isFinite(dateSeconds)
-                      ? Math.max(0, dateSeconds)
-                      : null;
+        signal.throwIfAborted();
+        if (response.ok && connectTimeoutOnly) {
+            if (!response.body || !response.headers.get("content-type")?.includes("text/event-stream")) {
+                throw responseError(response);
             }
-            throw error;
-        }
-        const readJson = response.json.bind(response);
-        response.json = async () => {
+        } else if (!(response.ok && allowEmpty && response.status === 204)) {
+            let body;
             try {
-                return await readJson();
+                body = await response.json();
+                signal.throwIfAborted();
             } catch (error) {
-                throw mapRequestError(error);
+                if (signal.aborted || error instanceof TypeError || error?.name === "AbortError") throw error;
+                if (response.ok) throw responseError(response);
             }
-        };
+            if (!response.ok || (validate && !validate(body))) throw responseError(response, body);
+            response.json = async () => body;
+        }
+        return response;
+    }
+    try {
+        const response = await new Promise((resolve, reject) => {
+            abort = () => reject(signal.reason);
+            signal.addEventListener("abort", abort, { once: true });
+            fetchResponse().then(resolve, reject);
+        });
+        clearTimeout(timer);
+        await reportConnection(auth, null, { config: path === "/api/v1/recorder/config" });
         return response;
     } catch (error) {
-        throw mapRequestError(error);
+        if (signal.aborted) {
+            if (!timeout.aborted || signal.reason !== timeout.reason) {
+                if (signal.reason?.name === "AbortError") throw signal.reason;
+                throw new DOMException("Request aborted", "AbortError");
+            }
+            error = connectionError("timeout", { timeoutMs });
+        } else if (error instanceof TypeError || error?.name === "AbortError") {
+            error = connectionError("network");
+        }
+        await reportConnection(auth, error);
+        throw error;
     } finally {
-        if (connectTimeoutOnly) clearTimeout(timer);
+        clearTimeout(timer);
+        signal.removeEventListener("abort", abort);
     }
 }
 
@@ -103,7 +118,7 @@ export async function createSession(auth, body) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-    });
+    }, undefined, { validate: (body) => typeof body?.id === "string" && Boolean(body.id) && isObject(body.encryption) });
     return response.json();
 }
 
@@ -128,6 +143,7 @@ export async function uploadChunk(auth, sessionId, index, blob, sha256) {
             body: blob,
         },
         120_000,
+        { allowEmpty: true, validate: (body) => body?.index === index },
     );
 }
 
@@ -139,6 +155,9 @@ export async function getSession(auth, sessionId) {
     const response = await request(
         auth,
         `/api/v1/recording-sessions/${sessionId}`,
+        undefined,
+        undefined,
+        { validate: hasSessionStatus },
     );
     return response.json();
 }
@@ -149,6 +168,8 @@ export async function recoverSession(auth, sessionId) {
         auth,
         `/api/v1/recording-sessions/${sessionId}/recover`,
         { method: "POST" },
+        undefined,
+        { validate: (body) => hasSessionStatus(body) && typeof body.id === "string" && Boolean(body.id) },
     );
     return response.json();
 }
@@ -167,6 +188,8 @@ export async function completeSession(auth, sessionId, body) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
         },
+        undefined,
+        { validate: (body) => hasSessionStatus(body) || (typeof body?.job_id === "string" && Boolean(body.job_id)) },
     );
     return response.json();
 }
@@ -178,7 +201,7 @@ export async function completeSession(auth, sessionId, body) {
 export async function abortSession(auth, sessionId) {
     await request(auth, `/api/v1/recording-sessions/${sessionId}`, {
         method: "DELETE",
-    });
+    }, undefined, { allowEmpty: true, validate: (body) => body?.success === true });
 }
 
 /**
@@ -186,7 +209,11 @@ export async function abortSession(auth, sessionId) {
  * @param {{serverUrl: string, apiKey: string}} auth
  */
 export async function getRecorderConfig(auth) {
-    const response = await request(auth, "/api/v1/recorder/config");
+    const response = await request(auth, "/api/v1/recorder/config", undefined, undefined, {
+        validate: (body) => typeof body?.encrypted_recording_protocol === "number" &&
+            (!("features" in body) || isObject(body.features)) &&
+            (!("defaults" in body) || isObject(body.defaults)),
+    });
     return response.json();
 }
 
@@ -249,7 +276,7 @@ export async function confirmPairing(auth, installationId) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ installationId }),
-    });
+    }, undefined, { allowEmpty: true });
 }
 
 /** Compute the lowercase hex SHA-256 of a Blob's bytes. */
@@ -270,5 +297,5 @@ export async function listRecorderFolders(auth) {
 export async function setSessionAgenda(auth, sessionId, agendaId) {
     return (await request(auth, `/api/v1/recording-sessions/${encodeURIComponent(sessionId)}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agendaId }),
-    })).json();
+    }, undefined, { validate: hasSessionStatus })).json();
 }

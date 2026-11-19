@@ -1,5 +1,6 @@
 import { supportsAgendas } from "../lib/agendas.js";
 import { listLocalSessions, readLocalMeta } from "../lib/chunk-store.js";
+import { mountConnectionNotice } from "../lib/connection-notice.js";
 import { localizeDocument, t } from "../lib/i18n.js";
 import { bindMeetingPromptSwitches } from "../lib/meeting-prompt-ui.js";
 import {
@@ -454,6 +455,7 @@ const pendingBufferRetries = new Set();
 const pendingBufferMessages = new Map();
 let pendingBufferRender = 0;
 
+
 async function renderPendingBuffers() {
     const version = ++pendingBufferRender;
     const ids = await listLocalSessions();
@@ -501,6 +503,7 @@ async function renderPendingBuffers() {
                 pendingBufferMessages.set(id, {
                     text: result?.ok ? t("retryBufferResumed") : result?.error ?? t("somethingWrong"),
                     error: !result?.ok,
+                    connection: result?.connection,
                 });
             } catch (error) {
                 pendingBufferMessages.set(id, { text: error?.message ?? t("somethingWrong"), error: true });
@@ -517,7 +520,7 @@ async function renderPendingBuffers() {
             if (result?.ok) await renderPendingBuffers();
             else
                 setStatus(
-                    el("connection-status"),
+                    result?.connection ? status : el("connection-status"),
                     result?.error ?? t("somethingWrong"),
                     false,
                 );
@@ -877,6 +880,20 @@ async function restore() {
 
 void bindMeetingPromptSwitches([el("meeting-prompt-switch"), el("setup-meeting-prompt")], el("meeting-prompt-status"))
     .catch(() => { el("meeting-prompt-status").textContent = t("meetingPromptAccessDenied"); });
+
+let wasUnavailable = false;
+const connectionNotice = mountConnectionNotice(el("pending-buffers"), {
+    onConnection(connection) {
+        if (connection?.state === "ok" && wasUnavailable) {
+            for (const [id, message] of pendingBufferMessages) {
+                if (message.connection) pendingBufferMessages.delete(id);
+            }
+            void renderPendingBuffers();
+        }
+        wasUnavailable = Boolean(connection && connection.state !== "ok");
+    },
+});
+window.addEventListener("pagehide", connectionNotice.destroy, { once: true });
 
 await loadSetupTarget();
 scheduleFallback();

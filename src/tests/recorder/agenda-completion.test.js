@@ -28,6 +28,11 @@ const el = (id) => document.getElementById(id);
 const settle = () => vi.advanceTimersByTimeAsync(0);
 
 function load(page, dependencies) {
+    dependencies.mountConnectionNotice = () => ({
+        ready: Promise.resolve(),
+        update: vi.fn(),
+        destroy: vi.fn(),
+    });
     document.documentElement.innerHTML = readFileSync(
         `extensions/recorder/${page}/${page}.html`,
         "utf8",

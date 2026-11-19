@@ -228,6 +228,7 @@ it.each(
             finalizing: "finalizing",
         },
         getState: async () => ({ state, tabId: 7 }),
+        isLiveCapture: (value) => value.state === "recording",
         stopRecording: stop,
         startRecording: start,
         getSettings: async () => ({

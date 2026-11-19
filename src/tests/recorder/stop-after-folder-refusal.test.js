@@ -7,6 +7,14 @@ import { STATE } from "../../../extensions/recorder/lib/constants.js";
 import { mountRecordingControls } from "../../../extensions/recorder/lib/recording-controls.js";
 import { isWaitingForUpload } from "../../../extensions/recorder/lib/upload-state.js";
 
+vi.mock("../../../extensions/recorder/lib/connection-notice.js", () => ({
+    mountConnectionNotice: () => ({
+        ready: Promise.resolve(),
+        update: vi.fn(),
+        destroy: vi.fn(),
+    }),
+}));
+
 vi.mock("../../../extensions/recorder/generated/folders.js", () => ({
     createFolderField: (...args) => bundle.createFolderField(...args),
     createRecordingFolder: (...args) => bundle.createRecordingFolder(...args),
@@ -145,6 +153,7 @@ it("sends stop-recording from the picker after the real bundled folder save is r
         "localizeDocument",
         "t",
         "createRecordingFolder",
+        "mountConnectionNotice",
         source,
     )(
         () => ({}),
@@ -159,6 +168,7 @@ it("sends stop-recording from the picker after the real bundled folder save is r
             pickerFolder = bundle.createRecordingFolder(options);
             return pickerFolder;
         },
+        () => ({ update: vi.fn(), destroy: vi.fn() }),
     );
     await act(async () => listener({ type: "state", state }));
     await refuseThenStop(

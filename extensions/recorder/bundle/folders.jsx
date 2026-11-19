@@ -229,6 +229,7 @@ export function createFolderField({
                         lookup.folders?.find(
                             (folder) => folder.id === current.folderId,
                         );
+                    if (!lookup?.ok && lookup?.status !== 404) throw new Error(t("folderSearchFailed"));
                     if (found || lookup?.status === 404) {
                         unavailable = !found;
                         current = {
@@ -268,10 +269,11 @@ export function createFolderField({
                 current.folderLabel !== value.folderLabel ||
                 current.folderScope !== value.folderScope ||
                 options.readOnly !== nextOptions.readOnly;
+            const retryRefresh = options.refresh === false && nextOptions.refresh !== false;
             current = value;
             options = nextOptions;
             if (options.readOnly) open = false;
-            if (!changed && entries.length) return;
+            if (!changed && !retryRefresh && entries.length) return;
             revision++;
             paint();
             if (nextOptions.refresh !== false && !nextOptions.readOnly)
@@ -320,13 +322,14 @@ export function createRecordingFolder({ container, prefix, request, send, t }) {
         },
     });
     return {
-        render(state) {
+        render(state, { refresh = true } = {}) {
             current = state;
             container.hidden = state.state !== "recording" || state.stopped;
             if (container.hidden) field.close();
             else
                 field.reset(state, {
                     readOnly: state.recordingFolderOverride !== true,
+                    refresh,
                 });
         },
         saved: () => field.saved().catch(() => {}),

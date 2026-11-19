@@ -496,13 +496,19 @@ describe("reminder refresh regressions", () => {
     it("times out a hanging refresh without blocking config or pairing", async () => {
         fetch
             .mockResolvedValueOnce(
-                Response.json({ features: { agendas: true } }),
+                Response.json({
+                    encrypted_recording_protocol: 1,
+                    features: { agendas: true },
+                }),
             )
             .mockImplementationOnce(() => new Promise(() => {}));
         await refreshServerConfig();
         await vi.advanceTimersByTimeAsync(0);
         const refresh = refreshAgendas();
-        const assertion = expect(refresh).rejects.toThrow("timed out");
+        const assertion = expect(refresh).rejects.toMatchObject({
+            kind: "unreachable",
+            detail: { kind: "timeout" },
+        });
         await vi.advanceTimersByTimeAsync(5000);
         await assertion;
     });

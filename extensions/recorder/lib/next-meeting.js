@@ -3,6 +3,7 @@ import { scheduleAgendaReminders } from "./agendas.js";
 import { formatMeetingTime } from "./meeting-time.js";
 import { claimMeetingNotification } from "./meeting-notifications.js";
 import { t } from "./i18n.js";
+import { isConnectionError, serverUnavailable } from "./server-connection.js";
 import { getSettings } from "./settings.js";
 import { meetCode } from "./meet-code.js";
 
@@ -51,34 +52,34 @@ export async function cachedNextMeeting() {
 
 let refreshing;
 /** Refresh on an alarm or page open; concurrent pages share the same request. */
-export function refreshNextMeeting({ opened = false } = {}) {
-    refreshing ??= refreshNow(opened).finally(() => {
+export function refreshNextMeeting({ opened = false, force = false } = {}) {
+    refreshing ??= refreshNow(opened, force).finally(() => {
         refreshing = undefined;
     });
     return refreshing;
 }
 
-async function refreshNow(opened) {
+async function refreshNow(opened, force) {
     const settings = await getSettings();
     if (!supportsNextMeeting(settings)) {
         await clearNextMeeting();
         return null;
     }
     const cached = await cachedNextMeeting();
-    if (cached && Date.now() - cached.fetchedAt < (opened ? 60000 : 300000)) {
+    if (await serverUnavailable(settings)) return cached;
+    if (!force && cached && Date.now() - cached.fetchedAt < (opened ? 60000 : 300000)) {
         await scheduleNextMeeting(cached.data);
         return cached;
     }
     let data = null;
     let reason;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000);
     try {
         const response = await pairingRequest(
             "/api/v1/recorder/meetings/next",
-            { signal: controller.signal },
+            {},
             supportsNextMeeting,
             settings,
+            { timeoutMs: 10000 },
         );
         const body = await response.json();
         data =
@@ -89,10 +90,9 @@ async function refreshNow(opened) {
                 ? body.data
                 : null;
         reason = body.reason;
-    } catch {
+    } catch (error) {
+        if (isConnectionError(error)) return cached;
         reason = "calendar_unavailable";
-    } finally {
-        clearTimeout(timer);
     }
     const latest = await getSettings();
     if (

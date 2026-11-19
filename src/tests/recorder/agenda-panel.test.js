@@ -15,6 +15,11 @@ import { meetCode } from "../../../extensions/recorder/lib/meet-code.js";
 import { formatMeetingTime } from "../../../extensions/recorder/lib/meeting-time.js";
 import { detectMeetingPlatform } from "../../../extensions/recorder/lib/platforms.js";
 
+import {
+    connectionError,
+    isConnectionError,
+} from "../../../extensions/recorder/lib/server-connection.js";
+
 const html = readFileSync("extensions/recorder/agenda/agenda.html", "utf8");
 const source = readFileSync(
     "extensions/recorder/agenda/agenda.js",
@@ -201,6 +206,7 @@ async function start(doc = document, tabId = 7) {
         "panelRoomHeartbeat",
         "supportsAgendaRooms",
         "mountRoomCards",
+        "isConnectionError",
         `return (async () => { ${source} })();`,
     );
     await run(
@@ -239,6 +245,7 @@ async function start(doc = document, tabId = 7) {
             cards = { render: vi.fn(), destroy: vi.fn() };
             return cards;
         },
+        isConnectionError,
     );
 }
 
@@ -1554,4 +1561,99 @@ describe("#403 selection provenance", () => {
         if (mode === "explicit selection")
             expect(el("title").textContent).toBe("Acme review");
     });
+});
+
+it("keeps the last agenda readable offline and reconnects its stream on recovery", async () => {
+    settings.serverDefaults = { agendaLive: true };
+    await start();
+    expect(el("points").querySelector("input[type=checkbox]")).not.toBeNull();
+    expect(subscribe).toHaveBeenCalledTimes(1);
+    controlOptions.onConnection(true);
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(el("agenda").hidden).toBe(false);
+    expect(el("points").textContent).toContain("Schedule");
+    expect(el("points").querySelector("input[type=checkbox]")).toBeNull();
+    expect(el("change-agenda").disabled).toBe(true);
+    expect(el("away-hint").textContent).toBe(t("agendaConnectionReadOnly"));
+    const calls = request.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(request).toHaveBeenCalledTimes(calls);
+    data.title = "Acme review updated";
+    controlOptions.onConnection(false);
+    await settle();
+    expect(el("title").textContent).toBe("Acme review updated");
+    expect(el("points").querySelector("input[type=checkbox]")).not.toBeNull();
+    expect(subscribe).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+    true,
+    false,
+])("keeps an unsent collaborative note offline (access restored: %s)", async (allowed) => {
+    settings.serverDefaults = { agendaText: 1 };
+    data.textProtocol = 1;
+    const doc = new Y.Doc();
+    const ytext = doc.getText("text");
+    const response = {
+        field: "point:p1:note",
+        get update() {
+            return Buffer.from(Y.encodeStateAsUpdate(doc)).toString("base64");
+        },
+        get stateVector() {
+            return Buffer.from(Y.encodeStateVector(doc)).toString("base64");
+        },
+        version: 1,
+    };
+    let online = true;
+    let fail = false;
+    const base = request.getMockImplementation();
+    const send = vi.fn((body) => {
+        if (!online) throw connectionError("network");
+        Y.applyUpdate(doc, Buffer.from(JSON.parse(body).update, "base64"));
+        data.points[0].note = ytext.toString();
+        return response;
+    });
+    request.mockImplementation(async (path, init) => {
+        if (fail)
+            throw Object.assign(new Error("Forbidden"), {
+                kind: "server",
+                status: 403,
+            });
+        if (path.endsWith("/text")) return send(init.body);
+        if (path.includes("/text?")) return response;
+        return base(path, init);
+    });
+    await start();
+    el("points").querySelector(".link").click();
+    const note = el("points").querySelector(
+        'textarea[data-field="point:p1:note"]',
+    );
+    await settle();
+    note.value = "Keep this draft";
+    note.dispatchEvent(new Event("input"));
+    online = false;
+    await vi.advanceTimersByTimeAsync(250);
+    expect(send).toHaveBeenCalledTimes(1);
+    controlOptions.onConnection(true);
+    expect(el("points").querySelector("textarea")).toBeNull();
+    expect(el("points").textContent).toContain("Keep this draft");
+    expect(el("away-hint").textContent).toBe(t("agendaDraftWaiting"));
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(send).toHaveBeenCalledTimes(1);
+
+    online = true;
+    fail = !allowed;
+    controlOptions.onConnection(false);
+    await settle();
+    if (allowed) {
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(ytext.toString()).toBe("Keep this draft");
+        expect(el("points").textContent).toContain("Keep this draft");
+    } else {
+        expect(send).toHaveBeenCalledTimes(1);
+        expect(el("agenda").hidden).toBe(true);
+        expect(el("agenda-error").hidden).toBe(false);
+        expect(el("status").textContent).toBe(t("agendaDraftLost"));
+    }
+    doc.destroy();
 });

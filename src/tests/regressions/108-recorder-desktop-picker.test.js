@@ -5,6 +5,14 @@ const { fitWindowToContent } = vi.hoisted(() => ({
     fitWindowToContent: vi.fn(),
 }));
 
+vi.mock("../../../extensions/recorder/lib/connection-notice.js", () => ({
+    mountConnectionNotice: () => ({
+        ready: Promise.resolve(),
+        update: vi.fn(),
+        destroy: vi.fn(),
+    }),
+}));
+
 vi.mock("../../../extensions/recorder/lib/fit-window.js", () => ({
     fitWindowToContent,
 }));
@@ -77,7 +85,7 @@ function setupPicker(chooseDesktopMedia) {
         querySelectorAll: () => [],
     });
     const close = vi.fn();
-    vi.stubGlobal("window", { close });
+    vi.stubGlobal("window", { close, addEventListener: vi.fn() });
     vi.stubGlobal("navigator", { mediaDevices: { getUserMedia } });
     vi.stubGlobal("chrome", {
         i18n: { getUILanguage: () => "en", getMessage: (key) => key },

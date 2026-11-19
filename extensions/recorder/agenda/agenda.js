@@ -17,6 +17,7 @@ import { formatMeetingTime } from "../lib/meeting-time.js";
 
 import { detectMeetingPlatform } from "../lib/platforms.js";
 import { mountRecordingControls } from "../lib/recording-controls.js";
+import { isConnectionError } from "../lib/server-connection.js";
 import { getSettings } from "../lib/settings.js";
 
 localizeDocument();
@@ -25,6 +26,7 @@ const el = (id) =>
 const panelTab = new URL(location.href).searchParams.get("tab");
 const panelKey = agendaPanelKey(panelTab);
 let detail;
+let unavailable = false;
 let context = {};
 let state = {};
 let currentTab;
@@ -42,6 +44,8 @@ let streamId;
 let streamConnected = false;
 let reconciledAt = 0;
 let lastEditable = false;
+let textPaused = false;
+let draftLost = false;
 const bindings = new Map();
 const fieldNodes = new Map();
 const openNotes = new Set();
@@ -67,13 +71,14 @@ const roomCards = mountRoomCards(el("room-cards"), {
 });
 
 function renderRoom() {
-    const enabled = supportsAgendaRooms(settings) && Boolean(meetCode(currentTab?.url));
-    heartbeat.update(settings, currentTab, presenceAgendaId());
+    const enabled = Boolean(settings) && supportsAgendaRooms(settings) && Boolean(meetCode(currentTab?.url));
+    heartbeat.update(unavailable ? {} : settings ?? {}, currentTab, presenceAgendaId());
     const people = enabled && detail?.own && !afterStop() ? roomPeople : [];
     const restricted = enabled && !detail && !choosing && room.restricted;
     roomCards.render({ agendaId: detail?.id, people, restricted,
         invitations: enabled && !choosing ? room.invitations : [] });
     el("room-cards").hidden ||= choosing;
+    el("room-cards").inert = unavailable;
     const chosen = enabled && detail ? room.data.find(row => row.id === detail.id)?.chosenBy?.filter(person => !person.self) ?? [] : [];
     el("room-chosen-by").hidden = !chosen.length || choosing;
     el("room-chosen-by").textContent = chosen.length ? t("agendaRoomChosenBy", chosen.map(person => person.name || t("unknown")).join(", ")) : "";
@@ -85,7 +90,7 @@ function renderRoom() {
 }
 
 async function refreshRoom() {
-    if (!supportsAgendaRooms(settings) || !meetCode(currentTab?.url)) {
+    if (!settings || !supportsAgendaRooms(settings) || !meetCode(currentTab?.url)) {
         room = { data: [], restricted: false, invitations: [] };
         roomPeople = [];
         return;
@@ -141,14 +146,39 @@ function connectPanel() {
 }
 connectPanel();
 
-function clearLive() {
+function clearStream() {
     stopStream?.();
     stopStream = undefined;
     streamId = undefined;
     streamConnected = false;
-    for (const binding of bindings.values()) binding.destroy();
+}
+
+function destroyBinding(binding) {
+    const pending = binding.hasPendingChanges();
+    void binding.destroy()?.then((saved) => {
+        if (saved || !pending || closed) return;
+        draftLost = true;
+        el("status").textContent = t("agendaDraftLost");
+        el("agenda-error").hidden = false;
+    });
+}
+
+function hasPendingDraft() {
+    return [...bindings.values()].some((binding) => binding.hasPendingChanges());
+}
+
+function clearLive() {
+    clearStream();
+    for (const binding of bindings.values()) destroyBinding(binding);
     bindings.clear();
     fieldNodes.clear();
+    textPaused = false;
+}
+
+function syncText() {
+    return Promise.all(
+        Array.from(bindings.values(), (binding) => binding.resync().catch(showError)),
+    );
 }
 
 async function flushText() {
@@ -188,7 +218,7 @@ function bindField(input, field, value) {
         return previous;
     }
     if (previous) {
-        bindings.get(field)?.destroy();
+        if (bindings.has(field)) destroyBinding(bindings.get(field));
         bindings.delete(field);
     }
     fieldNodes.set(field, input);
@@ -248,6 +278,7 @@ function button(key, action, disabled = false) {
 }
 
 function showError(error, load = false) {
+    if (isConnectionError(error) || unavailable || draftLost) return;
     el("status").textContent =
         error?.status === 409
             ? t("agendaConflict")
@@ -279,13 +310,14 @@ function onMeeting() {
 function editable() {
     return Boolean(
         detail?.permissions.edit &&
+            !unavailable &&
             !afterStop() &&
             (recording() || onMeeting()),
     );
 }
 
 async function mutate(path, method, body, optimistic) {
-    if (saving) return;
+    if (saving || unavailable) return;
     if (!(await flushText())) {
         showError();
         return;
@@ -383,14 +415,16 @@ function updateNote(note) {
 }
 
 function appendNote(row, meta, field, value, label, canEdit, legacySave) {
+    const previous = fieldNodes.get(field);
     if (!canEdit) {
+        const binding = bindings.get(field);
+        if (binding && (textPaused || !binding.hasPendingChanges())) value = previous.value;
         if (value)
             row.append(
                 renderLinkedText(text("p", "", "hint note-readonly"), value),
             );
         return;
     }
-    const previous = fieldNodes.get(field);
     if (
         !value &&
         !openNotes.has(field) &&
@@ -555,7 +589,7 @@ function render() {
     el("time").textContent = detail.plannedStart
         ? formatMeetingTime(detail.plannedStart, detail.plannedEnd)
         : "";
-    el("away-hint").hidden = recording() || onMeeting() || afterStop();
+    el("away-hint").hidden = !unavailable && (recording() || onMeeting() || afterStop());
     const scroll = {
         top: document.scrollingElement?.scrollTop ?? 0,
         left: document.scrollingElement?.scrollLeft ?? 0,
@@ -660,8 +694,8 @@ function render() {
         }
     }
     for (const [field, node] of fieldNodes)
-        if (!el("agenda").contains(node)) {
-            bindings.get(field)?.destroy();
+        if (!el("agenda").contains(node) && !bindings.get(field)?.hasPendingChanges()) {
+            if (bindings.has(field)) destroyBinding(bindings.get(field));
             bindings.delete(field);
             fieldNodes.delete(field);
         }
@@ -724,6 +758,8 @@ function renderRecording() {
     el("change-agenda").textContent = t(
         hasAgendaChoice() ? "agendaChange" : "agendaChoose",
     );
+    el("change-agenda").disabled = unavailable;
+    el("choices").inert = unavailable;
     el("change-agenda").hidden =
         choosing ||
         !(settings && supportsAgendas(settings)) ||
@@ -732,6 +768,7 @@ function renderRecording() {
 }
 
 async function loadDetail(id, poll = false) {
+    if (unavailable) return;
     const version = ++generation;
     try {
         const since =
@@ -748,15 +785,18 @@ async function loadDetail(id, poll = false) {
             openNotes.clear();
         }
         if (!next.unchanged) detail = next;
+        const resumingText = textPaused;
+        if (resumingText) {
+            for (const binding of bindings.values()) binding.setPaused(false);
+            await syncText();
+            if (version !== generation) return;
+            textPaused = false;
+        }
         if (el("status").textContent === t("agendaLoadError"))
             el("agenda-error").hidden = true;
         render();
-        await Promise.all(
-            Array.from(bindings.values(), (binding) =>
-                binding.resync().catch(showError),
-            ),
-        );
-        if (settings?.serverDefaults?.agendaLive === true && streamId !== id) {
+        if (!resumingText) await syncText();
+        if (!unavailable && settings?.serverDefaults?.agendaLive === true && streamId !== id) {
             stopStream?.();
             streamId = id;
             stopStream = subscribeAgenda(id, {
@@ -771,13 +811,16 @@ async function loadDetail(id, poll = false) {
         if ([401, 403, 404].includes(error?.status)) {
             clearLive();
             detail = null;
+            el("agenda").hidden = true;
+            el("title").textContent = t("agendaNone");
+            el("time").textContent = "";
         }
-        el("agenda").hidden = true;
         showError(error, true);
     }
 }
 
 async function select(agendaId) {
+    if (unavailable) return;
     if (!(await flushText())) {
         showError();
         return;
@@ -887,6 +930,7 @@ async function choices() {
 }
 
 async function restore(poll = false) {
+    if (unavailable) return;
     if (loading || saving) {
         reloadPending = true;
         return;
@@ -920,6 +964,7 @@ async function restore(poll = false) {
             restoredContext = true;
         }
         await refreshRoom();
+        if (unavailable) return;
         const agendaId = currentAgendaId();
         if (choosing) {
             if (agendaId && detail?.id !== agendaId) await loadDetail(agendaId);
@@ -983,6 +1028,7 @@ el("choice-list").addEventListener("keydown", (event) => {
 });
 el("retry").addEventListener("click", async () => {
     try {
+        draftLost = false;
         el("agenda-error").hidden = true;
         if (context.error) {
             const result = await chrome.runtime.sendMessage({
@@ -1010,15 +1056,11 @@ el("retry").addEventListener("click", async () => {
     }
 });
 chrome.storage.onChanged.addListener((changes, area) => {
-    if (
-        area === "local" &&
-        changes.serverDefaults &&
-        (changes.serverDefaults.oldValue?.agendaText !==
-            changes.serverDefaults.newValue?.agendaText ||
-            changes.serverDefaults.oldValue?.agendaLive !==
-                changes.serverDefaults.newValue?.agendaLive)
-    )
-        clearLive();
+    if (area === "local" && changes.serverDefaults) {
+        const { oldValue, newValue } = changes.serverDefaults;
+        if (oldValue?.agendaText !== newValue?.agendaText) clearLive();
+        else if (oldValue?.agendaLive !== newValue?.agendaLive) clearStream();
+    }
     if (area === "session" && changes.recordingState)
         updateRecordingState(changes.recordingState.newValue ?? {});
     if (
@@ -1030,6 +1072,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
                 changes.serverDefaults.newValue?.agendas !== true))
     ) {
         generation += 1;
+        for (const binding of bindings.values()) binding.setPaused(true);
         clearLive();
         detail = null;
         el("agenda").hidden = el("choices").hidden = true;
@@ -1051,6 +1094,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 setInterval(() => {
     if (
+        unavailable ||
         saving ||
         loading ||
         (choosing && !automaticChooser) ||
@@ -1089,13 +1133,40 @@ controls = await mountRecordingControls(el("recorder-controls"), {
                     renderNone();
                 }
             }
-            heartbeat.update(settings, currentTab, presenceAgendaId());
+            heartbeat.update(unavailable ? {} : settings ?? {}, currentTab, presenceAgendaId());
             if (!meetCode(tab?.url)) { room = { data: [], restricted: false, invitations: [] }; roomPeople = []; }
         }
         render();
         if (changedRoom) void restore(true);
     },
     onState: updateRecordingState,
+    onConnection: (disconnected) => {
+        if (unavailable === disconnected) return;
+        unavailable = disconnected;
+        if (unavailable) {
+            generation++;
+            clearStream();
+            textPaused = true;
+            for (const binding of bindings.values()) binding.setPaused(true);
+            if (!draftLost) el("agenda-error").hidden = true;
+            el("away-hint").textContent = t(
+                hasPendingDraft() ? "agendaDraftWaiting" : "agendaConnectionReadOnly",
+            );
+            if (detail) {
+                choosing = false;
+                render();
+            }
+            el("away-hint").hidden = !detail;
+            renderRecording();
+            renderRoom();
+        } else {
+            el("away-hint").textContent = t("agendaReadOnlyHint");
+            void (async () => {
+                if (context.error) el("retry").click();
+                else await restore();
+            })();
+        }
+    },
     beforeAction: async () => {
         if (!(await flushText())) showError();
     },
@@ -1107,10 +1178,17 @@ function resizeNotes() {
     for (const note of fieldNodes.values()) growNote(note);
 }
 window.addEventListener("resize", resizeNotes);
+function warnPendingDraft(event) {
+    if (!hasPendingDraft()) return;
+    event.preventDefault();
+    event.returnValue = true;
+}
+window.addEventListener("beforeunload", warnPendingDraft);
 window.addEventListener("pagehide", () => {
     closed = true;
     clearTimeout(portRetry);
     window.removeEventListener("resize", resizeNotes);
+    window.removeEventListener("beforeunload", warnPendingDraft);
     clearLive();
     controls?.destroy();
     panelPort?.disconnect();

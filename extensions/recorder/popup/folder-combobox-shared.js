@@ -173,6 +173,8 @@
                     } else if (response?.status === 404) {
                         remembered = null;
                         await persist(true).catch(() => {});
+                    } else if (response?.ok === false) {
+                        error = true;
                     }
                     if (!open) showSelection();
                 } else if (job.version === version) {
@@ -376,7 +378,7 @@
             }
         }
         return {
-            render(state) {
+            render(state, { refresh = true } = {}) {
                 container.hidden = state.state !== "recording" || state.stopped;
                 if (container.hidden) return;
                 field ??= createFolderField({
@@ -395,11 +397,13 @@
                     state.folderLabel,
                     state.folderScope,
                     state.recordingFolderOverride,
+                    refresh,
                 ]);
                 if (signature === next) return;
                 signature = next;
                 field.reset(state, {
                     readOnly: state.recordingFolderOverride !== true,
+                    refresh,
                 });
             },
             clear: () => field?.clear(),

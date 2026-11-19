@@ -32,7 +32,7 @@ describe("recorder API errors", () => {
         });
     });
 
-    it("has no code for a body without one", async () => {
+    it("treats errors without an envelope as a connection failure", async () => {
         vi.spyOn(globalThis, "fetch").mockResolvedValue(
             new Response("busy", { status: 503 }),
         );
@@ -44,6 +44,6 @@ describe("recorder API errors", () => {
                 new Blob(["x"]),
                 "0".repeat(64),
             ),
-        ).rejects.toMatchObject({ status: 503, code: null });
+        ).rejects.toMatchObject({ kind: "unreachable", httpStatus: 503 });
     });
 });

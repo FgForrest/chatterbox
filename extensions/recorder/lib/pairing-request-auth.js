@@ -11,5 +11,5 @@ export async function pairingRequest(path, init, supported, expected, options) {
     const latest = await getSettings();
     if (!apiKey || !supported(latest) || latest.serverUrl !== settings.serverUrl || latest.connectionId !== settings.connectionId)
         throw new Error(t("agendaUnsupported"));
-    return request({ serverUrl: settings.serverUrl, apiKey }, path, init, undefined, options);
+    return request({ serverUrl: settings.serverUrl, connectionId: settings.connectionId, apiKey }, path, init, undefined, options);
 }

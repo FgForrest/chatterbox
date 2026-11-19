@@ -1,6 +1,7 @@
 import { pairingRequest } from "./pairing-request-auth.js";
 import { t } from "./i18n.js";
 import { pickerWindowBounds } from "./picker-window.js";
+import { serverUnavailable } from "./server-connection.js";
 import { getSettings } from "./settings.js";
 import { formatMeetingTime } from "./meeting-time.js";
 import { claimMeetingNotification } from "./meeting-notifications.js";
@@ -31,7 +32,7 @@ function supportsAgendaPath(settings, path) {
 }
 
 /** Call an agenda route only after capability detection. */
-export async function agendaRequest(path = "", init = {}) {
+export async function agendaRequest(path = "", init = {}, options) {
     const settings = await getSettings();
     if (!supportsAgendaPath(settings, path)) throw new Error(t("agendaUnsupported"));
     const response = await pairingRequest(
@@ -39,6 +40,7 @@ export async function agendaRequest(path = "", init = {}) {
         init,
         (value) => supportsAgendaPath(value, path),
         settings,
+        options,
     );
     const body = await response.json();
     const current = await getSettings();
@@ -70,7 +72,7 @@ export async function matchAgendas(tabUrl, now = Date.now(), init = {}) {
 }
 
 /** Additive room metadata is consumed only when this server advertised support. */
-export async function matchAgendaRoom(tabUrl, now = Date.now(), init = {}) {
+export async function matchAgendaRoom(tabUrl, now = Date.now(), init = {}, options) {
     const settings = await getSettings();
     if (!supportsAgendas(settings)) return { data: [], restricted: false, invitations: [] };
     const query = new URLSearchParams({ at: new Date(now).toISOString() });
@@ -82,7 +84,7 @@ export async function matchAgendaRoom(tabUrl, now = Date.now(), init = {}) {
             query.set("meetCode", code.toLowerCase());
         }
     }
-    const body = await agendaRequest(`/match?${query}`, init);
+    const body = await agendaRequest(`/match?${query}`, init, options);
     const rooms = settings.serverDefaults?.agendaRooms === 1 && Boolean(tabUrl && meetCode(tabUrl));
     const data = Array.isArray(body.data) ? body.data : [];
     return {
@@ -173,6 +175,7 @@ async function refreshAgendasNow({ force = false } = {}) {
         await clearAgendas();
         return;
     }
+    if (await serverUnavailable(settings)) return;
     const now = Date.now();
     const cached = (await chrome.storage.session.get(AGENDA_CACHE_KEY))[AGENDA_CACHE_KEY];
     if (!force && cached?.serverUrl === settings.serverUrl && cached.connectionId === settings.connectionId && now - cached.fetchedAt < 30 * 60000) return;
@@ -182,15 +185,7 @@ async function refreshAgendasNow({ force = false } = {}) {
     });
     const identity = (await chrome.storage.local.get("encryptedApiKey"))
         .encryptedApiKey;
-    const controller = new AbortController();
-    let timer;
-    let body;
-    try {
-        body = await Promise.race([
-            agendaRequest(`?${query}`, { signal: controller.signal }),
-            new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error("Agenda refresh timed out")); }, 5000); }),
-        ]);
-    } finally { clearTimeout(timer); }
+    const body = await agendaRequest(`?${query}`, {}, { timeoutMs: 5000 });
     const latest = await getSettings();
     if (
         !supportsAgendas(latest) ||

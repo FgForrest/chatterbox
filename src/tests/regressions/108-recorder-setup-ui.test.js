@@ -135,6 +135,14 @@ const h = vi.hoisted(() => {
     };
 });
 
+vi.mock("../../../extensions/recorder/lib/connection-notice.js", () => ({
+    mountConnectionNotice: () => ({
+        ready: Promise.resolve(),
+        update: vi.fn(),
+        destroy: vi.fn(),
+    }),
+}));
+
 vi.mock("../../../extensions/recorder/lib/chunk-store.js", () => ({
     listLocalSessions: vi.fn(async () => []),
     readLocalMeta: vi.fn(),

@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import cs from "../../../extensions/recorder/_locales/cs/messages.json";
 import en from "../../../extensions/recorder/_locales/en/messages.json";
 import { createCaptureHost } from "../../../extensions/recorder/lib/capture-host.js";
+import { encryptChunk } from "../../../extensions/recorder/lib/chunk-crypto.js";
+import { writeChunk } from "../../../extensions/recorder/lib/chunk-store.js";
 import { microphoneError } from "../../../extensions/recorder/lib/microphone.js";
 
 vi.mock("../../../extensions/recorder/lib/chunk-crypto.js", () => ({
@@ -94,6 +96,39 @@ afterEach(async () => {
 });
 
 describe("capture keeps the meeting when the microphone fails", () => {
+    it("reports one stop only after the final encrypted chunk lands", async () => {
+        encryptChunk.mockResolvedValueOnce(new Blob(["encrypted"]));
+        const write = Promise.withResolvers();
+        writeChunk.mockReturnValueOnce(write.promise);
+        await host.start({ ...input, systemStream: system });
+        const stop = recorder.stop.bind(recorder);
+        recorder.stop = () => {
+            recorder.ondataavailable({ data: new Blob(["audio"]) });
+            stop();
+        };
+
+        host.stop();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(writeChunk).toHaveBeenCalledOnce();
+        host.stop();
+        expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: "recording-stopped" }),
+        );
+
+        write.resolve();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(
+            chrome.runtime.sendMessage.mock.calls.map(
+                ([message]) => message.type,
+            ),
+        ).toEqual(["recording-started", "chunk-ready", "recording-stopped"]);
+        expect(chrome.runtime.sendMessage).toHaveBeenLastCalledWith({
+            type: "recording-stopped",
+            sessionId: "meeting-1",
+            chunkCount: 1,
+        });
+    });
+
     it("includes a working mic when withoutMicrophone is false", async () => {
         await host.start({
             ...input,
