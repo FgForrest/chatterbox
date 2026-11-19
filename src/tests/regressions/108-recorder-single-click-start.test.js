@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "../../../extensions/recorder/popup/folder-combobox.js";
 
+vi.mock("../../../extensions/recorder/lib/connection-notice.js", () => ({
+    mountConnectionNotice: () => ({
+        ready: Promise.resolve(),
+        update: vi.fn(),
+        destroy: vi.fn(),
+    }),
+}));
+
 vi.mock("../../../extensions/recorder/generated/folders.js", () => ({
     createFolderField: (...args) =>
         globalThis.recorderFolders.createFolderField(...args),

@@ -23,9 +23,9 @@ function chunkName(index) {
 }
 
 /** Create the session directory and persist its metadata. */
-export async function createLocalSession(sessionId, meta) {
-    const dir = await sessionDir(sessionId, true);
-    const handle = await dir.getFileHandle("meta.json", { create: true });
+export async function createLocalSession(sessionId, meta, { create = true } = {}) {
+    const dir = await sessionDir(sessionId, create);
+    const handle = await dir.getFileHandle("meta.json", { create });
     const writable = await handle.createWritable();
     await writable.write(JSON.stringify(meta));
     await writable.close();
@@ -87,8 +87,8 @@ export async function deleteLocalSession(sessionId) {
     const dir = await root();
     try {
         await dir.removeEntry(sessionId, { recursive: true });
-    } catch {
-        // already gone
+    } catch (error) {
+        if (error?.name !== "NotFoundError") throw error;
     }
 }
 

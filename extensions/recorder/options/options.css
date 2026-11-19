@@ -429,3 +429,21 @@ input[role="switch"]:disabled {
     input[role="switch"] { appearance: auto; }
     input[role="switch"]::after { display: none; }
 }
+
+.connection-notice {
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.connection-notice strong {
+    color: var(--error);
+}
+
+.connection-notice button {
+    margin-top: 8px;
+}

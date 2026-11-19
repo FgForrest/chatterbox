@@ -3,6 +3,7 @@ import vm from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../../extensions/recorder/lib/api.js";
 import { ALARMS, STATE } from "../../../extensions/recorder/lib/constants.js";
+import { isConnectionError } from "../../../extensions/recorder/lib/server-connection.js";
 import { canPumpUploads } from "../../../extensions/recorder/lib/upload-state.js";
 
 const source = readFileSync("extensions/recorder/service-worker.js", "utf8");
@@ -126,6 +127,7 @@ function worker(initial = { state: "idle" }, overrides = {}) {
         ALARMS,
         MESSAGES: {},
         canPumpUploads,
+        isConnectionError,
         t: (key) => key,
         getSettings: vi.fn(async () => ({
             dataUseAcknowledgedAt: "yes",
@@ -1219,7 +1221,7 @@ describe("#383 request timeouts", () => {
             state: "recording",
             blocked: false,
             uploaded: [],
-            uploadNotice: "requestTimedOut",
+            uploadNotice: null,
         });
         const meta = h.metas.get("buffer-one");
         expect(meta.retryAttempt).toBe(1);
@@ -1233,7 +1235,7 @@ describe("#383 request timeouts", () => {
         expect(h.deps.completeSession).not.toHaveBeenCalled();
     });
 
-    it("retries a timed-out completion from the error view with its buffer intact", async () => {
+    it("retries a timed-out completion with its buffer intact", async () => {
         const fetch = hangRequests();
         const h = worker(stopped(), { completeSession: api.completeSession });
         await drain();
@@ -1242,10 +1244,9 @@ describe("#383 request timeouts", () => {
         await vi.advanceTimersByTimeAsync(30000);
         await check;
         expect(h.values.recordingState).toMatchObject({
-            state: "error",
+            state: "finalizing",
             stopped: true,
             blocked: false,
-            error: "requestTimedOut",
         });
         expect(fetch).toHaveBeenCalledOnce();
         expect(h.deps.deleteLocalSession).not.toHaveBeenCalled();
@@ -1317,7 +1318,11 @@ describe("#383 request timeouts", () => {
         });
         await drain();
         await vi.advanceTimersByTimeAsync(30000);
-        expect(await retry).toEqual({ ok: false, error: "requestTimedOut" });
+        expect(await retry).toEqual({
+            ok: false,
+            connection: true,
+            error: "requestTimedOut",
+        });
     });
 
     function agendaStream() {

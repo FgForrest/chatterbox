@@ -46,6 +46,7 @@ export function bindAgendaTextInput(
     let edits = 0;
     let acknowledged = 0;
     let disposed = false;
+    let paused = false;
     let composing = false;
     let localBlank = false;
     let refused = false;
@@ -112,7 +113,7 @@ export function bindAgendaTextInput(
     }
 
     async function connect() {
-        if (disposed) return;
+        if (disposed || paused) return;
         if (connecting) return connecting;
         if (!initialized) input.readOnly = true;
         connecting = transport
@@ -126,7 +127,7 @@ export function bindAgendaTextInput(
             })
             .finally(() => {
                 if (!disposed)
-                    input.readOnly = initialized ? originalReadOnly : true;
+                    input.readOnly = paused || !initialized || originalReadOnly;
                 connecting = null;
             });
         return connecting;
@@ -134,7 +135,7 @@ export function bindAgendaTextInput(
 
     function schedule(delay = options.debounceMs ?? 250) {
         clearTimeout(timer);
-        if (!disposed)
+        if (!disposed && !paused)
             timer = setTimeout(() => {
                 void flush();
             }, delay);
@@ -149,6 +150,7 @@ export function bindAgendaTextInput(
                 return false;
             }
         }
+        if (paused) return edits === acknowledged;
         if (refused) return false;
         if (!initialized || edits === acknowledged || composing) return true;
         if (sending) {
@@ -204,7 +206,7 @@ export function bindAgendaTextInput(
     }
 
     function localInput() {
-        if (!initialized || composing || disposed) return;
+        if (!initialized || composing || disposed || paused) return;
         const value = input.value.replace(/[\r\n]/gu, " ");
         localBlank = required && !value.trim();
         if (localBlank) return;
@@ -248,9 +250,21 @@ export function bindAgendaTextInput(
     if (input.ownerDocument.activeElement === input) focus();
     return {
         flush,
+        hasPendingChanges: () => edits !== acknowledged || composing,
+        setPaused(value: boolean) {
+            if (value && composing) compositionEnd();
+            paused = value;
+            if (paused) clearTimeout(timer);
+            input.readOnly = paused || !initialized || originalReadOnly;
+        },
         materializedVersion: () => materializedVersion,
-        resync: () =>
-            initialized ? connect().then(() => flush()) : Promise.resolve(true),
+        resync: ({ retryRefusal = false } = {}) =>
+            initialized
+                ? connect().then(() => {
+                      if (retryRefusal) refused = false;
+                      return flush();
+                  })
+                : Promise.resolve(true),
         destroy() {
             if (disposed) return;
             input.removeEventListener("focus", focus);
@@ -263,7 +277,10 @@ export function bindAgendaTextInput(
             const pending = flush();
             disposed = true;
             input.readOnly = originalReadOnly;
-            void pending.finally(() => doc.destroy());
+            return pending
+                .catch(() => false)
+                .then(() => edits === acknowledged && !composing)
+                .finally(() => doc.destroy());
         },
     };
 }

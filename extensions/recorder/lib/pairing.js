@@ -7,6 +7,7 @@ import { confirmPairing, getRecorderConfig } from "./api.js";
 import { listLocalSessions, readLocalMeta } from "./chunk-store.js";
 import { SETUP_FLOW_KEY, STORAGE_KEYS } from "./constants.js";
 import { t } from "./i18n.js";
+import { sameConnection } from "./server-connection.js";
 import { getSettings } from "./settings.js";
 import { clearToken, readToken, storeToken } from "./token-vault.js";
 
@@ -191,7 +192,7 @@ export async function storePairing({
         console.warn("[recorder] config fetch after pairing failed:", error),
     );
     await confirmPairing(
-        { serverUrl: cleanUrl, apiKey: String(apiKey) },
+        { serverUrl: cleanUrl, connectionId: (await getSettings()).connectionId, apiKey: String(apiKey) },
         await getInstallationId(),
     ).catch((error) =>
         console.warn(
@@ -214,8 +215,11 @@ export async function refreshServerConfig() {
     ) return false;
     const config = await getRecorderConfig({
         serverUrl: settings.serverUrl,
+        connectionId: settings.connectionId,
         apiKey: await readToken(),
     });
+    const latest = await getSettings();
+    if (!latest.dataUseAcknowledgedAt || !sameConnection(settings, latest)) return false;
     const defaults = config?.defaults ?? {};
     await chrome.storage.local.set({
         [STORAGE_KEYS.serverDefaults]: {

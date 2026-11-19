@@ -14,6 +14,7 @@ export function createFolderField({
     prefix = "folder",
     onPick,
     variant = "field",
+    saveImmediately = false,
 }) {
     container.setAttribute("data-recorder-folder", "");
     const root = createRoot(container);
@@ -25,6 +26,11 @@ export function createFolderField({
     let revision = 0;
     let refreshError = "";
     let open = false;
+    function persist(saver, folder) {
+        const result = saveImmediately ? saver(folder) : pending.catch(() => {}).then(() => saver(folder));
+        pending = result;
+        return result;
+    }
     const environment = () => ({
         labels: {
             folder: t("folder"),
@@ -83,15 +89,13 @@ export function createFolderField({
             };
             paint();
             const choice = current;
-            pending = pending
-                .catch(() => {})
-                .then(() => save(choice))
+            pending = persist(save, choice)
                 .then(() => {
                     setError("");
                     onPick?.();
                 })
                 .catch((error) => {
-                    current = previous;
+                    if (current === choice) current = previous;
                     focusAfterRemove.current = removed;
                     setError(error?.message || t("folderChangeFailed"));
                     paint();
@@ -218,9 +222,7 @@ export function createFolderField({
                         folderScope: selected.folder.scope,
                     };
                     const refreshed = current;
-                    pending = pending
-                        .catch(() => {})
-                        .then(() => saveOnRefresh(refreshed));
+                    persist(saveOnRefresh, refreshed);
                 } else {
                     const lookup = await request({ id: current.folderId });
                     if (version !== revision) return;
@@ -229,6 +231,7 @@ export function createFolderField({
                         lookup.folders?.find(
                             (folder) => folder.id === current.folderId,
                         );
+                    if (!lookup?.ok && lookup?.status !== 404) throw new Error(t("folderSearchFailed"));
                     if (found || lookup?.status === 404) {
                         unavailable = !found;
                         current = {
@@ -239,9 +242,7 @@ export function createFolderField({
                             folderScope: found?.scope ?? null,
                         };
                         const refreshed = current;
-                        pending = pending
-                            .catch(() => {})
-                            .then(() => saveOnRefresh(refreshed));
+                        persist(saveOnRefresh, refreshed);
                     }
                 }
             }
@@ -268,10 +269,11 @@ export function createFolderField({
                 current.folderLabel !== value.folderLabel ||
                 current.folderScope !== value.folderScope ||
                 options.readOnly !== nextOptions.readOnly;
+            const retryRefresh = options.refresh === false && nextOptions.refresh !== false;
             current = value;
             options = nextOptions;
             if (options.readOnly) open = false;
-            if (!changed && entries.length) return;
+            if (!changed && !retryRefresh && entries.length) return;
             revision++;
             paint();
             if (nextOptions.refresh !== false && !nextOptions.readOnly)
@@ -299,6 +301,7 @@ export function createRecordingFolder({ container, prefix, request, send, t }) {
         request,
         t,
         variant: "pill",
+        saveImmediately: true,
         save: async (folder) => {
             const response = await send({
                 type: "set-recording-folder",
@@ -320,13 +323,14 @@ export function createRecordingFolder({ container, prefix, request, send, t }) {
         },
     });
     return {
-        render(state) {
+        render(state, { refresh = true } = {}) {
             current = state;
             container.hidden = state.state !== "recording" || state.stopped;
             if (container.hidden) field.close();
             else
                 field.reset(state, {
                     readOnly: state.recordingFolderOverride !== true,
+                    refresh,
                 });
         },
         saved: () => field.saved().catch(() => {}),

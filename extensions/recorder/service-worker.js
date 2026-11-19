@@ -28,6 +28,7 @@ import {
     openAgendaWindow,
     refreshAgendas,
     remindAgenda,
+    saveAgendaEdit,
     scheduleAgendaReminders,
     supportsAgendas,
     shouldLinkEditedAgenda,
@@ -87,6 +88,15 @@ import { queuePairing } from "./lib/pairing-request.js";
 import { pickerWindowBounds } from "./lib/picker-window.js";
 import { activeSetupFlow, resumeTypedSetupAfterLogin } from "./lib/setup-flow.js";
 import { detectMeetingPlatform, platformById } from "./lib/platforms.js";
+import {
+    connectionNotice,
+    isConnectionError,
+    observeConnection,
+    readServerConnection,
+    sameConnection,
+    serverUnavailable,
+    SERVER_CONNECTION_KEY,
+} from "./lib/server-connection.js";
 import { canPumpUploads } from "./lib/upload-state.js";
 import { readToken } from "./lib/token-vault.js";
 import {
@@ -184,7 +194,7 @@ async function routeAgendaTab(tab, settings, state, matches) {
     const id = binding?.agendaId ?? recordingAgenda ?? (rows.length === 1 ? rows[0].id : null);
     const agendaSource = binding?.agendaId ? "join" : recordingAgenda ? "recording" : "automatic";
     const room = supportsAgendaRooms(settings) && meetCode(tab.url) ? (await chrome.storage.session.get(`agenda-match:${tab.id}`))[`agenda-match:${tab.id}`] : null;
-    const roomState = room?.serverUrl === settings.serverUrl && room.connectionId === settings.connectionId && room.target === JSON.stringify(meetingTarget(tab.url)) && Date.now() - room.at < 60000 && (room.restricted || room.invitations?.length);
+    const roomState = room?.serverUrl === settings.serverUrl && room.connectionId === settings.connectionId && room.target === JSON.stringify(meetingTarget(tab.url)) && (Date.now() - room.at < 60000 || await serverUnavailable(settings)) && (room.restricted || room.invitations?.length);
     if (id || rows.length || roomState) {
         const route = { agendaIds: id ? [id] : rows.map((row) => row.id), choose: !id && !roomState, tabId: tab.id, agendaSource, ...(supportsAgendaRooms(settings) && meetCode(tab.url) ? { roomAutomatic: agendaSource === "automatic" } : {}) };
         agendaTabs.set(tab.id, route);
@@ -207,6 +217,137 @@ const OPFS_WARN_BYTES = 1024 * 1024 * 1024; // 1 GiB of unsent audio.
 const NUDGE_PREFIX = "nudge:";
 const COMPLETION_PREFIX = "completed:";
 const COMPLETION_DISPLAY_MS = 3500;
+const CONNECTION_ALARM = "recorder-connection-probe";
+const METADATA_DRAIN_MS = 10_000;
+const CONNECTION_PAGES = [POPUP_URL, "agenda/agenda.html", "options/options.html", "picker/picker.html"];
+let connectionUpdates = Promise.resolve();
+let connectionProbe;
+let startupReconciliation;
+
+observeConnection(queueConnectionOutcome);
+
+function queueConnectionOutcome(outcome) {
+    const update = connectionUpdates.catch(() => {}).then(() => updateServerConnection(outcome));
+    connectionUpdates = update;
+    return update;
+}
+
+async function updateServerConnection({ config, ...outcome }) {
+    const settings = await getSettings();
+    if (!settings.dataUseAcknowledgedAt || !settings.hasApiKey || !sameConnection(settings, outcome)) return;
+    const previous = await readServerConnection(settings);
+    if (previous && previous.checkedAt > outcome.checkedAt) return;
+    const configError = config && outcome.state === "ok" ? outcome.configError : previous?.configError;
+    const changed = previous?.state !== outcome.state ||
+        previous?.configError !== configError ||
+        JSON.stringify(previous?.detail) !== JSON.stringify(outcome.detail);
+    await chrome.storage.session.set({
+        [SERVER_CONNECTION_KEY]: {
+            ...outcome,
+            ...(configError ? { configError } : {}),
+        },
+    });
+    if (outcome.state !== "ok") {
+        void ensureConnectionAlarm().catch(() => {});
+        if (changed) void syncConnectionBanners().catch(() => {});
+        return;
+    }
+    if (configError && changed) {
+        void ensureConnectionAlarm().catch(() => {});
+        void syncConnectionBanners().catch(() => {});
+    }
+    if (previous && (previous.state !== "ok" || (previous.configError && !configError))) {
+        const probe = connectionProbe ?? (config || configError ? null : probeConnection());
+        void Promise.resolve(probe).catch(() => {}).then(() => recoverConnection(settings)).catch(() => {});
+    }
+}
+
+async function syncConnectionBanners() {
+    const [armed, state] = await Promise.all([getArmed(), getState()]);
+    const tabs = new Set(Object.keys(armed).map(Number));
+    if (state.tabId != null) tabs.add(state.tabId);
+    await Promise.all([...tabs].map((tabId) => syncMeetingBannerNow(tabId, true)));
+}
+
+async function connectionHasWaiters() {
+    const [state, armed, contexts] = await Promise.all([
+        getState(),
+        getArmed(),
+        chrome.runtime.getContexts?.({ contextTypes: ["POPUP", "SIDE_PANEL", "TAB"] }) ?? [],
+    ]);
+    return Boolean((state.sessionId && state.state !== STATE.completed) ||
+        Object.values(armed).some((entry) => entry.bannerPrompt || entry.promptVisible || entry.bannerError) ||
+        contexts.some(({ documentUrl }) => CONNECTION_PAGES.some((path) => isExtensionPage(documentUrl, path))));
+}
+
+async function needsConnectionProbe() {
+    const connection = await readServerConnection();
+    return Boolean(connection && (connection.state !== "ok" || connection.configError));
+}
+
+async function ensureConnectionAlarm() {
+    if (!(await needsConnectionProbe()) || !(await connectionHasWaiters())) return;
+    if (!(await chrome.alarms.get(CONNECTION_ALARM))) {
+        await chrome.alarms.create(CONNECTION_ALARM, { periodInMinutes: 0.5 });
+    }
+}
+
+function probeConnection() {
+    connectionProbe ??= refreshServerConfig().finally(() => { connectionProbe = null; });
+    return connectionProbe;
+}
+
+async function recoverConnection(expected) {
+    await startupReconciliation?.catch(() => {});
+    const settings = await getSettings();
+    if (!settings.dataUseAcknowledgedAt || !settings.hasApiKey || !sameConnection(expected, settings)) return;
+    const connection = await readServerConnection(settings);
+    if (connection?.state !== "ok") return;
+    if (!connection.configError) await chrome.alarms.clear(CONNECTION_ALARM);
+    const state = await getState();
+    const upload = async () => {
+        if (state.sessionId && state.state !== STATE.completed) {
+            await transitionBuffer(async () => {
+                const current = await getState();
+                if (!sameUploadOwner(current, state)) return;
+                const bufferId = current.bufferId ?? current.sessionId;
+                if (!(await readLocalMeta(bufferId))) return;
+                await updateLocalMeta(bufferId, { retryAttempt: 0, nextRetryAt: null });
+                await setState({ uploadNotice: current.blocked && !current.stopped ? current.uploadNotice : null });
+                if (current.reconcilePending) await reconcileBufferedRecordingsOnce();
+                else if (!current.blocked) await resumeUploadWork();
+            });
+        }
+    };
+    await Promise.allSettled([
+        upload(),
+        ...(!connection.configError ? [
+            refreshNextMeeting({ force: true }),
+            refreshAgendas({ force: true }),
+        ] : []),
+        syncConnectionBanners(),
+    ]);
+}
+
+function isPollingFinalization(state) {
+    return state.state === STATE.finalizing && Boolean(state.serverCompleting || state.jobId);
+}
+
+async function resumeUploadWork() {
+    const state = await getState();
+    if (await serverUnavailable()) return;
+    if (state.reconcilePending) return reconcileBufferedRecordings();
+    if (state.sessionId && isPollingFinalization(state)) {
+        const settings = await getSettings();
+        await pollFinalization(state, {
+            serverUrl: settings.serverUrl,
+            connectionId: settings.connectionId,
+            apiKey: await readToken(),
+        });
+    } else {
+        await pumpUploads();
+    }
+}
 
 chrome.storage.local
     .setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" })
@@ -260,8 +401,14 @@ const IDLE_STATE = Object.freeze({
     stopReason: "user",
     uploaded: [],
     blocked: false,
+    reconcilePending: false,
+    truncatedAtChunk: null,
+    startConnectionError: false,
+    connecting: false,
+    uploadNotice: null,
     recoverablePrefix: null,
     jobId: null,
+    serverCompleting: false,
     finalizingAt: null,
     recordingUrl: null,
     partial: false,
@@ -279,22 +426,24 @@ async function getState() {
 
 let stateUpdates = Promise.resolve();
 
-function setState(patch) {
-    const update = stateUpdates.catch(() => {}).then(() => writeState(patch));
+function setState(patch, owner) {
+    const update = stateUpdates.catch(() => {}).then(() => writeState(patch, owner));
     stateUpdates = update;
     return update;
 }
 
-async function writeState(patch) {
+async function writeState(patch, owner) {
     const current = await getState();
+    if (owner && !sameUploadOwner(current, owner)) return;
     const next = { ...current, ...patch };
     await chrome.storage.session.set({ [STATE_KEY]: next });
     chrome.runtime.sendMessage({ type: "state", state: next }).catch(() => {});
     await updateRecordingBadge(next);
+    if ("reconcilePending" in patch && patch.reconcilePending) void ensureConnectionAlarm().catch(() => {});
     if (["state", "tabId", "stopped"].some((key) => key in patch)) void updateNextMeetingBadge().catch(() => {});
     const bannerFields = [
         "state", "tabId", "startedAt", "stopped", "folderId", "folderLabel", "folderScope",
-        "recordingFolderOverride", "error", "agendaId",
+        "recordingFolderOverride", "error", "agendaId", "uploadNotice", "connecting",
     ];
     if (Object.keys(patch).some((key) => bannerFields.includes(key))) {
         // State writes must bypass bannerUpdates so capture never waits for a queued agenda lookup.
@@ -425,9 +574,7 @@ async function handleDesktopWindowClosed(windowId) {
         return;
     }
     if (
-        (state.state !== STATE.recording && state.state !== STATE.error) ||
-        state.stopped ||
-        !state.sessionId
+        !isLiveCapture(state)
     ) return;
     const stored = await listChunkIndices(state.bufferId ?? state.sessionId);
     if (stored.length === 0) {
@@ -447,9 +594,7 @@ async function reconcileDesktopWindow() {
     const state = await getState();
     if (state.captureMode !== "desktop" || state.captureWindowId == null) return;
     if (
-        state.state !== STATE.awaitingPicker &&
-        state.state !== STATE.recording &&
-        state.state !== STATE.error
+        state.state !== STATE.awaitingPicker && !isLiveCapture(state)
     ) return;
     const window = await chrome.windows.get(state.captureWindowId).catch(() => null);
     if (!window) await handleDesktopWindowClosed(state.captureWindowId);
@@ -532,7 +677,11 @@ async function startRecordingLocked({
             ...entry, bannerError: null, errorDismissed: false,
         } : entry);
     }
-    await prepareRecordingAgenda(tabId, fromPopup ? agendaId : bannerAgendaId);
+    try {
+        await prepareRecordingAgenda(tabId, fromPopup ? agendaId : bannerAgendaId);
+    } catch (error) {
+        if (!isConnectionError(error)) throw error;
+    }
     const apiKey = await readToken();
     if (!microphoneChecked && (await microphonePermission()) !== "granted") {
         return openStartRequest({
@@ -552,6 +701,7 @@ async function startRecordingLocked({
         tabId: tabId ?? null,
         platformHint: platformHint ?? null,
         error: null,
+        startConnectionError: false,
         micWarning: null,
         meetingBannerErrorDismissed: false,
         popupFolder: fromPopup && folderId !== undefined ? { folderId, folderLabel: folderLabel ?? null, folderScope: folderScope ?? null } : null,
@@ -592,11 +742,12 @@ async function startCapturedRecording({
     const agendaExplicit = supportsAgendas(settings) && selection?.serverUrl === settings.serverUrl && selection.connectionId === settings.connectionId && selection.explicit === true;
     const popupFolder = (await getState()).popupFolder;
     const selectedFolder = popupFolder ?? (selectedAgenda ? agendaFolder(selectedAgenda) : {});
-    if (settings.serverDefaults?.encryptedRecordingProtocol !== 1) {
+    const connecting = await serverUnavailable(settings);
+    if (settings.serverDefaults?.encryptedRecordingProtocol !== 1 && !connecting) {
         await setState({ state: STATE.error, error: t("encryptedServerRequired") });
         throw new Error(t("encryptedServerRequired"));
     }
-    const auth = { serverUrl: settings.serverUrl, apiKey: apiKey ?? await readToken() };
+    const auth = { serverUrl: settings.serverUrl, connectionId: settings.connectionId, apiKey: apiKey ?? await readToken() };
     const startedAt = new Date().toISOString();
     const clientRecordingId = crypto.randomUUID();
     const channelLayout =
@@ -617,6 +768,7 @@ async function startCapturedRecording({
         folderId: "folderId" in selectedFolder ? selectedFolder.folderId ?? undefined : settings.folderId ?? undefined,
         ...(settings.serverDefaults?.sessionAgenda === true && selectedAgenda?.permissions?.edit !== false && selectedAgenda ? { agendaId: selectedAgenda.id } : {}),
     };
+    if (connecting) await setState({ connecting: true });
     let session;
     let folderId = "folderId" in selectedFolder ? selectedFolder.folderId : settings.folderId ?? null;
     let folderLabel = "folderId" in selectedFolder ? selectedFolder.folderLabel ?? null : settings.folderLabel ?? null;
@@ -648,9 +800,12 @@ async function startCapturedRecording({
             (current.state === STATE.awaitingPicker &&
                 current.pickerRequestId === pickerRequestId)
         ) {
+            const connectionFailed = isConnectionError(error);
             await setState({
                 state: STATE.error,
-                error: error?.message ?? String(error),
+                connecting: false,
+                startConnectionError: connectionFailed,
+                error: connectionFailed ? null : error?.message ?? String(error),
             });
         }
         throw error;
@@ -705,6 +860,7 @@ async function startCapturedRecording({
                 ? meetingTarget((await chrome.tabs.get(tabId).catch(() => null))?.url)
                 : null,
             state: STATE.recording,
+            connecting: false,
             sessionId: session.id,
             bufferId: session.id,
             startedAt,
@@ -716,6 +872,7 @@ async function startCapturedRecording({
             stopReason: "user",
             uploaded: [],
             jobId: null,
+            serverCompleting: false,
             finalizingAt: null,
             captureMode,
             captureWindowId,
@@ -787,6 +944,7 @@ async function startCapturedRecording({
                 stopped: true,
                 blocked: true,
                 captureWindowId: null,
+                connecting: false,
                 error: error?.message ?? String(error),
             });
         }
@@ -801,6 +959,7 @@ async function startCapturedRecording({
             await setState({
                 state: STATE.error,
                 captureWindowId: null,
+                connecting: false,
                 error: error?.message ?? String(error),
             });
         }
@@ -811,48 +970,64 @@ async function startCapturedRecording({
     }
 }
 
+function isLiveCapture(state) {
+    return Boolean(state.sessionId && !state.stopped &&
+        (state.state === STATE.recording || state.captureMode === "tab" ||
+            (state.captureMode === "desktop" && state.captureWindowId != null)));
+}
+
 async function stopRecording(reason = "user", expected = null) {
-    await folderUpdates;
     const state = await getState();
     if (expected && (state.tabId !== expected.tabId || state.sessionId !== expected.sessionId)) throw new Error(t("unrecognizedSender"));
-    if (state.state !== STATE.recording) return;
+    if (!isLiveCapture(state)) return { ok: true };
     if (state.tabId != null) {
         await chrome.alarms.clear(`${ALARMS.quietPrefix}${state.tabId}`);
     }
     await setState({ stopReason: reason });
-    if (state.captureMode === "desktop") {
-        await messageDesktop("stop", state.pickerRequestId).catch(() =>
-            handleDesktopWindowClosed(state.captureWindowId),
-        );
-    } else {
-        await messageOffscreen("stop").catch(() => {});
+    const desktop = state.captureMode === "desktop";
+    const response = await (desktop
+        ? messageDesktop("stop", state.pickerRequestId)
+        : messageOffscreen("stop")).catch(() => null);
+    if (response?.ok === true) return { ok: true };
+    if (desktop) {
+        await reconcileDesktopWindow();
+        if (!isLiveCapture(await getState())) return { ok: true };
     }
-    // The capture host reports the final chunk count after its last write.
+    return { ok: false, error: response?.error || t("somethingWrong") };
 }
 
 let metaUpdates = Promise.resolve();
-let folderUpdates = Promise.resolve();
+let recordingMetadataUpdates = Promise.resolve();
 
-function updateLocalMeta(bufferId, patch) {
+function updateLocalMeta(bufferId, patch, owner) {
     const update = metaUpdates.catch(() => {}).then(async () => {
         const meta = await readLocalMeta(bufferId);
         if (!meta) throw new Error(t("recoveryUnavailable"));
         const { agendaTitle: _title, ...persistentPatch } = patch;
         const { agendaTitle: _previousTitle, ...persistentMeta } = meta;
-        await createLocalSession(bufferId, { ...persistentMeta, ...persistentPatch });
+        const next = { ...persistentMeta, ...persistentPatch };
+        if (owner) {
+            if (!sameUploadOwner(await getState(), owner)) return false;
+            await createLocalSession(bufferId, next, { create: false });
+        } else {
+            await createLocalSession(bufferId, next);
+        }
+        return true;
     });
     metaUpdates = update;
     return update;
 }
 
 async function applyRecordingFolder(state, folder, remember = true) {
-    await updateLocalMeta(state.bufferId ?? state.sessionId, folder);
-    await setState(folder);
+    if (!(await updateLocalMeta(state.bufferId ?? state.sessionId, folder, state)) ||
+        !(await setState(folder, state))) return false;
     if (remember) await saveSettings(folder);
+    return true;
 }
 
 function updateRecordingFolder(message, sender) {
-    const update = folderUpdates.catch(() => {}).then(async () => {
+    const requestedState = getState().catch(() => null);
+    const update = recordingMetadataUpdates.then(async () => {
         const state = await getState();
         const popup = [POPUP_URL, "agenda/agenda.html"].some((path) => sender.url?.split("?")[0] === chrome.runtime.getURL(path));
         const pickerUrl = chrome.runtime.getURL("picker/picker.html");
@@ -863,7 +1038,7 @@ function updateRecordingFolder(message, sender) {
         if (!popup && !picker && !(await validMeetingBannerSender(sender, state))) throw new Error(t("unrecognizedSender"));
         const settings = await getSettings();
         if (state.sessionId !== message.sessionId || state.state !== STATE.recording ||
-            state.stopped || !state.recordingFolderOverride ||
+            !wasQueuedDuringCapture(await requestedState, state) || !state.recordingFolderOverride ||
             settings.serverDefaults?.recordingFolderOverride !== true) {
             throw new Error(t("folderChangeFailed"));
         }
@@ -877,10 +1052,10 @@ function updateRecordingFolder(message, sender) {
                 ? message.folderLabel : null,
             folderScope: message.folderId && ["personal", "org"].includes(message.folderScope) ? message.folderScope : null,
         };
-        await applyRecordingFolder(state, folder, message.remember !== false);
+        if (!(await applyRecordingFolder(state, folder, message.remember !== false))) throw new Error(t("folderChangeFailed"));
         return { ok: true };
     });
-    folderUpdates = update.catch(() => {});
+    recordingMetadataUpdates = update.catch(() => {});
     return update;
 }
 
@@ -911,7 +1086,7 @@ async function healStoppedUpload() {
     const state = await getState();
     if (
         !state.sessionId || !state.stopped || state.blocked ||
-        !(state.state === STATE.recording || (state.state === STATE.finalizing && !state.jobId))
+        !(state.state === STATE.recording || (state.state === STATE.finalizing && !isPollingFinalization(state)))
     ) return false;
     await pumpUploads();
     return true;
@@ -921,10 +1096,15 @@ async function pumpUploadsOnce() {
     try {
         for (;;) {
             const state = await getState();
-            if (!canPumpUploads(state)) break;
+            if (!canPumpUploads(state) || state.reconcilePending || await serverUnavailable()) break;
+            if (state.stopped && state.truncatedAtChunk) {
+                await finalize(state.truncatedAtChunk);
+                break;
+            }
             const settings = await getSettings();
             const auth = {
                 serverUrl: settings.serverUrl,
+                connectionId: settings.connectionId,
                 apiKey: await readToken(),
             };
 
@@ -984,16 +1164,14 @@ async function pumpUploadsOnce() {
                     if (!sameUploadOwner(await getState(), state)) return;
                     if (error?.status && ![429, 500, 502, 503, 504].includes(error.status)) {
                         await setState({
-                            state: STATE.error,
+                            ...(isLiveCapture(await getState())
+                                ? { uploadNotice: retryErrorMessage(error) }
+                                : { state: STATE.error, error: retryErrorMessage(error) }),
                             blocked: true,
-                            recoverablePrefix:
-                                [409, 413, 422].includes(error.status) && index > 0
-                                    ? index
-                                    : null,
-                            error: retryErrorMessage(error),
+                            recoverablePrefix: [409, 413, 422].includes(error.status) && index > 0 ? index : null,
                         });
                     } else {
-                        await setState({ uploadNotice: retryErrorMessage(error) });
+                        await setState({ uploadNotice: isConnectionError(error) ? null : retryErrorMessage(error) });
                         await scheduleUploadRetry(state.bufferId ?? state.sessionId, error);
                     }
                     break;
@@ -1002,11 +1180,11 @@ async function pumpUploadsOnce() {
             if (!progressed) break;
         }
     } catch (error) {
-        await setState({
-            state: STATE.error,
-            blocked: true,
-            error: error?.message ?? t("recoveryUnavailable"),
-        });
+        const state = await getState();
+        const message = error?.message ?? t("recoveryUnavailable");
+        await setState(isLiveCapture(state)
+            ? { blocked: true, uploadNotice: message }
+            : { state: STATE.error, blocked: true, error: message });
     }
 }
 
@@ -1025,6 +1203,10 @@ function sameUploadOwner(current, expected) {
         (current.bufferId ?? current.sessionId) === (expected.bufferId ?? expected.sessionId);
 }
 
+function wasQueuedDuringCapture(requested, current) {
+    return requested?.state === STATE.recording && !requested.stopped && sameUploadOwner(current, requested);
+}
+
 let finalization = null;
 
 function finalize(truncatedAtChunk = null) {
@@ -1037,10 +1219,23 @@ function finalize(truncatedAtChunk = null) {
 }
 
 async function finalizeOnce(truncatedAtChunk) {
-    await folderUpdates;
     const state = await getState();
     if (!state.sessionId || !state.stopped) return;
-    if (state.state === STATE.finalizing && state.jobId) return;
+    if (isPollingFinalization(state)) return;
+    const metadata = recordingMetadataUpdates;
+    let timer;
+    const drained = await Promise.race([
+        metadata.then(() => true),
+        new Promise(resolve => { timer = setTimeout(() => resolve(false), METADATA_DRAIN_MS); }),
+    ]);
+    clearTimeout(timer);
+    if (!drained) {
+        await ensureUploadRetryAlarm();
+        void metadata.then(pumpUploads).catch(() => {});
+        return;
+    }
+    const ready = await getState();
+    if (!sameUploadOwner(ready, state)) return;
 
     await setState({
         state: STATE.finalizing,
@@ -1048,16 +1243,16 @@ async function finalizeOnce(truncatedAtChunk) {
     });
     try {
         const settings = await getSettings();
-        const auth = { serverUrl: settings.serverUrl, apiKey: await readToken() };
+        const auth = { serverUrl: settings.serverUrl, connectionId: settings.connectionId, apiKey: await readToken() };
         const body = {
             chunkCount: state.chunkCount,
             ...(truncatedAtChunk ? { truncatedAtChunk } : {}),
             endedAt: new Date().toISOString(),
             stopReason: state.stopReason,
-            ...agendaCompletion(settings, state),
+            ...agendaCompletion(settings, ready),
             ...(settings.serverDefaults?.recordingFolderOverride === true &&
-                state.recordingFolderOverride === true
-                ? { folderId: state.folderId ?? null }
+                ready.recordingFolderOverride === true
+                ? { folderId: ready.folderId ?? null }
                 : {}),
         };
         let result;
@@ -1073,7 +1268,7 @@ async function finalizeOnce(truncatedAtChunk) {
                     folderId: state.startFolderId ?? null,
                     folderLabel: state.startFolderLabel ?? null,
                     folderScope: state.startFolderScope ?? null,
-                }, !state.agendaExplicit || !state.agendaId);
+                }, !ready.agendaExplicit || !ready.agendaId);
             } else {
                 throw error;
             }
@@ -1081,17 +1276,23 @@ async function finalizeOnce(truncatedAtChunk) {
         if (!sameUploadOwner(await getState(), state)) return;
         const agendaUnavailable = result.agenda?.attached === false && result.agenda.reason === "unavailable";
         if (agendaUnavailable) await updateLocalMeta(state.bufferId ?? state.sessionId, { agendaUnavailable });
-        await setState({ jobId: result.job_id ?? null, agendaUnavailable });
+        await setState({
+            jobId: result.job_id ?? null,
+            serverCompleting: result.status === "completing" || result.status === "completed",
+            agendaUnavailable,
+        });
 
-        await reconcileServerSession(state.sessionId, auth);
+        await pollFinalization(state, auth);
     } catch (error) {
         if (!sameUploadOwner(await getState(), state)) return;
         const blocked = Boolean(error?.status && ![429, 500, 502, 503, 504].includes(error.status));
-        await setState({
-            state: STATE.error,
-            blocked,
-            error: retryErrorMessage(error, t("finalizeFailed")),
-        });
+        if (!isConnectionError(error)) {
+            await setState({
+                state: STATE.error,
+                blocked,
+                error: retryErrorMessage(error, t("finalizeFailed")),
+            });
+        }
         if (!blocked) await scheduleUploadRetry(state.bufferId ?? state.sessionId, error);
     }
 }
@@ -1120,6 +1321,27 @@ async function ensureUploadRetryAlarm(delayInMinutes = 0.5) {
     await chrome.alarms.create(ALARMS.uploadRetry, { delayInMinutes });
 }
 
+async function pollFinalization(state, auth) {
+    try {
+        await reconcileServerSession(state.sessionId, auth);
+    } catch (error) {
+        const current = await getState();
+        if (!sameUploadOwner(current, state) || current.state !== STATE.finalizing) return;
+        if (error?.status && ![429, 500, 502, 503, 504].includes(error.status)) {
+            await setState({
+                state: STATE.error,
+                blocked: true,
+                error: retryErrorMessage(error, t("finalizeFailed")),
+            });
+        } else if (isConnectionError(error)) {
+            await ensureConnectionAlarm();
+        } else {
+            await setState({ uploadNotice: retryErrorMessage(error, t("finalizeFailed")) });
+            await ensureUploadRetryAlarm(Math.max(1, (error?.retryAfterSeconds ?? 0) / 60));
+        }
+    }
+}
+
 async function reconcileServerSession(sessionId, auth) {
     const pending = pendingReconciliations.get(sessionId);
     if (pending) return pending;
@@ -1136,26 +1358,31 @@ async function reconcileServerSession(sessionId, auth) {
 
 async function reconcileServerSessionOnce(sessionId, auth) {
     const remote = await getSession(auth, sessionId);
+    const state = await getState();
+    if (state.sessionId !== sessionId || state.state === STATE.completed) return;
     if (remote.status === "completing") {
+        const jobId = remote.job_id ?? state.jobId ?? null;
+        if (!state.serverCompleting || state.jobId !== jobId || state.uploadNotice)
+            await setState({ serverCompleting: true, jobId, uploadNotice: null });
         await ensureUploadRetryAlarm();
         return;
     }
     if (remote.status === "completed") {
-        if (!remote.recording_id) {
+        if (typeof remote.recording_id !== "string" || !remote.recording_id.trim()) {
             await setState({
                 state: STATE.error,
+                blocked: true,
                 error: "Server confirmed completion without a recording ID",
             });
             return;
         }
-        const state = await getState();
-        if (state.sessionId !== sessionId || state.state === STATE.completed) return;
         const url = new URL("/dashboard", auth.serverUrl);
         url.searchParams.set("recording", remote.recording_id);
         const recordingUrl = url.href;
-        await deleteLocalSession(state.bufferId ?? sessionId);
+        await safe(deleteLocalSession(state.bufferId ?? sessionId));
         await setState({
             state: STATE.completed,
+            uploadNotice: null,
             recordingUrl,
             partial: Boolean(remote.truncated_at_chunk),
         });
@@ -1208,7 +1435,9 @@ async function navigateToRecording(serverUrl, recordingUrl, preferredTabId) {
 
 async function cachedBannerAgendas(tab, settings) {
     const cached = (await chrome.storage.session.get(`agenda-match:${tab.id}`))[`agenda-match:${tab.id}`];
-    return cached?.target === JSON.stringify(meetingTarget(tab.url)) && cached.serverUrl === settings.serverUrl && cached.connectionId === settings.connectionId && Date.now() - cached.at < 60000 ? cached.agendas.filter(row => (supportsAgendaRooms(settings) && row.roomBound) || currentAgendas([row]).length) : [];
+    if (!sameConnection(cached, settings) || cached.target !== JSON.stringify(meetingTarget(tab.url))) return [];
+    if (await serverUnavailable(settings)) return cached.agendas;
+    return cached.agendas.filter(row => (supportsAgendaRooms(settings) && row.roomBound) || currentAgendas([row]).length);
 }
 
 async function bannerAgendas(tab, { strict = false } = {}) {
@@ -1216,21 +1445,20 @@ async function bannerAgendas(tab, { strict = false } = {}) {
     const target = JSON.stringify(meetingTarget(tab.url));
     const cached = (await chrome.storage.session.get(key))[key];
     const settings = await getSettings();
-    if (cached?.target === target && cached.serverUrl === settings.serverUrl && cached.connectionId === settings.connectionId && Date.now() - cached.at < 60000) return cachedBannerAgendas(tab, settings);
-    const controller = new AbortController();
-    let timer;
+    if (!strict && (await serverUnavailable(settings) ||
+        (sameConnection(cached, settings) && cached.target === target && Date.now() - cached.at < 60000))) {
+        return cachedBannerAgendas(tab, settings);
+    }
     try {
-        const room = await Promise.race([
-            matchAgendaRoom(tab.url, Date.now(), { signal: controller.signal }),
-            new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error("Agenda match timed out")); }, strict ? 10000 : 1000); }),
-        ]);
-        if (controller.signal.aborted) throw new Error("Agenda match timed out");
+        const room = await matchAgendaRoom(tab.url, Date.now(), {}, { timeoutMs: strict ? 10000 : 1000 });
         const freshTab = await chrome.tabs.get(tab.id).catch(() => null);
         if (freshTab && JSON.stringify(meetingTarget(freshTab.url)) === target)
             await chrome.storage.session.set({ [key]: { target, serverUrl: settings.serverUrl, connectionId: settings.connectionId, at: Date.now(), agendas: room.data, restricted: room.restricted, invitations: room.invitations } });
         return room.data;
-    } catch (error) { if (strict) throw error; return []; }
-    finally { clearTimeout(timer); }
+    } catch (error) {
+        if (strict) throw error;
+        return isConnectionError(error) ? cachedBannerAgendas(tab, settings) : [];
+    }
 }
 
 async function prepareRecordingAgenda(tabId, shownAgendaId) {
@@ -1249,7 +1477,7 @@ async function prepareRecordingAgenda(tabId, shownAgendaId) {
     const matches = cached?.target === target && cached.serverUrl === settings.serverUrl && cached.connectionId === settings.connectionId
         ? currentAgendas(cached.agendas) : [];
     let agenda = shown ? matches.find((row) => row.id === shown) : null;
-    if (!agenda && shown) {
+    if (!agenda && shown && !(await serverUnavailable(settings))) {
         const loaded = await agendaRequest(`/${encodeURIComponent(shown)}`);
         if (loaded.permissions?.edit) agenda = { ...loaded, start: loaded.plannedStart, end: loaded.plannedEnd };
     }
@@ -1264,12 +1492,13 @@ async function prepareRecordingAgenda(tabId, shownAgendaId) {
 
 function handleAgendaMessage(message, sender) {
     if (!["select-agenda", "edit-agenda"].includes(message.type)) return handleAgendaMessageNow(message, sender);
-    const update = folderUpdates.catch(() => {}).then(() => handleAgendaMessageNow(message, sender));
-    folderUpdates = update.catch(() => {});
+    const requestedState = message.sessionId ? getState().catch(() => null) : null;
+    const update = recordingMetadataUpdates.then(async () => handleAgendaMessageNow(message, sender, await requestedState));
+    recordingMetadataUpdates = update.catch(() => {});
     return update;
 }
 
-async function handleAgendaMessageNow(message, sender) {
+async function handleAgendaMessageNow(message, sender, requestedState = null) {
     if (sender.id !== chrome.runtime.id ||
         ![POPUP_URL, "agenda/agenda.html"].some((path) => sender.url?.split("?")[0] === chrome.runtime.getURL(path))) throw new Error(t("unrecognizedSender"));
     const settings = await getSettings();
@@ -1278,6 +1507,7 @@ async function handleAgendaMessageNow(message, sender) {
     if (["room-presence", "room-agendas"].includes(message.type)) {
         if (sender.url?.split("?")[0] !== chrome.runtime.getURL("agenda/agenda.html") || !supportsAgendaRooms(settings) || !meetCode(tab?.url)) return { ok: true, data: [], restricted: false, invitations: [] };
         if (message.type === "room-presence") {
+            if (await serverUnavailable(settings)) return { ok: true, retryAfterMs: 30000 };
             const panelTab = new URL(sender.url).searchParams.get("tab");
             if ((panelTab !== null && !openPanels.has(Number(panelTab))) || message.roomCode !== meetCode(tab.url)) return { ok: true };
             const result = await agendaRequest("/presence", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ meetCode: meetCode(tab.url), agendaId: message.agendaId ?? null }) });
@@ -1301,6 +1531,31 @@ async function handleAgendaMessageNow(message, sender) {
             (selected.target === target || selected.target === "null") && Date.now() - selected.at < 15 * 60000;
         return { ok: true, agendas, ...(binding ? { selectedAgenda: agendas[0] ?? null } : hasSelection ? { selectedAgenda: selected.agenda } : {}) };
     }
+    const edit = message.type === "edit-agenda" ? message.edit : null;
+    let saved;
+    if (edit) {
+        if (!isExtensionPage(sender.url, "agenda/agenda.html") ||
+            typeof message.agendaId !== "string" || !message.agendaId ||
+            typeof edit.path !== "string" || !edit.body || typeof edit.body !== "object")
+            throw new Error(t("agendaFailed"));
+        saved = await saveAgendaEdit(message.agendaId, edit.path, edit.body);
+        const state = await getState();
+        const canLink = state.agendaId
+            ? state.agendaId !== message.agendaId && !state.agendaOwn
+            : !state.agendaExplicit;
+        if (!canLink || !wasQueuedDuringCapture(requestedState, state) ||
+            message.sessionId !== state.sessionId || message.tabId !== state.tabId) return { ok: true, saved };
+    }
+    try {
+        const agenda = await linkRecordingAgenda(message, settings, tab, requestedState);
+        return { ok: true, agenda, saved };
+    } catch (error) {
+        if (!edit) throw error;
+        return { ok: true, saved, linkError: t("agendaFailed") };
+    }
+}
+
+async function linkRecordingAgenda(message, settings, tab, requestedState) {
     let agenda = null;
     if (message.agendaId != null) {
         agenda = await agendaRequest(`/${encodeURIComponent(message.agendaId)}`);
@@ -1309,16 +1564,20 @@ async function handleAgendaMessageNow(message, sender) {
     }
     const state = await getState();
     if (message.sessionId) {
-        if (state.sessionId !== message.sessionId || !canChooseRecordingAgenda(state)) throw new Error(t("agendaFailed"));
-        if (message.type === "edit-agenda" && (message.tabId !== state.tabId || !shouldLinkEditedAgenda(state, agenda))) return { ok: true, agenda };
-        if (settings.serverDefaults?.sessionAgenda === true && state.state === STATE.recording && !state.stopped) {
-            await setSessionAgenda({ serverUrl: settings.serverUrl, apiKey: await readToken() }, state.sessionId, agenda?.id ?? null);
-        }
+        const metadataState = state.stopped && wasQueuedDuringCapture(requestedState, state) &&
+            (state.state === STATE.recording || (state.state === STATE.error && state.blocked))
+            ? { ...state, state: STATE.recording, stopped: false } : state;
+        if (state.sessionId !== message.sessionId || !canChooseRecordingAgenda(metadataState)) throw new Error(t("agendaFailed"));
+        if (message.type === "edit-agenda" && (message.tabId !== state.tabId || !shouldLinkEditedAgenda(metadataState, agenda))) return agenda;
+        const announce = settings.serverDefaults?.sessionAgenda === true && metadataState.state === STATE.recording;
+        const announceAgenda = async () => setSessionAgenda({ serverUrl: settings.serverUrl, connectionId: settings.connectionId, apiKey: await readToken() }, state.sessionId, agenda?.id ?? null);
+        if (announce && !message.edit) await announceAgenda();
         const patch = { agendaId: agenda?.id ?? null, agendaTitle: agenda?.title ?? null, agendaOwn: agenda?.own === true, agendaExplicit: true,
             folderId: settings.folderId, folderLabel: settings.folderLabel, folderScope: settings.folderScope,
             ...agendaFolder(agenda) };
-        await updateLocalMeta(state.bufferId ?? state.sessionId, patch);
-        await setState(patch);
+        if (!(await updateLocalMeta(state.bufferId ?? state.sessionId, patch, state)) ||
+            !(await setState(patch, state))) throw new Error(t("agendaFailed"));
+        if (announce && message.edit && !state.stopped) await announceAgenda();
     } else {
         const target = JSON.stringify(meetingTarget(tab?.url));
         await chrome.storage.session.set({ [AGENDA_SELECTION_KEY]: { serverUrl: settings.serverUrl, connectionId: settings.connectionId, target, at: Date.now(), agenda, explicit: true } });
@@ -1327,7 +1586,7 @@ async function handleAgendaMessageNow(message, sender) {
         const binding = await joinedMeeting(tab, settings);
         if (binding) await chrome.storage.session.set({ [`meeting-tab:${tab.id}`]: { ...binding, agendaId: agenda?.id ?? null } });
     }
-    return { ok: true, agenda };
+    return agenda;
 }
 
 async function resolvePanelAgenda(message, sender, meeting, opened) {
@@ -1498,6 +1757,10 @@ async function dismissMeetingBanner(tabId) {
 }
 
 async function showMeetingBannerError(tabId, meetingUrl, error) {
+    if (isConnectionError(error)) {
+        await syncMeetingBannerNow(tabId, true);
+        return;
+    }
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab || !isPromptMeeting(tab.url) || !sameMeetingTarget(meetingUrl, tab.url) ||
         !(await hasMeetingPromptAccess())) return;
@@ -1519,6 +1782,8 @@ function syncMeetingBanner(tabId, cachedOnly = false) {
 async function syncMeetingBannerNow(tabId, cachedOnly = false) {
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     const settings = await getSettings();
+    const connection = await readServerConnection(settings);
+    const disconnected = connection && connection.state !== "ok";
     const enabled = tab && isPromptMeeting(tab.url) && settings.dataUseAcknowledgedAt &&
         await isPaired() && await hasMeetingPromptAccess();
     const binding = await joinedMeeting(tab, settings);
@@ -1530,20 +1795,26 @@ async function syncMeetingBannerNow(tabId, cachedOnly = false) {
     const agendaRoute = tab ? await routeAgendaTab(tab, settings, state, cachedOnly || !enabled || !settings.agendaBanner ? await cachedBannerAgendas(tab, settings) : agendas) : false;
     const ownRecording = state.tabId === tabId &&
         (!state.meetingTarget || sameMeetingTarget(state.meetingTarget, tab?.url));
-    if (enabled && ownRecording && state.state !== STATE.idle) {
-        await updateArmedTab(tabId, (current) => current ? {
-            ...current, bannerPrompt: false, promptVisible: false, nudged: true, dismissed: true,
-        } : null);
-        const recording = state.state === STATE.recording && !state.stopped;
-        const view = state.state === STATE.error ? "error" : recording ? "recording" :
+    if (enabled && ownRecording && state.state !== STATE.idle && !(state.startConnectionError && !disconnected)) {
+        if (state.sessionId || (state.state === STATE.error && !state.startConnectionError)) {
+            await updateArmedTab(tabId, (current) => current ? {
+                ...current, bannerPrompt: false, promptVisible: false, nudged: true, dismissed: true,
+            } : null);
+        }
+        const recording = isLiveCapture(state);
+        const view = recording ? "recording" : state.state === STATE.error ? "error" :
             state.state === STATE.awaitingPicker ? "waiting" : "stopped";
         if (view === "error" && (entry?.errorDismissed || state.meetingBannerErrorDismissed)) {
             await sendMeetingBanner(tabId, { view: "hidden" });
-        } else await sendMeetingBanner(tabId, { view, state: {
+        } else await sendMeetingBanner(tabId, { view,
+            connection: connectionNotice(connection, { recording, starting: state.startConnectionError || state.connecting }),
+            state: {
             state: state.state,
             sessionId: state.sessionId,
             startedAt: state.startedAt,
             stopped: state.stopped,
+            connecting: state.connecting,
+            uploadNotice: state.uploadNotice,
             folderId: state.folderId,
             folderLabel: state.folderLabel,
             folderScope: state.folderScope ?? null,
@@ -1569,6 +1840,7 @@ async function syncMeetingBannerNow(tabId, cachedOnly = false) {
         ]);
         const response = await sendMeetingBanner(tabId, {
             view: "prompt",
+            connection: connectionNotice(connection),
             agendas,
             agendaPanel: agendaRoute,
             notice: effectiveNoticeText(settings),
@@ -1584,6 +1856,7 @@ async function syncMeetingBannerNow(tabId, cachedOnly = false) {
         } : null);
         await applyArmedUi(tabId, platformById(entry.platformId), entry.mode, next?.promptVisible);
         if (next?.promptVisible) {
+            if (disconnected) void ensureConnectionAlarm().catch(() => {});
             await chrome.notifications.clear(`${NUDGE_PREFIX}${tabId}`).catch(() => {});
         } else if (next?.bannerPrompt && !next.notificationFallback) {
             await notifyMeetingNudge(tabId, platformById(entry.platformId), settings);
@@ -1607,8 +1880,7 @@ async function handleMeetingBannerMessage(message, sender) {
     }
     if (message.type === "stop-recording") {
         if (state.tabId !== tabId || state.sessionId !== message.sessionId) throw new Error(t("unrecognizedSender"));
-        await stopRecording("user", { tabId, sessionId: message.sessionId });
-        return { ok: true };
+        return stopRecording("user", { tabId, sessionId: message.sessionId });
     }
     if (message.type === "set-recording-folder") {
         if (state.tabId !== tabId) throw new Error(t("unrecognizedSender"));
@@ -1620,7 +1892,7 @@ async function handleMeetingBannerMessage(message, sender) {
             throw new Error(t("folderChangeFailed"));
         }
         const settings = await getSettings();
-        const auth = { serverUrl: settings.serverUrl, apiKey: await readToken() };
+        const auth = { serverUrl: settings.serverUrl, connectionId: settings.connectionId, apiKey: await readToken() };
         try {
             const folders = typeof message.id === "string" ? await getRecorderFolder(auth, message.id) :
                 typeof message.q === "string" ? await searchRecorderFolders(auth, message.q) : [];
@@ -1640,7 +1912,7 @@ async function handleMeetingBannerMessage(message, sender) {
         return { ok: true };
     }
     if (!entry?.promptVisible || !entry.bannerPrompt) throw new Error(t("unrecognizedSender"));
-    await dismissMeetingBanner(tabId);
+    if (message.type === "meeting-banner-dismiss") await dismissMeetingBanner(tabId);
     if (message.type === "meeting-banner-dialog") {
         try {
             await startRecording({ tabId, platformHint: entry.platformId, auto: entry.mode === "auto",
@@ -1885,7 +2157,7 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
     await disarm(tabId);
     await chrome.alarms.clear(`${ALARMS.quietPrefix}${tabId}`);
     const state = await getState();
-    if (state.state === STATE.recording && state.tabId === tabId) {
+    if (isLiveCapture(state) && state.tabId === tabId) {
         await stopRecording("tab-closed");
     }
 });
@@ -1927,7 +2199,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
  */
 async function startFromInvocation(tab) {
     const state = await getState();
-    if (state.state === STATE.recording && state.tabId === tab.id) {
+    if ((state.state === STATE.recording || isLiveCapture(state)) && !state.stopped && state.tabId === tab.id) {
         await stopRecording("user");
         return;
     }
@@ -2020,7 +2292,7 @@ chrome.action.onClicked.addListener((tab) => {
 chrome.commands.onCommand.addListener(async (command) => {
     if (command !== "toggle-recording") return;
     const state = await getState();
-    if (state.state === STATE.recording) {
+    if (isLiveCapture(state)) {
         await stopRecording("user");
         return;
     }
@@ -2055,17 +2327,14 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         await refreshAgendas().catch(() => {});
         return;
     }
+    if (alarm.name === CONNECTION_ALARM) {
+        if (await needsConnectionProbe() && await connectionHasWaiters()) await probeConnection().catch(() => {});
+        else await chrome.alarms.clear(CONNECTION_ALARM);
+        return;
+    }
     if (alarm.name === ALARMS.uploadRetry) {
-        const state = await getState();
-        if (state.sessionId && state.state === STATE.finalizing && state.jobId) {
-            const settings = await getSettings();
-            await reconcileServerSession(state.sessionId, {
-                serverUrl: settings.serverUrl,
-                apiKey: await readToken(),
-            }).catch(() => ensureUploadRetryAlarm(1));
-        } else {
-            await pumpUploads();
-        }
+        if (await serverUnavailable()) await ensureConnectionAlarm();
+        else await resumeUploadWork();
         return;
     }
     if (alarm.name === ALARMS.configRefresh) {
@@ -2084,7 +2353,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         }
         const tab = await chrome.tabs.get(tabId).catch(() => null);
         if (tab?.audible) return; // sound came back; a new quiet clock will start
-        await stopRecording("auto-quiet");
+        if (!(await stopRecording("auto-quiet")).ok) return;
         await notify(
             t("recordingStopped"),
             t("recordingStoppedBody"),
@@ -2285,6 +2554,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
     }
 
+    if (["recorder-connection-watch", "recorder-connection-retry", "recorder-connection-outcome"].includes(message.type)) {
+        const page = sender.id === chrome.runtime.id && CONNECTION_PAGES.some((path) => isExtensionPage(sender.url, path));
+        const banner = message.type === "recorder-connection-retry" && !page;
+        (async () => {
+            if (!page && !(banner && await validMeetingBannerSender(sender))) return { ok: false };
+            if (message.type === "recorder-connection-outcome") await queueConnectionOutcome(message.outcome);
+            else if (message.type === "recorder-connection-watch") await ensureConnectionAlarm();
+            else if (!(await probeConnection())) return { ok: false, error: t("connectFirst") };
+            return { ok: true };
+        })().then(sendResponse, (error) => sendResponse({
+            ok: false,
+            error: error?.message ?? t("recoveryUnavailable"),
+        }));
+        return true;
+    }
+
     const meetingControl = sender.tab &&
         !sender.url?.startsWith(chrome.runtime.getURL("")) &&
         ["get-folders", "set-recording-folder", "stop-recording"].includes(message.type);
@@ -2307,7 +2592,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case "room-agendas":
         case "edit-agenda":
             handleAgendaMessage(message, sender).then(sendResponse)
-                .catch(() => sendResponse({ ok: false, error: t("agendaFailed") }));
+                .catch(error => sendResponse({
+                    ok: false,
+                    error: t("agendaFailed"),
+                    ...(message.edit ? { kind: error?.kind, status: error?.status } : {}),
+                }));
             return true;
         case "resume-recording":
             resumeRecording(message, sender)
@@ -2322,7 +2611,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             handleDesktopPickerMessage(message, sender)
                 .then(sendResponse)
                 .catch((error) =>
-                    sendResponse({ ok: false, error: error?.message ?? String(error) }),
+                    sendResponse({ ok: false, ...(isConnectionError(error) ? { connection: true } : {}), error: error?.message ?? String(error) }),
                 );
             return true;
 
@@ -2343,6 +2632,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 .then(async (settings) => {
                     const auth = {
                         serverUrl: settings.serverUrl,
+                        connectionId: settings.connectionId,
                         apiKey: await readToken(),
                     };
                     if (typeof message.id === "string")
@@ -2379,13 +2669,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             startRecording({ ...message.payload, fromPopup: true, auto: false })
                 .then((result) => sendResponse({ ok: true, ...result }))
                 .catch((error) =>
-                    sendResponse({ ok: false, error: error?.message ?? String(error) }),
+                    sendResponse({ ok: false, ...(isConnectionError(error) ? { connection: true } : {}), error: error?.message ?? String(error) }),
                 );
             return true;
 
         case "stop-recording":
             stopRecording(message.reason ?? "user")
-                .then(() => sendResponse({ ok: true }))
+                .then(sendResponse)
                 .catch((error) =>
                     sendResponse({ ok: false, error: error?.message ?? String(error) }),
                 );
@@ -2402,13 +2692,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case "check-finalization":
             getState()
                 .then(async (state) => {
+                    if (await serverUnavailable()) return;
                     if (await healStoppedUpload()) return;
-                    if (state.state !== STATE.finalizing || !state.sessionId || !state.jobId) {
+                    if (!state.sessionId || !isPollingFinalization(state)) {
                         return;
                     }
                     const settings = await getSettings();
-                    await reconcileServerSession(state.sessionId, {
+                    await pollFinalization(state, {
                         serverUrl: settings.serverUrl,
+                        connectionId: settings.connectionId,
                         apiKey: await readToken(),
                     });
                 })
@@ -2425,7 +2717,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return true;
 
         case "discard-session":
-            discardSession(message.sessionId)
+            getState().then(async (state) => {
+                if (state.sessionId !== message.sessionId) throw new Error(t("recoveryUnavailable"));
+                if (message.sessionId) await discardBuffer(state.bufferId ?? state.sessionId);
+                else await resetState();
+            })
                 .then(() => sendResponse({ ok: true }))
                 .catch((error) =>
                     sendResponse({ ok: false, error: error?.message ?? String(error) }),
@@ -2442,7 +2738,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             (message.type === "retry-buffer" ? retryBuffer(message.bufferId) : discardBuffer(message.bufferId))
                 .then(() => sendResponse({ ok: true }))
                 .catch((error) =>
-                    sendResponse({ ok: false, error: retryErrorMessage(error) }),
+                    sendResponse({ ok: false, ...(isConnectionError(error) ? { connection: true } : {}), error: retryErrorMessage(error) }),
                 );
             return true;
 
@@ -2561,10 +2857,12 @@ async function handleRecordingStopped(message) {
         { length: message.chunkCount },
         (_, index) => index,
     ).find((index) => !available.has(index));
+    const latest = await getState();
     await setState({
         stopped: true,
         chunkCount: message.chunkCount,
-        recoverablePrefix: firstMissing && firstMissing > 0 ? firstMissing : null,
+        ...(latest.blocked ? { state: STATE.error, error: latest.error ?? latest.uploadNotice, uploadNotice: null } : {}),
+        recoverablePrefix: latest.recoverablePrefix ?? (firstMissing && firstMissing > 0 ? firstMissing : null),
     });
     if (state.captureMode === "desktop" && state.captureWindowId != null) {
         await chrome.windows.update(state.captureWindowId, {
@@ -2591,7 +2889,8 @@ async function savePlayablePrefixOnce(chunkCount) {
     ) {
         throw new Error("No verified playable prefix is available");
     }
-    await setState({ blocked: false });
+    await updateLocalMeta(state.bufferId ?? state.sessionId, { truncatedAtChunk: chunkCount });
+    await setState({ blocked: false, truncatedAtChunk: chunkCount });
     await finalize(chunkCount);
 }
 
@@ -2602,20 +2901,22 @@ function retryUpload() {
 async function retryUploadOnce() {
     const state = await getState();
     if (!state.sessionId) return;
+    if (isLiveCapture(state)) throw new Error(t("retryBufferCaptureLive"));
     const settings = await getSettings();
-    const auth = { serverUrl: settings.serverUrl, apiKey: await readToken() };
+    const auth = { serverUrl: settings.serverUrl, connectionId: settings.connectionId, apiKey: await readToken() };
     let remote = await getSession(auth, state.sessionId);
     if (!sameUploadOwner(await getState(), state)) throw new Error(t("retryBufferBusy"));
     if (remote.status === "completed" || remote.status === "completing") {
         await setState({
             state: STATE.finalizing,
             jobId: remote.job_id ?? null,
+            serverCompleting: true,
             finalizingAt: new Date().toISOString(),
             error: null,
             uploadNotice: null,
             blocked: false,
         });
-        await reconcileServerSession(state.sessionId, auth);
+        await pollFinalization(state, auth);
         return;
     }
     if (remote.status === "aborted" || remote.status === "failed") {
@@ -2632,12 +2933,14 @@ async function retryUploadOnce() {
     if (!sameUploadOwner(await getState(), state)) throw new Error(t("retryBufferBusy"));
     await setState({
         bufferId: state.bufferId ?? state.sessionId,
-        sessionId: remote.id,
+        sessionId: remote.id ?? state.sessionId,
         uploaded: remote.received_chunks ?? [],
         blocked: false,
+        reconcilePending: false,
         recoverablePrefix: null,
         state: STATE.error,
         jobId: null,
+        serverCompleting: false,
         error: null,
         uploadNotice: null,
     });
@@ -2684,7 +2987,7 @@ function transitionBuffer(change) {
 
 async function assertBufferRetryAllowed(bufferId) {
     const state = await getState();
-    if (starting || state.state === STATE.awaitingPicker || (state.state === STATE.recording && !state.stopped)) {
+    if (starting || state.state === STATE.awaitingPicker || isLiveCapture(state)) {
         throw new Error(t("retryBufferCaptureLive"));
     }
     if ((state.bufferId ?? state.sessionId) !== bufferId && state.sessionId &&
@@ -2715,7 +3018,7 @@ async function retryBufferOnce(bufferId) {
         await retryUploadOnce();
         await healStoppedUpload();
     } else {
-        const auth = { serverUrl: settings.serverUrl, apiKey: await readToken() };
+        const auth = { serverUrl: settings.serverUrl, connectionId: settings.connectionId, apiKey: await readToken() };
         let remote = await getSession(auth, meta.serverSessionId ?? bufferId);
         await assertBufferRetryAllowed(bufferId);
         if (remote.status === "aborted" || remote.status === "failed") {
@@ -2729,13 +3032,15 @@ async function retryBufferOnce(bufferId) {
                 ...IDLE_STATE,
                 ...recordingFolderState(meta),
                 state: STATE.finalizing,
+                reconcilePending: false,
+                stopped: true,
                 sessionId: serverSessionId,
                 bufferId,
-                stopped: true,
                 jobId: remote.job_id ?? null,
+                serverCompleting: true,
                 finalizingAt: new Date().toISOString(),
             });
-            await reconcileServerSession(serverSessionId, auth);
+            await pollFinalization(await getState(), auth);
         } else if (remote.status === "open") {
             if (!(await resumeBufferedSession(bufferId, meta, remote, true))) {
                 throw new Error(t("recoveryUnavailable"));
@@ -2749,13 +3054,13 @@ async function retryBufferOnce(bufferId) {
 async function discardSession(sessionId) {
     const settings = await getSettings();
     const state = await getState();
-    if (sessionId && settings.serverUrl && settings.hasApiKey) {
+    if (sessionId && settings.serverUrl && settings.hasApiKey && !(await serverUnavailable(settings))) {
         await abortSession(
-            { serverUrl: settings.serverUrl, apiKey: await readToken() },
+            { serverUrl: settings.serverUrl, connectionId: settings.connectionId, apiKey: await readToken() },
             sessionId,
         ).catch(() => {});
     }
-    if (sessionId) await deleteLocalSession(state.bufferId ?? sessionId);
+    if (sessionId) await safe(deleteLocalSession(state.bufferId ?? sessionId));
     await resetState();
 }
 
@@ -2765,18 +3070,20 @@ function discardBuffer(bufferId) {
 
 async function discardBufferOnce(bufferId) {
     const state = await getState();
-    if ((state.bufferId ?? state.sessionId) === bufferId && state.state === STATE.recording && !state.stopped) {
+    if ((state.bufferId ?? state.sessionId) === bufferId && isLiveCapture(state)) {
         throw new Error("Stop recording before discarding its buffer");
     }
     const meta = await readLocalMeta(bufferId);
-    if (!meta) return;
     const settings = await getSettings();
-    if (meta.serverUrl === settings.serverUrl && settings.hasApiKey) {
-        const auth = { serverUrl: settings.serverUrl, apiKey: await readToken() };
+    if (meta && meta.serverUrl === settings.serverUrl && settings.hasApiKey) {
+        const auth = { serverUrl: settings.serverUrl, connectionId: settings.connectionId, apiKey: await readToken() };
         try {
             const remote = await getSession(auth, meta.serverSessionId ?? bufferId);
             if (remote.status === "completing") {
                 throw new Error("Wait for server finalization before discarding");
+            }
+            if (remote.status === "completed" && remote.recording_id === null) {
+                throw new Error(t("recoveryUnavailable"));
             }
             if (remote.status === "open" || remote.status === "failed") {
                 await abortSession(auth, meta.serverSessionId ?? bufferId);
@@ -2787,7 +3094,8 @@ async function discardBufferOnce(bufferId) {
             }
         }
     }
-    await deleteLocalSession(bufferId);
+    metaUpdates = metaUpdates.catch(() => {}).then(() => deleteLocalSession(bufferId));
+    await metaUpdates;
     const latest = await getState();
     if ((latest.bufferId ?? latest.sessionId) === bufferId) await resetState();
 }
@@ -2808,6 +3116,7 @@ function recordingFolderState(meta) {
         startFolderId: meta?.startFolderId ?? null,
         startFolderLabel: meta?.startFolderLabel ?? null,
         recordingFolderOverride: meta?.recordingFolderOverride === true,
+        truncatedAtChunk: meta?.truncatedAtChunk ?? null,
     };
 }
 
@@ -2838,7 +3147,12 @@ async function resumeBufferedSession(bufferId, meta, session, resetRetry = false
     return true;
 }
 
-async function reconcileOnStartup() {
+function reconcileOnStartup() {
+    startupReconciliation ??= reconcileStartup().finally(() => { startupReconciliation = null; });
+    return startupReconciliation;
+}
+
+async function reconcileStartup() {
     await joinedMeetingsLoaded;
     await unregisterPairingScripts();
     await reconcileMeetingPrompt().catch((error) =>
@@ -2849,7 +3163,39 @@ async function reconcileOnStartup() {
     await reconcileDesktopWindow();
     // Session storage is empty after a browser restart; re-arm open meetings.
     await reevaluateAllTabs();
+    await reconcileBufferedRecordings();
+}
 
+async function markBufferedReconciliation(bufferId, meta, sessionId, error) {
+    if (!(await readLocalMeta(bufferId))) return false;
+    const outage = isConnectionError(error);
+    const waiting = outage || [429, 500, 502, 503, 504].includes(error?.status);
+    await setState({
+        ...IDLE_STATE,
+        ...recordingFolderState(meta),
+        state: waiting ? STATE.recording : STATE.error,
+        sessionId,
+        bufferId,
+        startedAt: meta.startedAt,
+        chunkCount: waiting ? Math.max(-1, ...await listChunkIndices(bufferId)) + 1 : 0,
+        stopped: true,
+        blocked: !waiting,
+        reconcilePending: waiting,
+        error: waiting ? null : retryErrorMessage(error),
+        uploadNotice: waiting && !outage ? retryErrorMessage(error) : null,
+    });
+    if (outage) await ensureConnectionAlarm();
+    else if (waiting) await scheduleUploadRetry(bufferId, error);
+    return waiting;
+}
+
+let bufferReconciliation;
+function reconcileBufferedRecordings() {
+    bufferReconciliation ??= transitionBuffer(reconcileBufferedRecordingsOnce).finally(() => { bufferReconciliation = null; });
+    return bufferReconciliation;
+}
+
+async function reconcileBufferedRecordingsOnce() {
     const settings = await getSettings();
     if (!settings.dataUseAcknowledgedAt || !settings.serverUrl || !settings.hasApiKey) return;
     let token;
@@ -2857,8 +3203,8 @@ async function reconcileOnStartup() {
         token = await readToken();
     } catch (error) {
         const [bufferId] = await listLocalSessions();
-        if (bufferId) {
-            const meta = await readLocalMeta(bufferId);
+        const meta = bufferId ? await readLocalMeta(bufferId) : null;
+        if (meta) {
             await setState({
                 ...recordingFolderState(meta),
                 state: STATE.error,
@@ -2871,26 +3217,24 @@ async function reconcileOnStartup() {
         }
         return;
     }
-    const auth = { serverUrl: settings.serverUrl, apiKey: token };
+    const auth = { serverUrl: settings.serverUrl, connectionId: settings.connectionId, apiKey: token };
 
     const state = await getState();
-    if (state.state === STATE.recording && state.stopped) {
+    if (state.state === STATE.recording && state.stopped && !state.reconcilePending) {
         await pumpUploads();
         return;
     }
-    if (state.state === STATE.recording && state.captureMode === "desktop") {
+    if (isLiveCapture(state) && state.captureMode === "desktop") {
         pumpUploads();
         return;
     }
-    if (state.state === STATE.recording && (await hasOffscreen())) {
+    if (isLiveCapture(state) && (await hasOffscreen())) {
         pumpUploads();
         return;
     }
     if (state.state === STATE.finalizing && state.sessionId) {
         if (await healStoppedUpload()) return;
-        await reconcileServerSession(state.sessionId, auth).catch(() =>
-            ensureUploadRetryAlarm(1),
-        );
+        await pollFinalization(state, auth);
         return;
     }
 
@@ -2902,29 +3246,27 @@ async function reconcileOnStartup() {
         try {
             session = await getSession(auth, serverSessionId);
         } catch (error) {
-            await setState({
-                ...recordingFolderState(meta),
-                state: STATE.error,
-                sessionId: serverSessionId,
-                bufferId: sessionId,
-                stopped: true,
-                blocked: true,
-                error: error?.message ?? t("recoveryUnavailable"),
-            });
+            if (await markBufferedReconciliation(sessionId, meta, serverSessionId, error)) break;
             continue;
         }
+        if (!(await readLocalMeta(sessionId))) continue;
         if (session.status === "completed") {
-            await setState({ ...recordingFolderState(meta), sessionId: serverSessionId, bufferId: sessionId });
-            await reconcileServerSession(serverSessionId, auth);
+            await setState({ ...recordingFolderState(meta), sessionId: serverSessionId, bufferId: sessionId, reconcilePending: false });
+            await reconcileServerSession(serverSessionId, auth).catch((error) =>
+                markBufferedReconciliation(sessionId, meta, serverSessionId, error));
+            if ((await getState()).reconcilePending) break;
             continue;
         }
         if (session.status === "completing") {
             await setState({
                 ...recordingFolderState(meta),
                 state: STATE.finalizing,
+                reconcilePending: false,
+                stopped: true,
                 sessionId: serverSessionId,
                 bufferId: sessionId,
                 jobId: session.job_id,
+                serverCompleting: true,
                 finalizingAt: new Date().toISOString(),
             });
             await ensureUploadRetryAlarm();
@@ -2933,28 +3275,24 @@ async function reconcileOnStartup() {
         if (session.status === "aborted" || session.status === "failed") {
             try {
                 session = await recoverSession(auth, serverSessionId);
+                if (!(await readLocalMeta(sessionId))) continue;
                 serverSessionId = session.id;
                 await updateLocalMeta(sessionId, {
                     serverSessionId,
                 });
             } catch (error) {
-                await setState({
-                    ...recordingFolderState(meta),
-                    state: STATE.error,
-                    sessionId: serverSessionId,
-                    bufferId: sessionId,
-                    stopped: true,
-                    blocked: true,
-                    error: error?.message ?? t("recoveryUnavailable"),
-                });
+                if (await markBufferedReconciliation(sessionId, meta, serverSessionId, error)) break;
                 continue;
             }
         }
         if (session.status !== "open") continue;
         // Only resume into a recording state when nothing else is active.
         const live = await getState();
-        if (live.state !== STATE.idle && live.state !== STATE.error) break;
-        if (!(await resumeBufferedSession(sessionId, meta, session))) continue;
+        if (live.state !== STATE.idle && live.state !== STATE.error && !live.reconcilePending) break;
+        if (!(await resumeBufferedSession(sessionId, meta, session, state.reconcilePending === true))) {
+            if (live.reconcilePending && live.bufferId === sessionId) await resetState();
+            continue;
+        }
         break;
     }
 
@@ -2990,9 +3328,12 @@ chrome.runtime.onInstalled.addListener(() => {
     reconcileOnStartup().catch(() => {});
 });
 
+void ensureConnectionAlarm().catch(() => {});
 void getState().then(async (state) => {
-    if (state.state === STATE.finalizing && state.sessionId && state.jobId) {
+    if (state.sessionId && isPollingFinalization(state)) {
         await ensureUploadRetryAlarm();
+    } else if (state.reconcilePending) {
+        await resumeUploadWork();
     } else {
         await healStoppedUpload();
     }

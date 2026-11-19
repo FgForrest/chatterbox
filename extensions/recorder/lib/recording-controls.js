@@ -1,5 +1,6 @@
 import { createAgendaCard } from "../lib/agenda-card.js";
 import { agendaFolder, supportsAgendas } from "../lib/agendas.js";
+import { mountConnectionNotice } from "../lib/connection-notice.js";
 import { STATE } from "../lib/constants.js";
 import { localizeDocument, t } from "../lib/i18n.js";
 import { bindMeetingPromptOffer } from "../lib/meeting-prompt-ui.js";
@@ -32,6 +33,7 @@ export async function mountRecordingControls(
         onTab = () => {},
         idleNotice,
         beforeAction = async () => {},
+        onConnection = () => {},
     } = {},
 ) {
     if (!root.querySelector("#view-idle")) {
@@ -73,6 +75,15 @@ export async function mountRecordingControls(
     let currentPlatform = null;
     let currentState = { state: STATE.idle };
     let meetingCard;
+    let unavailable = false;
+    const notice = mountConnectionNotice(views.connect, {
+        onConnection(connection) {
+            const previous = unavailable;
+            unavailable = Boolean(connection && connection.state !== "ok");
+            onConnection(unavailable);
+            if (previous !== unavailable) void render(currentState);
+        },
+    });
 
     async function renderMicrophoneWarning(state) {
         const settings = await getSettings();
@@ -172,7 +183,7 @@ export async function mountRecordingControls(
                     });
             },
         });
-        await agendaCard(settings, state);
+        await agendaCard(settings, state, unavailable);
     }
 
     // ---- Unpaired: connect to the current site ------------------------------
@@ -220,7 +231,7 @@ export async function mountRecordingControls(
         el("notice-text").textContent = customNoticeText(settings);
         el("notice-text").hidden = !el("notice-text").textContent;
         el("picker-hint").hidden = false;
-        folderCombobox.reset(popupFolderChoice ?? agendaFolderChoice ?? settings);
+        folderCombobox.reset(popupFolderChoice ?? agendaFolderChoice ?? settings, unavailable ? { refresh: false } : undefined);
 
         if (currentPlatform) {
             hint.textContent = t("recordThis", currentPlatform.name);
@@ -244,7 +255,8 @@ export async function mountRecordingControls(
         el("start").disabled = true;
         el("start-desktop").disabled = true;
         button.textContent = t(
-            forceDesktop ? "openingPicker" : "startingCapture",
+            unavailable ? "connectionConnecting" : forceDesktop ? "openingPicker" : "startingCapture",
+            t("appNameInstrumental", t("appName")),
         );
         try {
             await beforeAction();
@@ -261,6 +273,7 @@ export async function mountRecordingControls(
                 },
             });
             if (response?.ok !== true) {
+                if (response?.connection) return;
                 throw new Error(response?.error ?? t("couldNotStart"));
             }
             if (variant === "popup") window.close();
@@ -313,10 +326,10 @@ export async function mountRecordingControls(
         el("finalizing-progress-fill").style.width = `${percent}%`;
         renderUploadStatus(state, "finalizing-status");
         if (processing) {
-            el("processing-status").textContent = t(
-                "uploadComplete",
-                String(total),
-            );
+            const uploadedStatus = t("uploadComplete", String(total));
+            el("processing-status").textContent = state.uploadNotice
+                ? `${uploadedStatus} ${state.uploadNotice}`
+                : uploadedStatus;
             const startedAt = state.finalizingAt ?? new Date().toISOString();
             const tick = () => {
                 el("processing-elapsed").textContent = t(
@@ -333,6 +346,9 @@ export async function mountRecordingControls(
     async function render(state) {
         const version = ++renderVersion;
         currentState = state;
+        const live = !state.stopped && (state.state === STATE.recording ||
+            (state.sessionId && state.captureMode && state.state === STATE.error));
+        notice.update({ recording: live, starting: state.startConnectionError || state.connecting });
         onState(state);
         void meetingCard?.render();
         if (state.state !== STATE.idle)
@@ -368,6 +384,7 @@ export async function mountRecordingControls(
             finalizationTimer = undefined;
         }
 
+        if (live && state.state === STATE.error) state = { ...state, state: STATE.recording, uploadNotice: state.error };
         switch (state.state) {
             case STATE.recording: {
                 if (state.stopped) {
@@ -375,7 +392,7 @@ export async function mountRecordingControls(
                     break;
                 }
                 show("recording");
-                recordingFolder.render(state);
+                recordingFolder.render(state, unavailable ? { refresh: false } : undefined);
                 el("mic-bar").style.width = dbToWidth(state.levels?.micDb ?? -100);
                 el("sys-bar").style.width = dbToWidth(state.levels?.systemDb ?? -100);
                 const tick = () => {
@@ -400,10 +417,18 @@ export async function mountRecordingControls(
                 break;
             case STATE.awaitingPicker:
                 show("idle");
-                el("idle-hint").textContent = t("waitingPicker");
+                el("idle-hint").textContent = state.connecting
+                    ? t("connectionConnecting", t("appNameInstrumental", t("appName")))
+                    : t("waitingPicker");
                 break;
             case STATE.error:
+                if (state.startConnectionError) {
+                    await renderIdle(version);
+                    break;
+                }
                 show("error");
+                el("retry").hidden = !state.sessionId;
+                el("discard").textContent = t(state.sessionId ? "discard" : "dismiss");
                 el("error-text").textContent =
                     state.error ?? t("somethingWrong");
                 el("partial-recovery").hidden = !(state.recoverablePrefix > 0);
@@ -426,8 +451,7 @@ export async function mountRecordingControls(
     }
 
     el("stop").addEventListener("click", async () => {
-        await beforeAction();
-        await recordingFolder.saved();
+        if (!unavailable) void beforeAction().catch(() => {});
         await sendMessage({ type: "stop-recording", reason: "user" });
     });
 
@@ -455,10 +479,11 @@ export async function mountRecordingControls(
     });
 
     el("discard").addEventListener("click", async () => {
-        await sendMessage({
+        const result = await sendMessage({
             type: "discard-session",
             sessionId: currentSessionId,
         });
+        if (result?.ok === false) el("error-text").textContent = result.error;
     });
 
     for (const id of ["open-options", "go-options"]) {
@@ -500,6 +525,7 @@ export async function mountRecordingControls(
     chrome.runtime.onMessage.addListener(listener);
 
     // Initial paint.
+    await notice.ready;
     await (async () => {
         void sendMessage({ type: "reevaluate-tabs" }).catch(() => {});
         currentTab = await activeTab();
@@ -565,6 +591,7 @@ export async function mountRecordingControls(
             chrome.tabs.onUpdated?.removeListener(tabUpdated);
             chrome.tabs.onActivated?.removeListener(tabActivated);
             chrome.storage.onChanged.removeListener?.(settingsChanged);
+            notice.destroy();
             meetingCard.destroy();
             folderCombobox.destroy();
             recordingFolder.destroy();

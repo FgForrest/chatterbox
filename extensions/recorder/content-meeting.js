@@ -48,6 +48,9 @@
         .elapsed { font-variant-numeric:tabular-nums; font-weight:650; }
         .dot-button,.label,.elapsed,#pill-agenda,.stop { flex:none; white-space:nowrap; }
         .pill > .error:empty { display:none; }
+        .pill.has-connection-notice { flex-wrap:wrap; }
+        .connection-notice { flex:0 0 100%; width:100%; max-width:480px; padding:8px; font-size:12px; }
+        .connection-notice p { margin-bottom:4px; }
         .folder-target { display:inline-flex; flex:0 1 auto; min-width:0; max-width:180px; height:28px; align-items:center; border:1px solid var(--border); border-radius:calc(infinity * 1px); overflow:hidden; font-size:12px; line-height:16px; }
         .folder-chip { min-width:69px; --folder-color:var(--primary); border-color:color-mix(in oklab,var(--folder-color) 20%,transparent); background:color-mix(in oklab,var(--folder-color) 5%,transparent); }
         .folder-chip.organization { --folder-color:var(--organization); }
@@ -201,19 +204,50 @@
             : "meetingPromptPolicyUnpinned";
     }
 
-    function viewLabel(view) {
+    function viewLabel({ view, state }) {
         switch (view) {
             case "prompt":
                 return t("meetingPromptTitle", t("appName"));
             case "recording":
                 return t("meetingPromptRecording", t("appName"));
             case "error":
-                return t("meetingPromptErrorTitle", t("appName"));
+                return state?.sessionId ? t("uploadFailedTitle") : t("meetingPromptErrorTitle", t("appName"));
             case "waiting":
-                return t("startingCapture");
+                return state?.connecting ? t("connectionConnecting", t("appNameInstrumental", t("appName"))) : t("startingCapture");
             default:
                 return t("recordingStopped");
         }
+    }
+
+    function renderConnection(copy, parent) {
+        surface.classList.toggle("has-connection-notice", Boolean(copy));
+        const existing = el("meeting-connection");
+        if (!copy) {
+            existing?.remove();
+            return;
+        }
+        if (existing?.dataset.copy === JSON.stringify(copy)) return;
+        existing?.remove();
+        const retry = button("connection-retry", "", [t("connectionRetry")]);
+        retry.addEventListener("click", async () => {
+            retry.disabled = true;
+            try {
+                const response = await send({ type: "recorder-connection-retry" });
+                if (response?.error && !el("meeting-connection")) showError(new Error(response.error));
+            }
+            catch (error) { showError(error); }
+            finally { retry.disabled = false; }
+        });
+        const box = node("div", { id: "meeting-connection", class: "connection-notice" }, [
+            node("div", { role: "status" }, [
+                node("strong", {}, [copy.message]),
+                node("p", {}, [copy.detail]),
+                ...(copy.context ? [node("p", {}, [copy.context])] : []),
+            ]),
+            retry,
+        ]);
+        box.dataset.copy = JSON.stringify(copy);
+        parent.append(box);
     }
 
     function renderPrompt(message) {
@@ -295,7 +329,7 @@
         el("folder-toggle").setAttribute("aria-expanded", String(!collapsed && folderOpen));
     }
 
-    function renderRecording(state) {
+    function renderRecording(state, connection) {
         if (currentView !== "recording") {
             folderMetadata.clear();
             collapsed = false;
@@ -366,7 +400,6 @@
             el("stop").addEventListener("click", async () => {
                 el("stop").disabled = true;
                 try {
-                    await recordingFolder.saved();
                     const response = await send({
                         type: "stop-recording",
                         sessionId: currentState.sessionId,
@@ -383,7 +416,8 @@
         }
         el("pill-agenda").hidden = !state.agendas?.length;
         renderFolderTarget(state);
-        recordingFolder.render(state);
+        recordingFolder.render({ ...state, state: "recording" }, { refresh: !connection });
+        text("action-error", state.uploadNotice || state.error || "");
         updateCollapsed();
         const tick = () => {
             if (!chrome.runtime?.id) {
@@ -415,17 +449,17 @@
         }
         if (
             message.view === "stopped" &&
-            stoppedSession === message.state?.sessionId
+            !message.connection && !message.state?.uploadNotice && stoppedSession === message.state?.sessionId
         )
             return;
         clearTimeout(hideTimer);
         host.style.setProperty("top", `${message.topOffset ?? 16}px`, "important");
-        const label = viewLabel(message.view);
+        const label = viewLabel(message);
         surface.setAttribute("aria-label", label);
         currentState = message.state ?? null;
         if (message.view !== "recording") clearInterval(timer);
         if (message.view === "prompt") renderPrompt(message);
-        else if (message.view === "recording") renderRecording(message.state);
+        else if (message.view === "recording") renderRecording(message.state, message.connection);
         else {
             surface.className = "surface confirmation";
             surface.replaceChildren();
@@ -433,15 +467,19 @@
             status.setAttribute("role", "status");
             const isError = message.view === "error";
             if (isError) {
-                status.textContent = message.state.error || t("somethingWrong");
+                status.textContent = message.state.error || (message.connection ? "" : t("somethingWrong"));
                 status.className = "error";
                 surface.append(node("h2", {}, [label]));
             } else {
                 status.textContent = t(
-                    message.view === "waiting"
-                        ? "startingCapture"
-                        : "meetingPromptStopped",
+                    "meetingPromptStopped",
                 );
+                if (message.view === "waiting") status.textContent = label;
+                if (message.view === "stopped" && message.connection) status.textContent = t("uploadingRecording");
+                if (message.view === "stopped" && message.state?.uploadNotice) {
+                    const stage = message.state.state === "finalizing" ? "processingRecording" : "uploadingRecording";
+                    status.textContent = `${t(stage)} ${message.state.uploadNotice}`;
+                }
             }
             surface.append(status);
             if (isError) {
@@ -451,11 +489,12 @@
                 close.addEventListener("click", dismiss);
                 surface.append(close);
             }
-            if (message.view === "stopped") {
+            if (message.view === "stopped" && !message.connection && !message.state?.uploadNotice) {
                 stoppedSession = message.state?.sessionId;
                 hideTimer = setTimeout(hide, 3500);
             }
         }
+        renderConnection(message.connection, message.view === "prompt" ? el("how").parentElement : surface);
         currentView = message.view;
         if (!host.isConnected) {
             document.getElementById("recorder-meeting-banner")?.remove();
@@ -505,6 +544,9 @@
     window.addEventListener("pageshow", (event) => {
         if (event.isTrusted === false) return;
         refresh();
+    });
+    window.addEventListener("online", () => {
+        if (host.isConnected && el("meeting-connection")) void send({ type: "recorder-connection-retry" }).catch(() => {});
     });
     refresh();
 })();

@@ -1,7 +1,7 @@
 ---
 title: Meeting Recorder as a Chromium extension with encrypted buffering, released ahead of the servers it talks to
 date: 2026-10-21
-updated: 2026-10-22 17:00
+updated: 2026-11-19 14:49
 status: accepted
 kind: feature
 issues: []
@@ -9,7 +9,7 @@ prs: [108, 123, 124, 125, 130, 132, 163, 180, 188, 193, 195, 198, 207, 213]
 areas: [extensions/recorder, src/app/api/v1/recording-sessions, src/app/api/v1/recorder, src/lib/recording-sessions, src/lib/recorder, content/docs/guides/meeting-recorder.mdx]
 supersedes: []
 superseded-by: []
-relates: [2026-10-19-employee-first-onboarding, 2026-10-22-meeting-recorder-banner]
+relates: [2026-10-19-employee-first-onboarding, 2026-10-22-meeting-recorder-banner, 2026-11-19-recorder-unreachable-server]
 ---
 
 # Meeting Recorder as a Chromium extension with encrypted buffering, released ahead of the servers it talks to
@@ -131,6 +131,9 @@ microphone where the meeting already runs. The constraints that shaped every lat
   wizard's recorder step, and the request that led to one-pass pairing, the microphone check and the
   meeting prompt.
 - [2026-10-22-meeting-recorder-banner](../2026-10-22-meeting-recorder-banner.md): 0.7.0 replaces the meeting notification with an in-page banner and a recording pill.
+
+- [Recorder outage recovery](../2026-11-19-recorder-unreachable-server.md) keeps encrypted buffers
+  retryable and preserves cached agendas while the paired server is unreachable.
 
 ## Timeline
 

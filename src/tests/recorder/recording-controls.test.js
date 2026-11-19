@@ -142,6 +142,7 @@ describe.each([
         await mount();
         expect(h.reset).toHaveBeenCalledWith(
             expect.objectContaining({ folderScope: "org" }),
+            undefined,
         );
         const choice = {
             folderId: "calls",
@@ -163,7 +164,7 @@ describe.each([
         };
         listener({ type: "state", state });
         await settle();
-        expect(h.recordingRender).toHaveBeenCalledWith(state);
+        expect(h.recordingRender).toHaveBeenCalledWith(state, undefined);
     });
     it("keeps the sharing-dialog action available and renders finalization, errors and recovery", async () => {
         await mount();
@@ -198,10 +199,14 @@ describe.each([
                 state: "finalizing",
                 chunkCount: 4,
                 uploaded: [0, 1, 2, 3],
+                uploadNotice: "Access could not be verified",
             },
         });
         await settle();
         expect(el("view-finalizing").hidden).toBe(false);
+        expect(el("processing-status").textContent).toContain(
+            "Access could not be verified",
+        );
         listener({
             type: "state",
             state: {
@@ -224,6 +229,23 @@ describe.each([
         expect(el("completion-agenda-notice").textContent).toBe(
             "agendaUnavailable",
         );
+    });
+    it("sends Stop while agenda and folder saves are still pending", async () => {
+        const saving = Promise.withResolvers();
+        h.wait = saving.promise;
+        const beforeAction = vi.fn(() => saving.promise);
+        widget = await mountRecordingControls(document.body, {
+            variant,
+            beforeAction,
+        });
+        el("stop").click();
+        await settle();
+        expect(beforeAction).toHaveBeenCalledOnce();
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+            type: "stop-recording",
+            reason: "user",
+        });
+        saving.resolve();
     });
     it.each([
         [null, { noticeText: "Default", noticeTextIsDefault: true }, ""],

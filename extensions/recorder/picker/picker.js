@@ -1,4 +1,5 @@
 import { createCaptureHost, openSystemAudio } from "../lib/capture-host.js";
+import { mountConnectionNotice } from "../lib/connection-notice.js";
 import { RECORDER_WINDOW_WIDTH, STATE } from "../lib/constants.js";
 import { fitWindowToContent } from "../lib/fit-window.js";
 import { localizeDocument, t } from "../lib/i18n.js";
@@ -35,6 +36,17 @@ let recording = false;
 let completed = false;
 let elapsedTimer;
 let finalizationTimer;
+let currentState;
+let unavailable = true;
+const connectionNotice = mountConnectionNotice(status, {
+    onConnection(connection) {
+        const next = Boolean(connection && connection.state !== "ok");
+        if (unavailable === next) return;
+        unavailable = next;
+        renderFolder();
+    },
+});
+window.addEventListener("pagehide", connectionNotice.destroy, { once: true });
 
 function showError(error) {
     status.textContent = error?.message ?? String(error);
@@ -65,13 +77,22 @@ function formatElapsed(startedAt) {
     return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+function renderFolder() {
+    if (currentState)
+        recordingFolder.render(currentState, { refresh: !unavailable });
+}
+
 function renderState(state) {
     if (state.state === STATE.idle && completed) {
         window.close();
         return;
     }
     if (state.pickerRequestId !== requestId) return;
-    recordingFolder.render(state);
+    currentState = state;
+    connectionNotice.update({ recording: recording && !state.stopped, starting: state.startConnectionError || state.connecting });
+    renderFolder();
+    if (state.connecting) status.textContent = t("connectionConnecting", t("appNameInstrumental", t("appName")));
+    else if (recording && !state.stopped) status.textContent = state.uploadNotice ?? t("recording");
 
     if (elapsedTimer) clearInterval(elapsedTimer);
     elapsedTimer = undefined;
@@ -124,10 +145,10 @@ function renderState(state) {
             String(total),
         ]);
         if (processing) {
-            document.getElementById("picker-processing-status").textContent = t(
-                "uploadComplete",
-                String(total),
-            );
+            const uploadedStatus = t("uploadComplete", String(total));
+            document.getElementById("picker-processing-status").textContent = state.uploadNotice
+                ? `${uploadedStatus} ${state.uploadNotice}`
+                : uploadedStatus;
             const startedAt = state.finalizingAt ?? new Date().toISOString();
             const tick = () => {
                 document.getElementById("picker-processing-elapsed").textContent = t(
@@ -145,7 +166,7 @@ function renderState(state) {
         progress.hidden = true;
         completedView.hidden = true;
         status.hidden = false;
-        showError(new Error(state.error ?? t("somethingWrong")));
+        showError(new Error(state.error ?? (state.startConnectionError ? "" : t("somethingWrong"))));
     }
 }
 
@@ -229,7 +250,6 @@ cancel.addEventListener("click", async () => {
 });
 
 stop.addEventListener("click", async () => {
-    await recordingFolder.saved();
     stop.disabled = true;
     status.textContent = t("finishing");
     const response = await chrome.runtime.sendMessage({ type: "stop-recording" });
@@ -291,6 +311,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         await fitToRecorder();
         status.textContent = t("startingCapture");
         const response = await report("desktop-capture-ready");
+        if (response?.connection) {
+            releaseSystemStream();
+            await fitToRecorder();
+            return;
+        }
         if (!response?.ok) throw new Error(response?.error ?? t("couldNotStart"));
     } catch (error) {
         if (!recording) releaseSystemStream();

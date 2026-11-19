@@ -27,13 +27,6 @@ export function subscribeAgenda(id, { invalidate, onConnection = () => {} }) {
                 { connectTimeoutOnly: true },
             );
             if (destroyed) return;
-            if (
-                !response.body ||
-                !response.headers
-                    .get("content-type")
-                    ?.includes("text/event-stream")
-            )
-                throw new Error("Invalid stream");
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let buffer = "";
@@ -74,7 +67,6 @@ export function subscribeAgenda(id, { invalidate, onConnection = () => {} }) {
             }
         } catch (error) {
             if ([401, 403, 404, 410].includes(error?.status)) {
-                onConnection(false);
                 return;
             }
             retry = (error?.retryAfterSeconds ?? 0) * 1000;

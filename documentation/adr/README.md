@@ -40,6 +40,7 @@ field, a filename date disagrees with `date:`, a value is not one of the allowed
 
 | Date | Record | Kind | Status | Refs |
 |------|--------|------|--------|------|
+| 2026-11-19 | [The recorder preserves encrypted buffers when its server is unreachable](2026-11-19-recorder-unreachable-server.md) | fix | accepted | [#420](https://github.com/FgForrest/chatterbox/issues/420) |
 | 2026-11-18 | [Owners finish reviews before recordings are shared with the Organization](2026-11-18-owner-review-before-share.md) | feature | accepted |  |
 | 2026-11-18 | [Remove per-share review from Care](2026-11-18-remove-per-share-review-from-care.md) | fix | accepted |  |
 | 2026-11-11 | [Active creators may restrict their Organization folders alongside curators](2026-11-11-creators-restrict-organization-folders.md) | feature | accepted | [#404](https://github.com/FgForrest/chatterbox/issues/404), [PR #405](https://github.com/FgForrest/chatterbox/pull/405) |
