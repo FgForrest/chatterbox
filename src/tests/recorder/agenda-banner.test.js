@@ -53,6 +53,28 @@ function render(view, payload = {}) {
     );
 }
 describe("agenda banner and pill", () => {
+    it.each([
+        true,
+        false,
+    ])("explains opening the agenda panel without claiming instant capture (pinned=%s)", (pinned) => {
+        render("prompt", {
+            pinned,
+            agendaPanel: true,
+            shortcut: "Ctrl+Shift+U",
+            notice: "Inform participants",
+        });
+        expect(root.getElementById("how").textContent).toBe(
+            pinned ? "agendaPanelIcon" : "agendaPanelIconUnpinned",
+        );
+        expect(root.getElementById("consent").textContent).toBe(
+            "meetingPromptConsent",
+        );
+        expect(root.querySelector("section").textContent).not.toMatch(
+            /meetingPromptStartsNow|meetingPromptMenuRecordStep/,
+        );
+        expect(root.querySelector("kbd")).toBeNull();
+        expect(Boolean(root.querySelector(".toolbar-menu-row"))).toBe(!pinned);
+    });
     it("offers matched agendas without reading page content and opens from the button gesture", () => {
         document.body.textContent = "Private meeting page";
         const readPage = vi.spyOn(document, "querySelectorAll");

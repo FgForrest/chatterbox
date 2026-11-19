@@ -7,6 +7,7 @@ import {
 import { MEETING_PROMPT_SCRIPT_ID } from "../../../extensions/recorder/lib/meeting-prompt.js";
 import { meetingTarget } from "../../../extensions/recorder/lib/meeting-target.js";
 import { MEETING_PROMPT_ORIGINS } from "../../../extensions/recorder/lib/platforms.js";
+import { createPromptIconBlink } from "../../../extensions/recorder/lib/prompt-icon.js";
 import { readToken } from "../../../extensions/recorder/lib/token-vault.js";
 
 const h = vi.hoisted(() => {
@@ -110,11 +111,13 @@ const h = vi.hoisted(() => {
         },
         action: {
             setPopup: vi.fn(async () => {}),
+            setIcon: vi.fn(async () => {}),
             setBadgeText: vi.fn(async () => {}),
             setTitle: vi.fn(async () => {}),
             setBadgeBackgroundColor: vi.fn(async () => {}),
             getUserSettings: vi.fn(async () => ({ isOnToolbar: true })),
             onClicked: event("clicked"),
+            onUserSettingsChanged: event("pinChanged"),
         },
         commands: {
             getAll: vi.fn(async () => [
@@ -248,6 +251,309 @@ async function start() {
     );
     await settle();
 }
+
+describe("meeting prompt toolbar icon", () => {
+    const tabId = 7;
+    const normal = expect.objectContaining({
+        tabId,
+        path: expect.objectContaining({ 16: "icons/icon-16.png" }),
+    });
+    const image = (fillStyle) => ({
+        imageData: expect.objectContaining({
+            16: { width: 16, fillStyle },
+            32: { width: 32, fillStyle },
+        }),
+        tabId,
+    });
+
+    beforeEach(() => {
+        vi.stubGlobal(
+            "OffscreenCanvas",
+            class {
+                getContext() {
+                    return {
+                        fillStyle: "#000",
+                        drawImage() {},
+                        clearRect() {},
+                        beginPath() {},
+                        roundRect() {},
+                        fill() {},
+                        getImageData(_x, _y, width) {
+                            return { width, fillStyle: this.fillStyle };
+                        },
+                    };
+                }
+            },
+        );
+        vi.stubGlobal(
+            "createImageBitmap",
+            vi.fn(async () => ({ close() {} })),
+        );
+        const fetchOriginal = globalThis.fetch;
+        vi.stubGlobal("fetch", (url, ...args) =>
+            String(url).startsWith("chrome-extension://test/icons/")
+                ? Promise.resolve(new Response("toolbar icon"))
+                : fetchOriginal(url, ...args),
+        );
+    });
+
+    afterEach(async () => {
+        await h.listeners.updated(tabId, { status: "loading" }, meeting);
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+    });
+
+    it("alternates 16- and 32-pixel frames for 20 seconds and keeps REC? after restoring", async () => {
+        vi.useFakeTimers();
+        await arm();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(chrome.action.setIcon).toHaveBeenLastCalledWith(
+            image("#f35f6d"),
+        );
+        await vi.advanceTimersByTimeAsync(600);
+        expect(chrome.action.setIcon).toHaveBeenLastCalledWith(image("#000"));
+        await vi.advanceTimersByTimeAsync(600);
+        expect(chrome.action.setIcon).toHaveBeenLastCalledWith(
+            image("#f35f6d"),
+        );
+        await vi.advanceTimersByTimeAsync(18_800);
+        expect(chrome.action.setIcon).toHaveBeenLastCalledWith(normal);
+        expect(chrome.action.setBadgeText).toHaveBeenLastCalledWith({
+            tabId,
+            text: "REC?",
+        });
+        const frames = chrome.action.setIcon.mock.calls.length;
+        await arm();
+        await vi.advanceTimersByTimeAsync(25_000);
+        expect(chrome.action.setIcon).toHaveBeenCalledTimes(frames);
+    });
+
+    it.each([
+        "hide",
+        "dismiss",
+        "recording",
+        "navigation",
+        "tab close",
+    ])("restores without further ticks on %s", async (reason) => {
+        vi.useFakeTimers();
+        await arm();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(chrome.action.setIcon).toHaveBeenCalledWith(image("#f35f6d"));
+        switch (reason) {
+            case "hide":
+                h.visible = false;
+                await message({ type: "meeting-banner-ready" });
+                break;
+            case "dismiss":
+                expect(
+                    await message({ type: "meeting-banner-dismiss" }),
+                ).toEqual({ ok: true });
+                break;
+            case "recording":
+                await message(
+                    {
+                        type: "start-recording",
+                        payload: {
+                            tabId,
+                            platformHint: "google-meet",
+                            noticeAcknowledgedAt: "yes",
+                        },
+                    },
+                    extension,
+                );
+                expect(h.session.recordingState.state).toBe("recording");
+                break;
+            case "navigation":
+                h.tabs.set(tabId, { ...meeting, url: "https://example.com" });
+                await h.listeners.updated(
+                    tabId,
+                    { url: "https://example.com" },
+                    h.tabs.get(tabId),
+                );
+                break;
+            case "tab close":
+                h.tabs.delete(tabId);
+                await h.listeners.tabRemoved(tabId);
+                break;
+        }
+        await vi.advanceTimersByTimeAsync(0);
+        expect(chrome.action.setIcon).toHaveBeenLastCalledWith(normal);
+        const frames = chrome.action.setIcon.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(25_000);
+        expect(chrome.action.setIcon).toHaveBeenCalledTimes(frames);
+    });
+
+    it("skips unpinned prompts and re-syncs only visible prompts when pin state changes", async () => {
+        chrome.action.getUserSettings.mockResolvedValue({ isOnToolbar: false });
+        await arm();
+        h.tabs.set(8, { ...meeting, id: 8, audible: false });
+        await h.listeners.updated(8, { status: "complete" }, h.tabs.get(8));
+        expect(chrome.action.setIcon).not.toHaveBeenCalled();
+        chrome.tabs.sendMessage.mockClear();
+        chrome.action.getUserSettings.mockResolvedValue({ isOnToolbar: true });
+        h.listeners.pinChanged({ isOnToolbar: true });
+        await vi.waitFor(() =>
+            expect(chrome.action.setIcon).toHaveBeenLastCalledWith(
+                image("#f35f6d"),
+            ),
+        );
+        expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
+            tabId,
+            expect.objectContaining({ view: "prompt", pinned: true }),
+            { frameId: 0 },
+        );
+        expect(chrome.tabs.sendMessage).not.toHaveBeenCalledWith(
+            8,
+            expect.anything(),
+            expect.anything(),
+        );
+        chrome.action.getUserSettings.mockResolvedValue({ isOnToolbar: false });
+        h.listeners.pinChanged({ isOnToolbar: false });
+        await vi.waitFor(() =>
+            expect(chrome.action.setIcon).toHaveBeenLastCalledWith(normal),
+        );
+        expect(chrome.tabs.sendMessage).toHaveBeenLastCalledWith(
+            tabId,
+            expect.objectContaining({ view: "prompt", pinned: false }),
+            { frameId: 0 },
+        );
+    });
+
+    it("discards a prompt sync when navigation starts during the pin lookup", async () => {
+        const lookupStarted = Promise.withResolvers();
+        const pinSettings = Promise.withResolvers();
+        chrome.action.getUserSettings.mockImplementationOnce(() => {
+            lookupStarted.resolve();
+            return pinSettings.promise;
+        });
+        const arming = arm();
+        await lookupStarted.promise;
+        await h.listeners.updated(tabId, { status: "loading" }, meeting);
+        pinSettings.resolve({ isOnToolbar: true });
+        await arming;
+
+        expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
+        expect(chrome.action.setIcon).not.toHaveBeenCalledWith(
+            image("#f35f6d"),
+        );
+        expect(h.session.armedTabs[tabId].promptVisible).toBe(false);
+    });
+
+    it("ignores the old document's acknowledgement after navigation starts", async () => {
+        const promptSent = Promise.withResolvers();
+        const acknowledgement = Promise.withResolvers();
+        chrome.tabs.sendMessage.mockImplementationOnce(() => {
+            promptSent.resolve();
+            return acknowledgement.promise;
+        });
+        const arming = arm();
+        await promptSent.promise;
+        await h.listeners.updated(tabId, { status: "loading" }, meeting);
+        acknowledgement.resolve({ visible: true });
+        await arming;
+
+        expect(h.session.armedTabs[tabId].promptVisible).toBe(false);
+        expect(chrome.action.setIcon).not.toHaveBeenCalledWith(
+            image("#f35f6d"),
+        );
+    });
+
+    it("re-renders an unpinned first prompt while the old render awaits acknowledgement", async () => {
+        const promptSent = Promise.withResolvers();
+        const acknowledgement = Promise.withResolvers();
+        chrome.tabs.sendMessage.mockImplementationOnce((_tabId, payload) => {
+            promptSent.resolve(payload);
+            return acknowledgement.promise;
+        });
+        const arming = arm();
+        const first = await promptSent.promise;
+        const visibleBeforeAck = h.session.armedTabs[tabId].promptVisible;
+        chrome.action.getUserSettings.mockResolvedValue({ isOnToolbar: false });
+        h.listeners.pinChanged({ isOnToolbar: false });
+        await settle();
+        acknowledgement.resolve({ visible: true });
+        await arming;
+
+        expect(first).toMatchObject({ view: "prompt", pinned: true });
+        expect(visibleBeforeAck).toBe(false);
+        await vi.waitFor(() =>
+            expect(chrome.tabs.sendMessage).toHaveBeenLastCalledWith(
+                tabId,
+                expect.objectContaining({ view: "prompt", pinned: false }),
+                { frameId: 0 },
+            ),
+        );
+        expect(h.session.armedTabs[tabId].promptVisible).toBe(true);
+        expect(chrome.action.setIcon).not.toHaveBeenCalledWith(
+            image("#f35f6d"),
+        );
+    });
+
+    it("sends no blink deadline when Chrome cannot build icon frames", async () => {
+        vi.stubGlobal("OffscreenCanvas", undefined);
+        await arm();
+        expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
+            tabId,
+            expect.objectContaining({
+                view: "prompt",
+                pinned: true,
+                blinkUntil: null,
+            }),
+            { frameId: 0 },
+        );
+        expect(chrome.action.setIcon).not.toHaveBeenCalled();
+    });
+
+    it("clears the blink instructions when Chrome rejects an icon update", async () => {
+        vi.useFakeTimers();
+        const blinkUntil = Date.now() + 20_000;
+        chrome.action.setIcon.mockRejectedValueOnce(
+            new Error("Could not update icon"),
+        );
+        await arm();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
+            tabId,
+            expect.objectContaining({ view: "prompt", blinkUntil }),
+            { frameId: 0 },
+        );
+        expect(chrome.tabs.sendMessage).toHaveBeenLastCalledWith(
+            tabId,
+            { type: "meeting-banner-blink-stopped", blinkUntil },
+            { frameId: 0 },
+        );
+        const frames = chrome.action.setIcon.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(chrome.action.setIcon).toHaveBeenCalledTimes(frames);
+    });
+
+    it("restores interrupted overrides on a new worker and does not restart a visible prompt", async () => {
+        const blinkUntil = Date.now() + 10_000;
+        Object.assign(h.session, {
+            "prompt-icon:7": blinkUntil,
+            "prompt-icon:8": true,
+            armedTabs: {
+                7: { promptVisible: true },
+                8: { promptVisible: false },
+            },
+        });
+        const clearCopy = vi.fn(async () => {});
+        const restored = createPromptIconBlink(
+            Promise.resolve({ ...h.session }),
+            clearCopy,
+        );
+        expect(await restored.reserve(tabId, () => true)).toBeNull();
+        expect(chrome.action.setIcon).toHaveBeenCalledTimes(2);
+        expect(chrome.action.setIcon).toHaveBeenCalledWith(normal);
+        expect(chrome.action.setIcon).toHaveBeenCalledWith(
+            expect.objectContaining({ tabId: 8, path: expect.any(Object) }),
+        );
+        expect(h.session["prompt-icon:8"]).toBeUndefined();
+        expect(clearCopy).toHaveBeenCalledExactlyOnceWith(tabId, blinkUntil);
+        expect(h.session["prompt-icon:7"]).toBe(blinkUntil);
+        await restored.stop(tabId);
+    });
+});
 
 describe("meeting-site permission lifecycle", () => {
     it("registers a persistent isolated top-frame script and injects only matching open sites on grant", async () => {

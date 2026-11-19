@@ -8,8 +8,7 @@
 //
 // Capture lives in the offscreen document for tabs and in a persistent
 // extension window for desktop audio. Chunks travel through shared OPFS.
-// Every piece of per-tab state lives in chrome.storage.session, never in
-// module scope: MV3 suspends this worker between events.
+// Per-tab state needed across MV3 suspension lives in chrome.storage.session.
 
 import {
     AGENDA_ALARM_PREFIX,
@@ -75,6 +74,7 @@ import {
     reconcileMeetingPrompt,
     meetingPromptPermissionChanged,
 } from "./lib/meeting-prompt.js";
+import { createPromptIconBlink } from "./lib/prompt-icon.js";
 import {
     connectGrantedOrigins,
     getInstallationId,
@@ -214,6 +214,7 @@ const POPUP_URL = "popup/popup.html";
 const DEFAULT_TITLE = t("extensionName");
 const OPFS_WARN_BYTES = 1024 * 1024 * 1024; // 1 GiB of unsent audio.
 const NUDGE_PREFIX = "nudge:";
+const promptIcon = createPromptIconBlink(agendaRoutesLoaded, clearPromptBlinkCopy);
 const COMPLETION_PREFIX = "completed:";
 const COMPLETION_DISPLAY_MS = 3500;
 const CONNECTION_ALARM = "recorder-connection-probe";
@@ -1623,6 +1624,8 @@ async function handleMeetingNotification(id, button) {
 const MEETING_BANNER_MESSAGES = new Set(["meeting-banner-ready", "meeting-banner-dismiss", "meeting-banner-dialog"]);
 let armedUpdates = Promise.resolve();
 let bannerUpdates = Promise.resolve();
+const bannerSyncs = new Map();
+let pinGeneration = 0;
 
 function updateArmedTab(tabId, update) {
     const work = armedUpdates.catch(() => {}).then(async () => {
@@ -1638,9 +1641,20 @@ function updateArmedTab(tabId, update) {
     return work;
 }
 
-async function sendMeetingBanner(tabId, payload) {
+function stopPromptIcon(tabId, updateCopy = false) {
+    bannerSyncs.delete(tabId);
+    void promptIcon.stop(tabId, updateCopy);
+}
+
+function clearPromptBlinkCopy(tabId, blinkUntil) {
+    return chrome.tabs.sendMessage(tabId, { type: "meeting-banner-blink-stopped", blinkUntil }, { frameId: 0 }).catch(() => {});
+}
+
+async function sendMeetingBanner(tabId, payload, isCurrent) {
+    if (payload.view !== "prompt") stopPromptIcon(tabId);
     try {
         const tab = await chrome.tabs.get(tabId).catch(() => null);
+        if (isCurrent && !isCurrent()) return null;
         const topOffset = detectMeetingPlatform(tab?.url)?.promptTopOffset ?? 16;
         return await chrome.tabs.sendMessage(tabId, {
             type: "meeting-banner", ...payload,
@@ -1695,6 +1709,17 @@ function syncMeetingBanner(tabId, cachedOnly = false) {
 }
 
 async function syncMeetingBannerNow(tabId, cachedOnly = false) {
+    const generation = {};
+    bannerSyncs.set(tabId, generation);
+    const isCurrent = () => bannerSyncs.get(tabId) === generation;
+    try {
+        await renderMeetingBanner(tabId, cachedOnly, isCurrent);
+    } finally {
+        if (isCurrent()) bannerSyncs.delete(tabId);
+    }
+}
+
+async function renderMeetingBanner(tabId, cachedOnly, isCurrent) {
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     const settings = await getSettings();
     const connection = await readServerConnection(settings);
@@ -1708,6 +1733,7 @@ async function syncMeetingBannerNow(tabId, cachedOnly = false) {
     const state = await getState();
     const entry = (await getArmed())[tabId];
     const agendaRoute = tab ? await routeAgendaTab(tab, settings, state, cachedOnly || !enabled || !settings.agendaBanner ? await cachedBannerAgendas(tab, settings) : agendas) : false;
+    if (!isCurrent()) return;
     const ownRecording = state.tabId === tabId &&
         (!state.meetingTarget || sameMeetingTarget(state.meetingTarget, tab?.url));
     if (enabled && ownRecording && state.state !== STATE.idle && !(state.startConnectionError && !disconnected)) {
@@ -1749,10 +1775,17 @@ async function syncMeetingBannerNow(tabId, cachedOnly = false) {
     }
     if (enabled && settings.nudgeEnabled && entry?.bannerPrompt &&
         sameMeetingTarget(entry.meetingTarget, tab.url)) {
+        const pinAtLookup = pinGeneration;
+        const isCurrentPrompt = () => isCurrent() && pinAtLookup === pinGeneration;
         const [commands, actionSettings] = await Promise.all([
             chrome.commands.getAll().catch(() => []),
             chrome.action.getUserSettings().catch(() => ({})),
         ]);
+        if (!isCurrentPrompt()) return;
+        const pinned = actionSettings.isOnToolbar !== false;
+        if (!pinned) void promptIcon.stop(tabId);
+        const blink = pinned ? await promptIcon.reserve(tabId, isCurrentPrompt) : null;
+        if (!isCurrentPrompt()) return;
         const response = await sendMeetingBanner(tabId, {
             view: "prompt",
             connection: connectionNotice(connection),
@@ -1760,16 +1793,22 @@ async function syncMeetingBannerNow(tabId, cachedOnly = false) {
             agendaPanel: agendaRoute,
             notice: effectiveNoticeText(settings),
             shortcut: commands.find((command) => command.name === "toggle-recording")?.shortcut || "",
-            pinned: actionSettings.isOnToolbar !== false,
+            pinned,
+            blinkUntil: blink?.until ?? null,
             policyRequired: entry.mode === "auto" && !settings.autoModeAcknowledgedAt,
-        });
-        const next = await updateArmedTab(tabId, (current) => current ? {
+        }, isCurrentPrompt);
+        if (!isCurrentPrompt()) return;
+        const next = await updateArmedTab(tabId, (current) => current && isCurrentPrompt() ? {
             ...current,
             promptVisible: current.bannerPrompt === true && response?.visible === true,
             shownAgendaId: response?.visible === true && agendas.length === 1 ? agendas[0].id : undefined,
             notificationFallback: response?.visible === true ? false : current.notificationFallback,
-        } : null);
+        } : current);
+        if (!isCurrentPrompt()) return;
         await applyArmedUi(tabId, platformById(entry.platformId), entry.mode, next?.promptVisible);
+        if (!isCurrentPrompt()) return;
+        if (next?.promptVisible) promptIcon.start(tabId, blink);
+        else stopPromptIcon(tabId);
         if (next?.promptVisible) {
             if (disconnected) void ensureConnectionAlarm().catch(() => {});
             await chrome.notifications.clear(`${NUDGE_PREFIX}${tabId}`).catch(() => {});
@@ -2027,6 +2066,7 @@ async function reevaluateAllTabs() {
 }
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+    if (changeInfo.url || changeInfo.status === "loading") stopPromptIcon(tabId, true);
     if (changeInfo.url || changeInfo.status === "complete") {
         void updateNextMeetingBadge().catch(() => {});
         await resumeTypedSetupAfterLogin(tab).catch((error) =>
@@ -2063,6 +2103,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 });
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
+    stopPromptIcon(tabId);
     const cleared = clearJoinedMeeting(tabId);
     await agendaRoutesLoaded;
     await cleared;
@@ -2076,6 +2117,15 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
     if (isLiveCapture(state) && state.tabId === tabId) {
         await stopRecording("tab-closed");
     }
+});
+
+chrome.action.onUserSettingsChanged?.addListener((changes) => {
+    if (typeof changes.isOnToolbar !== "boolean") return;
+    pinGeneration++;
+    const pending = new Set(bannerSyncs.keys());
+    void getArmed().then((armed) => Promise.all(Object.entries(armed)
+        .filter(([tabId, entry]) => entry.promptVisible || (entry.bannerPrompt && pending.has(Number(tabId))))
+        .map(([tabId]) => syncMeetingBanner(Number(tabId), true)))).catch(() => {});
 });
 
 // Re-arm live when the user changes a platform mode or the server pushes new
