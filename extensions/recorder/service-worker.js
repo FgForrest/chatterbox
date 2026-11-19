@@ -245,7 +245,6 @@ async function updateServerConnection({ config, ...outcome }) {
         [SERVER_CONNECTION_KEY]: {
             ...outcome,
             ...(configError ? { configError } : {}),
-            since: previous?.state === outcome.state ? previous.since : outcome.checkedAt,
         },
     });
     if (outcome.state !== "ok") {

@@ -204,6 +204,7 @@ export async function completeSession(auth, sessionId, body) {
             body: JSON.stringify(body),
         },
         undefined,
+        // Released servers answer with the session; a bare {job_id} keeps the pre-0.9.10 client contract.
         { validate: (body) => isSessionResponse(body, sessionId) ||
             (body?.id === undefined && body?.status === undefined &&
                 typeof body?.job_id === "string" && Boolean(body.job_id.trim()) &&
@@ -295,7 +296,7 @@ export async function confirmPairing(auth, installationId) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ installationId }),
-    }, undefined, { allowEmpty: true });
+    }, undefined, { validate: (body) => body?.success === true });
 }
 
 /** Compute the lowercase hex SHA-256 of a Blob's bytes. */

@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { uploadChunk } from "../../../extensions/recorder/lib/api.js";
+import {
+    confirmPairing,
+    uploadChunk,
+} from "../../../extensions/recorder/lib/api.js";
 
 afterEach(() => {
     vi.restoreAllMocks();
@@ -45,5 +48,32 @@ describe("recorder API errors", () => {
                 "0".repeat(64),
             ),
         ).rejects.toMatchObject({ kind: "unreachable", httpStatus: 503 });
+    });
+});
+
+describe("recorder pairing confirmation", () => {
+    const auth = { serverUrl: "https://chatterbox.example", apiKey: "op_x" };
+
+    it("accepts the released success envelope", async () => {
+        vi.spyOn(globalThis, "fetch").mockResolvedValue(
+            Response.json({ success: true }),
+        );
+        await expect(
+            confirmPairing(auth, "installation-1"),
+        ).resolves.toBeUndefined();
+    });
+
+    it.each([
+        Response.json({ success: false }),
+        Response.json({ message: "Sign in" }),
+        new Response(null, { status: 204 }),
+    ])("rejects an unexpected HTTP $status response", async (response) => {
+        vi.spyOn(globalThis, "fetch").mockResolvedValue(response);
+        await expect(
+            confirmPairing(auth, "installation-1"),
+        ).rejects.toMatchObject({
+            kind: "unreachable",
+            detail: { kind: "foreign-response", httpStatus: response.status },
+        });
     });
 });

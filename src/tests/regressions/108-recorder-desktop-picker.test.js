@@ -1,16 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCaptureHost } from "../../../extensions/recorder/lib/capture-host.js";
 
-const { fitWindowToContent } = vi.hoisted(() => ({
-    fitWindowToContent: vi.fn(),
-}));
+const { fitWindowToContent, mountConnectionNotice, renderFolder } = vi.hoisted(
+    () => ({
+        fitWindowToContent: vi.fn(),
+        mountConnectionNotice: vi.fn(() => ({
+            ready: Promise.resolve(),
+            update: vi.fn(),
+            destroy: vi.fn(),
+        })),
+        renderFolder: vi.fn(),
+    }),
+);
 
 vi.mock("../../../extensions/recorder/lib/connection-notice.js", () => ({
-    mountConnectionNotice: () => ({
-        ready: Promise.resolve(),
-        update: vi.fn(),
-        destroy: vi.fn(),
-    }),
+    mountConnectionNotice,
 }));
 
 vi.mock("../../../extensions/recorder/lib/fit-window.js", () => ({
@@ -19,7 +23,7 @@ vi.mock("../../../extensions/recorder/lib/fit-window.js", () => ({
 
 vi.mock("../../../extensions/recorder/generated/folders.js", () => ({
     createRecordingFolder: () => ({
-        render: vi.fn(),
+        render: renderFolder,
         saved: async () => {},
         close: vi.fn(),
     }),
@@ -28,6 +32,8 @@ vi.mock("../../../extensions/recorder/generated/folders.js", () => ({
 beforeEach(() => {
     vi.resetModules();
     fitWindowToContent.mockReset();
+    mountConnectionNotice.mockClear();
+    renderFolder.mockClear();
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -118,6 +124,40 @@ function setupPicker(chooseDesktopMedia) {
 }
 
 describe("desktop recorder extension window", () => {
+    it("skips folder refreshes until the connection is available", async () => {
+        const { dispatchState } = setupPicker(vi.fn(() => 123));
+        await vi.importActual("../../../extensions/recorder/picker/picker.js");
+        const { onConnection } = mountConnectionNotice.mock.calls[0][1];
+        const state = {
+            pickerRequestId: "request-1",
+            state: "recording",
+            recordingFolderOverride: true,
+            folderId: "remembered",
+        };
+
+        dispatchState(state);
+        expect(renderFolder).toHaveBeenLastCalledWith(state, {
+            refresh: false,
+        });
+        onConnection({ state: "ok" });
+        expect(renderFolder).toHaveBeenLastCalledWith(state, { refresh: true });
+
+        onConnection({ state: "unreachable" });
+        expect(renderFolder).toHaveBeenLastCalledWith(state, {
+            refresh: false,
+        });
+        renderFolder.mockClear();
+        dispatchState(state);
+        dispatchState(state);
+        expect(renderFolder.mock.calls).toEqual([
+            [state, { refresh: false }],
+            [state, { refresh: false }],
+        ]);
+
+        onConnection({ state: "ok" });
+        expect(renderFolder).toHaveBeenLastCalledWith(state, { refresh: true });
+    });
+
     it("rejects a desktop start without a stream opened in the picker frame", async () => {
         const getUserMedia = vi.fn();
         vi.stubGlobal("navigator", { mediaDevices: { getUserMedia } });

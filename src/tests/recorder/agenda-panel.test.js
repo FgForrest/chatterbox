@@ -866,6 +866,64 @@ describe("live panel collaboration", () => {
             edit: { path: "/points/p1", body: { version: 2, discussed: true } },
         });
     });
+    it("shows the live note when Stop makes the agenda read-only during a save", async () => {
+        session.recordingState = {
+            state: "recording",
+            sessionId: "session-one",
+            tabId: 7,
+        };
+        settings.serverDefaults = { agendaText: 1 };
+        data.textProtocol = 1;
+        data.points[0].note = "Saved note";
+        const doc = new Y.Doc();
+        const ytext = doc.getText("text");
+        ytext.insert(0, "Saved note");
+        const response = () => ({
+            field: "point:p1:note",
+            update: Buffer.from(Y.encodeStateAsUpdate(doc)).toString("base64"),
+            stateVector: Buffer.from(Y.encodeStateVector(doc)).toString(
+                "base64",
+            ),
+            version: 1,
+        });
+        const { promise: savingNote, resolve: finishSave } =
+            Promise.withResolvers();
+        const save = vi.fn(async (body) => {
+            await savingNote;
+            Y.applyUpdate(doc, Buffer.from(JSON.parse(body).update, "base64"));
+            return response();
+        });
+        request.mockImplementation(async (path, init) => {
+            if (path.endsWith("/text")) return save(init.body);
+            if (path.includes("/text?")) return response();
+            return structuredClone(data);
+        });
+        try {
+            await start();
+            el("points").querySelector(".note-editable").click();
+            const note = el("points").querySelector("textarea");
+            await settle();
+            expect(note.readOnly).toBe(false);
+            note.value = "Updated note";
+            note.dispatchEvent(new Event("input"));
+            await vi.advanceTimersByTimeAsync(250);
+            expect(save).toHaveBeenCalledOnce();
+            expect(ytext.toString()).toBe("Saved note");
+
+            await chrome.storage.session.set({
+                recordingState: { ...session.recordingState, stopped: true },
+            });
+
+            expect(el("points").querySelector("textarea")).toBeNull();
+            expect(
+                el("points").querySelector(".note-readonly").textContent,
+            ).toBe("Updated note");
+        } finally {
+            finishSave();
+            await settle();
+            doc.destroy();
+        }
+    });
     it("reuses the shared CRDT binding, keeps a focused textarea/caret, and flushes its materialized version before ticking", async () => {
         settings.serverDefaults = { agendaLive: true, agendaText: 1 };
         data.textProtocol = 1;

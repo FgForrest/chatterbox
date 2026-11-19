@@ -220,6 +220,7 @@ async function startCapture({
 
     if (pending.stopRequested) throw new Error("Capture stopped before start");
 
+    // Do not await before recorder.start(), so stop() cannot see active with an unstarted recorder.
     active = {
         recorder,
         context,
