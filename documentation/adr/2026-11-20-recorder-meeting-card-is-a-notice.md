@@ -5,7 +5,7 @@ updated: 2026-11-20 10:33
 status: accepted
 kind: feature
 issues: [429]
-prs: []
+prs: [431]
 areas: [extensions/recorder/content-meeting.js, extensions/recorder/service-worker.js, extensions/recorder/lib/prompt-icon.js, extensions/recorder/lib/recording-controls.js]
 supersedes: [2026-10-22-meeting-recorder-banner, 2026-11-19-recorder-prompt-points-at-icon]
 superseded-by: []

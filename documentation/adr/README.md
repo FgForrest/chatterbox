@@ -40,7 +40,7 @@ field, a filename date disagrees with `date:`, a value is not one of the allowed
 
 | Date | Record | Kind | Status | Refs |
 |------|--------|------|--------|------|
-| 2026-11-20 | [The meeting card is a notice and manual recording starts in the extension](2026-11-20-recorder-meeting-card-is-a-notice.md) | feature | accepted | [#429](https://github.com/FgForrest/chatterbox/issues/429) |
+| 2026-11-20 | [The meeting card is a notice and manual recording starts in the extension](2026-11-20-recorder-meeting-card-is-a-notice.md) | feature | accepted | [#429](https://github.com/FgForrest/chatterbox/issues/429), [PR #431](https://github.com/FgForrest/chatterbox/pull/431) |
 | 2026-11-19 | [Point the meeting prompt at the toolbar and blink the pinned recorder icon](2026-11-19-recorder-prompt-points-at-icon.md) | fix | superseded by [2026-11-20-recorder-meeting-card-is-a-notice](2026-11-20-recorder-meeting-card-is-a-notice.md) | [#421](https://github.com/FgForrest/chatterbox/issues/421), [PR #424](https://github.com/FgForrest/chatterbox/pull/424) |
 | 2026-11-19 | [The recorder preserves encrypted buffers when its server is unreachable](2026-11-19-recorder-unreachable-server.md) | fix | accepted | [#420](https://github.com/FgForrest/chatterbox/issues/420), [PR #423](https://github.com/FgForrest/chatterbox/pull/423) |
 | 2026-11-18 | [Owners finish reviews before recordings are shared with the Organization](2026-11-18-owner-review-before-share.md) | feature | accepted |  |
