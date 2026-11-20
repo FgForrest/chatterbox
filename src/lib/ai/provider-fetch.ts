@@ -6,6 +6,7 @@ import { pipeline } from "node:stream/promises";
 import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { requireHttpUrl } from "@/lib/net/http-url";
 import {
     createPinnedLookup,
     type PublicAddress,
@@ -31,19 +32,9 @@ function inputHref(input: RequestInfo | URL): string {
     return input.url;
 }
 
-async function resolveProviderTarget(
-    input: RequestInfo | URL,
-): Promise<{ url: URL; addresses: PublicAddress[] }> {
+async function resolveProviderAddresses(url: URL): Promise<PublicAddress[]> {
     try {
-        const url = new URL(inputHref(input));
-        if (
-            (url.protocol !== "http:" && url.protocol !== "https:") ||
-            url.username ||
-            url.password
-        ) {
-            throw new Error("Invalid provider URL");
-        }
-        return { url, addresses: await resolvePublicHostname(url.hostname) };
+        return await resolvePublicHostname(url.hostname);
     } catch (error) {
         if (error instanceof PublicHostnameResolutionError) {
             throw new AppError(
@@ -137,11 +128,15 @@ export const fetchWithoutIdleTimeout: typeof globalThis.fetch = (
     return globalThis.fetch(input, options);
 };
 
-/** Hosted provider transport: resolve every request, pin DNS, and refuse redirects. Self-host uses `fetchWithoutIdleTimeout`. */
+/** Validate provider request URLs and pin public destinations in hosted mode. */
 export const providerFetch: typeof globalThis.fetch = async (input, init) => {
+    const url = requireHttpUrl(inputHref(input), {
+        field: "baseUrl",
+        allowCredentials: !env.IS_HOSTED,
+    });
     if (!env.IS_HOSTED) return fetchWithoutIdleTimeout(input, init);
 
-    const { url, addresses } = await resolveProviderTarget(input);
+    const addresses = await resolveProviderAddresses(url);
     const callerSignal =
         init?.signal ?? (input instanceof Request ? input.signal : null);
     callerSignal?.throwIfAborted();

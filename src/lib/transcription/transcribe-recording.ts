@@ -21,6 +21,7 @@ import {
     withUsageFailure,
 } from "@/lib/ai/usage-attempt";
 import { recordAiUsage } from "@/lib/ai/usage-cost";
+import { providerBaseUrl } from "@/lib/ai/validate-base-url";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { isHostedLockedOut } from "@/lib/entitlements";
 import { env } from "@/lib/env";
@@ -48,6 +49,7 @@ import {
     agendaSpellingTerms,
     loadRecordingAgenda,
 } from "@/lib/meetings/pipeline-context";
+import { InvalidHttpUrlError } from "@/lib/net/http-url";
 import { isOrgScopeEnabled } from "@/lib/org/config";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import {
@@ -828,6 +830,13 @@ async function transcribeRecordingInner(
             persistModel = result.model;
         } else if (credentials) {
             const apiKey = credentials.apiKey;
+            const transcriptionStyle = getTranscriptionStyle(
+                credentials.provider,
+            );
+            const baseUrl =
+                transcriptionStyle === "gemini"
+                    ? undefined
+                    : providerBaseUrl(credentials.baseUrl);
 
             const storage = await createUserStorageProvider(ctx.ownerUserId);
             const audioBuffer = await storage.downloadFile(
@@ -870,10 +879,6 @@ async function transcribeRecordingInner(
             // - "chat": OpenAI-compatible chat completions with input_audio
             //   (OpenRouter today; #122 -- /v1/audio/transcriptions 404s there)
             // - "whisper": OpenAI-compatible /v1/audio/transcriptions
-            const transcriptionStyle = getTranscriptionStyle(
-                credentials.provider,
-            );
-
             if (transcriptionStyle === "gemini") {
                 await reserveCall();
                 const result = await geminiTranscribe({
@@ -903,7 +908,7 @@ async function transcribeRecordingInner(
                         model,
                         file: audioFile,
                         language: defaultLanguage,
-                        baseUrl: credentials.baseUrl,
+                        baseUrl,
                         keyterms,
                     }),
                 );
@@ -927,7 +932,7 @@ async function transcribeRecordingInner(
                         model,
                         file: audioFile,
                         language: defaultLanguage,
-                        baseUrl: credentials.baseUrl,
+                        baseUrl,
                         vocabulary,
                     }),
                 );
@@ -941,7 +946,7 @@ async function transcribeRecordingInner(
                 const openai = new OpenAI({
                     fetch: usageAttemptFetch,
                     apiKey,
-                    baseURL: credentials.baseUrl || undefined,
+                    baseURL: baseUrl,
                     timeout: env.WHISPER_REQUEST_TIMEOUT_MS,
                     maxRetries: resolved.organizationCredential ? 0 : undefined,
                 });
@@ -1161,6 +1166,14 @@ async function transcribeRecordingInner(
             detectedLanguage,
         };
     } catch (error) {
+        if (error instanceof InvalidHttpUrlError) {
+            if (!orgView) {
+                await emitEvent("transcription.failed", userId, recordingId, {
+                    error: error.message,
+                });
+            }
+            throw error;
+        }
         console.error("Error transcribing recording:", error);
         if (isMynahBudgetExhausted(error)) {
             if (!orgView) {

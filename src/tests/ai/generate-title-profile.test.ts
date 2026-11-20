@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
     create: vi.fn(),
@@ -36,6 +36,7 @@ vi.mock("@/lib/posthog-server", () => ({
 }));
 
 import { generateTitleFromTranscription } from "@/lib/ai/generate-title";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { defaultProfileSettings } from "@/lib/profiles/settings";
 
 function selectRows(rows: unknown[]) {
@@ -43,6 +44,22 @@ function selectRows(rows: unknown[]) {
         from: () => ({
             where: () => ({ limit: () => Promise.resolve(rows) }),
         }),
+    });
+}
+
+function mockTitleProvider(baseUrl: string | null) {
+    mocks.resolveStepProvider.mockResolvedValue({
+        kind: "credential",
+        credential: {
+            id: "credential-1",
+            provider: "OpenAI",
+            apiKey: "secret",
+            baseUrl,
+            defaultModel: "gpt-4o-mini",
+        },
+        payerUserId: "owner-1",
+        reserveCall: vi.fn().mockResolvedValue(undefined),
+        organizationCredential: false,
     });
 }
 
@@ -55,22 +72,33 @@ describe("profile-backed title generation", () => {
         mocks.resolveItemProfile.mockResolvedValue({
             settings,
         });
-        mocks.resolveStepProvider.mockResolvedValue({
-            kind: "credential",
-            credential: {
-                id: "credential-1",
-                provider: "OpenAI",
-                apiKey: "secret",
-                baseUrl: null,
-                defaultModel: "gpt-4o-mini",
-            },
-            payerUserId: "owner-1",
-            reserveCall: vi.fn().mockResolvedValue(undefined),
-            organizationCredential: false,
-        });
+        mockTitleProvider(null);
         mocks.create.mockResolvedValue({
             choices: [{ message: { content: "Název" } }],
         });
+    });
+
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("rejects non-http(s) base URLs before fetch", async () => {
+        selectRows([{ detectedLanguage: "en" }]);
+        selectRows([{ uiLocale: "en" }]);
+        mockTitleProvider("file:");
+        const fetch = vi.fn();
+        vi.stubGlobal("fetch", fetch);
+
+        const error = await generateTitleFromTranscription(
+            "actor-1",
+            "recording-1",
+            "Example transcript.",
+        ).catch((error: unknown) => error);
+        expect(error).toBeInstanceOf(AppError);
+        expect(error).toMatchObject({
+            code: ErrorCode.INVALID_INPUT,
+            statusCode: 400,
+        });
+        expect(mocks.openAi).not.toHaveBeenCalled();
+        expect(fetch).not.toHaveBeenCalled();
     });
 
     it.each([

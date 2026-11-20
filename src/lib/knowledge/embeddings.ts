@@ -23,6 +23,7 @@ import {
 import { responseUsage } from "@/lib/ai/usage-values";
 import { decrypt } from "@/lib/encryption";
 import { env } from "@/lib/env";
+import { requireHttpUrl } from "@/lib/net/http-url";
 
 export class EmbeddingUnavailable extends Error {
     constructor(message: string, options?: { cause?: unknown }) {
@@ -152,6 +153,10 @@ export class EmbeddingClient {
         } = {},
     ): Promise<Float32Array[]> {
         if (texts.length === 0) return [];
+        requireHttpUrl(this.options.baseUrl, {
+            field: "baseUrl",
+            allowCredentials: true,
+        });
         if (!this.available) {
             throw new EmbeddingUnavailable("The embedding service is paused");
         }

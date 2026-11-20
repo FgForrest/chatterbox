@@ -19,6 +19,7 @@ vi.mock("@/lib/env", () => ({
 }));
 
 import { recordAiUsage } from "@/lib/ai/usage-cost";
+import { AppError, ErrorCode } from "@/lib/errors";
 
 import {
     EmbeddingClient,
@@ -75,6 +76,37 @@ function fakeFetch(
 
 describe("EmbeddingClient", () => {
     beforeEach(() => vi.clearAllMocks());
+    it("rejects non-http(s) base URLs before fetch", async () => {
+        const fetch = vi.fn();
+        const client = new EmbeddingClient({
+            baseUrl: "file:",
+            model: "example",
+            fetch,
+        });
+        const error = await client
+            .embed(["example"])
+            .catch((error: unknown) => error);
+        expect(error).toBeInstanceOf(AppError);
+        expect(error).toMatchObject({
+            code: ErrorCode.INVALID_INPUT,
+            statusCode: 400,
+        });
+        expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it("passes a configured URL with credentials to the transport", async () => {
+        const { fetch, calls } = fakeFetch();
+        const baseUrl = "http://user:secret@embeddings/v1";
+        const client = new EmbeddingClient({
+            baseUrl,
+            model: "example",
+            fetch,
+        });
+
+        await expect(client.embed(["example"])).resolves.toHaveLength(1);
+        expect(calls[0]?.url).toBe(`${baseUrl}/embeddings`);
+    });
+
     it("records a single usage event per HTTP batch, including a null item", async () => {
         const { fetch } = fakeFetch();
         const client = new EmbeddingClient({

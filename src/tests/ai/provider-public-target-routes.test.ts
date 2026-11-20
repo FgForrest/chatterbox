@@ -167,7 +167,7 @@ describe.each([
         expect(
             (
                 await handler(
-                    request("https://api.example.com/v1", _name),
+                    request(" HTTPS://api.example.com/v1\n", _name),
                     context,
                 )
             ).status,
@@ -186,6 +186,45 @@ describe.each([
         ).toBe(200);
         expect(lookup).not.toHaveBeenCalled();
     });
+
+    it.each([
+        ["non-HTTP(S) URLs on self-host", false, "file:"],
+        [
+            "URLs with credentials on self-host",
+            false,
+            "https://user:secret@api.example.com/v1",
+        ],
+        [
+            "URLs with credentials on hosted",
+            true,
+            "https://user:secret@api.example.com/v1",
+        ],
+    ] as const)("rejects %s before writes or HTTP", async (_case, isHosted, url) => {
+        env.IS_HOSTED = isHosted;
+        const response = await handler(request(url, _name), context);
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toMatchObject({
+            code: "INVALID_INPUT",
+            details: { field: "baseUrl" },
+        });
+        expect(lookup).not.toHaveBeenCalled();
+        expect(transaction).not.toHaveBeenCalled();
+        expect(createOrganizationProvider).not.toHaveBeenCalled();
+        expect(updateOrganizationProvider).not.toHaveBeenCalled();
+        expect(providerFetch).not.toHaveBeenCalled();
+    });
+});
+
+it("uses the preset when the models base URL contains only whitespace", async () => {
+    env.IS_HOSTED = false;
+    providerFetch.mockClear().mockResolvedValue(Response.json({ data: [] }));
+    const response = await models(request(" \n ", "models probe"));
+
+    expect(response.status).toBe(200);
+    expect(providerFetch).toHaveBeenCalledWith(
+        "https://openrouter.ai/api/v1/models",
+        expect.anything(),
+    );
 });
 
 it("keeps a request-time policy refusal readable in the models probe", async () => {

@@ -27,6 +27,7 @@ import {
     chatCompletionWithUsage,
     usageAttemptFetch,
 } from "@/lib/ai/usage-attempt";
+import { providerBaseUrl } from "@/lib/ai/validate-base-url";
 import { encryptJsonField } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -358,7 +359,7 @@ export const trimJobHandler: JobHandler<TrimPayload> = {
         if (!model) return skip("provider_unavailable");
         const client = new OpenAI({
             apiKey: credential.apiKey,
-            baseURL: credential.baseUrl ?? undefined,
+            baseURL: providerBaseUrl(credential.baseUrl),
             fetch: usageAttemptFetch,
             maxRetries: 0,
         });

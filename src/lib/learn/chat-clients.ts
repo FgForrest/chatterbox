@@ -14,6 +14,7 @@ import {
     usageAttemptFetch,
 } from "@/lib/ai/usage-attempt";
 import type { AiOperation } from "@/lib/ai/usage-cost";
+import { providerBaseUrl } from "@/lib/ai/validate-base-url";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { retryWithBackoff } from "@/lib/jobs/backoff";
 import { isRetryableError } from "@/lib/jobs/retryable";
@@ -64,17 +65,18 @@ export async function learnChatClients(input: {
         );
     }
     const credentials = resolved.credential;
+    const baseURL = providerBaseUrl(credentials.baseUrl);
     const openai = new OpenAI({
         fetch: usageAttemptFetch,
         apiKey: credentials.apiKey,
-        baseURL: credentials.baseUrl || undefined,
+        baseURL,
         maxRetries: resolved.organizationCredential ? 0 : undefined,
     });
     const model = enhancementChatModel(credentials);
     const bridgeClient = new OpenAI({
         fetch: usageAttemptFetch,
         apiKey: credentials.apiKey,
-        baseURL: credentials.baseUrl || undefined,
+        baseURL,
         maxRetries: 0,
         timeout: BRIDGE_CALL_TIMEOUT_MS,
     });
