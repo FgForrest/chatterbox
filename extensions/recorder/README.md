@@ -56,9 +56,8 @@ recording, its meters show the microphone and selected source of the recording
 in progress. Use its red dot to collapse or expand it. **File later**
 leaves it unfiled. The selected folder survives interrupted uploads and is
 remembered for the next recording. Older servers show the start folder read-only.
-The pill also shows elapsed time and **Stop**, and its red dot collapses or
-expands the controls. When capture stops, it briefly confirms that upload
-continues in the extension. If a changed folder is unavailable when saving, the
+When capture stops, the pill briefly confirms that upload continues in the
+extension. If a changed folder is unavailable when saving, the
 server uses the start folder instead.
 
 On supporting servers, an accessible restricted Organization folder shows an olive
