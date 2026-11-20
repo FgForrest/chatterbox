@@ -12,6 +12,7 @@ import {
 import type { ComponentProps } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { ConfirmDialogProvider } from "@/components/confirm-dialog";
+import type { TranscriptOption } from "@/components/dashboard/transcription-panel";
 import { Workstation } from "@/components/dashboard/workstation";
 import {
     RECORDING_DRAG_TYPE,
@@ -193,6 +194,13 @@ function folderSnapshot(filed: RecordingFolder[]): FolderOrganization {
 function open(
     initial = projection(),
     view: "private" | "org" | "received" = "private",
+    {
+        mobileView = "detail",
+        transcripts = [],
+    }: {
+        mobileView?: "list" | "detail";
+        transcripts?: TranscriptOption[];
+    } = {},
 ) {
     const folder =
         view === "org"
@@ -201,7 +209,7 @@ function open(
               ? "&folder=private-root&view=received"
               : "&folder=private-root";
     window.history.replaceState(
-        { mobileView: "detail" },
+        { mobileView },
         "",
         `/dashboard?recording=${item.id}${folder}`,
     );
@@ -280,6 +288,8 @@ function open(
             });
         if (url.includes("/withdraw-preview"))
             return Response.json({ retentionSeconds: null, deletionAt: null });
+        if (url.startsWith("/api/settings/profiles?"))
+            return Response.json({ profiles: [] });
         return Response.json({});
     });
     vi.stubGlobal("fetch", fetch);
@@ -305,7 +315,7 @@ function open(
             other,
         ],
         transcriptions: new Map(),
-        transcriptVariants: new Map(),
+        transcriptVariants: new Map([[item.id, transcripts]]),
         initialSettings: {
             dateTimeFormat: "relative",
             recordingListSortOrder: "oldest",
@@ -678,6 +688,39 @@ it("reconciles a pruned parent when its stale filing settles after switching ite
         expect(row.getByText("Minutes")).toBeTruthy();
         expect(row.queryByText("Notes")).toBeNull();
     });
+});
+
+it("resets the transcript pick when mobile browser Back closes the same item", async () => {
+    const app = open(projection(), "private", {
+        mobileView: "list",
+        transcripts: [
+            { source: "plaud", text: "Imported transcript" },
+            { source: "riffado", text: "Custom transcript" },
+        ],
+    });
+    expect(window.history.state.mobileView).toBe("list");
+    app.reopen();
+    expect(await screen.findByText("Imported transcript")).toBeTruthy();
+    const tabs = () =>
+        within(
+            screen.getByLabelText("Transcript source", {
+                selector: "fieldset",
+            }),
+        );
+    fireEvent.click(tabs().getByText("Custom"));
+    expect(screen.getByText("Custom transcript")).toBeTruthy();
+    await act(async () => {
+        const popped = new Promise((resolve) =>
+            window.addEventListener("popstate", resolve, { once: true }),
+        );
+        window.history.back();
+        await popped;
+    });
+    expect(window.history.state.mobileView).toBe("list");
+    expect(window.location.search).toContain(`recording=${item.id}`);
+    app.reopen();
+    expect(window.history.state.mobileView).toBe("detail");
+    expect(screen.getByText("Imported transcript")).toBeTruthy();
 });
 
 it("keeps the mobile list open when withdrawal finishes after Back", async () => {

@@ -425,7 +425,7 @@ describe("recording detail layout", () => {
         expect(screen.queryByTestId("transcription-panel")).toBeNull();
     });
 
-    it("remounts artifact panels after transcript or summary availability changes", () => {
+    it("keeps the transcript panel mounted when summary availability changes", () => {
         const { rerender } = render(
             <WorkstationDetailPane
                 {...sharedProps}
@@ -449,30 +449,10 @@ describe("recording detail layout", () => {
             />,
         );
 
-        expect(screen.getByTestId("transcription-panel")).not.toBe(
+        expect(screen.getByTestId("transcription-panel")).toBe(
             panelBeforeErase,
         );
     });
-    it("remounts Organization artifacts when another tab invalidates the selected recording", () => {
-        const currentRecording = { ...recording, view: "org" as const };
-        const { rerender } = render(
-            <WorkstationDetailPane
-                {...sharedProps}
-                currentRecording={currentRecording}
-                contentRevision={0}
-            />,
-        );
-        const before = screen.getByTestId("transcription-panel");
-        rerender(
-            <WorkstationDetailPane
-                {...sharedProps}
-                currentRecording={currentRecording}
-                contentRevision={1}
-            />,
-        );
-        expect(screen.getByTestId("transcription-panel")).not.toBe(before);
-    });
-
     it("spaces the detail blocks and closes Knowledge on a second click", () => {
         render(
             <WorkstationDetailPane

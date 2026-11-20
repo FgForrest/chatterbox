@@ -12,6 +12,7 @@ import { TranscriptView } from "@/components/dashboard/transcript-view";
 import { HelpLink } from "@/components/help/help-button";
 import {
     useItemContentView,
+    useItemDetail,
     useItemPartVersion,
 } from "@/components/items/item-detail-store";
 import type { LearnMarks } from "@/components/learn/learn-marks";
@@ -19,7 +20,7 @@ import { LearnReview } from "@/components/learn/learn-review";
 import { SpeakerAccentContext } from "@/components/people/speaker-accent-context";
 import {
     confirmedAttributions,
-    type SpeakerResponseRow,
+    type SpeakersResponse,
     SpeakerTags,
     type TranscriptSpeakerTag,
 } from "@/components/people/speaker-tags";
@@ -78,7 +79,10 @@ import { deriveWorkflowWidgets } from "@/lib/pipeline/workflow-widgets";
 import { withRecordingView } from "@/lib/sharing/view";
 import type { TranscriptTopic } from "@/lib/topics/timeline";
 import { formatSpeakerLabel } from "@/lib/transcription/diarization";
-import { preferredTranscript } from "@/lib/transcription/preferred-source";
+import {
+    preferredLearnTranscript,
+    preferredTranscript,
+} from "@/lib/transcription/preferred-source";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import type { Recording } from "@/types/recording";
 
@@ -104,6 +108,7 @@ export interface TranscriptOption {
      * the stored one.
      */
     version?: { transcriptionId: string; revision: number };
+    contentVersion?: string;
     language?: string;
     provider?: string;
     model?: string;
@@ -235,25 +240,30 @@ export function TranscriptionPanel({
     const view = useItemContentView(recording.view, shared);
     const orgView = view === "org";
 
-    const [activeSource, setActiveSource] = useState<string | undefined>(
-        undefined,
-    );
+    const detail = useItemDetail();
+    const usesRenderedVersions =
+        detail !== null && recording.titleVersion !== undefined;
+    const [localSource, setLocalSource] = useState<string>();
+    const selectSource = detail?.selectTranscript ?? setLocalSource;
+    const activeSource = detail?.transcriptSource ?? localSource;
     useEffect(() => {
-        if (cut?.open && cut.proposalSource)
-            setActiveSource(cut.proposalSource);
-    }, [cut?.open, cut?.proposalSource]);
+        if (cut?.open && cut.proposalSource) selectSource(cut.proposalSource);
+    }, [cut?.open, cut?.proposalSource, selectSource]);
     const [openingReviewSource, setOpeningReviewSource] = useState<
         string | null
     >(null);
     const [transcriptExpanded, setTranscriptExpanded] = useState(true);
     const [workflowTranscriptExpanded, setWorkflowTranscriptExpanded] =
         useState(false);
-    const activeTranscript =
-        transcriptList.find((t) => t.source === activeSource) ??
-        (linkedWidget === "learn"
-            ? preferredTranscript(transcriptList)
-            : undefined) ??
-        transcriptList[0];
+    const learnTranscript = preferredLearnTranscript(
+        transcriptList,
+        processing?.phases.learn?.inputs?.contentSourceId,
+    );
+    let activeTranscript = transcriptList.find(
+        (t) => t.source === activeSource,
+    );
+    if (linkedWidget === "learn") activeTranscript ??= learnTranscript;
+    activeTranscript ??= transcriptList[0];
     const showSummary =
         Boolean(activeTranscript?.text) &&
         (!widgets || widgets.summary.visible || linkedWidget === "summary");
@@ -262,17 +272,17 @@ export function TranscriptionPanel({
     }, [cut?.setActiveTurns, activeTranscript?.turns]);
     useWorkflowWidgetOpen(
         `recording-learn-review-${recording.id}`,
-        (source) => {
+        (source, fromLink) => {
+            let target = source;
+            if (fromLink) target ??= learnTranscript?.source;
+            if (!target || target === activeTranscript?.source) return;
             if (
-                !source ||
-                !transcriptList.some(
-                    (transcript) => transcript.source === source,
+                transcriptList.some(
+                    (transcript) => transcript.source === target,
                 )
-            )
-                return;
-            if (activeTranscript?.source !== source) {
-                setActiveSource(source);
-                setOpeningReviewSource(source);
+            ) {
+                selectSource(target);
+                setOpeningReviewSource(target);
             }
         },
     );
@@ -311,6 +321,7 @@ export function TranscriptionPanel({
         (candidate) => candidate.text,
     );
     useEffect(() => {
+        if (usesRenderedVersions) return;
         const serverJobFinished =
             previousServerTranscriptionJob.current !== null &&
             serverTranscriptionJob === null;
@@ -335,6 +346,7 @@ export function TranscriptionPanel({
         serverHasTranscript,
         serverTranscriptionJob,
         transcriptMissing,
+        usesRenderedVersions,
     ]);
     const canHavePlaudSummary =
         recording.view !== "org" &&
@@ -353,6 +365,8 @@ export function TranscriptionPanel({
                 : transcriptFingerprint(activeTranscript),
         [activeTranscript],
     );
+    const activeTranscriptPending =
+        detail?.pendingTranscripts.has(activeTranscript?.source ?? "") ?? false;
     // Topics are anchored to timed turns and written onto the transcript
     // row, by whoever may change it: its owner on the private view, the
     // organization account on the Organization view while shared.
@@ -380,6 +394,8 @@ export function TranscriptionPanel({
         canDetectTopics,
         view,
         followUpRevision,
+        activeTranscriptPending,
+        activeTranscriptKey,
     );
     const transcriptSectionRef = useRef<HTMLElement>(null);
     const speakerCursorRef = useRef<{
@@ -394,7 +410,7 @@ export function TranscriptionPanel({
     // and highlights twice.
     const [topicJump, setTopicJump] = useState<{ index: number } | null>(null);
     // The ready review's proposals, shown in the transcript it was made on.
-    const reviewKey = `${recording.id}:${view ?? "private"}:${activeTranscript?.source}:${activeTranscriptKey}`;
+    const reviewKey = `${recording.id}:${activeTranscript?.source}:${activeTranscriptKey}`;
     const [learnMarks, setLearnMarks] = useState<{
         key: string;
         marks: LearnMarks;
@@ -439,7 +455,8 @@ export function TranscriptionPanel({
     }>(
         correctionsUrl,
         JSON.stringify([correctionsVersion, reviewsFinished, correctionsRead]),
-        `${recording.id}:corrections:${correctionSource}`,
+        `${reviewKey}:corrections`,
+        { paused: activeTranscriptPending },
     );
     const undoCorrection = useCallback(
         async (correctionId: string) => {
@@ -512,9 +529,7 @@ export function TranscriptionPanel({
         const timer = setTimeout(() => setSpeakerJump(null), 2000);
         return () => clearTimeout(timer);
     }, [speakerJump, transcriptExpanded]);
-    const attributionKey = activeTranscript
-        ? `${recording.id}:${view ?? "private"}:${activeTranscript.source}`
-        : "";
+    const attributionKey = activeTranscript ? reviewKey : "";
     const [attributionsByKey, setAttributionsByKey] = useState<
         Record<string, SpeakerAttributions>
     >({});
@@ -608,52 +623,69 @@ export function TranscriptionPanel({
         summarySource === "riffado"
             ? preferredTranscript(transcriptList)
             : transcriptList.find((candidate) => candidate.source === "plaud");
+    useWorkflowWidgetOpen(`recording-summary-${recording.id}`, (source) => {
+        if (source && transcriptList.some((t) => t.source === source)) {
+            selectSource(source);
+            setSummarySelection({
+                recordingId: recording.id,
+                source: "riffado",
+            });
+        }
+    });
     const summarySpeakerTags = useMemo(
         () => transcriptSpeakerTags(summaryTranscript),
         [summaryTranscript],
     );
-    const summaryAttributionKey = summaryTranscript
-        ? `${recording.id}:${view ?? "private"}:${summaryTranscript.source}`
-        : "";
-    const summarySpeakerAttributions =
-        attributionsByKey[summaryAttributionKey] ?? {};
-
-    useEffect(() => {
-        if (!summaryTranscript || summaryAttributionKey === attributionKey) {
-            return;
+    let summaryAttributionKey = "";
+    if (summaryTranscript) {
+        let summaryTranscriptKey: string;
+        if (summaryTranscript.version) {
+            const { transcriptionId, revision } = summaryTranscript.version;
+            summaryTranscriptKey = `${transcriptionId}@${revision}`;
+        } else {
+            summaryTranscriptKey = transcriptFingerprint(summaryTranscript);
         }
-        const controller = new AbortController();
-        void fetch(
-            withRecordingView(
-                `/api/recordings/${recording.id}/speakers?source=${encodeURIComponent(summaryTranscript.source)}`,
-                view,
-            ),
-            { signal: controller.signal },
-        )
-            .then(async (response) => {
-                if (!response.ok) return null;
-                return (await response.json()) as {
-                    speakers?: SpeakerResponseRow[];
-                };
-            })
-            .then((body) => {
-                if (!body) return;
+        summaryAttributionKey = `${recording.id}:${summaryTranscript.source}:${summaryTranscriptKey}`;
+    }
+    const summaryTranscriptPending =
+        detail?.pendingTranscripts.has(summaryTranscript?.source ?? "") ??
+        false;
+    const summarySpeakersVersion = useItemPartVersion(
+        "speakers",
+        summaryTranscript?.source,
+    );
+    useItemPartFetch<SpeakersResponse>(
+        summaryTranscript && summaryAttributionKey !== attributionKey
+            ? withRecordingView(
+                  `/api/recordings/${recording.id}/speakers?source=${encodeURIComponent(summaryTranscript.source)}`,
+                  view,
+              )
+            : null,
+        summarySpeakersVersion,
+        summaryAttributionKey,
+        {
+            paused: summaryTranscriptPending,
+            onLoad: (body) => {
+                const shown = summaryTranscript?.version;
+                if (
+                    shown &&
+                    body.transcriptionId !== undefined &&
+                    body.revision !== undefined &&
+                    (body.transcriptionId !== shown.transcriptionId ||
+                        body.revision !== shown.revision)
+                )
+                    return;
                 setAttributionsByKey((current) => ({
                     ...current,
                     [summaryAttributionKey]: confirmedAttributions(
                         body.speakers,
                     ),
                 }));
-            })
-            .catch(() => {});
-        return () => controller.abort();
-    }, [
-        attributionKey,
-        recording.id,
-        summaryAttributionKey,
-        summaryTranscript,
-        view,
-    ]);
+            },
+        },
+    );
+    const summarySpeakerAttributions =
+        attributionsByKey[summaryAttributionKey] ?? {};
 
     // The title, summary and topics automatic Learn held back are made by
     // jobs a finished review queues: followed here, since nothing the page
@@ -669,7 +701,7 @@ export function TranscriptionPanel({
             setFollowUpRevision((count) => count + 1);
             // The correction pass may have corrected it meanwhile.
             setCorrectionsRead((count) => count + 1);
-            onTranscriptStale?.();
+            if (!usesRenderedVersions) onTranscriptStale?.();
         },
     });
     const learnSummaryHold = !heldForReview
@@ -687,14 +719,14 @@ export function TranscriptionPanel({
     const handleReviewFinished = useCallback(() => {
         setReviewsFinished((count) => count + 1);
         followReleased();
-        onTranscriptStale?.();
-    }, [followReleased, onTranscriptStale]);
+        if (!usesRenderedVersions) onTranscriptStale?.();
+    }, [followReleased, onTranscriptStale, usesRenderedVersions]);
 
     useWorkflowWidgetOpen(
         !widgets || widgets.transcript.visible ? transcriptWidgetId : undefined,
         (source) => {
             if (source && transcriptList.some((t) => t.source === source))
-                setActiveSource(source);
+                selectSource(source);
             setWorkflowTranscriptExpanded(true);
             setTranscriptExpanded(true);
         },
@@ -736,7 +768,6 @@ export function TranscriptionPanel({
                               key: "language",
                               content: (
                                   <RecordingLanguage
-                                      key={`${recording.id}:${view ?? "private"}`}
                                       recordingId={recording.id}
                                       detectedLanguage={
                                           activeTranscript.language
@@ -751,7 +782,8 @@ export function TranscriptionPanel({
                                           setFollowUpRevision(
                                               (count) => count + 1,
                                           );
-                                          onTranscriptStale?.();
+                                          if (!usesRenderedVersions)
+                                              onTranscriptStale?.();
                                       }}
                                       onTranscribe={onTranscribe}
                                       onResummarize={() => {
@@ -971,7 +1003,7 @@ export function TranscriptionPanel({
                                                     value={
                                                         activeTranscript.source
                                                     }
-                                                    onSelect={setActiveSource}
+                                                    onSelect={selectSource}
                                                 />
                                             </div>
                                             <div className="@min-[560px]/transcription:hidden">
@@ -998,7 +1030,7 @@ export function TranscriptionPanel({
                                                                 activeTranscript.source
                                                             }
                                                             onValueChange={
-                                                                setActiveSource
+                                                                selectSource
                                                             }
                                                         >
                                                             {transcriptList.map(
@@ -1085,11 +1117,9 @@ export function TranscriptionPanel({
                             )}
                         {activeTranscript && speakerTags.length > 0 && (
                             <SpeakerTags
-                                // Another recording, view, source or text is
-                                // another transcript to name: mount afresh, so
-                                // nothing of the last one's state, or its late
-                                // answers, reaches this one.
-                                key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}:${reviewsFinished}`}
+                                transcriptIdentity={reviewKey}
+                                transcriptPending={activeTranscriptPending}
+                                refreshKey={reviewsFinished}
                                 recordingId={recording.id}
                                 source={activeTranscript.source}
                                 speakers={speakerTags}
@@ -1105,26 +1135,34 @@ export function TranscriptionPanel({
                                         : undefined
                                 }
                                 shownVersion={activeTranscript.version}
-                                onStale={onTranscriptStale}
+                                onStale={(reason) => {
+                                    if (reason === "sharing" || !detail)
+                                        onTranscriptStale?.();
+                                    else detail.revalidateTranscript();
+                                }}
                                 readOnly={readOnly}
                             />
                         )}
-                        {transcriptionRunning ? (
+                        {transcriptionRunning && (
                             <div className="flex flex-col items-center justify-center py-12">
                                 <div className="animate-spin size-8 border-2 border-primary border-t-transparent rounded-full mb-4" />
                                 <p className="text-sm text-muted-foreground">
                                     {i18n("Transcribing audio…")}
                                 </p>
                             </div>
-                        ) : activeTranscript?.text ? (
-                            <div className="space-y-4">
+                        )}
+                        {activeTranscript?.text && (
+                            <div
+                                className="space-y-4"
+                                hidden={transcriptionRunning}
+                            >
                                 <section
                                     ref={transcriptSectionRef}
                                     aria-label={i18n("Transcript content")}
                                     className="relative max-h-96 overflow-y-auto rounded-lg bg-muted"
                                 >
                                     <TranscriptChapterBar
-                                        key={`${attributionKey}:${activeTranscriptKey}`}
+                                        transcriptIdentity={reviewKey}
                                         widgetId={`recording-topics-${recording.id}`}
                                         topics={topics}
                                         expanded={transcriptOpen}
@@ -1190,7 +1228,7 @@ export function TranscriptionPanel({
                                     </div>
                                 </section>
                             </div>
-                        ) : null}
+                        )}
                     </WorkflowWidget>
                 </div>
             )}
@@ -1200,7 +1238,8 @@ export function TranscriptionPanel({
                 (!widgets || widgets.learn.visible) && (
                     <SpeakerAccentContext value={accentPositions}>
                         <LearnReview
-                            key={reviewKey}
+                            transcriptIdentity={reviewKey}
+                            transcriptPending={activeTranscriptPending}
                             recordingId={recording.id}
                             view={view}
                             source={
@@ -1272,6 +1311,7 @@ export function TranscriptionPanel({
                         taskWidgetId={`recording-task-review-${recording.id}`}
                         learnHold={learnSummaryHold}
                         refreshKey={followUpRevision}
+                        transcriptPending={summaryTranscriptPending}
                     />
                 </div>
             )}

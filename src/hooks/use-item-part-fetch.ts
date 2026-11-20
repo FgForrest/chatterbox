@@ -8,6 +8,7 @@ interface PartRequest {
     identity: string;
     url: string | null;
     version: string | undefined;
+    paused: boolean;
 }
 
 interface PartState<T> {
@@ -19,6 +20,7 @@ interface PartState<T> {
 
 interface PartFetchOptions<T> {
     cachedData?: T | null;
+    paused?: boolean;
     onLoad?: (data: T, signal: AbortSignal) => void;
 }
 
@@ -47,9 +49,10 @@ export function useItemPartFetch<T>(
     identity: string,
     options?: PartFetchOptions<T>,
 ) {
+    const paused = options?.paused ?? false;
     const request = useMemo(
-        () => ({ identity, url, version }),
-        [identity, url, version],
+        () => ({ identity, url, version, paused }),
+        [identity, url, version, paused],
     );
     const [state, setState] = useState<PartState<T>>({
         request,
@@ -89,7 +92,7 @@ export function useItemPartFetch<T>(
             const isCurrent = () =>
                 !controller.signal.aborted && currentRequest.current === target;
             const load = async () => {
-                if (!target.url) return null;
+                if (!target.url || target.paused) return null;
                 try {
                     const response = await fetch(target.url, {
                         signal: controller.signal,

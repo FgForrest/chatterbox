@@ -2,8 +2,9 @@
 
 import { Languages, Pencil } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
+import { useItemPartVersion } from "@/components/items/item-detail-store";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -24,7 +25,9 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { ActionTooltip } from "@/components/ui/tooltip";
+import { useItemPartFetch } from "@/hooks/use-item-part-fetch";
 import { getApiErrorMessage } from "@/lib/api-errors";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import {
     normalizeDetectedLanguage,
     recordingLanguageName,
@@ -72,7 +75,6 @@ export function RecordingLanguage({
     const i18n = useExtracted();
     const locale = useLocale();
     const [editing, setEditing] = useState(false);
-    const [metadata, setMetadata] = useState<LanguageMetadata | null>(null);
     const [saving, setSaving] = useState(false);
     const [regeneratingTitle, setRegeneratingTitle] = useState(false);
     const [titleRefreshKey, setTitleRefreshKey] = useState(0);
@@ -80,19 +82,18 @@ export function RecordingLanguage({
         `/api/recordings/${recordingId}/language`,
         view,
     );
-    useEffect(() => {
-        void refreshKey;
-        void resummarizeDisabled;
-        void titleRefreshKey;
-        const controller = new AbortController();
-        void fetch(url, { signal: controller.signal })
-            .then(async (response) => {
-                if (response.ok)
-                    setMetadata((await response.json()) as LanguageMetadata);
-            })
-            .catch(() => {});
-        return () => controller.abort();
-    }, [url, refreshKey, resummarizeDisabled, titleRefreshKey]);
+    const version = useItemPartVersion("language");
+    const { data: metadata, setData: setMetadata } =
+        useItemPartFetch<LanguageMetadata>(
+            url,
+            version ??
+                JSON.stringify([
+                    refreshKey,
+                    resummarizeDisabled,
+                    titleRefreshKey,
+                ]),
+            recordingId,
+        );
     const name = (code: string) => recordingLanguageName(code, locale);
     const confirmed = metadata?.confirmedLanguage;
     const detected = normalizeDetectedLanguage(detectedLanguage);
@@ -102,12 +103,12 @@ export function RecordingLanguage({
     const change = async (language: string | null) => {
         if ((metadata?.confirmedLanguage ?? null) === language) return;
         const previous = metadata;
-        setMetadata((value) => ({
+        setMetadata({
             confirmedLanguage: language,
-            needsResummary: value?.needsResummary ?? false,
-            needsTitleRegeneration: value?.needsTitleRegeneration ?? false,
+            needsResummary: metadata?.needsResummary ?? false,
+            needsTitleRegeneration: metadata?.needsTitleRegeneration ?? false,
             canChange: true,
-        }));
+        });
         setSaving(true);
         try {
             const response = await fetch(url, {
@@ -126,6 +127,7 @@ export function RecordingLanguage({
                 ...((await response.json()) as LanguageMetadata),
                 canChange: true,
             });
+            invalidateItemProcessing(recordingId);
             onReload();
         } catch (error) {
             setMetadata(previous);
@@ -153,6 +155,7 @@ export function RecordingLanguage({
                     ),
                 );
             setTitleRefreshKey((value) => value + 1);
+            invalidateItemProcessing(recordingId);
             onReload();
             toast.success(i18n("Title regenerated"));
         } catch (error) {

@@ -23,6 +23,7 @@ interface TranscriptChapterBarProps {
     showOriginal: boolean;
     onShowOriginalChange: (show: boolean) => void;
     widgetId: string;
+    transcriptIdentity?: string;
     expanded?: boolean;
 }
 
@@ -39,6 +40,7 @@ export function TranscriptChapterBar({
     showOriginal,
     onShowOriginalChange,
     widgetId,
+    transcriptIdentity,
     expanded = true,
 }: TranscriptChapterBarProps) {
     const playback = usePlayback();
@@ -51,6 +53,12 @@ export function TranscriptChapterBar({
         ms: 0,
         playing: false,
     });
+
+    useEffect(() => {
+        void transcriptIdentity;
+        setSelectedIndex(null);
+        setReadingIndex(0);
+    }, [transcriptIdentity]);
 
     useEffect(() => {
         return playback?.subscribe((state) => {

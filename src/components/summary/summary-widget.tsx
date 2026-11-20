@@ -98,6 +98,7 @@ interface SummaryWidgetProps {
     taskWidgetId: string;
     learnHold?: SummaryLearnHold;
     refreshKey?: string | number;
+    transcriptPending?: boolean;
     onResummarizeReady?: (
         action: { run: () => void; disabled: boolean } | null,
     ) => void;
@@ -126,6 +127,7 @@ export function SummaryWidget({
     taskWidgetId,
     learnHold = null,
     refreshKey = 0,
+    transcriptPending,
     onResummarizeReady,
 }: SummaryWidgetProps) {
     const i18n = useExtracted();
@@ -166,6 +168,7 @@ export function SummaryWidget({
         transcriptionText: contentText,
         view,
         version,
+        transcriptPending,
         profileChannel: kind,
     });
     const contextKey = `${itemId}:${source}:${view ?? "private"}`;

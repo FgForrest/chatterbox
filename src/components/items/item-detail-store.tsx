@@ -5,6 +5,7 @@ import {
     type ReactNode,
     useCallback,
     useContext,
+    useEffect,
     useLayoutEffect,
     useMemo,
     useRef,
@@ -18,12 +19,14 @@ import {
 import { onTasksChanged } from "@/components/tasks/task-api";
 import {
     ITEM_PROCESSING_REVALIDATION_MS,
+    invalidateItemProcessing,
     onItemProcessingInvalidated,
     recentItemProcessingInvalidation,
 } from "@/lib/pipeline/item-processing-events";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import { deriveWorkflowStatus } from "@/lib/pipeline/workflow-status";
 import type { RecordingView } from "@/lib/sharing/view";
+import { preferredTranscript } from "@/lib/transcription/preferred-source";
 
 type Projection = ItemProcessingPresentation;
 type ItemDetailStatus = "loading" | "ready" | "unavailable" | "error";
@@ -44,6 +47,11 @@ interface Scope {
     initialData?: Projection | null;
 }
 
+interface RenderedTranscript {
+    source: string;
+    contentVersion?: string;
+}
+
 interface ItemDetailProviderProps {
     itemId: string;
     kind: "audio" | "mail";
@@ -53,6 +61,11 @@ interface ItemDetailProviderProps {
     initialShared?: boolean;
     initialData?: Projection | null;
     operationQueue?: ItemOperationQueue;
+    transcripts?: readonly RenderedTranscript[];
+    titleVersion?: string;
+    renderedHasSummary?: boolean;
+    refreshDashboard?: () => void;
+    detailVisible?: boolean;
     children: ReactNode;
 }
 
@@ -66,6 +79,10 @@ interface ItemDetail {
     shared: boolean;
     workflow: ReturnType<typeof deriveWorkflowStatus> | null;
     stale: boolean;
+    transcriptSource: string | undefined;
+    selectTranscript: (source: string) => void;
+    revalidateTranscript: () => void;
+    pendingTranscripts: ReadonlySet<string>;
     refresh: () => Promise<void>;
     enqueueOperation: ItemOperationQueue["enqueueOperation"];
     pendingFolderIds: ReadonlySet<string>;
@@ -78,6 +95,159 @@ interface ItemDetail {
 }
 
 const ItemDetailContext = createContext<ItemDetail | null>(null);
+const TRANSCRIPT_REFRESH_RETRY_MS = 10_000;
+
+interface RenderedPartRefresh {
+    version: string;
+    retryAt: number | null;
+}
+
+function useRenderedItemRefresh(
+    itemId: string,
+    versions: Projection["versions"],
+    transcripts: readonly RenderedTranscript[] | undefined,
+    titleVersion: string | undefined,
+    renderedHasSummary: boolean | undefined,
+    projectedHasSummary: boolean | undefined,
+    refreshDashboard: (() => void) | undefined,
+) {
+    const requested = useRef<{
+        itemId: string;
+        parts: Map<string, RenderedPartRefresh>;
+    } | null>(null);
+    const [released, setReleased] = useState<{
+        itemId: string;
+        parts: Map<string, string>;
+    } | null>(null);
+    if (released && released.itemId !== itemId) setReleased(null);
+    const serverVersions = useMemo(() => {
+        if (
+            !versions ||
+            !transcripts ||
+            titleVersion === undefined ||
+            !refreshDashboard
+        )
+            return null;
+        return new Map([
+            ...Object.entries(versions.transcripts),
+            ["title", versions.title],
+            ["summary-flag", String(projectedHasSummary)],
+        ]);
+    }, [
+        projectedHasSummary,
+        refreshDashboard,
+        titleVersion,
+        transcripts,
+        versions,
+    ]);
+    const mismatches = useMemo(() => {
+        const parts = new Set<string>();
+        if (!serverVersions || !versions || !transcripts) return parts;
+        const rendered = new Map(
+            transcripts.map(({ source, contentVersion }) => [
+                source,
+                contentVersion,
+            ]),
+        );
+        for (const source of new Set([
+            ...rendered.keys(),
+            ...Object.keys(versions.transcripts),
+        ])) {
+            if (rendered.get(source) !== versions.transcripts[source])
+                parts.add(source);
+        }
+        if (versions.title !== titleVersion) parts.add("title");
+        if (
+            renderedHasSummary !== undefined &&
+            renderedHasSummary !== projectedHasSummary
+        )
+            parts.add("summary-flag");
+        return parts;
+    }, [
+        projectedHasSummary,
+        renderedHasSummary,
+        serverVersions,
+        titleVersion,
+        transcripts,
+        versions,
+    ]);
+    const pendingTranscripts = useMemo(() => {
+        const pending = new Set<string>();
+        for (const source of mismatches) {
+            const version = versions?.transcripts[source];
+            if (
+                version !== undefined &&
+                (released?.itemId !== itemId ||
+                    released.parts.get(source) !== version)
+            )
+                pending.add(source);
+        }
+        return pending;
+    }, [itemId, mismatches, released, versions]);
+
+    useEffect(() => {
+        if (!serverVersions || !refreshDashboard) return;
+        if (requested.current?.itemId !== itemId)
+            requested.current = { itemId, parts: new Map() };
+        const { parts } = requested.current;
+        const superseded = [...parts].filter(
+            ([name, entry]) =>
+                entry.version !== (serverVersions.get(name) ?? ""),
+        );
+        for (const [name] of superseded) parts.delete(name);
+        if (superseded.length > 0 && released?.itemId === itemId) {
+            const next = new Map(released.parts);
+            for (const [name] of superseded) next.delete(name);
+            if (next.size !== released.parts.size)
+                setReleased({ itemId, parts: next });
+        }
+
+        let shouldRefresh = false;
+        const deadline = Date.now() + TRANSCRIPT_REFRESH_RETRY_MS;
+        for (const name of mismatches) {
+            if (parts.has(name)) continue;
+            parts.set(name, {
+                version: serverVersions.get(name) ?? "",
+                retryAt: pendingTranscripts.has(name) ? deadline : null,
+            });
+            shouldRefresh = true;
+        }
+        const waiting = [...pendingTranscripts].flatMap((source) => {
+            const entry = parts.get(source);
+            return entry?.retryAt != null
+                ? [{ source, entry, at: entry.retryAt }]
+                : [];
+        });
+        if (shouldRefresh) refreshDashboard();
+        if (waiting.length === 0) return;
+        const retryAt = Math.min(...waiting.map(({ at }) => at));
+        const timer = window.setTimeout(
+            () => {
+                const next = new Map(
+                    released?.itemId === itemId ? released.parts : undefined,
+                );
+                for (const { source, entry, at } of waiting) {
+                    if (at > retryAt) continue;
+                    entry.retryAt = null;
+                    next.set(source, entry.version);
+                }
+                setReleased({ itemId, parts: next });
+                refreshDashboard();
+            },
+            Math.max(0, retryAt - Date.now()),
+        );
+        return () => window.clearTimeout(timer);
+    }, [
+        itemId,
+        mismatches,
+        pendingTranscripts,
+        refreshDashboard,
+        released,
+        serverVersions,
+    ]);
+
+    return pendingTranscripts;
+}
 
 /** Own the processing projection and its polling, keyed by itemId. */
 export function ItemDetailProvider({
@@ -89,6 +259,11 @@ export function ItemDetailProvider({
     initialShared = false,
     initialData,
     operationQueue,
+    transcripts,
+    titleVersion,
+    renderedHasSummary,
+    refreshDashboard,
+    detailVisible = true,
     children,
 }: ItemDetailProviderProps) {
     const localQueue = useMemo(() => new ItemOperationQueue(itemId), [itemId]);
@@ -381,6 +556,77 @@ export function ItemDetailProvider({
         [],
     );
     const { projection, status, failures, sharedOnOpen } = currentState;
+    const workflowOnItem = useMemo(
+        () => (projection ? deriveWorkflowStatus(projection, kind) : null),
+        [projection, kind],
+    );
+    const pendingTranscripts = useRenderedItemRefresh(
+        itemId,
+        projection?.versions,
+        transcripts,
+        titleVersion,
+        renderedHasSummary,
+        projection?.outputs.summary,
+        refreshDashboard,
+    );
+
+    const visibleItemId = detailVisible ? itemId : null;
+    const [tab, setTab] = useState<{
+        itemId: string | null;
+        workflowDefault?: boolean;
+        source?: string;
+    }>({ itemId: visibleItemId });
+    const continuing = visibleItemId !== null && tab.itemId === visibleItemId;
+    const selected = continuing ? tab.source : undefined;
+    const initialDefault =
+        !enabled || view === "received" || status === "unavailable"
+            ? false
+            : workflowOnItem?.visible;
+    let workflowDefault: boolean | undefined;
+    if (visibleItemId !== null) {
+        workflowDefault = initialDefault;
+        if (continuing) workflowDefault = tab.workflowDefault ?? initialDefault;
+    }
+    let fallback: string | undefined;
+    if (transcripts) {
+        if (workflowDefault !== false) {
+            fallback = preferredTranscript(transcripts)?.source;
+        }
+        fallback ??= transcripts[0]?.source;
+    }
+    const shown =
+        selected && transcripts?.some(({ source }) => source === selected)
+            ? selected
+            : fallback;
+    let remembered: string | undefined;
+    if (selected && pendingTranscripts.has(selected)) {
+        remembered = selected;
+    } else if (selected !== undefined || workflowDefault !== undefined) {
+        remembered = shown;
+    }
+    if (
+        tab.itemId !== visibleItemId ||
+        tab.workflowDefault !== workflowDefault ||
+        tab.source !== remembered
+    )
+        setTab({ itemId: visibleItemId, workflowDefault, source: remembered });
+    const selectTranscript = useCallback(
+        (source: string) => {
+            if (visibleItemId !== null)
+                setTab((current) => ({
+                    ...current,
+                    itemId: visibleItemId,
+                    source,
+                }));
+        },
+        [visibleItemId],
+    );
+    const revalidateTranscript = useCallback(() => {
+        if (titleVersion !== undefined && enabled && view !== "received")
+            invalidateItemProcessing(itemId);
+        else refreshDashboard?.();
+    }, [enabled, itemId, refreshDashboard, titleVersion, view]);
+
     const value = useMemo<ItemDetail>(() => {
         const operations = pending.map((entry) => entry.operation);
         const data = operations.reduce(
@@ -398,8 +644,15 @@ export function ItemDetailProvider({
             shared: projection
                 ? (projection.access?.shared ?? false)
                 : sharedOnOpen,
-            workflow: data ? deriveWorkflowStatus(data, kind) : null,
+            workflow:
+                data === projection
+                    ? workflowOnItem
+                    : data && deriveWorkflowStatus(data, kind),
             stale: failures >= 2,
+            transcriptSource: shown,
+            selectTranscript,
+            revalidateTranscript,
+            pendingTranscripts,
             refresh,
             enqueueOperation: queue.enqueueOperation,
             pendingFolderIds: new Set(
@@ -432,11 +685,16 @@ export function ItemDetailProvider({
         itemId,
         kind,
         pending,
+        pendingTranscripts,
         projection,
         queue,
         refresh,
+        revalidateTranscript,
+        selectTranscript,
         sharedOnOpen,
+        shown,
         status,
+        workflowOnItem,
     ]);
 
     return (
