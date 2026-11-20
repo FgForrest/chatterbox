@@ -202,9 +202,10 @@ const REFRESH_REJECTED_MESSAGE =
 
 /**
  * Exchange a refresh token for a fresh user token
- * (`POST /auth/refresh-user-token`). Plaud rotates the refresh token but
- * keeps the old one valid, and never extends the session past its original
- * end. Throws `PLAUD_INVALID_TOKEN` when Plaud rejects the refresh token,
+ * (`POST /auth/refresh-user-token`). Store the returned refresh token every
+ * time. The previous refresh token stops working shortly after rotation,
+ * and the session keeps its original end. Throws `PLAUD_INVALID_TOKEN`
+ * when Plaud rejects the refresh token,
  * `PLAUD_RATE_LIMITED` / `PLAUD_UPSTREAM_ERROR` for transient failures
  * (including network errors).
  */

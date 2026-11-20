@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { plaudConnections } from "@/db/schema";
 import { decrypt } from "@/lib/encryption";
@@ -84,7 +84,7 @@ export async function createPlaudClient(
     let storedRefreshToken = connection.refreshToken;
     let bearerToken = connection.bearerToken;
     let sessionEnd = sessionExpiresAt;
-    const refresh = async () => {
+    const requestRefresh = async (expectedRefreshToken: string) => {
         if (sessionEnd && sessionEnd.getTime() <= Date.now()) {
             throw new AppError(
                 ErrorCode.PLAUD_INVALID_TOKEN,
@@ -94,27 +94,43 @@ export async function createPlaudClient(
             );
         }
 
-        const expectedRefreshToken = storedRefreshToken;
         const refreshToken = decrypt(expectedRefreshToken);
         const tokens = await plaudRefreshUserToken(refreshToken, apiBase);
-        let accessToken = tokens.accessToken;
-        let saved: Awaited<ReturnType<typeof persistRefreshedPlaudTokens>>;
+        return { ...tokens, refreshToken: tokens.refreshToken ?? refreshToken };
+    };
+
+    const refreshUserToken = async () => {
+        const expectedRefreshToken = storedRefreshToken;
+        const rejectedCiphertext = bearerToken;
+        let tokens: Awaited<ReturnType<typeof requestRefresh>> | undefined;
+        let refreshError: AppError | undefined;
         try {
-            saved = await persistRefreshedPlaudTokens({
-                userId,
-                connectionId,
-                storedRefreshToken: expectedRefreshToken,
-                tokens: {
-                    ...tokens,
-                    refreshToken: tokens.refreshToken ?? refreshToken,
-                },
-            });
+            tokens = await requestRefresh(expectedRefreshToken);
+        } catch (error) {
+            if (!isPlaudTokenRejection(error)) throw error;
+            refreshError = error;
+        }
+
+        let accessToken = tokens?.accessToken;
+        let saved: Awaited<ReturnType<typeof persistRefreshedPlaudTokens>> =
+            null;
+        let currentRefreshToken: string | null | undefined;
+        try {
+            if (tokens) {
+                saved = await persistRefreshedPlaudTokens({
+                    userId,
+                    connectionId,
+                    storedRefreshToken: expectedRefreshToken,
+                    tokens,
+                });
+            }
             if (!saved) {
                 const [current] = await db
                     .select({
                         bearerToken: plaudConnections.bearerToken,
                         refreshToken: plaudConnections.refreshToken,
                         sessionExpiresAt: plaudConnections.sessionExpiresAt,
+                        invalidatedAt: plaudConnections.invalidatedAt,
                     })
                     .from(plaudConnections)
                     .where(
@@ -122,12 +138,13 @@ export async function createPlaudClient(
                             eq(plaudConnections.id, connectionId),
                             eq(plaudConnections.userId, userId),
                             eq(plaudConnections.apiBase, apiBase),
-                            isNull(plaudConnections.invalidatedAt),
                         ),
                     )
                     .limit(1);
+                currentRefreshToken = current?.refreshToken;
                 if (
                     current?.refreshToken &&
+                    !current.invalidatedAt &&
                     current.refreshToken !== expectedRefreshToken
                 ) {
                     saved = { ...current, refreshToken: current.refreshToken };
@@ -147,33 +164,11 @@ export async function createPlaudClient(
                 502,
             );
         }
-        if (!saved) {
-            throw new AppError(
-                ErrorCode.PLAUD_UPSTREAM_ERROR,
-                "The Plaud connection changed during refresh. Please try again.",
-                502,
-            );
-        }
 
-        storedRefreshToken = saved.refreshToken;
-        bearerToken = saved.bearerToken;
-        sessionEnd = saved.sessionExpiresAt ?? sessionEnd;
-        options.onTokensStored?.(bearerToken);
-        return {
-            accessToken,
-            bearerCiphertext: bearerToken,
-        };
-    };
-
-    const refreshUserToken = async () => {
-        const rejectedCiphertext = bearerToken;
-        try {
-            return await refresh();
-        } catch (error) {
-            if (!isPlaudTokenRejection(error)) throw error;
+        if (refreshError && currentRefreshToken === expectedRefreshToken) {
             const rejection = new PlaudTokenRejection(
                 rejectedCiphertext,
-                error,
+                refreshError,
             );
             if (options.onRefreshRejected) {
                 options.onRefreshRejected(rejection);
@@ -192,6 +187,22 @@ export async function createPlaudClient(
             }
             throw rejection;
         }
+        if (!saved || accessToken === undefined) {
+            throw new AppError(
+                ErrorCode.PLAUD_UPSTREAM_ERROR,
+                "The Plaud connection changed during refresh. Please try again.",
+                502,
+            );
+        }
+
+        storedRefreshToken = saved.refreshToken;
+        bearerToken = saved.bearerToken;
+        sessionEnd = saved.sessionExpiresAt ?? sessionEnd;
+        options.onTokensStored?.(bearerToken);
+        return {
+            accessToken,
+            bearerCiphertext: bearerToken,
+        };
     };
 
     let userToken: string | undefined;

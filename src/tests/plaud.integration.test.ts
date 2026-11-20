@@ -47,6 +47,7 @@ async function readPlaud<T>(read: () => Promise<T>): Promise<T> {
     }
 }
 
+// This check consumes PLAUD_REFRESH_TOKEN through rotation. Start each run with a fresh email-code login.
 it.skipIf(!refreshToken)(
     "refreshes Plaud access without extending the sign-in",
     async () => {

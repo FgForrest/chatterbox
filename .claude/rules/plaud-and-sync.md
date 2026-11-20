@@ -30,12 +30,13 @@ Non-obvious facts about Plaud's server. Issue numbers below refer to upstream
 
 - **User and refresh tokens.** Email-code login returns a 30-day user token (UT) and a 30-day
   refresh token. The current web app sets `pld_ut` (24 hours) and `pld_urt` (30 days). Connector
-  0.2.4+ forwards both. Connector 0.2.3 and manual paste supply only the UT. Older tokens remain
-  valid until their JWT `exp`.
+  0.2.4+ forwards both. Connector 0.2.3 and manual paste supply only the UT. Older user tokens
+  remain valid until their JWT `exp`.
 - **Renewal.** `POST /auth/refresh-user-token` takes the refresh token as Bearer and returns a new
-  pair without extending the original session. Older refresh tokens still work after rotation.
-  Plaud returns HTTP 401 when it rejects the refresh token. Treat rate limits, 5xx and network
-  errors as transient. OTP and refresh response expiry fields are Unix seconds.
+  pair without extending the original session. The previous refresh token stops working shortly
+  after a refresh, so always store the returned refresh token. Plaud returns HTTP 401 when it
+  rejects the refresh token. Treat rate limits, 5xx and network errors as transient. OTP and
+  refresh response expiry fields are Unix seconds.
 - **UT vs WT.** Chatterbox stores the UT in `plaudConnections.bearerToken`. `PlaudClient` uses it to
   mint a short-lived workspace token (WT) at `/user-app/auth/workspace/token/<id>`. WT JWTs carry
   workspace claims such as `ut_ref`, `wid`, or `wtype`; UTs do not. When Plaud rejects a WT, try

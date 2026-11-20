@@ -1221,6 +1221,8 @@ describe("createPlaudClient refresh", () => {
     });
 
     it("does not loop when the refresh token is rejected after a 401", async () => {
+        const connection = makeConnection();
+        installConnectionStore({ ...connection, invalidatedAt: null });
         const updates = mockUpdates();
         routeFetch({
             "/auth/refresh-user-token": () => rejectedRefresh(),
@@ -1229,7 +1231,7 @@ describe("createPlaudClient refresh", () => {
             "/file/simple/web": () => jsonResponse({ msg: "expired" }, 401),
         });
 
-        const client = await createPlaudClient(makeConnection());
+        const client = await createPlaudClient(connection);
         await expect(client.listDevices()).rejects.toMatchObject({
             code: ErrorCode.PLAUD_INVALID_TOKEN,
         });
@@ -1244,14 +1246,14 @@ describe("createPlaudClient refresh", () => {
     });
 
     it("skips the refresh call once the sign-in has ended", async () => {
-        await expect(
-            createPlaudClient(
-                makeConnection({
-                    accessExpiresAt: new Date(Date.now() - 60_000),
-                    sessionExpiresAt: new Date(Date.now() - 1000),
-                }),
-            ),
-        ).rejects.toMatchObject({ code: ErrorCode.PLAUD_INVALID_TOKEN });
+        const connection = makeConnection({
+            accessExpiresAt: new Date(Date.now() - 60_000),
+            sessionExpiresAt: new Date(Date.now() - 1000),
+        });
+        installConnectionStore({ ...connection, invalidatedAt: null });
+        await expect(createPlaudClient(connection)).rejects.toMatchObject({
+            code: ErrorCode.PLAUD_INVALID_TOKEN,
+        });
         expect(mockFetch).not.toHaveBeenCalled();
     });
 
@@ -1522,12 +1524,18 @@ describe("refresh persistence against a stored row", () => {
     });
 
     it.each([
-        false,
-        true,
-    ])("adopts the winning refresh pair only if its row is healthy (invalidated: %s)", async (invalidated) => {
+        { outcome: "CAS miss", invalidated: false },
+        { outcome: "CAS miss", invalidated: true },
+        { outcome: "refresh rejection", invalidated: false },
+        { outcome: "refresh rejection", invalidated: true },
+    ])("adopts the winning refresh pair after a $outcome only if its row is healthy (invalidated: $invalidated)", async ({
+        outcome,
+        invalidated,
+    }) => {
+        const originalRefresh = makeRefreshToken(nowSec() + 20 * DAY);
         const row = storedConnectionRow({
             accessToken: makeUserToken(nowSec() - 60, "expired"),
-            refreshToken: makeRefreshToken(nowSec() + 20 * DAY),
+            refreshToken: originalRefresh,
             accessExpiresAt: new Date(Date.now() - 60_000),
             sessionExpiresAt: new Date((nowSec() + 20 * DAY) * 1000),
         });
@@ -1538,6 +1546,7 @@ describe("refresh persistence against a stored row", () => {
         const winningAccess = makeUserToken(nowSec() + DAY, "winner");
         const winningRefresh = makeRefreshToken(nowSec() + 20 * DAY, "winner");
         const onTokensStored = vi.fn();
+        const onRefreshRejected = vi.fn();
         let refreshRequests = 0;
         refreshRoutes(() => {
             if (++refreshRequests === 1) {
@@ -1551,16 +1560,25 @@ describe("refresh persistence against a stored row", () => {
             });
         });
 
-        const loser = createPlaudClient(snapshot, { onTokensStored });
+        const loser = createPlaudClient(snapshot, {
+            onTokensStored,
+            onRefreshRejected,
+        });
         await firstStarted.promise;
         const winner = await createPlaudClient(snapshot);
-        if (invalidated) row.invalidatedAt = new Date();
+        const invalidatedAt = invalidated ? new Date() : null;
+        row.invalidatedAt = invalidatedAt;
         firstResponse.resolve(
-            jsonResponse({
-                status: 0,
-                access_token: makeUserToken(nowSec() + DAY, "unsaved"),
-                refresh_token: makeRefreshToken(nowSec() + 20 * DAY, "unsaved"),
-            }),
+            outcome === "refresh rejection"
+                ? rejectedRefresh()
+                : jsonResponse({
+                      status: 0,
+                      access_token: makeUserToken(nowSec() + DAY, "unsaved"),
+                      refresh_token: makeRefreshToken(
+                          nowSec() + 20 * DAY,
+                          "unsaved",
+                      ),
+                  }),
         );
 
         if (invalidated) {
@@ -1584,7 +1602,13 @@ describe("refresh persistence against a stored row", () => {
             );
         }
         expect(decrypt(String(row.refreshToken))).toBe(winningRefresh);
-        expect(refreshRequests).toBe(2);
+        expect(row.invalidatedAt).toBe(invalidatedAt);
+        expect(onRefreshRejected).not.toHaveBeenCalled();
+        expect(
+            callsTo("/auth/refresh-user-token").map(([, init]) =>
+                authHeader(init),
+            ),
+        ).toEqual([`Bearer ${originalRefresh}`, `Bearer ${originalRefresh}`]);
     });
 
     it("keeps a known session end when the refresh response has none", async () => {
@@ -1682,6 +1706,7 @@ describe("sync with a rejected refresh token", () => {
             accessToken: makeUserToken(nowSec() - 60),
             accessExpiresAt: new Date(Date.now() - 60_000),
         });
+        installConnectionStore({ ...connection, invalidatedAt: null });
         mockSyncSelects(connection);
         const updates = mockUpdates();
         routeFetch({
@@ -1699,12 +1724,16 @@ describe("sync with a rejected refresh token", () => {
     });
 
     it("surfaces the refresh rejection as PLAUD_INVALID_TOKEN", async () => {
+        const connection = makeConnection({
+            accessExpiresAt: new Date(Date.now() - 1000),
+        });
+        installConnectionStore({ ...connection, invalidatedAt: null });
         routeFetch({
             "/auth/refresh-user-token": () => rejectedRefresh(),
         });
-        const err = await createPlaudClient(
-            makeConnection({ accessExpiresAt: new Date(Date.now() - 1000) }),
-        ).catch((e: unknown) => e);
+        const err = await createPlaudClient(connection).catch(
+            (e: unknown) => e,
+        );
         expect(err).toBeInstanceOf(AppError);
         expect((err as AppError).code).toBe(ErrorCode.PLAUD_INVALID_TOKEN);
     });
@@ -1720,7 +1749,7 @@ describe("sync invalidation against a stored row", () => {
         });
     }
 
-    it("does not flag a reconnect that replaced the sign-in which failed", async () => {
+    it("continues syncing with the reconnect that replaced the rejected sign-in", async () => {
         const row = expiredRow();
         installConnectionStore(row);
         const utB = makeUserToken(nowSec() + DAY, "ut-b");
@@ -1742,6 +1771,8 @@ describe("sync invalidation against a stored row", () => {
             "/team-app/workspaces/list": workspacesOk,
             "/workspace/token/": mintOk,
             "/device/list": devicesOk,
+            "/file/simple/web": () =>
+                jsonResponse({ status: 0, data_file_list: [] }),
         });
 
         const result = await syncRecordingsForUser(USER_ID);
@@ -1749,11 +1780,13 @@ describe("sync invalidation against a stored row", () => {
         expect(decrypt(String(row.bearerToken))).toBe(utB);
         expect(row.invalidatedAt).toBeNull();
         expect(result.needsReconnect).toBeFalsy();
-        expect(result.errors.join(" ")).toMatch(/changed during this sync/);
+        expect(result.errors).toEqual([]);
+        expect(callsTo("/file/simple/web")).toHaveLength(1);
     });
 
     it("flags the row while it still holds the token that failed", async () => {
         const row = expiredRow();
+        const originalRefresh = String(row.refreshToken);
         installConnectionStore(row);
         routeFetch({
             "/auth/refresh-user-token": () => rejectedRefresh(),
@@ -1762,7 +1795,11 @@ describe("sync invalidation against a stored row", () => {
         const result = await syncRecordingsForUser(USER_ID);
 
         expect(row.invalidatedAt).toBeInstanceOf(Date);
+        expect(row.refreshToken).toBe(originalRefresh);
         expect(result.needsReconnect).toBe(true);
+        const [[, init]] = callsTo("/auth/refresh-user-token");
+        expect(callsTo("/auth/refresh-user-token")).toHaveLength(1);
+        expect(authHeader(init)).toBe(`Bearer ${decrypt(originalRefresh)}`);
     });
 
     it("flags the row after the failing client stored a refresh of its own", async () => {
