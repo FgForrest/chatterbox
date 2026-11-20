@@ -3,6 +3,7 @@
 import { FolderInput, FolderPlus } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useState } from "react";
+import { useItemDetail } from "@/components/items/item-detail-store";
 import { ItemFolderChip } from "@/components/items/item-folder-chip";
 import { FolderPicker } from "@/components/recordings/folder-picker";
 import {
@@ -85,6 +86,8 @@ export function RecordingFolderTags({
     onFolderCreated,
 }: RecordingFolderTagsProps) {
     const i18n = useExtracted();
+    const detail = useItemDetail();
+    const itemDetail = detail?.itemId === recordingId ? detail : null;
     const [pickerOpen, setPickerOpen] = useState(false);
     // The Organization folder whose removal would withdraw the recording,
     // while its owner confirms.
@@ -98,20 +101,53 @@ export function RecordingFolderTags({
         isOwn ? "private" : "org",
     );
     const label = useFolderLabel();
+    const baseIds = assignments
+        .filter((assignment) => assignment.recordingId === recordingId)
+        .map((assignment) => assignment.folderId);
+    const placements = [
+        ...(itemDetail?.projection?.placements ?? []),
+        ...(itemDetail?.data?.placements ?? []),
+    ];
+    const committedIds =
+        itemDetail?.projection?.placements.map((folder) => folder.id) ??
+        baseIds;
     const assignedIds = new Set(
-        assignments
-            .filter((assignment) => assignment.recordingId === recordingId)
-            .map((assignment) => assignment.folderId),
+        itemDetail?.previewFolderIds(committedIds) ?? committedIds,
     );
+    const knownFolders = new Map(folders.map((folder) => [folder.id, folder]));
+    for (const placement of placements ?? []) {
+        const folder = knownFolders.get(placement.id);
+        knownFolders.set(placement.id, {
+            ...(folder ?? { kind: "custom", sortOrder: 0, version: 0 }),
+            ...placement,
+            name: folder?.name ?? placement.name,
+            restricted: placement.restricted,
+            restricting: placement.restricted && folder?.restricting,
+            access: placement.access,
+        });
+    }
     const inScope = (folder: RecordingFolder) =>
         !organizationOnly || folder.scope === "org";
-    const assigned = folders.filter(
+    const assigned = [...knownFolders.values()].filter(
         (folder) =>
-            assignedIds.has(folder.id) &&
+            (assignedIds.has(folder.id) ||
+                itemDetail?.pendingRemovedFolderIds.has(folder.id)) &&
             inScope(folder) &&
             (isOwn || folder.access !== false),
     );
-    const assignedOrg = assigned.filter((folder) => folder.scope === "org");
+    const gateIds = new Set(
+        itemDetail?.folderIdsForGate(committedIds) ?? committedIds,
+    );
+    const openOrganizationFolders = [...knownFolders.values()].filter(
+        (folder) =>
+            gateIds.has(folder.id) &&
+            folder.scope === "org" &&
+            !folder.restricted &&
+            !folder.restricting,
+    );
+    const assignedOrg = assigned.filter(
+        (folder) => folder.scope === "org" && assignedIds.has(folder.id),
+    );
     const moveSource =
         !isOwn &&
         onMove &&
@@ -149,6 +185,7 @@ export function RecordingFolderTags({
                     }
                     restricted={folder.restricted || folder.restricting}
                     organization={folder.scope === "org"}
+                    pending={itemDetail?.pendingFolderIds.has(folder.id)}
                     onSelect={() => onSelectFolder(folder)}
                     onRemove={
                         isOwn ||
@@ -164,9 +201,7 @@ export function RecordingFolderTags({
                             ? () => {
                                   if (
                                       folder.scope === "org" &&
-                                      assignedOrg.filter(
-                                          (entry) => !entry.restricted,
-                                      ).length === 1 &&
+                                      openOrganizationFolders.length === 1 &&
                                       !folder.restricted &&
                                       kind !== "meeting"
                                   ) {
@@ -198,8 +233,17 @@ export function RecordingFolderTags({
                     folders={folders}
                     canCurate={canCurate}
                     onCreated={onFolderCreated}
-                    assignedIds={assignedIds}
+                    assignedIds={
+                        new Set([
+                            ...assignedIds,
+                            ...(itemDetail?.pendingRemovedFolderIds ?? []),
+                            ...(itemDetail?.data?.intents.map(
+                                (intent) => intent.folderId,
+                            ) ?? []),
+                        ])
+                    }
                     open={pickerOpen}
+                    closeOnSelect={itemDetail !== null}
                     onOpenChange={setPickerOpen}
                     organizationOnly={organizationOnly || !isOwn}
                     sharing={!organizationOnly && isOwn}

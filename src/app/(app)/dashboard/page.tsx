@@ -11,7 +11,6 @@ import {
 import {
     aiEnhancements,
     chatterItems,
-    itemShares,
     recordings,
     transcriptions,
     users,
@@ -25,8 +24,11 @@ import { decryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { exportProvidersAvailability } from "@/lib/folder-exports/configurations";
 import { listMyRestrictedAccessInvitations } from "@/lib/folders/access-requests";
+import {
+    dashboardFolderOrganization,
+    listDashboardReceivedShares,
+} from "@/lib/folders/dashboard-organization";
 import { listFolderOrganization } from "@/lib/folders/folders";
-import { organizationForDeployment } from "@/lib/folders/hierarchy";
 import { confirmedOverlays } from "@/lib/learn/llm-input";
 import { recordingsNeedingReview } from "@/lib/learn/pending";
 import { type OverlayCorrection, readTextOf } from "@/lib/learn/render";
@@ -447,20 +449,7 @@ export default async function DashboardPage() {
                         listMyRestrictedAccessInvitations(session.user.id),
                     ]).then((lists) => lists.flat())
                   : Promise.resolve([]),
-              db
-                  .select({
-                      id: itemShares.id,
-                      itemId: itemShares.itemId,
-                      version: itemShares.version,
-                      filingFolderId: itemShares.filingFolderId,
-                  })
-                  .from(itemShares)
-                  .where(
-                      and(
-                          eq(itemShares.receiverUserId, session.user.id),
-                          eq(itemShares.state, "accepted"),
-                      ),
-                  ),
+              listDashboardReceivedShares(session.user.id),
           ])
         : ([null, [], []] as const);
     const receivedByItem = new Map(
@@ -500,13 +489,6 @@ export default async function DashboardPage() {
     // `src/lib/settings/initial-settings.ts`; adding a new preference
     // there is the only place callers need to touch.
     const initialSettings = initialSettingsFromRow(settingsRow);
-    const visibleFolderOrganization = organizationForDeployment(
-        folderOrganization,
-        {
-            isHosted: env.IS_HOSTED,
-            selfHostMode: env.SELF_HOST_MODE,
-        },
-    );
     const mailAvailable = isMailEnabled() && !viewerIsOrgAccount;
 
     return (
@@ -538,22 +520,10 @@ export default async function DashboardPage() {
                 canCurate={actor ? await actsForOrganization(actor) : false}
                 exportProviders={exportProvidersAvailability()}
                 initialInvitations={[...invitations]}
-                initialFolderOrganization={{
-                    ...visibleFolderOrganization,
-                    assignments: [
-                        ...visibleFolderOrganization.assignments,
-                        ...receivedShares.flatMap((share) =>
-                            share.filingFolderId
-                                ? [
-                                      {
-                                          recordingId: share.itemId,
-                                          folderId: share.filingFolderId,
-                                      },
-                                  ]
-                                : [],
-                        ),
-                    ],
-                }}
+                initialFolderOrganization={dashboardFolderOrganization(
+                    folderOrganization,
+                    receivedShares,
+                )}
             />
         </PersonSharingProvider>
     );

@@ -18,6 +18,7 @@ import {
     ItemDetailProvider,
     useItemDetail,
 } from "@/components/items/item-detail-store";
+import type { ItemOperationQueue } from "@/components/items/item-operation-queue";
 import { RecordingAgenda } from "@/components/meetings/recording-agenda";
 import { ItemWorkflow } from "@/components/pipeline/item-workflow";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
@@ -50,6 +51,7 @@ interface TranscriptionData {
 }
 
 interface Props {
+    operationQueue?: ItemOperationQueue;
     currentRecording: Recording | null;
     userId?: string;
     itemLinkQuery?: string;
@@ -121,6 +123,7 @@ export function WorkstationDetailPane(props: Props) {
     const isOwn = recording.isOwn !== false;
     return (
         <ItemDetailProvider
+            operationQueue={props.operationQueue}
             itemId={recording.id}
             kind="audio"
             view={recording.view}

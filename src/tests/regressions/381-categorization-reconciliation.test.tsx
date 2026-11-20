@@ -57,7 +57,7 @@ const processing = processingFixture({
         },
     },
     profile: null,
-    placements: [],
+    placements: [{ ...r, path: r.name, restricted: true }],
     intents: [],
     outputs: { transcript: false, summary: false, learn: false },
     processAgain: false,

@@ -18,6 +18,7 @@ import type { MailDetailPane } from "@/components/mail/mail-detail-pane";
 import { RestrictedFolderProvider } from "@/components/sharing/restricted-folder-context";
 import type { OrgClientEvent } from "@/lib/events/types";
 import { INITIAL_SETTINGS_DEFAULTS } from "@/lib/settings/initial-settings";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 import type { RecordingFolder } from "@/types/folder";
 
 const mock = vi.hoisted(() => ({
@@ -291,6 +292,33 @@ it.each([
     expect(mock.observe).not.toHaveBeenCalled();
 });
 it("moves open A to B while retaining R, with PATCH and no publication warning", async () => {
+    const processing = {
+        ...processingFixture({
+            itemId: own.id,
+            kind: "audio",
+            legacy: true,
+            manualOnly: false,
+            phases: {},
+            profile: null,
+            placements: [folder, openB].map((entry) => ({
+                ...entry,
+                path: entry.name,
+            })),
+            intents: [],
+            outputs: { transcript: false, summary: false, learn: false },
+            processAgain: false,
+            processAgainReason: null,
+            learnFindingsWaiting: 0,
+            taskReviewWaiting: 0,
+            jobs: { transcription: null, summary: null },
+            failures: [],
+        }),
+        access: { role: "owner", shared: true, contentView: "org" },
+    };
+    vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json({ placement: "filed", processing })),
+    );
     const initial = [...assignments, { recordingId: own.id, folderId: "a" }];
     mount({
         initialFolderOrganization: {
