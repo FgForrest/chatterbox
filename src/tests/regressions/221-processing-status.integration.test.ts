@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
     afterAll,
     beforeAll,
@@ -114,6 +114,19 @@ const itemId = "item-veln";
     () => {
         let database: TestPostgresDatabase;
         const db = () => database.db;
+        const settleAdvanceForPollingTest = () =>
+            db()
+                .update(itemProcessing)
+                .set({
+                    processedGeneration: sql`${itemProcessing.requestedGeneration}`,
+                })
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, itemId),
+                        eq(itemProcessing.userId, owner),
+                        eq(itemProcessing.view, "private"),
+                    ),
+                );
         beforeAll(async () => {
             database = await createMigratedTestDatabase(
                 url ?? "",
@@ -557,6 +570,7 @@ const itemId = "item-veln";
                     kind: "learn.run",
                     pipeline: { itemId, userId: owner, phase: "learn" },
                 });
+                await settleAdvanceForPollingTest();
                 await db()
                     .update(asyncJobs)
                     .set({
@@ -609,6 +623,7 @@ const itemId = "item-veln";
                 kind: "learn.run",
                 pipeline: { itemId, userId: owner, phase: "learn" },
             });
+            await settleAdvanceForPollingTest();
             const retryAt = new Date(Date.now() + 30_000);
             await db()
                 .update(asyncJobs)

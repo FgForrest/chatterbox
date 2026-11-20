@@ -50,7 +50,7 @@ export async function recordIntendedPlacementInTx(
         requestPipeline?: boolean;
         canCurate: boolean;
     },
-): Promise<void> {
+): Promise<"intended" | "withheld"> {
     await lockOrgTree(tx);
     const folder = await assertCategorizableFolder(
         input.ownerUserId,
@@ -80,7 +80,7 @@ export async function recordIntendedPlacementInTx(
             folder.folderId,
             input.canCurate,
         );
-        return;
+        return "withheld";
     }
     const [item] = await tx
         .select({ id: chatterItems.id })
@@ -112,6 +112,7 @@ export async function recordIntendedPlacementInTx(
             reason: "placement",
         });
     }
+    return "intended";
 }
 
 /**
@@ -508,8 +509,8 @@ export async function cancelIntendedPlacement(
     ownerUserId: string,
     itemId: string,
     folderId: string,
-): Promise<void> {
-    await db.transaction(async (tx) => {
+): Promise<boolean> {
+    const removed = await db.transaction(async (tx) => {
         await lockOrgTree(tx);
         await lockItemForFolderMutation(tx, itemId, ownerUserId);
         const deleted = await tx
@@ -542,7 +543,8 @@ export async function cancelIntendedPlacement(
             view: "private",
             reason: "placement",
         });
-        if (!advance || deleted.length === 0) return;
+        if (deleted.length === 0) return false;
+        if (!advance) return true;
         const [remaining] = await tx
             .select({ folderId: mailPendingShares.folderId })
             .from(mailPendingShares)
@@ -561,6 +563,8 @@ export async function cancelIntendedPlacement(
                 at: new Date().toISOString(),
             });
         }
+        return true;
     });
     nudge();
+    return removed;
 }

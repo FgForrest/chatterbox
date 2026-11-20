@@ -2555,6 +2555,14 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 expect(await shared.json()).toEqual({
                     assigned: true,
                     summaryStale: false,
+                    placement: "shared",
+                    processing: expect.objectContaining({
+                        access: {
+                            role: "owner",
+                            shared: true,
+                            contentView: "org",
+                        },
+                    }),
                 });
                 const orgSummary = async () =>
                     (

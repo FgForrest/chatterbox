@@ -557,10 +557,20 @@ async function mutate(
                         }),
                     ]),
                 );
+                if (view === "received")
+                    expect(
+                        await loadPrivateItemProcessing(
+                            OWNER,
+                            ITEM,
+                            userId,
+                            "en",
+                            "received",
+                        ),
+                    ).toBeNull();
                 const processing = await loadPrivateItemProcessing(
                     OWNER,
                     ITEM,
-                    userId,
+                    view === "received" ? OWNER : userId,
                     "en",
                     view === "org" ? "org" : "private",
                 );

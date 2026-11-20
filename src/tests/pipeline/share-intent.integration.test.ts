@@ -9,18 +9,27 @@ import {
     vi,
 } from "vitest";
 import {
+    aiEnhancements,
     asyncJobs,
     chatterItems,
     itemProcessing,
     learnReviewItems,
     learnRuns,
+    mailContents,
+    mailMessages,
     mailPendingShares,
+    processingProfileRevisions,
+    processingProfiles,
     recordingFolderAssignments,
     recordingFolders,
     recordingTasks,
+    restrictedFolderMembers,
+    summaryRemarks,
     taskMentions,
     taskUpdateProposals,
+    transcriptCorrections,
     transcriptions,
+    transcriptSpeakers,
     users,
 } from "@/db/schema";
 import {
@@ -29,7 +38,7 @@ import {
     type TestPostgresDatabase,
 } from "@/tests/integration/postgres";
 
-const { dbProxy, dbRef, mockEnv, authzState } = vi.hoisted(() => {
+const { dbProxy, dbRef, mockEnv, authzState, session } = vi.hoisted(() => {
     const ref: { current: Record<PropertyKey, unknown> | null } = {
         current: null,
     };
@@ -48,6 +57,7 @@ const { dbProxy, dbRef, mockEnv, authzState } = vi.hoisted(() => {
             },
         },
     );
+    const session = { user: { id: "share-intent-alice" } };
     return {
         dbProxy: proxy,
         dbRef: ref,
@@ -64,10 +74,29 @@ const { dbProxy, dbRef, mockEnv, authzState } = vi.hoisted(() => {
             AUTHZ_MODE: "local" as "local" | "idp",
         },
         authzState: { holderMayUse: true },
+        session,
     };
 });
 
 vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
+vi.mock("@/lib/auth-server", async (importOriginal) => ({
+    ...(await importOriginal()),
+    requireApiSession: vi.fn(async () => session),
+    requireApiSessionActor: vi.fn(async () => ({
+        session,
+        actor: {
+            kind: "user",
+            actorId: session.user.id,
+            issuer: null,
+            subject: null,
+            capabilities: new Set(["use"]),
+            clientId: null,
+            clientPermissions: new Set(),
+            verifiedAt: null,
+        },
+        authTime: null,
+    })),
+}));
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 vi.mock("@/lib/authz/access-state", () => ({
     holderAccess: vi.fn(async () =>
@@ -88,13 +117,42 @@ vi.mock("@/lib/folder-exports/jobs", () => ({
     enqueueExportPlansForUser: vi.fn().mockResolvedValue(undefined),
 }));
 
+import { GET as mailDetail } from "@/app/api/mail/[id]/route";
+import { POST as categorize } from "@/app/api/recordings/[id]/categorize/route";
+import {
+    POST as file,
+    PATCH as move,
+    DELETE as unfile,
+} from "@/app/api/recordings/[id]/folders/route";
+import { DELETE as cancel } from "@/app/api/recordings/[id]/intended-placements/[folderId]/route";
+import { POST as confirm } from "@/app/api/recordings/[id]/intended-placements/confirm/route";
+import {
+    PATCH as changeLanguage,
+    GET as language,
+} from "@/app/api/recordings/[id]/language/route";
+import { GET as review } from "@/app/api/recordings/[id]/review/route";
+import {
+    POST as addRemark,
+    DELETE as removeRemark,
+} from "@/app/api/recordings/[id]/summary/remarks/route";
+import {
+    PUT as saveSummary,
+    GET as summary,
+} from "@/app/api/recordings/[id]/summary/route";
 import { db as appDb } from "@/db";
-import { encryptText } from "@/lib/encryption/fields";
+import { setItemTitle } from "@/db/items";
+import * as contentVersions from "@/db/queries/item-content-versions";
+import { deleteMailContent } from "@/db/queries/mail-retention";
+import { completeProcessingGenerationInTx } from "@/db/queries/pipeline";
+import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
 import {
     assertCategorizableFolder,
     ensureRootFolders,
 } from "@/lib/folders/folders";
+import { revertCorrection } from "@/lib/knowledge/corrections";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
+import { changeTranscriptSpeaker } from "@/lib/knowledge/speaker-changes";
+import { llmRendering } from "@/lib/learn/llm-input";
 import { mailShareProblems } from "@/lib/mail/share-gate";
 import { gatherFacts } from "@/lib/pipeline/facts";
 import { loadPrivateItemProcessing } from "@/lib/pipeline/presentation";
@@ -105,6 +163,11 @@ import {
     executeIntendedSharesWithOutcome,
     recordIntendedPlacementInTx,
 } from "@/lib/pipeline/share-intent";
+import { defaultProfileSettings } from "@/lib/profiles/settings";
+import { updateProfile } from "@/lib/profiles/store";
+import { taskViewerById } from "@/lib/tasks/access";
+import { acceptReview, addTask, skipTaskReview } from "@/lib/tasks/tasks";
+import { upsertTranscription } from "@/lib/transcription/persist";
 import { insertRecordings } from "@/tests/integration/items";
 
 const testDatabaseUrl = getTestDatabaseUrl();
@@ -267,6 +330,7 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
     }, 30_000);
 
     beforeEach(async () => {
+        session.user.id = ALICE;
         mockEnv.AUTHZ_MODE = "local";
         authzState.holderMayUse = true;
         await db().delete(users);
@@ -309,6 +373,1042 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
             parentId: bobRootId,
             name: "Bob's folder",
         });
+    });
+
+    const context = (id: string) => ({ params: Promise.resolve({ id }) });
+
+    function panelRequest(path: string, method = "GET", body?: object) {
+        return new Request(`https://example.com/${path}`, {
+            method,
+            ...(body ? { body: JSON.stringify(body) } : {}),
+        });
+    }
+
+    function writeTranscript(id: string, text: string) {
+        return upsertTranscription({
+            recordingId: id,
+            userId: ALICE,
+            provider: "openai",
+            model: "sample",
+            source: "riffado",
+            detectedLanguage: "en",
+            text,
+            turns: [{ speaker: "speaker_0", startMs: 0, endMs: 5000, text }],
+        });
+    }
+
+    function folderRequest(method: string, body: object, view = "private") {
+        return new Request(`https://example.com/folders?view=${view}`, {
+            method,
+            body: JSON.stringify(body),
+        });
+    }
+
+    it("reports private filing, sharing, and both withdrawal responses", async () => {
+        const itemId = "folder-write-outcomes";
+        await insertAudio(itemId);
+        await insertTranscript(itemId);
+        const personal = "owner-folder";
+        await insertFolder({
+            id: personal,
+            userId: ALICE,
+            parentId: aliceRootId,
+            name: "Personal",
+        });
+        const ctx = context(itemId);
+        const before = await file(
+            folderRequest("POST", { folderId: personal }),
+            ctx,
+        );
+        expect(await before.json()).toMatchObject({
+            assigned: true,
+            placement: "filed",
+            processing: {
+                access: {
+                    role: "owner",
+                    shared: false,
+                    contentView: "private",
+                },
+            },
+        });
+        const shared = await move(
+            folderRequest("PATCH", {
+                fromFolderId: personal,
+                toFolderId: orgFolderId,
+            }),
+            ctx,
+        );
+        expect(await shared.json()).toMatchObject({
+            moved: true,
+            placement: "shared",
+            processing: {
+                access: { role: "owner", shared: true, contentView: "org" },
+            },
+        });
+        for (const [user, role] of [
+            [BOB, "member"],
+            [ORG, "curator"],
+        ]) {
+            const projection = await loadPrivateItemProcessing(
+                ALICE,
+                itemId,
+                user,
+                "en",
+                "org",
+            );
+            expect(projection?.access).toEqual({
+                role,
+                shared: true,
+                contentView: "org",
+            });
+        }
+        const removed = await unfile(
+            folderRequest(
+                "DELETE",
+                { folderId: orgFolderId, withdraw: true },
+                "org",
+            ),
+            ctx,
+        );
+        expect(await removed.json()).toMatchObject({
+            assigned: false,
+            placement: "unshared",
+            processing: {
+                access: {
+                    role: "owner",
+                    shared: false,
+                    contentView: "private",
+                },
+            },
+        });
+        expect(
+            await (
+                await file(
+                    folderRequest("POST", { folderId: orgFolderId }),
+                    ctx,
+                )
+            ).json(),
+        ).toMatchObject({
+            placement: "shared",
+            processing: { access: { shared: true } },
+        });
+        session.user.id = ORG;
+        const withdrawn = await unfile(
+            folderRequest(
+                "DELETE",
+                { organization: true, withdraw: true },
+                "org",
+            ),
+            ctx,
+        );
+        expect(await withdrawn.json()).toMatchObject({
+            shared: false,
+            placement: "unshared",
+            processing: null,
+        });
+    });
+
+    it("distinguishes an unchanged refusal, an intended filing and a withheld filing", async () => {
+        const itemId = "unfinished-audio";
+        await insertAudio(itemId);
+        const ctx = context(itemId);
+        const request = () => folderRequest("POST", { folderId: orgFolderId });
+        const before = await loadPrivateItemProcessing(ALICE, itemId);
+        const refused = await file(request(), ctx);
+        expect(refused.status).toBe(409);
+        expect(await assignments(itemId)).toEqual([]);
+        expect(
+            (await loadPrivateItemProcessing(ALICE, itemId))?.versions,
+        ).toEqual(before?.versions);
+
+        const [profile] = await db()
+            .select({
+                id: processingProfiles.id,
+                version: processingProfiles.version,
+            })
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, ORG),
+                    eq(processingProfiles.channel, "audio"),
+                    eq(processingProfiles.isDefault, true),
+                ),
+            );
+        if (!profile) throw new Error("Organization audio default missing");
+        const settings = defaultProfileSettings("audio");
+        settings.steps.learn.automatic = true;
+        await updateProfile({
+            ownerUserId: ORG,
+            profileId: profile.id,
+            expectedVersion: profile.version,
+            settings,
+            actor: {
+                kind: "local-org",
+                actorId: ORG,
+                issuer: null,
+                subject: null,
+                capabilities: new Set(["use"]),
+                clientId: null,
+                clientPermissions: new Set(),
+                verifiedAt: null,
+            },
+        });
+        await db()
+            .insert(itemProcessing)
+            .values({ itemId, userId: ALICE, view: "private" });
+
+        const intended = await file(request(), ctx);
+        expect(await intended.json()).toMatchObject({
+            placement: "intended",
+            processing: {
+                access: { shared: false },
+                intents: [{ folderId: orgFolderId }],
+            },
+        });
+        await makeManualOnly(itemId);
+        const confirmed = await confirm(folderRequest("POST", {}), ctx);
+        expect(await confirmed.json()).toMatchObject({
+            placement: "confirmed",
+            confirmed: 1,
+            processing: {
+                access: { shared: false },
+                intents: [{ confirmed: true }],
+            },
+        });
+        const cancelled = await cancel(folderRequest("DELETE", {}), {
+            params: Promise.resolve({ id: itemId, folderId: orgFolderId }),
+        });
+        expect(await cancelled.json()).toMatchObject({
+            placement: "removed",
+            cancelled: true,
+            processing: { access: { shared: false }, intents: [] },
+        });
+        await db()
+            .update(recordingFolders)
+            .set({ restrictedAt: new Date() })
+            .where(eq(recordingFolders.id, orgFolderId));
+        await db().insert(restrictedFolderMembers).values({
+            folderId: orgFolderId,
+            userId: ALICE,
+            role: "member",
+            addedByUserId: ORG,
+        });
+        const withheld = await file(request(), ctx);
+        expect(await withheld.json()).toMatchObject({
+            placement: "withheld",
+            processing: {
+                access: { shared: false },
+                placements: [{ id: orgFolderId, restricted: true }],
+            },
+        });
+    });
+
+    it("returns the committed projection when categorizing", async () => {
+        const itemId = "categorized-audio";
+        await insertAudio(itemId);
+        const response = await categorize(
+            new Request("https://example.com/categorize", {
+                method: "POST",
+                body: JSON.stringify({ folderIds: [orgFolderId] }),
+            }),
+            context(itemId),
+        );
+        expect(await response.json()).toMatchObject({
+            itemId,
+            placement: "categorized",
+            placements: [{ folderId: orgFolderId, placement: "intended" }],
+            processing: {
+                access: { shared: false },
+                intents: [{ folderId: orgFolderId }],
+            },
+        });
+    });
+
+    it("reports a committed move if loading its projection throws", async () => {
+        const id = "projection-failure";
+        await insertAudio(id);
+        await insertTranscript(id);
+        const parentId = "original-personal-placement";
+        await insertFolder({
+            id: parentId,
+            userId: ALICE,
+            parentId: aliceRootId,
+            name: "Original",
+        });
+        expect(
+            (
+                await file(
+                    folderRequest("POST", { folderId: parentId }),
+                    context(id),
+                )
+            ).status,
+        ).toBe(200);
+        const read = vi
+            .spyOn(contentVersions, "loadTranscriptOverlayVersions")
+            .mockRejectedValueOnce(new Error("Projection test failure"));
+        const log = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            const response = await move(
+                folderRequest("PATCH", {
+                    fromFolderId: parentId,
+                    toFolderId: orgFolderId,
+                }),
+                context(id),
+            );
+            expect(response.status).toBe(200);
+            expect(await response.json()).toEqual({
+                moved: true,
+                placement: "shared",
+                removal: "removed",
+                processingStale: true,
+            });
+            expect(await assignments(id)).toEqual([orgFolderId]);
+            expect(log).toHaveBeenCalledTimes(1);
+            expect(
+                (await loadPrivateItemProcessing(ALICE, id))?.access.shared,
+            ).toBe(true);
+        } finally {
+            read.mockRestore();
+            log.mockRestore();
+        }
+    });
+
+    it("reports a pruned parent as unchanged on add, move and categorize", async () => {
+        const id = "pruned-parent";
+        await insertAudio(id);
+        const parentId = "pruned-parent-folder";
+        const childId = "retained-child-folder";
+        const otherId = "unrelated-folder";
+        for (const folder of [
+            { id: parentId, parentId: aliceRootId, name: "Parent" },
+            { id: childId, parentId, name: "Child" },
+            { id: otherId, parentId: aliceRootId, name: "Other" },
+        ])
+            await insertFolder({ ...folder, userId: ALICE });
+        const ctx = context(id);
+        for (const folderId of [childId, otherId])
+            expect(
+                (await file(folderRequest("POST", { folderId }), ctx)).status,
+            ).toBe(200);
+        const added = await file(
+            folderRequest("POST", { folderId: parentId }),
+            ctx,
+        );
+        expect(await added.json()).toMatchObject({
+            assigned: true,
+            placement: "unchanged",
+        });
+        expect(await assignments(id)).not.toContain(parentId);
+        const moved = await move(
+            folderRequest("PATCH", {
+                fromFolderId: otherId,
+                toFolderId: parentId,
+            }),
+            ctx,
+        );
+        expect(await moved.json()).toMatchObject({
+            moved: true,
+            placement: "unchanged",
+            removal: "removed",
+        });
+        expect(await assignments(id)).toEqual([childId]);
+        const categorized = await categorize(
+            panelRequest("categorize", "POST", {
+                folderIds: [parentId, childId],
+            }),
+            ctx,
+        );
+        expect(await categorized.json()).toMatchObject({
+            placement: "categorized",
+            placements: expect.arrayContaining([
+                { folderId: parentId, placement: "unchanged" },
+                { folderId: childId, placement: "filed" },
+            ]),
+        });
+        expect(await assignments(id)).toEqual([childId]);
+    });
+
+    it("versions an effective default-profile language change on a legacy item", async () => {
+        const id = "default-language-version";
+        const profileId = "default-language-profile";
+        const revisionId = "default-language-revision";
+        const ctx = context(id);
+        await insertAudio(id);
+        const settings = defaultProfileSettings("audio");
+        settings.steps.summary.outputLanguage = "en";
+        await db()
+            .insert(processingProfiles)
+            .values({
+                id: profileId,
+                ownerUserId: ALICE,
+                scope: "personal",
+                channel: "audio",
+                isDefault: true,
+                name: encryptText("Audio default"),
+                currentRevisionId: revisionId,
+            });
+        await db()
+            .insert(processingProfileRevisions)
+            .values({
+                id: revisionId,
+                profileId,
+                settings: encryptText(JSON.stringify(settings)),
+            });
+        await db()
+            .insert(aiEnhancements)
+            .values({
+                itemId: id,
+                userId: ALICE,
+                summary: encryptText("English summary"),
+                provider: "sample",
+                model: "sample",
+                outputLanguage: "en",
+            });
+        const before = await loadPrivateItemProcessing(ALICE, id);
+        expect(before).toMatchObject({ legacy: true, profile: null });
+        expect(
+            await (await language(panelRequest("language"), ctx)).json(),
+        ).toMatchObject({ needsResummary: false });
+        settings.steps.summary.outputLanguage = "cs";
+        await expect(
+            updateProfile({
+                ownerUserId: ALICE,
+                profileId,
+                expectedVersion: 1,
+                settings,
+                actor: {
+                    kind: "user",
+                    actorId: ALICE,
+                    issuer: null,
+                    subject: null,
+                    capabilities: new Set(["use"]),
+                    clientId: null,
+                    clientPermissions: new Set(),
+                    verifiedAt: null,
+                },
+            }),
+        ).resolves.toMatchObject({ id: profileId });
+        const after = await loadPrivateItemProcessing(ALICE, id);
+        expect(
+            await (await language(panelRequest("language"), ctx)).json(),
+        ).toMatchObject({ needsResummary: true });
+        expect(after?.versions.language).not.toBe(before?.versions.language);
+        expect(after?.versions.summaries).toEqual(before?.versions.summaries);
+    });
+
+    it("keeps Learn keys scoped to viewers who can open a review", async () => {
+        const id = "learn-version-access";
+        await insertAudio(id);
+        await insertTranscript(id);
+        expect(
+            (
+                await file(
+                    folderRequest("POST", { folderId: orgFolderId }),
+                    context(id),
+                )
+            ).status,
+        ).toBe(200);
+        const [transcript] = await db()
+            .select()
+            .from(transcriptions)
+            .where(eq(transcriptions.recordingId, id));
+        if (!transcript) throw new Error("Transcript missing");
+        await db().insert(learnRuns).values({
+            itemId: id,
+            userId: ALICE,
+            scopeUserId: ORG,
+            view: "org",
+            trigger: "manual",
+            vocabularyVersion: 0,
+            status: "ready",
+            transcriptionId: transcript.id,
+            transcriptRevision: transcript.revision,
+        });
+        for (const viewer of [ALICE, ORG, BOB]) {
+            session.user.id = viewer;
+            const response = await review(
+                panelRequest("review?view=org&source=riffado"),
+                context(id),
+            );
+            const projection = await loadPrivateItemProcessing(
+                ALICE,
+                id,
+                viewer,
+                "en",
+                "org",
+            );
+            expect(response.status).toBe(viewer === BOB ? 403 : 200);
+            expect(Object.keys(projection?.versions.learn ?? {})).toEqual(
+                viewer === BOB ? [] : ["riffado"],
+            );
+        }
+        session.user.id = ALICE;
+        const password = mockEnv.ORG_ACCOUNT_PASSWORD;
+        mockEnv.ORG_ACCOUNT_PASSWORD = undefined;
+        try {
+            expect(
+                (
+                    await review(
+                        panelRequest("review?view=org&source=riffado"),
+                        context(id),
+                    )
+                ).status,
+            ).toBe(403);
+            expect(
+                (await loadPrivateItemProcessing(ALICE, id))?.versions.learn,
+            ).toEqual({});
+        } finally {
+            mockEnv.ORG_ACCOUNT_PASSWORD = password;
+        }
+    });
+
+    it.each([
+        "olderContent",
+        "stale",
+    ] as const)("changes the summary version when the %s warning changes without a summary write", async (warning) => {
+        const id = `summary-warning-${warning}`;
+        const ctx = context(id);
+        await insertAudio(id);
+        await writeTranscript(id, "Paint the door.");
+        const [transcript] = await db()
+            .select()
+            .from(transcriptions)
+            .where(eq(transcriptions.recordingId, id));
+        if (!transcript) throw new Error("Transcript missing");
+        if (warning === "stale") {
+            await db()
+                .insert(transcriptCorrections)
+                .values({
+                    id: "warning-correction",
+                    transcriptionId: transcript.id,
+                    transcriptRevision: transcript.revision,
+                    userId: ALICE,
+                    kind: "fix",
+                    heard: encryptText("door"),
+                    heardHmac: "0".repeat(64),
+                    replacement: encryptText("floor"),
+                    turnIndex: 0,
+                    charStart: 10,
+                    charEnd: 14,
+                });
+        }
+        const modelInput = await llmRendering(transcript.id);
+        expect(modelInput?.text).toContain(
+            warning === "stale" ? "floor" : "door",
+        );
+        await db()
+            .insert(aiEnhancements)
+            .values({
+                itemId: id,
+                userId: ALICE,
+                summary: encryptText("Generated summary"),
+                provider: "sample",
+                model: "sample",
+                transcriptionId: transcript.id,
+                inputFingerprint:
+                    warning === "stale" ? modelInput?.fingerprint : null,
+                inputs: {
+                    contentId: transcript.id,
+                    contentRevision: transcript.revision,
+                    contentSourceId: "riffado",
+                },
+            });
+        const read = async () => {
+            const response = await summary(
+                panelRequest("summary?source=riffado"),
+                ctx,
+            );
+            expect(response.status).toBe(200);
+            return response.json();
+        };
+        const before = await loadPrivateItemProcessing(ALICE, id);
+        const rowBefore = await db()
+            .select()
+            .from(aiEnhancements)
+            .where(eq(aiEnhancements.itemId, id));
+        expect(await read()).toMatchObject({ [warning]: false });
+        if (warning === "olderContent") {
+            await writeTranscript(id, "Paint the window.");
+        } else {
+            await revertCorrection({
+                correctionId: "warning-correction",
+                transcriptionId: transcript.id,
+                userId: ALICE,
+                actorUserId: ALICE,
+                orgUserId: ORG,
+            });
+        }
+        expect(await read()).toMatchObject({ [warning]: true });
+        expect(
+            await db()
+                .select()
+                .from(aiEnhancements)
+                .where(eq(aiEnhancements.itemId, id)),
+        ).toEqual(rowBefore);
+        const after = await loadPrivateItemProcessing(ALICE, id);
+        expect(after?.versions.summaries.riffado).not.toBe(
+            before?.versions.summaries.riffado,
+        );
+        expect(after?.versions.item).not.toBe(before?.versions.item);
+    });
+
+    it("measures projection wall time on small and large items", async () => {
+        const small = "projection-timing-small";
+        const large = "projection-timing-large";
+        for (const id of [small, large]) {
+            await insertAudio(id);
+            await insertTranscript(id);
+            await db()
+                .insert(aiEnhancements)
+                .values({
+                    itemId: id,
+                    userId: ALICE,
+                    provider: "sample",
+                    model: "sample",
+                    summary: encryptText("Sample summary"),
+                });
+            await db()
+                .insert(itemProcessing)
+                .values({ itemId: id, userId: ALICE, view: "private" });
+        }
+        const [transcript] = await db()
+            .select()
+            .from(transcriptions)
+            .where(eq(transcriptions.recordingId, large));
+        if (!transcript) throw new Error("Transcript missing");
+        await db()
+            .insert(recordingTasks)
+            .values(
+                Array.from({ length: 500 }, (_, index) => ({
+                    itemId: large,
+                    userId: ALICE,
+                    source: "manual" as const,
+                    status: "open" as const,
+                    position: index,
+                    text: encryptText("Check the notes"),
+                })),
+            );
+        await db()
+            .insert(summaryRemarks)
+            .values(
+                Array.from({ length: 200 }, () => ({
+                    itemId: large,
+                    userId: ALICE,
+                    authorUserId: ALICE,
+                    text: encryptText("Add a short example"),
+                })),
+            );
+        await db()
+            .insert(transcriptSpeakers)
+            .values(
+                Array.from({ length: 300 }, (_, index) => ({
+                    transcriptionId: transcript.id,
+                    userId: ALICE,
+                    label: `speaker_${index}`,
+                    status: "confirmed" as const,
+                    source: "user" as const,
+                    markedUnknown: true,
+                })),
+            );
+        await db()
+            .insert(transcriptCorrections)
+            .values(
+                Array.from({ length: 300 }, (_, index) => ({
+                    transcriptionId: transcript.id,
+                    userId: ALICE,
+                    transcriptRevision: transcript.revision,
+                    kind: "fix" as const,
+                    turnIndex: index,
+                    charStart: 0,
+                    charEnd: 4,
+                    heard: encryptText("door"),
+                    heardHmac: "0".repeat(64),
+                    replacement: encryptText("floor"),
+                })),
+            );
+        const samples: Record<string, number[]> = { [small]: [], [large]: [] };
+        for (let attempt = 0; attempt <= 10; attempt++) {
+            for (const id of [small, large]) {
+                const start = performance.now();
+                const projection = await loadPrivateItemProcessing(ALICE, id);
+                const elapsed = performance.now() - start;
+                expect(projection?.versions.item).toBeTruthy();
+                if (attempt > 0) samples[id]?.push(elapsed);
+            }
+        }
+        const median = (id: string) => {
+            const sorted = [...(samples[id] ?? [])].sort((a, b) => a - b);
+            return ((sorted[4] + sorted[5]) / 2).toFixed(2);
+        };
+        console.info(
+            `Projection wall time (median of 10) small ${median(small)} ms, large ${median(large)} ms`,
+        );
+    });
+
+    it("changes the versions of only the affected audio parts", async () => {
+        const id = "versioned-audio";
+        await insertAudio(id);
+        await insertTranscript(id);
+        const [transcript] = await db()
+            .select()
+            .from(transcriptions)
+            .where(eq(transcriptions.recordingId, id));
+        if (!transcript) throw new Error("Transcript missing");
+        const readVersions = async () => {
+            const projection = await loadPrivateItemProcessing(ALICE, id);
+            if (!projection) throw new Error("Projection missing");
+            return projection.versions;
+        };
+        let before = await readVersions();
+        const change = async (
+            expected: string[],
+            write: () => Promise<unknown>,
+        ) => {
+            await write();
+            const after = await readVersions();
+            expect(after.item).not.toBe(before.item);
+            const keys = Object.keys(after) as (keyof typeof after)[];
+            expect(
+                keys
+                    .filter(
+                        (key) =>
+                            key !== "item" &&
+                            JSON.stringify(after[key]) !==
+                                JSON.stringify(before[key]),
+                    )
+                    .sort(),
+            ).toEqual([...expected].sort());
+            before = after;
+        };
+        await change(["transcripts"], () =>
+            db()
+                .update(transcriptions)
+                .set({ topics: encryptJsonField({ topics: ["Example"] }) })
+                .where(eq(transcriptions.id, transcript.id)),
+        );
+        await change(["transcripts"], () =>
+            db()
+                .update(transcriptions)
+                .set({ topics: encryptJsonField({ topics: ["Revised"] }) })
+                .where(eq(transcriptions.id, transcript.id)),
+        );
+        await change(["transcripts", "corrections", "speakers"], () =>
+            writeTranscript(id, "New words"),
+        );
+        await change(["summaries", "language"], () =>
+            db()
+                .insert(aiEnhancements)
+                .values({
+                    id: "summary-1",
+                    itemId: id,
+                    userId: ALICE,
+                    model: "sample",
+                    provider: "sample",
+                    transcriptionId: transcript.id,
+                    summary: encryptText("A summary"),
+                }),
+        );
+        await change(["summaries", "language"], async () => {
+            const response = await saveSummary(
+                panelRequest("summary", "PUT", {
+                    summary: "Edited summary",
+                    keyPoints: ["One point"],
+                    revision: 0,
+                    summaryId: "summary-1",
+                }),
+                context(id),
+            );
+            expect(response.status).toBe(200);
+            expect(
+                await (
+                    await summary(panelRequest("summary"), context(id))
+                ).json(),
+            ).toMatchObject({ summary: "Edited summary" });
+        });
+        let remarkId = "";
+        await change(["summaries"], async () => {
+            const response = await addRemark(
+                panelRequest("summary/remarks", "POST", {
+                    text: "Please add an example",
+                }),
+                context(id),
+            );
+            expect(response.status).toBe(200);
+            const body = await response.json();
+            remarkId = body.remarks[0].id;
+        });
+        await change(["summaries"], async () => {
+            const response = await removeRemark(
+                panelRequest(`summary/remarks?remarkId=${remarkId}`, "DELETE"),
+                context(id),
+            );
+            expect(response.status).toBe(200);
+        });
+        await change(["language"], async () => {
+            const response = await changeLanguage(
+                panelRequest("language", "PATCH", { language: "cs" }),
+                context(id),
+            );
+            expect(await response.json()).toMatchObject({
+                confirmedLanguage: "cs",
+            });
+        });
+        await change(["title", "language"], () =>
+            setItemTitle(db(), {
+                id,
+                userId: ALICE,
+                title: encryptText("Revised title"),
+                editedAt: new Date(),
+            }),
+        );
+        await change(["learn"], () =>
+            db()
+                .insert(learnRuns)
+                .values({
+                    id: "current-review",
+                    itemId: id,
+                    transcriptionId: transcript.id,
+                    transcriptRevision: transcript.revision + 1,
+                    userId: ALICE,
+                    scopeUserId: ALICE,
+                    view: "private",
+                    trigger: "manual",
+                    vocabularyVersion: 0,
+                    status: "ready",
+                }),
+        );
+        await change(["corrections"], () =>
+            db()
+                .insert(transcriptCorrections)
+                .values({
+                    id: "correction-1",
+                    transcriptionId: transcript.id,
+                    transcriptRevision: transcript.revision + 1,
+                    userId: ALICE,
+                    kind: "fix",
+                    heard: encryptText("word"),
+                    heardHmac: "0".repeat(64),
+                    replacement: encryptText("words"),
+                    turnIndex: 0,
+                    charStart: 0,
+                    charEnd: 4,
+                }),
+        );
+        await change(["corrections"], () =>
+            revertCorrection({
+                correctionId: "correction-1",
+                transcriptionId: transcript.id,
+                userId: ALICE,
+                actorUserId: ALICE,
+                orgUserId: ORG,
+            }),
+        );
+        await change(["speakers"], async () => {
+            await expect(
+                changeTranscriptSpeaker({
+                    transcriptionId: transcript.id,
+                    revision: transcript.revision + 1,
+                    userId: ALICE,
+                    actorUserId: ALICE,
+                    orgUserId: ORG,
+                    label: "speaker_0",
+                    answer: { kind: "name", displayName: "Jitka Dvořáková" },
+                }),
+            ).resolves.toEqual(expect.any(String));
+        });
+        const viewer = await taskViewerById(ALICE);
+        await change(["tasks"], () =>
+            addTask(viewer, id, {
+                status: "proposed",
+                text: "Check the notes",
+            }),
+        );
+        await change(["tasks"], () => skipTaskReview(viewer, id));
+        await change(["tasks"], async () => {
+            await expect(acceptReview(viewer, id)).resolves.toMatchObject({
+                accepted: 1,
+            });
+        });
+        await change(["folders"], () => recordIntent(id));
+        const [pending] = await db()
+            .select({ generation: itemProcessing.requestedGeneration })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, id),
+                    eq(itemProcessing.userId, ALICE),
+                    eq(itemProcessing.view, "private"),
+                ),
+            );
+        if (!pending) throw new Error("Pending advance missing");
+        await change([], async () => {
+            const result = await db().transaction((tx) =>
+                completeProcessingGenerationInTx(
+                    tx,
+                    id,
+                    "private",
+                    ALICE,
+                    pending.generation,
+                ),
+            );
+            expect(result).toBe("stable");
+        });
+        expect(await readVersions()).toEqual(before);
+    });
+
+    it("versions Organization content for the owner and hides owner-only rows from members", async () => {
+        const id = "shared-content-versions";
+        await insertAudio(id);
+        await insertTranscript(id);
+        expect(
+            (
+                await file(
+                    folderRequest("POST", { folderId: orgFolderId }),
+                    context(id),
+                )
+            ).status,
+        ).toBe(200);
+        const [transcript] = await db()
+            .select()
+            .from(transcriptions)
+            .where(eq(transcriptions.recordingId, id));
+        if (!transcript) throw new Error("Transcript missing");
+        await db()
+            .insert(aiEnhancements)
+            .values({
+                itemId: id,
+                userId: ALICE,
+                model: "sample",
+                provider: "sample",
+                transcriptionId: transcript.id,
+                summary: encryptText("Sample summary"),
+            });
+        const owner = () => loadPrivateItemProcessing(ALICE, id);
+        const member = () =>
+            loadPrivateItemProcessing(ALICE, id, BOB, "en", "org");
+        const ownerBefore = (await owner())?.versions;
+        const memberBefore = (await member())?.versions;
+        const correction = {
+            transcriptionId: transcript.id,
+            transcriptRevision: transcript.revision,
+            kind: "fix" as const,
+            heard: encryptText("word"),
+            heardHmac: "0".repeat(64),
+            replacement: encryptText("words"),
+            turnIndex: 0,
+            charStart: 0,
+            charEnd: 4,
+        };
+        await db()
+            .insert(transcriptCorrections)
+            .values({ ...correction, userId: ALICE });
+        expect((await owner())?.versions).toEqual(ownerBefore);
+        expect((await member())?.versions).toEqual(memberBefore);
+        await db()
+            .insert(transcriptCorrections)
+            .values({ ...correction, userId: ORG });
+        const ownerShared = (await owner())?.versions;
+        const memberShared = (await member())?.versions;
+        expect(ownerShared?.corrections).not.toEqual(ownerBefore?.corrections);
+        expect(memberShared?.corrections).toEqual(ownerShared?.corrections);
+        await db()
+            .insert(summaryRemarks)
+            .values({
+                itemId: id,
+                userId: ALICE,
+                authorUserId: ALICE,
+                text: encryptText("Add a short example"),
+            });
+        await db().insert(transcriptSpeakers).values({
+            transcriptionId: transcript.id,
+            userId: ALICE,
+            label: "speaker_0",
+            source: "llm",
+            status: "suggested",
+        });
+        const ownerWithDrafts = (await owner())?.versions;
+        expect(ownerWithDrafts?.summaries).not.toEqual(ownerShared?.summaries);
+        expect(ownerWithDrafts?.speakers).not.toEqual(ownerShared?.speakers);
+        expect((await member())?.versions).toEqual(memberShared);
+    });
+
+    it("shares mail through the same route and versions its parsed content", async () => {
+        const itemId = "versioned-mail";
+        await insertMail(itemId);
+        await db()
+            .insert(mailMessages)
+            .values({
+                id: itemId,
+                userId: ALICE,
+                rawHash: "0".repeat(64),
+                receivedAt: new Date(),
+                sizeBytes: 100,
+                auth: {},
+                senderVerified: true,
+            });
+        await db()
+            .insert(mailContents)
+            .values({
+                itemId,
+                userId: ALICE,
+                parserVersion: 1,
+                segments: encryptJsonField([]),
+            });
+        const read = async (view: string) => {
+            const response = await mailDetail(
+                new Request(
+                    `https://example.com/mail/${itemId}?processing=1&view=${view}`,
+                ),
+                context(itemId),
+            );
+            expect(response.status).toBe(200);
+            return (await response.json()).processing;
+        };
+        const before = await read("private");
+        expect(before.access).toEqual({
+            contentView: "private",
+            role: "owner",
+            shared: false,
+        });
+        expect(before.versions.content).toEqual(expect.any(String));
+        expect(
+            await (
+                await file(
+                    folderRequest("POST", { folderId: orgFolderId }),
+                    context(itemId),
+                )
+            ).json(),
+        ).toMatchObject({
+            placement: "shared",
+            processing: { access: { shared: true, contentView: "org" } },
+        });
+        session.user.id = BOB;
+        const shared = await read("org");
+        expect(shared.access).toEqual({
+            contentView: "org",
+            role: "member",
+            shared: true,
+        });
+        await expect(
+            deleteMailContent(
+                itemId,
+                ALICE,
+                { isOrg: true, orgUserId: ORG },
+                new Date(),
+            ),
+        ).resolves.toBe(true);
+        const after = await read("org");
+        const {
+            content: previousContent,
+            item: previousItem,
+            ...otherParts
+        } = shared.versions;
+        expect(previousContent).toEqual(expect.any(String));
+        expect(after.versions).toEqual({
+            ...otherParts,
+            item: expect.any(String),
+        });
+        expect(after.versions.item).not.toBe(previousItem);
     });
 
     it("keeps a blocked audio intent, then shares it exactly once", async () => {
