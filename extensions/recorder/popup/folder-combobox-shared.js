@@ -12,6 +12,7 @@
         save,
         saveOnRefresh = save,
         t,
+        saveImmediately = false,
     }) {
         let readOnly = false;
         const optionPrefix =
@@ -39,9 +40,8 @@
                 folderLabel: remembered?.label ?? null,
                 folderScope: remembered?.scope ?? null,
             };
-            saving = saving.catch(() => {}).then(() =>
-                (refresh ? saveOnRefresh : save)(settings),
-            );
+            const saver = refresh ? saveOnRefresh : save;
+            saving = saveImmediately ? saver(settings) : saving.catch(() => {}).then(() => saver(settings));
             return saving;
         }
 
@@ -173,6 +173,8 @@
                     } else if (response?.status === 404) {
                         remembered = null;
                         await persist(true).catch(() => {});
+                    } else if (response?.ok === false) {
+                        error = true;
                     }
                     if (!open) showSelection();
                 } else if (job.version === version) {
@@ -286,6 +288,7 @@
         save,
         saveOnRefresh = save,
         t,
+        saveImmediately = false,
     }) {
         const node = (tag, suffix, className, attributes = {}) => {
             const element = document.createElement(tag);
@@ -326,6 +329,7 @@
             save: (settings) => persistFolder(settings, save),
             saveOnRefresh: (settings) => persistFolder(settings, saveOnRefresh),
             t,
+            saveImmediately,
         });
         async function persistFolder(settings, saver) {
             try {
@@ -376,7 +380,7 @@
             }
         }
         return {
-            render(state) {
+            render(state, { refresh = true } = {}) {
                 container.hidden = state.state !== "recording" || state.stopped;
                 if (container.hidden) return;
                 field ??= createFolderField({
@@ -387,6 +391,7 @@
                     t,
                     save: (folder) => saveFolder(folder),
                     saveOnRefresh: (folder) => saveFolder(folder, false),
+                    saveImmediately: true,
                 });
                 current = state;
                 const next = JSON.stringify([
@@ -395,11 +400,13 @@
                     state.folderLabel,
                     state.folderScope,
                     state.recordingFolderOverride,
+                    refresh,
                 ]);
                 if (signature === next) return;
                 signature = next;
                 field.reset(state, {
                     readOnly: state.recordingFolderOverride !== true,
+                    refresh,
                 });
             },
             clear: () => field?.clear(),

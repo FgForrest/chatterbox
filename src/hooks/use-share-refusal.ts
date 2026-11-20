@@ -2,57 +2,45 @@
 
 import { useExtracted } from "next-intl";
 import { useCallback } from "react";
+import {
+    shareReviewHref,
+    useShareProblemMessage,
+} from "@/hooks/use-share-problem-message";
 import type { ApiErrorBody } from "@/lib/api-errors";
-import type { ShareGateProblem } from "@/lib/sharing/share-gate";
+import {
+    isShareReviewProblem,
+    type ShareGateProblem,
+} from "@/lib/sharing/share-gate";
 
 const SHARE_REQUIREMENTS_UNMET = "SHARE_REQUIREMENTS_UNMET";
 
-/**
- * Words for a refused share: what the recording still needs, from the
- * problems the server listed. Null when the error is not a refused share.
- */
-export function useShareRefusal(): (error: ApiErrorBody) => string | null {
+/** Explain a refused share and offer to open the review when one is required. */
+export function useShareRefusal() {
     const i18n = useExtracted();
+    const problemMessage = useShareProblemMessage();
     return useCallback(
-        (error: ApiErrorBody) => {
+        (error: ApiErrorBody, itemId?: string) => {
             if (error.code !== SHARE_REQUIREMENTS_UNMET) return null;
             const problems = Array.isArray(error.details?.problems)
                 ? (error.details.problems as ShareGateProblem[])
                 : [];
-            const sentences = problems.map((problem) => {
-                switch (problem.kind) {
-                    case "no_transcript":
-                        return i18n(
-                            "Transcribe the recording before sharing it.",
-                        );
-                    case "unresolved_speakers": {
-                        const count = problem.labels.length;
-                        return problem.source === "plaud"
-                            ? i18n(
-                                  "{count, plural, one {# speaker is} other {# speakers are}} still unnamed in the Plaud transcript.",
-                                  { count },
-                              )
-                            : problem.source === "mixed"
-                              ? i18n(
-                                    "{count, plural, one {# speaker is} other {# speakers are}} still unnamed in the Mix transcript.",
-                                    { count },
-                                )
-                              : i18n(
-                                    "{count, plural, one {# speaker is} other {# speakers are}} still unnamed in the Custom transcript.",
-                                    { count },
-                                );
-                    }
-                    default:
-                        return null;
-                }
-            });
-            const known = sentences.filter(
-                (sentence): sentence is string => sentence !== null,
-            );
-            return known.length > 0
-                ? `${i18n("Not shared.")} ${known.join(" ")}`
-                : error.error;
+            const known = problems.map(problemMessage).filter(Boolean);
+            const review = problems.find(isShareReviewProblem);
+            const href =
+                itemId && review ? shareReviewHref(itemId, review) : null;
+            return {
+                message:
+                    known.length > 0
+                        ? `${i18n("Not shared.")} ${known.join(" ")}`
+                        : error.error,
+                action: href
+                    ? {
+                          label: i18n("Open recording to review"),
+                          onClick: () => window.location.assign(href),
+                      }
+                    : undefined,
+            };
         },
-        [i18n],
+        [i18n, problemMessage],
     );
 }

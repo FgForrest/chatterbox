@@ -17,7 +17,9 @@ You can also drag an item onto a folder in the folder tree. Items addressed or u
 
 After categorizing, the row under the title shows the folder chips, **Add to folder**, any intended Organization folders, and the profile chip on the right. Open the profile chip to change the profile or choose **Nothing automatic**.
 
-Choosing an Organization folder records an intended placement. The item remains private while it is processed. Chatterbox shares it automatically after the transcript, speaker, and Learn checks pass. Intended sharing waits while trim is running or awaiting your decision, as well as during a cut. Declining, the four-hour timeout or a completed cut releases that wait. Already-shared recordings stay shared. Task review does not delay sharing. With **Nothing automatic**, it waits instead: the intended folder in the folder row offers **Share now** and a cancel button.
+Choosing an Organization folder records an intended placement. A recording stays private until it has a transcript with named or unknown speakers, the owner has finished or skipped the required Learn review, the automatic summary is no longer due or running, and the owner has reviewed or skipped the task proposals. The **Share** step explains what is still waiting and links to the reviews. Intended sharing also waits while trim is running or awaiting your decision, and during a cut. Declining, the four-hour timeout or a completed cut releases that wait. Already-shared recordings stay shared. With **Nothing automatic**, the intended folder offers **Share now** and a cancel button.
+
+Mail has no share gate. Automatic filing still waits up to 72 hours when Learn holds processing. Filing mail by hand into an open Organization folder shares it immediately. Organization publication closes any open private Learn run. Only the mail owner can review its task proposals.
 
 <span id="profiles-are-processing-recipes" />
 

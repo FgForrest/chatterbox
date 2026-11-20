@@ -14,6 +14,7 @@ import { renderLinkedText } from "../../../extensions/recorder/lib/linkify.js";
 import { meetCode } from "../../../extensions/recorder/lib/meet-code.js";
 import { formatMeetingTime } from "../../../extensions/recorder/lib/meeting-time.js";
 import { detectMeetingPlatform } from "../../../extensions/recorder/lib/platforms.js";
+import { isConnectionError } from "../../../extensions/recorder/lib/server-connection.js";
 
 const html = readFileSync("extensions/recorder/agenda/agenda.html", "utf8");
 const source = readFileSync(
@@ -34,6 +35,13 @@ const changes = [];
 const settle = () => vi.advanceTimersByTimeAsync(0);
 const pointNote = () =>
     document.querySelector('#points textarea[data-field="point:p1:note"]');
+
+function saveAgendaEdit(id, path, body) {
+    return request(`/${id}${path}`, {
+        method: path === "/text" ? "POST" : "PATCH",
+        body: JSON.stringify(body),
+    });
+}
 
 beforeEach(() => {
     vi.useFakeTimers();
@@ -92,12 +100,26 @@ beforeEach(() => {
             },
         },
         runtime: {
-            sendMessage: vi.fn(async () => ({
-                ok: true,
-                agendas: [
-                    { id: "agenda-one", title: "Read www.example.com/plan" },
-                ],
-            })),
+            sendMessage: vi.fn(async ({ type, agendaId, edit }) =>
+                type === "edit-agenda"
+                    ? {
+                          ok: true,
+                          saved: await saveAgendaEdit(
+                              agendaId,
+                              edit.path,
+                              edit.body,
+                          ),
+                      }
+                    : {
+                          ok: true,
+                          agendas: [
+                              {
+                                  id: "agenda-one",
+                                  title: "Read www.example.com/plan",
+                              },
+                          ],
+                      },
+            ),
         },
         storage: {
             session: {
@@ -124,6 +146,7 @@ async function start() {
         agendaPanelKey,
         canChooseRecordingAgenda,
         agendaRequest: request,
+        saveAgendaEdit,
         agendaChoices: async () => [],
         supportsAgendas: () => true,
         localizeDocument,
@@ -147,6 +170,7 @@ async function start() {
         panelRoomHeartbeat: () => ({ update() {}, stop() {} }),
         supportsAgendaRooms: () => false,
         mountRoomCards: () => ({ render() {}, destroy() {} }),
+        isConnectionError,
     };
     await new Function(
         ...Object.keys(dependencies),
@@ -353,7 +377,7 @@ describe("panel links and growing notes", () => {
             }
             return base(path, init);
         });
-        state = { state: "recording", sessionId: "session-one" };
+        state = { state: "recording", sessionId: "session-one", tabId: 7 };
         await start();
         document.querySelector("#points .note-editable").click();
         await settle();

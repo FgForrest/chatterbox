@@ -104,7 +104,7 @@ vi.mock("@/lib/export/document-sidecars", () => ({
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 
-describeWithDatabase("#224 owner Task review without a sharing gate", () => {
+describeWithDatabase("#224 owner Task review and sharing", () => {
     let database: TestPostgresDatabase;
     beforeAll(async () => {
         database = await createMigratedTestDatabase(
@@ -124,7 +124,7 @@ describeWithDatabase("#224 owner Task review without a sharing gate", () => {
     it.each([
         "audio",
         "mail",
-    ] as const)("proposes %s tasks, shares before review, then delivers accepted tasks", async (kind) => {
+    ] as const)("proposes %s tasks and delivers accepted tasks", async (kind) => {
         const db = database.db;
         await db.insert(users).values([
             { id: "owner", email: "velnira@example.test" },
@@ -331,20 +331,29 @@ describeWithDatabase("#224 owner Task review without a sharing gate", () => {
             expect.objectContaining({ id: "taskReview", state: "review" }),
         );
 
-        await expect(
+        const share = () =>
             addRecordingToFolder({
                 userId: "owner",
                 recordingId: "review-item",
                 folderId: folder.id,
-            }),
-        ).resolves.toBeUndefined();
-        expect(await listRecordingTasks(assignee, "review-item")).toMatchObject(
-            {
+            });
+        if (kind === "audio") {
+            await expect(share()).rejects.toMatchObject({
+                code: "SHARE_REQUIREMENTS_UNMET",
+                details: {
+                    problems: [{ kind: "tasks_unreviewed", waiting: "review" }],
+                },
+            });
+        } else {
+            await expect(share()).resolves.toBeUndefined();
+            expect(
+                await listRecordingTasks(assignee, "review-item"),
+            ).toMatchObject({
                 reviewed: true,
                 proposals: [],
                 tasks: [],
-            },
-        );
+            });
+        }
         const query = {
             tab: "mine",
             state: "open",
@@ -357,6 +366,7 @@ describeWithDatabase("#224 owner Task review without a sharing gate", () => {
         await expect(acceptReview(owner, "review-item")).resolves.toMatchObject(
             { accepted: 1 },
         );
+        if (kind === "audio") await expect(share()).resolves.toBeUndefined();
         expect(await listTasks(assignee, query)).toMatchObject([
             { text: "Send the report", status: "open", canClose: true },
         ]);

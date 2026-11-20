@@ -19,6 +19,10 @@ import {
 } from "@/lib/folders/folders";
 import { assertOrgScopeWritable, getOrgUserId } from "@/lib/org/config";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
+import {
+    type TaskTargetChanges,
+    taskTargetsChanged,
+} from "@/lib/tasks/routing";
 
 export const withheldPlacementArchiveSchema = z.object({
     itemId: z.string(),
@@ -45,6 +49,7 @@ export async function restoreWithheldPlacements(
             skipped++;
             continue;
         }
+        const taskTargets: TaskTargetChanges = new Map();
         const filed = await db.transaction(async (tx) => {
             await lockOrgTree(tx);
             const [folder] = await tx
@@ -124,6 +129,7 @@ export async function restoreWithheldPlacements(
                     itemId,
                     folderId: folder.id,
                     orgUserId,
+                    taskTargets,
                 });
                 if (problems.length) return false;
                 await tx
@@ -156,6 +162,7 @@ export async function restoreWithheldPlacements(
                 .onConflictDoNothing();
             return true;
         });
+        await taskTargetsChanged(taskTargets);
         if (filed) restored++;
         else skipped++;
     }

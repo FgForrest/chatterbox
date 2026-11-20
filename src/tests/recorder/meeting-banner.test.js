@@ -71,6 +71,7 @@ beforeEach(() => {
     new Function(source)();
 });
 afterEach(() => {
+    if (root?.host.isConnected) render("hidden");
     vi.clearAllTimers();
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -93,11 +94,66 @@ function prompt(pinned = true, shortcut = "Ctrl+Shift+U") {
     return render("prompt", {
         pinned,
         shortcut,
+        blinkUntil: pinned ? Date.now() + 20_000 : null,
         notice: "Inform participants before recording.",
     });
 }
 
 describe("in-meeting banner", () => {
+    it.each([
+        [
+            "en",
+            "Record this tab: click the blinking icon at the top",
+            "Record this tab: click the Chatterbox icon with the REC? badge at the top",
+        ],
+        [
+            "cs",
+            "Nahrávat tuto kartu: klikněte na blikající ikonu nahoře",
+            "Nahrávat tuto kartu: klikněte nahoře na ikonu Klepny se značkou REC?",
+        ],
+    ])("switches pinned instructions to the badge at the blink deadline in %s", (locale, blinking, badge) => {
+        messages = locale === "cs" ? czechMessages : englishMessages;
+        render("prompt", { pinned: true, blinkUntil: Date.now() + 20_000 });
+        expect(el("how").textContent).toBe(blinking);
+        vi.advanceTimersByTime(19_999);
+        expect(el("how").textContent).toBe(blinking);
+        vi.advanceTimersByTime(1);
+        expect(el("how").textContent).toBe(badge);
+    });
+
+    it("uses the badge immediately with no active blink and clears the timer on hide or re-render", () => {
+        render("prompt", { pinned: true, blinkUntil: null });
+        expect(el("how").textContent).toBe(
+            "Record this tab: click the Chatterbox icon with the REC? badge at the top",
+        );
+        expect(vi.getTimerCount()).toBe(0);
+        render("prompt", { pinned: true, blinkUntil: Date.now() + 1000 });
+        expect(vi.getTimerCount()).toBe(1);
+        render("prompt", { pinned: true, blinkUntil: Date.now() - 1 });
+        expect(vi.getTimerCount()).toBe(0);
+        expect(el("how").textContent).toContain("REC? badge");
+        render("prompt", { pinned: true, blinkUntil: Date.now() + 1000 });
+        render("hidden");
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("switches to the badge when the worker reports that this blink stopped early", () => {
+        const blinkUntil = Date.now() + 20_000;
+        render("prompt", { pinned: true, blinkUntil });
+        const stop = (deadline) =>
+            listener(
+                { type: "meeting-banner-blink-stopped", blinkUntil: deadline },
+                { id: "recorder-test" },
+                vi.fn(),
+            );
+        stop(blinkUntil - 1);
+        expect(el("how").textContent).toContain("blinking icon");
+        stop(blinkUntil);
+        expect(el("how").textContent).toContain("REC? badge");
+        expect(vi.getTimerCount()).toBe(0);
+        expect(root.host.isConnected).toBe(true);
+    });
+
     it("mounts a labelled prompt in one closed shadow root without reading meeting content", () => {
         document.body.textContent = "Private meeting text";
         const readPage = vi.spyOn(document, "querySelectorAll");
@@ -116,8 +172,25 @@ describe("in-meeting banner", () => {
             "Inform participants before recording.",
         );
         expect(el("consent").textContent).toContain("consent");
-        expect(el("how").textContent).toContain("top right");
-        expect(el("how").querySelector("kbd").textContent).toBe("Ctrl+Shift+U");
+        expect(el("how").textContent).toBe(
+            "Record this tab: click the blinking icon at the top",
+        );
+        expect(root.querySelector(".toolbar-icon").textContent).toBe("REC?");
+        expect(root.querySelector(".prompt-detail").textContent).toContain(
+            "no further dialog",
+        );
+        expect(root.querySelector("kbd").textContent).toBe("Ctrl+Shift+U");
+        expect(
+            [...root.querySelector(".links").children].map(
+                (child) => child.textContent,
+            ),
+        ).toEqual(["Not now", "Another tab or window…"]);
+        expect(root.querySelector("section").lastElementChild.className).toBe(
+            "links",
+        );
+        expect(root.querySelector("style").textContent).toMatch(
+            /\.links\s*\{[^}]*justify-content:flex-end/,
+        );
         expect(root.querySelector("style").textContent).toContain(
             "prefers-reduced-motion",
         );
@@ -131,8 +204,70 @@ describe("in-meeting banner", () => {
     it("explains the puzzle menu when unpinned and omits an unassigned shortcut", () => {
         prompt(false, "");
         expect(el("how").textContent).toContain("puzzle piece");
-        expect(el("how").textContent).toContain("pin Chatterbox");
+        const steps = root.querySelectorAll("ol li");
+        expect(steps).toHaveLength(2);
+        expect(steps[0].textContent).toBe(
+            "Click the puzzle piece at the top right.",
+        );
+        expect(steps[1].textContent).toContain(
+            "Click Chatterbox in the menu. Recording starts at once.",
+        );
+        const menu = steps[1].querySelector(".toolbar-menu-row");
+        expect(menu.querySelector("span").textContent).toBe("Chatterbox");
+        expect(menu.querySelector("img")).toBeTruthy();
+        expect(menu.querySelector("svg path")).toBeTruthy();
+        expect(root.querySelector(".prompt-detail").textContent).toContain(
+            "Pin Chatterbox",
+        );
+        expect(root.querySelector(".toolbar-badge")).toBeNull();
         expect(root.querySelector("kbd")).toBeNull();
+    });
+    it.each([
+        true,
+        false,
+    ])("describes Options when policy is required (pinned=%s)", (pinned) => {
+        render("prompt", {
+            pinned,
+            policyRequired: true,
+            shortcut: "Alt+Shift+R",
+            notice: "Custom reminder",
+        });
+        expect(el("how").textContent).toContain("open Options");
+        expect(el("how").textContent).toContain(
+            "confirm the automatic recording rules first",
+        );
+        expect(el("notice").textContent).toBe("Custom reminder");
+        expect(el("consent").textContent).toBe(
+            "Starting the recording confirms you have consent.",
+        );
+        expect(root.querySelector("kbd")).toBeNull();
+        expect(root.querySelector("section").textContent).not.toMatch(
+            /starts at once/i,
+        );
+        expect(
+            root.querySelector("ol li:last-child")?.firstChild.textContent,
+        ).toBe(pinned ? undefined : "Click Chatterbox in the menu.");
+    });
+    it("shows a server connection notice above the actions and offers retry", () => {
+        render("prompt", {
+            pinned: true,
+            notice: "Inform participants",
+            connection: {
+                message: "Cannot reach Chatterbox",
+                detail: "No answer within 30 s",
+            },
+        });
+        expect(el("meeting-connection").textContent).toContain(
+            "No answer within 30 s",
+        );
+        expect(
+            el("meeting-connection").compareDocumentPosition(el("not-now")) &
+                Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy();
+        el("connection-retry").click();
+        expect(send).toHaveBeenLastCalledWith({
+            type: "recorder-connection-retry",
+        });
     });
     it.each([
         "close",
@@ -308,6 +443,65 @@ describe("in-meeting banner", () => {
     });
 });
 
+describe("prompt arrow", () => {
+    function viewport(width, outerWidth = width, right = 800) {
+        vi.stubGlobal("innerWidth", width);
+        vi.stubGlobal("outerWidth", outerWidth);
+        vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+            top: 16,
+            right,
+            height: 200,
+        });
+        window.dispatchEvent(new Event("resize"));
+    }
+
+    it("moves the estimate between the icon, puzzle menu and side panel corner", () => {
+        viewport(1200);
+        prompt();
+        const arrow = root.querySelector(".prompt-arrow");
+        expect(arrow.getAttribute("aria-hidden")).toBe("true");
+        expect(arrow.hasAttribute("hidden")).toBe(false);
+        expect(
+            [...arrow.querySelectorAll("circle")].map((ring) =>
+                ring.getAttribute("cx"),
+            ),
+        ).toEqual(["1050", "1050"]);
+        expect(arrow.querySelector("path").getAttribute("d")).toMatch(
+            /^M802 82 C/,
+        );
+        prompt(false);
+        expect(arrow.querySelector("circle").getAttribute("cx")).toBe("1090");
+        viewport(1000, 1200);
+        expect(arrow.querySelector("circle").getAttribute("cx")).toBe("1000");
+    });
+
+    it("hides on narrow viewports or when the card would cross the arrow", () => {
+        viewport(700, 700, 450);
+        prompt();
+        const arrow = root.querySelector(".prompt-arrow");
+        expect(arrow.hasAttribute("hidden")).toBe(true);
+        viewport(960, 960, 810);
+        expect(arrow.hasAttribute("hidden")).toBe(true);
+        viewport(1200);
+        expect(arrow.hasAttribute("hidden")).toBe(false);
+    });
+
+    it.each([
+        "waiting",
+        "recording",
+        "error",
+        "stopped",
+        "hidden",
+    ])("hides in the %s view", (view) => {
+        viewport(1200);
+        prompt();
+        const arrow = root.querySelector(".prompt-arrow");
+        expect(arrow.hasAttribute("hidden")).toBe(false);
+        render(view, { state });
+        expect(arrow.hasAttribute("hidden")).toBe(true);
+    });
+});
+
 describe("meeting banner DOM and lifecycle review fixes", () => {
     it.each([
         "button",
@@ -383,10 +577,12 @@ describe("meeting banner DOM and lifecycle review fixes", () => {
         });
         expect(el("how").textContent).toContain("open Options");
         expect(el("how").textContent).toContain(
-            "confirm your automatic recording policy",
+            "confirm the automatic recording rules first",
         );
         expect(el("how").textContent).not.toContain("record this tab");
-        expect(el("consent").textContent).toContain("Sharing through Chrome");
+        expect(el("consent").textContent).toBe(
+            "Starting the recording confirms you have consent.",
+        );
         expect(root.querySelector("kbd")).toBeNull();
     });
     it("builds the prompt, recording controls and folder picker with Trusted Types HTML sinks blocked", () => {
@@ -412,20 +608,22 @@ describe("Chrome-check banner fixes", () => {
     it.each([
         "en",
         "cs",
-    ])("uses the popup mark, notice label, emphasized icon and shortcut sentence in %s", (locale) => {
+    ])("uses the toolbar illustration and updated prompt copy in %s", (locale) => {
         messages = locale === "cs" ? czechMessages : englishMessages;
         prompt();
         const mark = root.querySelector("img.logo");
         expect(mark.getAttribute("src")).toBe(
             `data:image/png;base64,${readFileSync("extensions/recorder/icons/icon-48.png").toString("base64")}`,
         );
-        expect(el("how").querySelector("strong").textContent).toBe(
-            locale === "cs" ? "ikonu Klepny" : "the Chatterbox icon",
-        );
         expect(el("how").textContent).toBe(
             locale === "cs"
-                ? "Klikněte na ikonu Klepny vpravo nahoře, nebo stiskněte Ctrl+Shift+U. Nahraje se tato karta, bez dalšího dialogu."
-                : "Click the Chatterbox icon at the top right, or press Ctrl+Shift+U. This tab will be recorded, without another dialog.",
+                ? "Nahrávat tuto kartu: klikněte na blikající ikonu nahoře"
+                : "Record this tab: click the blinking icon at the top",
+        );
+        expect(root.querySelector(".prompt-detail").textContent).toBe(
+            locale === "cs"
+                ? "Začne hned, bez dalšího dialogu. Stačí i Ctrl+Shift+U."
+                : "Recording starts at once, with no further dialog. You can also press Ctrl+Shift+U.",
         );
         expect(el("notice-label").textContent).toBe(
             locale === "cs"
@@ -434,18 +632,23 @@ describe("Chrome-check banner fixes", () => {
         );
         expect(el("consent").textContent).toBe(
             locale === "cs"
-                ? "Kliknutím na ikonu potvrzujete, že souhlas máte."
-                : "Clicking the icon confirms you have consent.",
+                ? "Spuštěním nahrávání potvrzujete, že souhlas máte."
+                : "Starting the recording confirms you have consent.",
         );
         prompt(true, "");
+        expect(root.querySelector(".prompt-detail").textContent).toBe(
+            locale === "cs"
+                ? "Začne hned, bez dalšího dialogu."
+                : "Recording starts at once, with no further dialog.",
+        );
+        expect(root.querySelector("kbd")).toBeNull();
+        prompt(false, "Alt+Shift+R");
+        expect(root.querySelector("kbd").textContent).toBe("Alt+Shift+R");
         expect(el("how").textContent).toBe(
             locale === "cs"
-                ? "Klikněte na ikonu Klepny vpravo nahoře. Nahraje se tato karta, bez dalšího dialogu."
-                : "Click the Chatterbox icon at the top right. This tab will be recorded, without another dialog.",
+                ? "Nahrávat tuto kartu: ikona Klepny je pod dílkem skládačky nahoře"
+                : "Record this tab: the Chatterbox icon is under the puzzle piece above",
         );
-        expect(el("how").querySelector("kbd")).toBeNull();
-        prompt(false, "Alt+Shift+R");
-        expect(el("how").querySelector("kbd").textContent).toBe("Alt+Shift+R");
         expect(el("notice").textContent).toContain("Inform participants");
         expect(el("consent").textContent).toContain(
             locale === "cs" ? "souhlas" : "consent",

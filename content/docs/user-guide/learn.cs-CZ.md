@@ -1,6 +1,6 @@
 ---
 title: Učení
-description: Nechte Klepna navrhnout jména mluvčích, opravy a fakta a poté je zkontrolujte.
+description: Nechte Klepnu navrhnout jména mluvčích, opravy a fakta a poté je zkontrolujte.
 ---
 
 Funkce Učení porovnává přepis s vaším [Almanachem](almanac.md) a navrhuje nalezené položky:
@@ -21,7 +21,7 @@ Učení je dostupné u přepisů s časovými údaji na instancích s vlastním 
 
 U ručního kroku prvek Učení uvádí, že je připravený, a nabízí tlačítko **Učení**. Po spuštění se bez otevření okna přepne na stav **Učení čte přepis**. Během zpracování můžete stránku opustit. Po dokončení prvek nabídne akci **Zkontrolovat**.
 
-Pokud má profil zpracování položky u Učení zapnuté **Spouštět automaticky**, Učení se spustí po novém přepisu. Když najde návrhy, jeho kontrola se zobrazí vložená přímo v pracovním postupu. Pruh uvádí **Ke kontrole** a akce **Zkontrolovat poznatky** kontrolu rozbalí a posune se k ní. Název, shrnutí a témata čekají na Vaši kontrolu, aby používaly opravený přepis, a zamýšlené sdílení s Organizací čeká s nimi. Po 72 hodinách pokračují bez kontroly. Kontrola zůstane otevřená, dokud ji nedokončíte nebo dokud položka nebude sdílena.
+Pokud má profil zpracování položky u Učení zapnuté **Spouštět automaticky**, Učení se spustí po novém přepisu. Když najde návrhy, jeho kontrola se zobrazí vložená přímo v pracovním postupu. Pruh uvádí **Ke kontrole** a akce **Zkontrolovat poznatky** kontrolu rozbalí a posune se k ní. Název, shrnutí a témata čekají na Vaši kontrolu až 72 hodin, aby používaly opravený přepis. První sdílení nahrávky s Organizací čeká i po uplynutí této lhůty, dokud vlastník Učení nedokončí nebo nepřeskočí. Pokud Učení nad upřednostněným přepisem selže, vlastník ho může zkusit znovu nebo zvolit **Přeskočit**. Nový upřednostněný přepis nebo jeho nová revize vyžaduje vlastní běh Učení.
 
 Pokud Učení nenajde nic ke kontrole a je zapnutá volba **Opravit přepis po Učení**, krok Učení zůstane ve stavu **Běží**, zatímco přepis znovu čte a opravuje špatně rozpoznaná slova. U shrnutí se zobrazí, že čeká na tuto opravu, a po jejím dokončení se samo spustí. Kliknutím na **Shrnout** jej můžete spustit ihned.
 
@@ -71,7 +71,7 @@ Přijaté opravy jsou uchovány vedle původního textu, nikdy ne místo něj, t
 
 Po běžném dokončení, pokud má profil zpracování zapnuté **Opravit přepis po Učení**, Učení potom ještě jednou přečte celý přepis s údaji z Almanachu a opraví další nesprávně rozpoznaná slova. Každá oprava je podtržena jantarovou barvou a můžete ji vrátit zpět.
 
-Když sdílíte nahrávku nebo e-mail, u kterých jste dokončili kontrolu Učení pro aktuální obsah, Klepna předá potvrzené poznatky Organizaci bez dalšího potvrzení. Dokončení a dostupné počty najdete ve **Znalostech** položky. Pracovní postup pokračuje bez další kontroly Učení. Kurátoři mohou spustit **Učit se znovu** a osoby i věci Organizace slučovat nebo mazat.
+Když sdílíte nahrávku nebo e-mail, u kterých jste dokončili kontrolu Učení pro aktuální obsah, Klepna předá potvrzené poznatky Organizaci bez dalšího potvrzení. Dokončení a dostupné počty najdete ve **Znalostech** položky. Pracovní postup pokračuje bez další kontroly Učení. Kurátoři mohou spustit **Učit se znovu** a osoby i věci Organizace slučovat nebo mazat. Pokud je při sdílení s Organizací soukromý běh Učení ještě otevřený, sdílení ho ukončí a jeho poznatky zůstanou soukromé.
 
 <span id="where-reviews-wait" />
 
@@ -80,7 +80,7 @@ Když sdílíte nahrávku nebo e-mail, u kterých jste dokončili kontrolu Učen
 - Ikona **Znalosti** v záhlaví položky má odznak s počtem návrhů čekajících na Vaši kontrolu. Podnadpis panelu nabízí **Zkontrolovat**, které otevře stávající kontrolu.
 - Filtr **Vyžaduje kontrolu** nad seznamem nahrávek.
 - Odznak na **Almanach** a záložka **Ke kontrole** tamtéž.
-- Sdílení položky s Organizací uzavře její nedokončenou soukromou kontrolu a její zjištění zůstanou soukromá. Znalostmi Organizace se stane jen to, co jste potvrdili v dokončené kontrole.
+- Seznamy a odznaky čekajících kontrol ukazují jen Vaše vlastní položky. Kurátor může otevřít sdílenou nahrávku a dokončit Učení v pohledu Organizace, například po opakovaném běhu.
 
 <span id="good-to-know" />
 

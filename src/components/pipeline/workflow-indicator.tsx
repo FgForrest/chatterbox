@@ -2,7 +2,7 @@
 
 import { Check, LoaderCircle, Minus, TriangleAlert } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
-import { useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { useTimeZone } from "use-intl/react";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +22,7 @@ interface WorkflowStripProps {
     workflow: WorkflowStatus;
     kind?: "audio" | "mail";
     onAction?: (action: WorkflowActionCode) => void;
+    secondaryAction?: ReactNode;
     readOnly?: boolean;
 }
 
@@ -215,6 +216,7 @@ export function WorkflowStrip({
     workflow,
     kind = "audio",
     onAction,
+    secondaryAction,
     readOnly = false,
 }: WorkflowStripProps) {
     const i18n = useExtracted();
@@ -724,6 +726,7 @@ export function WorkflowStrip({
                             )}
                             {message()}
                         </p>
+                        {!readOnly && secondaryAction}
                         {workflow.status.action && !readOnly && (
                             <Button
                                 type="button"

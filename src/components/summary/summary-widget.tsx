@@ -81,6 +81,7 @@ interface SummaryWidgetProps {
     canChange: boolean;
     contentText?: string | null;
     canSummarize?: boolean;
+    showSummary?: boolean;
     view?: RecordingView;
     source?: SummarySource;
     canSwitchSource?: boolean;
@@ -108,6 +109,7 @@ export function SummaryWidget({
     canChange,
     contentText,
     canSummarize = Boolean(contentText),
+    showSummary = true,
     view,
     source = "riffado",
     canSwitchSource = false,
@@ -882,6 +884,8 @@ export function SummaryWidget({
         },
     ];
 
+    if (!showSummary) return taskReview || null;
+
     return (
         <>
             <WorkflowWidget
@@ -890,8 +894,13 @@ export function SummaryWidget({
                 collapsed={!editing && hasSummary && !summaryOpen}
                 inlineLine={editing ? undefined : line}
                 tone={tone}
-                onOpenChange={(next) => {
-                    if (next && runsFromLine && !runFromLineDisabled) {
+                onOpenChange={(next, fromLink) => {
+                    if (
+                        next &&
+                        !fromLink &&
+                        runsFromLine &&
+                        !runFromLineDisabled
+                    ) {
                         runSummary();
                     }
                     if (workflowVisible) setWorkflowExpanded(next);

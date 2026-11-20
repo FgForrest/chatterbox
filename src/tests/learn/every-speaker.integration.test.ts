@@ -567,11 +567,9 @@ const turns = [0, 1].map((n) => ({
         } finally {
             decrypt.mockRestore();
         }
-        expect(await pendingReviewCount(OWNER, false)).toBe(1);
-        expect(await recordingsNeedingReview(OWNER, false)).toEqual(
-            new Set([ITEM]),
-        );
-        expect(await reviewQueue(OWNER, false)).toHaveLength(1);
+        expect(await pendingReviewCount(OWNER)).toBe(1);
+        expect(await recordingsNeedingReview(OWNER)).toEqual(new Set([ITEM]));
+        expect(await reviewQueue(OWNER)).toHaveLength(1);
     });
 
     it.each([
@@ -701,9 +699,9 @@ const turns = [0, 1].map((n) => ({
             snapshots.find((snapshot) => snapshot.status === "finished")
                 ?.correcting,
         ).toBe(true);
-        expect(await pendingReviewCount(OWNER, false)).toBe(0);
-        expect(await recordingsNeedingReview(OWNER, false)).toEqual(new Set());
-        expect(await reviewQueue(OWNER, false)).toEqual([]);
+        expect(await pendingReviewCount(OWNER)).toBe(0);
+        expect(await recordingsNeedingReview(OWNER)).toEqual(new Set());
+        expect(await reviewQueue(OWNER)).toEqual([]);
         expect(
             (await loadPrivateItemProcessing(OWNER, ITEM))
                 ?.learnFindingsWaiting,

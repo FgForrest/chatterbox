@@ -7,8 +7,12 @@ import { gatherFacts } from "@/lib/pipeline/facts";
 import type { PipelineJobResult } from "@/lib/pipeline/outcome";
 import { isProviderBlockedReason, planAdvance } from "@/lib/pipeline/plan";
 import { sweepAutomaticTranscriptionRetries } from "@/lib/pipeline/sweep";
-import { PIPELINE_ADVANCE_JOB_KIND } from "@/lib/pipeline/trigger";
+import {
+    PIPELINE_ADVANCE_JOB_KIND,
+    requestAdvanceInTx,
+} from "@/lib/pipeline/trigger";
 import type { PipelineView } from "@/lib/pipeline/types";
+import { isShareReviewProblem } from "@/lib/sharing/share-gate";
 
 const MAX_STABLE_CHECKS = 10;
 const UNSTABLE_RETRY_MS = 5_000;
@@ -62,15 +66,37 @@ async function advancePipeline(
             });
         }
         signal.throwIfAborted();
-        const completed = await db.transaction((tx) =>
-            completeProcessingGenerationInTx(
+        const completed = await db.transaction(async (tx) => {
+            if (
+                facts.share?.problems.some(isShareReviewProblem) &&
+                plan.actions.some(
+                    (action) =>
+                        action.type === "markPhase" &&
+                        ((action.phase === "learn" &&
+                            ["done", "skipped"].includes(
+                                action.record.state,
+                            )) ||
+                            (action.phase === "summary" &&
+                                ["done", "skipped", "failed"].includes(
+                                    action.record.steps?.summary?.state ?? "",
+                                ))),
+                )
+            ) {
+                await requestAdvanceInTx(tx, {
+                    itemId: payload.itemId,
+                    userId,
+                    view: payload.view,
+                    reason: "share-gate",
+                });
+            }
+            return completeProcessingGenerationInTx(
                 tx,
                 payload.itemId,
                 payload.view,
                 userId,
                 generation,
-            ),
-        );
+            );
+        });
         if (completed === "missing")
             return {
                 skipped: "gone",

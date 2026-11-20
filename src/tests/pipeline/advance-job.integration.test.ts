@@ -672,7 +672,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
         });
     });
 
-    it("waits for the owner to review Plaud proposals while still reaching the share gate", async () => {
+    it("blocks the share while the owner reviews imported Plaud proposals", async () => {
         await seedPlaudTaskPipeline(["Draft the final report"]);
 
         await expect(
@@ -684,7 +684,8 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
             taskReview: { state: "waiting", reason: "needs_review" },
             share: {
                 state: "waiting",
-                reason: "org_unavailable",
+                reason: "gate_blocked",
+                problems: [{ kind: "tasks_unreviewed", waiting: "review" }],
             },
         });
     });

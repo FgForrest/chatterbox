@@ -13,20 +13,23 @@ Choose an Organization folder in the inline **Categorize recording** or **Catego
 
 ![The folder row and Add to folder picker with Organization folders](images/add-to-folder.png)
 
-This first creates an intended Organization placement. The item remains private while its profile runs. Chatterbox shares it automatically when it is ready for others to read:
+This creates an intended Organization placement. Before a recording is shared for the first time, Chatterbox needs:
 
-- it has a transcript when it is a recording,
-- every speaker is named or marked unknown.
+- a transcript with every speaker named or marked unknown,
+- completed Learn in the private view, if the profile runs it,
+- the automatic summary if it is still due or running, and the owner's review of proposed tasks.
 
-Task review does not delay sharing. Colleagues see a proposed task only after the owner or a curator accepts it.
+The quick-finish and Skip options also complete their respective reviews when offered. The **Share** step shows what the recording is waiting for and links to the review. The same requirements apply when you file or move a recording directly into an open Organization folder. Only the owner sees proposed tasks from a recording or email until they accept them.
 
-The folder row shows the intended Organization folder, and the workflow strip adds a **Share** step that shows which gate is waiting. Sharing cancels any open private [Learn](learn.md) run. Its findings stay private. When the Organization profile enables automatic Learn, a new run starts in the Organization scope and the summary waits for that review.
+If a recording has no processing profile yet and filing it assigns a profile that runs Learn or Summary automatically, Chatterbox saves the folder as an intended placement. The recording stays private while those steps run and you finish any required reviews. Chatterbox then shares it in that folder. If closing an earlier task clears the last task decision, an intended share can also proceed once its other requirements are met.
 
 If you finished the private Learn review for the item's current content, sharing publishes what you confirmed as Organization knowledge without another confirmation. The item's header **Knowledge** panel shows Learn as complete with the number of applied changes, and the workflow counts Learn as done. This also applies to mail. Curators can start **Re-learn** and merge or delete Organization people and things.
 
 An item categorized with **Nothing automatic** is not shared by itself. Its intended folder offers **Share now** and a cancel button in the folder row. The strip says **Your turn.** and waits until you share or cancel it.
 
-Mail sent directly to an Organization folder address also starts as a private intended placement, runs the same gates, and shares automatically. See [Mail](mail.md).
+Mail sent to an Organization folder address starts with a private intended placement. Mail has no share gate. Automatic filing waits for any Learn hold for up to 72 hours. Filing mail by hand into an open Organization folder shares it immediately. Only the mail owner can review its task proposals. See [Mail](mail.md).
+
+When an item is published to the Organization with a private Learn run still open, sharing closes that run and its findings stay private. This can happen with mail or with a recording whose open run is outside the share gate. Automatic Learn can then run in the Organization scope if the profile enables it.
 
 ## A shared item
 
@@ -69,7 +72,7 @@ Each member may make 60 calls per hour to each Organization provider by default.
 With identity-provider authorization, people granted `org.curate` are curators and people granted `access.manage` manage access and Organization providers. On a local installation, the organization account holds those responsibilities. Curators can:
 
 - edit shared recordings and mail,
-- review shared Learn results and tasks,
+- finish Organization-view Learn on an opened shared item and edit accepted shared tasks,
 - manage Organization profiles, people, things, and suggested relations,
 - review **Almanac → Care → Possible duplicates**, compare and join Organization records, or mark a pair **Not the same** so it stays dismissed for all curators (see [Care](almanac.md#care-possible-duplicates)),
 - set up folder exports of Organization folders,

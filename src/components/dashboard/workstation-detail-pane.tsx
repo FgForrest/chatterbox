@@ -474,6 +474,9 @@ export function WorkstationDetailPane({
                                                 <TranscriptionPanel
                                                     key={`${currentRecording.id}:${currentRecording.view ?? "private"}:${contentRevision}:${currentRecording.audioReaped ? 1 : 0}:${hasTranscript ? 1 : 0}:${currentRecording.hasSummary ? 1 : 0}`}
                                                     recording={currentRecording}
+                                                    itemLinkQuery={
+                                                        itemLinkQuery
+                                                    }
                                                     transcription={
                                                         currentTranscription
                                                     }

@@ -622,14 +622,17 @@ export async function settlePipelineBindingInTx(
             ),
         );
     if (
+        binding.phase === "share" &&
+        outcome.kind === "waiting" &&
+        outcome.reason !== "cut" &&
+        outcome.reason !== "trim" &&
         !(
-            binding.phase === "share" &&
-            outcome.kind === "waiting" &&
-            outcome.reason !== "cut" &&
-            outcome.reason !== "trim"
+            outcome.reason === "gate_blocked" &&
+            processing.requestedGeneration > binding.generation
         )
     )
-        await wakePipelineInTx(tx, binding.itemId, binding.userId);
+        return true;
+    await wakePipelineInTx(tx, binding.itemId, binding.userId);
     return true;
 }
 

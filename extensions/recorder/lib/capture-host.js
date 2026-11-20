@@ -220,6 +220,7 @@ async function startCapture({
 
     if (pending.stopRequested) throw new Error("Capture stopped before start");
 
+    // Do not await before recorder.start(), so stop() cannot see active with an unstarted recorder.
     active = {
         recorder,
         context,
@@ -269,10 +270,11 @@ async function startCapture({
 
     recorder.onstop = async () => {
         const current = active;
-        if (!current) return;
+        if (current?.recorder !== recorder) return;
         // Wait for the last slices to finish writing so the server sees every
         // chunk the count promises, then tear the graph down.
         await Promise.allSettled([...current.pendingWrites]);
+        if (active !== current) return;
         const chunkCount = current.nextIndex;
         cleanup(current);
         active = null;
@@ -300,6 +302,12 @@ async function startCapture({
     // Live meters, reported a few times a second.
     const micBuffer = new Float32Array(micAnalyser.fftSize);
     const systemBuffer = new Float32Array(systemAnalyser.fftSize);
+    try {
+        recorder.start(CHUNK_INTERVAL_MS);
+    } catch (error) {
+        active = null;
+        throw error;
+    }
     active.meterTimer = setInterval(() => {
         send({
             type: "levels",
@@ -309,7 +317,6 @@ async function startCapture({
         });
     }, 200);
 
-    recorder.start(CHUNK_INTERVAL_MS);
     send({ type: "recording-started", sessionId });
     if (micErrorName)
         send({ type: "mic-unavailable", sessionId, errorName: micErrorName });
@@ -333,28 +340,12 @@ function stop() {
         if (pendingCapture) pendingCapture.stopRequested = true;
         return;
     }
-    // Stop metering immediately, then ask the recorder to stop. The final
-    // dataavailable and onstop do the rest: they flush the last chunk, report
-    // the true count, and only then release the streams and audio graph.
+    // An inactive recorder can still be flushing its final chunk in onstop.
     if (active.meterTimer) {
         clearInterval(active.meterTimer);
         active.meterTimer = undefined;
     }
-    try {
-        if (active.recorder.state !== "inactive") {
-            active.recorder.stop();
-        } else {
-            // Never started or already finished: clean up here since onstop
-            // will not fire.
-            cleanup(active);
-            const chunkCount = active.nextIndex;
-            const sessionId = active.sessionId;
-            active = null;
-            send({ type: "recording-stopped", sessionId, chunkCount });
-        }
-    } catch {
-        // already stopped; onstop will finish the teardown
-    }
+    if (active.recorder.state !== "inactive") active.recorder.stop();
 }
 
 return { start, stop, isRecording: () => Boolean(active) };

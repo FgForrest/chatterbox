@@ -558,6 +558,7 @@ export async function settleSourceTaskUpdatesInTx(
     let skipped = 0;
     const acceptedTaskIds = new Set<string>();
     const touched = new Map<string, string>();
+    const appliedVersions = new Map<string, number>();
     for (const proposal of input.updates) {
         const target = await targetFor(tx, input.viewer, proposal.taskId);
         const statementAt = proposal.statementAt;
@@ -595,7 +596,11 @@ export async function settleSourceTaskUpdatesInTx(
             skipped += 1;
             continue;
         }
-        if (target.version !== proposal.version) {
+        // A change this review applied to the same task is not a conflict.
+        if (
+            target.version !==
+            proposal.version + (appliedVersions.get(proposal.taskId) ?? 0)
+        ) {
             await setProposalState(tx, proposal.id, "obsolete", {
                 actorUserId: input.viewer.userId,
                 routedTo: null,
@@ -635,6 +640,11 @@ export async function settleSourceTaskUpdatesInTx(
             input.viewer.userId,
             statementAt,
         );
+        if (proposal.kind !== "attach_merge")
+            appliedVersions.set(
+                proposal.taskId,
+                (appliedVersions.get(proposal.taskId) ?? 0) + 1,
+            );
         await setProposalState(tx, proposal.id, "applied", {
             actorUserId: input.viewer.userId,
             routedTo: null,
@@ -656,10 +666,28 @@ export async function settleSourceTaskUpdatesInTx(
     return { applied, skipped, acceptedTaskIds, touched };
 }
 
-/** Routes proposals that were held until their private source became shared. */
+/** Items whose tasks a transaction changed (item id to owner), for {@link taskTargetsChanged}. */
+export type TaskTargetChanges = Map<string, string>;
+
+/** After commit: notify and re-export the items whose tasks a share changed. */
+export async function taskTargetsChanged(
+    changes: TaskTargetChanges,
+): Promise<void> {
+    for (const [itemId, ownerUserId] of changes) {
+        await changed(ownerUserId, itemId);
+    }
+}
+
+/**
+ * Settles proposals that were held until their private source became shared:
+ * what the source owner may apply is applied, the rest goes to the target's
+ * editors. Items whose tasks changed are added to `changes` for the caller to
+ * pass to {@link taskTargetsChanged} after commit.
+ */
 export async function routeAwaitingShareTaskProposalsInTx(
     tx: Tx,
     sourceItemId: string,
+    changes?: TaskTargetChanges,
 ): Promise<void> {
     const [source] = await tx
         .select({ ownerUserId: chatterItems.userId, email: users.email })
@@ -682,7 +710,6 @@ export async function routeAwaitingShareTaskProposalsInTx(
     const proposals = await tx
         .select({
             id: taskUpdateProposals.id,
-            kind: taskUpdateProposals.kind,
             taskId: taskUpdateProposals.taskId,
         })
         .from(taskUpdateProposals)
@@ -706,8 +733,16 @@ export async function routeAwaitingShareTaskProposalsInTx(
     const lockedProposals = await tx
         .select({
             id: taskUpdateProposals.id,
-            kind: taskUpdateProposals.kind,
             taskId: taskUpdateProposals.taskId,
+            kind: taskUpdateProposals.kind,
+            dueDate: taskUpdateProposals.dueDate,
+            duePhrase: taskUpdateProposals.duePhrase,
+            proposedAssigneePersonId:
+                taskUpdateProposals.proposedAssigneePersonId,
+            proposedAssigneeHint: taskUpdateProposals.proposedAssigneeHint,
+            proposedAssigneeCheck: taskUpdateProposals.proposedAssigneeCheck,
+            statementAt: taskUpdateProposals.statementAt,
+            version: taskUpdateProposals.version,
         })
         .from(taskUpdateProposals)
         .where(
@@ -725,31 +760,18 @@ export async function routeAwaitingShareTaskProposalsInTx(
         id: sourceOwnerUserId,
         email: source.email,
     });
-    for (const proposal of lockedProposals) {
-        const target = await targetFor(tx, sourceViewer, proposal.taskId);
-        if (!target?.visible) {
-            await setProposalState(tx, proposal.id, "obsolete", {
-                actorUserId: sourceOwnerUserId,
-                routedTo: null,
-                obsoleteReason: "task_invisible",
-            });
-            continue;
-        }
-        await tx
-            .update(taskUpdateProposals)
-            .set({
-                state: "awaiting_target_review",
-                routedTo: await routingTargets(tx, proposal.kind, target),
-                updatedAt: new Date(),
-            })
-            .where(
-                and(
-                    eq(taskUpdateProposals.id, proposal.id),
-                    eq(taskUpdateProposals.itemId, sourceItemId),
-                    eq(taskUpdateProposals.userId, sourceOwnerUserId),
-                    eq(taskUpdateProposals.state, "awaiting_share"),
-                ),
-            );
+    const { touched } = await settleSourceTaskUpdatesInTx(tx, {
+        viewer: sourceViewer,
+        sourceItemId,
+        sourceOwnerUserId,
+        sourceShared: true,
+        updates: lockedProposals.map((proposal) => ({
+            ...proposal,
+            ticked: true,
+        })),
+    });
+    for (const [itemId, ownerUserId] of touched) {
+        changes?.set(itemId, ownerUserId);
     }
 }
 

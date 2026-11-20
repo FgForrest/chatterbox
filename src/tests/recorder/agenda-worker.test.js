@@ -377,7 +377,11 @@ describe("reviewed agenda decisions", () => {
     });
     it("starts capture using cached agendas without waiting for a hanging banner match", async () => {
         h.local.serverDefaults.agendas = true;
-        h.request.mockImplementationOnce(() => new Promise(() => {}));
+        let release;
+        const delayed = new Promise((resolve) => {
+            release = resolve;
+        });
+        h.request.mockImplementationOnce(() => delayed);
         const began = Date.now();
         const result = await message(
             {
@@ -392,6 +396,8 @@ describe("reviewed agenda decisions", () => {
             expect.objectContaining({ target: "offscreen", type: "start" }),
         );
         expect(h.session.recordingState.agendaExplicit).toBe(false);
+        release(await defaultRequest(null, "/match?"));
+        await settle();
     });
     it("requires confirmation of a match offered in the pill after start", async () => {
         h.local.serverDefaults.agendas = true;
@@ -866,13 +872,20 @@ describe("agenda worker integration", () => {
         "timeout",
     ])("reports a match %s distinctly and retries without caching it", async (kind) => {
         h.local.serverDefaults.agendas = true;
-        h.request.mockImplementation(async (_auth, path) => {
-            if (path.includes("/match?")) {
-                if (kind === "timeout") return new Promise(() => {});
-                throw new Error("offline");
-            }
-            return { json: async () => ({ data: [] }) };
-        });
+        h.request.mockImplementation(
+            async (_auth, path, _init, _timeout, options) => {
+                if (path.includes("/match?")) {
+                    if (kind === "timeout") {
+                        expect(options.timeoutMs).toBe(10000);
+                        throw Object.assign(new Error("timeout"), {
+                            kind: "unreachable",
+                        });
+                    }
+                    throw new Error("offline");
+                }
+                return { json: async () => ({ data: [] }) };
+            },
+        );
         expect(
             await message({ type: "match-agendas", tabId: 7 }, extension),
         ).toMatchObject({ ok: false });
@@ -973,7 +986,7 @@ describe("agenda recovery", () => {
 });
 
 describe("agenda selection and stop ordering", () => {
-    it("waits for an in-flight agenda selection before stopping capture", async () => {
+    it("stops capture while an in-flight agenda selection is still pending", async () => {
         h.local.serverDefaults.agendas = true;
         await start();
         let release;
@@ -999,22 +1012,19 @@ describe("agenda selection and stop ordering", () => {
             extension,
         );
         const stop = message({ type: "stop-recording" }, extension);
-        await settle();
-        expect(
-            chrome.runtime.sendMessage.mock.calls.some(
-                ([input]) =>
-                    input.target === "offscreen" && input.type === "stop",
-            ),
-        ).toBe(false);
-        release();
+        try {
+            await settle();
+            expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+                target: "offscreen",
+                type: "stop",
+                payload: undefined,
+            });
+        } finally {
+            release();
+        }
         expect(await selection).toMatchObject({ ok: true });
         expect(await stop).toMatchObject({ ok: true });
         expect(h.metas.get("session-1").agendaId).toBe("agenda-two");
-        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-            target: "offscreen",
-            type: "stop",
-            payload: undefined,
-        });
     });
 });
 
@@ -1058,7 +1068,11 @@ describe("banner selection regressions", () => {
         });
         h.request.mockImplementation(
             count === "timeout"
-                ? () => new Promise(() => {})
+                ? async () => {
+                      throw Object.assign(new Error("timeout"), {
+                          kind: "unreachable",
+                      });
+                  }
                 : async () => ({
                       json: async () => ({
                           data: Array.from({ length: count }, (_, i) =>

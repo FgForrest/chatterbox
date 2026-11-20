@@ -829,6 +829,43 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
         false,
         true,
     ])("uses live sharing for a pending scope restart (re-share before advance: %s)", async (reshareBeforeAdvance) => {
+        async function setManualOnly(manualOnly: boolean) {
+            const where = and(
+                eq(itemProcessing.itemId, REC),
+                eq(itemProcessing.userId, OWNER),
+                eq(itemProcessing.view, "private"),
+            );
+            const [processing] = await db()
+                .select({ phases: itemProcessing.phases })
+                .from(itemProcessing)
+                .where(where);
+            const categorize = processing?.phases.categorize;
+            await db()
+                .update(itemProcessing)
+                .set({
+                    manualOnly,
+                    ...(categorize?.placementProfile
+                        ? {
+                              phases: {
+                                  ...processing?.phases,
+                                  categorize: {
+                                      ...categorize,
+                                      placementProfile: {
+                                          ...categorize.placementProfile,
+                                          manualOnly,
+                                      },
+                                  },
+                              },
+                          }
+                        : {}),
+                })
+                .where(where);
+        }
+        async function shareWhileManual() {
+            await setManualOnly(true);
+            await share();
+            await setManualOnly(false);
+        }
         await provider(OWNER);
         await prepareAutomaticLearn();
         expect(
@@ -840,14 +877,14 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
             }),
         ).toEqual({ status: "started" });
         const [original] = await db().select().from(learnRuns);
-        await share();
+        await shareWhileManual();
         await unshareRecording(OWNER, REC, { withdraw: true });
         const [pending] = await db()
             .select()
             .from(itemProcessing)
             .where(eq(itemProcessing.view, "private"));
         expect(pending?.phases.learn?.reason).toBe("scope_changed");
-        if (reshareBeforeAdvance) await share();
+        if (reshareBeforeAdvance) await shareWhileManual();
         await advance();
 
         const expectedView = reshareBeforeAdvance ? "org" : "private";
@@ -872,7 +909,7 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
         expect(await db().select().from(learnRuns)).toHaveLength(2);
 
         if (!reshareBeforeAdvance) {
-            await share();
+            await shareWhileManual();
             await advance();
             await requestAdvance({
                 itemId: REC,
@@ -2627,16 +2664,16 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
         });
     });
 
-    it("lists the reviews waiting, naming only recordings the viewer may see now", async () => {
+    it("lists the owner’s reviews in both views, where currently accessible", async () => {
         await run("private", "ready");
-        expect(await reviewQueue(OWNER, false)).toMatchObject([
+        expect(await reviewQueue(OWNER)).toMatchObject([
             { id: REC, filename: "Weekly" },
         ]);
         // An Organization run on a recording no longer shared (a
         // withdrawal landing between two reads).
         await db().delete(learnRuns);
         await run("org", "ready");
-        expect(await reviewQueue(orgUserId, true)).toEqual([]);
+        expect(await reviewQueue(OWNER)).toEqual([]);
         const [root] = await db()
             .select({ id: recordingFolders.id })
             .from(recordingFolders)
@@ -2648,10 +2685,11 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 itemId: REC,
                 folderId: root?.id ?? "",
             });
-        expect(await reviewQueue(orgUserId, true)).toMatchObject([
-            { id: REC, filename: "Weekly" },
+        expect(await reviewQueue(OWNER)).toMatchObject([
+            { id: REC, filename: "Weekly", view: "org" },
         ]);
-        expect(await reviewQueue(BOB, false)).toEqual([]);
+        expect(await reviewQueue(orgUserId)).toEqual([]);
+        expect(await reviewQueue(BOB)).toEqual([]);
     });
 
     it("hands a member none of the owner's private corrections when a withdrawal lands mid-request", async () => {
@@ -2719,16 +2757,14 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
         expect(markdown.status).toBe(404);
     });
 
-    it("counts the reviews waiting for each: the owner's own, the Organization's for its account", async () => {
+    it("counts a ready review only for the item owner", async () => {
         await run("private", "ready");
         await run("private", "finished");
         await run("org", "ready");
-        expect(await pendingReviewCount(OWNER, false)).toBe(1);
-        expect([...(await recordingsNeedingReview(OWNER, false))]).toEqual([
-            REC,
-        ]);
-        expect(await pendingReviewCount(BOB, false)).toBe(0);
-        expect(await pendingReviewCount(orgUserId, true)).toBe(1);
+        expect(await pendingReviewCount(OWNER)).toBe(1);
+        expect([...(await recordingsNeedingReview(OWNER))]).toEqual([REC]);
+        expect(await pendingReviewCount(BOB)).toBe(0);
+        expect(await pendingReviewCount(orgUserId)).toBe(0);
         const answer = await getPending(
             new Request("http://localhost/api/learn/pending", {
                 headers: { "x-test-user": OWNER },

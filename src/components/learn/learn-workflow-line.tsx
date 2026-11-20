@@ -20,6 +20,8 @@ interface LearnWorkflowLineProps {
     onOpen?: (source?: string) => void;
     actionDisabled?: boolean;
     onRetry?: () => void;
+    onSkip?: () => void;
+    skipping?: boolean;
 }
 
 /** Shared Learn status line for recording and mail workflow widgets. */
@@ -36,6 +38,8 @@ export function LearnWorkflowLine({
     onOpen = onAction,
     actionDisabled = false,
     onRetry,
+    onSkip,
+    skipping,
 }: LearnWorkflowLineProps) {
     const i18n = useExtracted();
     let action: ReactNode = null;
@@ -50,11 +54,31 @@ export function LearnWorkflowLine({
                 {actionLabel}
             </Button>
         );
-    } else if (!working && onRetry) {
+    } else if (!working && (onRetry || onSkip)) {
         action = (
-            <Button type="button" size="sm" onClick={onRetry}>
-                {i18n("Try again")}
-            </Button>
+            <div className="flex gap-2">
+                {onSkip && (
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={onSkip}
+                        disabled={skipping}
+                    >
+                        {i18n("Skip")}
+                    </Button>
+                )}
+                {onRetry && (
+                    <Button
+                        type="button"
+                        size="sm"
+                        onClick={onRetry}
+                        disabled={skipping}
+                    >
+                        {i18n("Try again")}
+                    </Button>
+                )}
+            </div>
         );
     }
     const collapsed = finished || failed;

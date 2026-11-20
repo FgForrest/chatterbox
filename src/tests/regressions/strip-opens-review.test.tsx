@@ -12,10 +12,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LearnReview } from "@/components/learn/learn-review";
 import { MailLearnCard } from "@/components/mail/mail-learn-card";
 import { ItemWorkflow } from "@/components/pipeline/item-workflow";
-import { openWidget } from "@/components/pipeline/workflow-widget";
+import {
+    openWidget,
+    useLinkedRecordingWidget,
+} from "@/components/pipeline/workflow-widget";
 import { SummaryWidget } from "@/components/summary/summary-widget";
 import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
 import type { RecordingTasksState } from "@/components/tasks/use-recording-tasks";
+import { shareReviewHref } from "@/hooks/use-share-problem-message";
 import type { MailDetail } from "@/lib/mail/detail";
 import type { CategorizationPanelPresentation } from "@/lib/pipeline/categorization-presentation";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
@@ -26,18 +30,23 @@ import {
 import { processingFixture } from "@/tests/pipeline/processing-fixture";
 import type { Recording } from "@/types/recording";
 
+const summaryRun = vi.fn();
+let summaryAvailable = true;
+
 vi.mock("@/hooks/use-transcription-summary", () => ({
     useTranscriptionSummary: () => {
         const [summaryExpanded, setSummaryExpanded] = useState(false);
         return {
-            summaryData: { summary: "The project is ready for review." },
+            summaryData: summaryAvailable
+                ? { summary: "The project is ready for review." }
+                : null,
             summaryLoaded: true,
             isSummarizing: false,
             summaryProgress: null,
             summaryElapsedMs: 0,
             summaryExpanded,
             setSummaryExpanded,
-            handleSummarize: vi.fn(),
+            handleSummarize: summaryRun,
             recheckSummary: vi.fn(),
         };
     },
@@ -208,7 +217,14 @@ function expectUniqueId(id: string) {
     ).toHaveLength(1);
 }
 
+function FollowWidgetLink({ href }: { href: string }) {
+    useLinkedRecordingWidget("rec-1", new URL(href, "http://localhost").search);
+    return null;
+}
+
 beforeEach(() => {
+    summaryAvailable = true;
+    summaryRun.mockClear();
     HTMLElement.prototype.scrollIntoView = vi.fn();
     vi.stubGlobal(
         "matchMedia",
@@ -232,6 +248,129 @@ beforeEach(() => {
             return Response.json({});
         }),
     );
+});
+
+it("opens and scrolls to Learn after the linked widget loads", async () => {
+    const href = shareReviewHref("rec-1", { kind: "learn_unfinished" });
+    render(
+        <>
+            <FollowWidgetLink href={href} />
+            <LearnDetail kind="audio" frame="inline" />
+        </>,
+    );
+    await screen.findByRole("checkbox", { name: "Jan — leads — Orion" });
+    expect(document.activeElement).toBe(
+        screen.getByRole("heading", { name: /Review what Learn found/ }),
+    );
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({
+        behavior: "smooth",
+        block: "start",
+    });
+});
+
+it("shows Skip with the Learn retry in the workflow strip", async () => {
+    const base = processing("audio");
+    const fetch = vi.mocked(globalThis.fetch);
+    const data = processingFixture({
+        ...base,
+        failedLearnRunId: "run-1",
+        learnFindingsWaiting: 0,
+        phases: {
+            ...base.phases,
+            learn: {
+                state: "failed",
+                reason: "PROVIDER_FAILED",
+                at: "2026-10-19T10:00:00.000Z",
+                generation: 1,
+            },
+        },
+        failures: [
+            {
+                phase: "learn",
+                reasonCode: "PROVIDER_FAILED",
+                retryAvailable: true,
+            },
+        ],
+    });
+    render(<Strip data={data} />);
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+    await waitFor(() =>
+        expect(fetch).toHaveBeenCalledWith(
+            "/api/recordings/rec-1/review/skip",
+            expect.objectContaining({
+                method: "POST",
+                body: JSON.stringify({ runId: "run-1" }),
+            }),
+        ),
+    );
+});
+
+it("links a summary-only share wait to the Summary widget without starting a summary", async () => {
+    summaryAvailable = false;
+    const problem = { kind: "tasks_unreviewed", waiting: "summary" } as const;
+    const base = processing("audio");
+    const data = processingFixture({
+        ...base,
+        phases: {
+            ...base.phases,
+            share: {
+                state: "waiting",
+                reason: "gate_blocked",
+                at: "2026-10-19T10:00:00.000Z",
+                generation: 1,
+                problems: [problem],
+            },
+        },
+        intents: [
+            {
+                folderId: "org-folder",
+                name: "Organization",
+                path: "Organization",
+                confirmationRequired: false,
+                confirmed: true,
+            },
+        ],
+    });
+    render(<Strip data={data} />);
+    const href = screen
+        .getByRole("link", { name: "Open summary" })
+        .getAttribute("href");
+    expect(href).toBe(shareReviewHref(data.itemId, problem));
+    if (!href) throw new Error("Missing summary link");
+    render(
+        <>
+            <FollowWidgetLink href={href} />
+            <SummaryWidget
+                itemId={data.itemId}
+                kind="audio"
+                canChange
+                canSummarize
+                contentText="Project notes"
+                workflowVisible
+                widget={{
+                    visible: true,
+                    active: false,
+                    collapsed: true,
+                    frame: "inline",
+                    tone: "quiet",
+                    action: null,
+                }}
+                widgetId="recording-summary-rec-1"
+                taskWidgetId="recording-task-review-rec-1"
+            />
+        </>,
+    );
+    await waitFor(() =>
+        expect(document.activeElement).toBe(
+            screen.getByRole("heading", { name: "Summary" }),
+        ),
+    );
+    expect(summaryRun).not.toHaveBeenCalled();
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({
+        behavior: "smooth",
+        block: "start",
+    });
 });
 
 afterEach(() => {
@@ -423,10 +562,21 @@ describe.each([
     "audio",
     "mail",
 ] as const)("%s task-review strip action", (kind) => {
-    it.each([
-        "inline",
-        "dialog",
-    ] as const)("opens the %s review and focuses its heading", async (frame) => {
+    const cases =
+        kind === "audio"
+            ? ([
+                  ["inline", false],
+                  ["dialog", false],
+                  ["inline", true],
+                  ["dialog", true],
+              ] as const)
+            : ([
+                  ["inline", false],
+                  ["dialog", false],
+              ] as const);
+    it.each(
+        cases,
+    )("opens the %s review and focuses its heading (linked: %s)", async (frame, linked) => {
         const base = processing(kind);
         const data: ItemProcessingPresentation = processingFixture({
             ...base,
@@ -479,6 +629,14 @@ describe.each([
         render(
             <>
                 <Strip data={data} />
+                {linked && (
+                    <FollowWidgetLink
+                        href={shareReviewHref(data.itemId, {
+                            kind: "tasks_unreviewed",
+                            waiting: "review",
+                        })}
+                    />
+                )}
                 <TaskReviewLink
                     state={state}
                     speakers={[]}
@@ -491,13 +649,20 @@ describe.each([
         );
         expectUniqueId(id);
 
-        fireEvent.click(screen.getByRole("button", { name: "Review tasks" }));
+        if (linked)
+            await screen.findByRole("button", { name: "Finish without tasks" });
+        else
+            fireEvent.click(
+                screen.getByRole("button", { name: "Review tasks" }),
+            );
 
         expect(
             screen.getByRole("button", { name: "Finish without tasks" }),
         ).toBeTruthy();
-        expect(document.activeElement).toBe(
-            screen.getByRole("heading", { name: /Task review/ }),
+        await waitFor(() =>
+            expect(document.activeElement).toBe(
+                screen.getByRole("heading", { name: /Task review/ }),
+            ),
         );
         expectUniqueId(id);
         expect(Boolean(screen.queryByRole("dialog"))).toBe(frame === "dialog");

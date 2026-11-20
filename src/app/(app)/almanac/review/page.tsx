@@ -1,4 +1,4 @@
-import { and, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import Link from "next/link";
 import { getExtracted } from "next-intl/server";
 import { SuggestedRelations } from "@/components/people/suggested-relations";
@@ -22,40 +22,15 @@ import { recordingsAwaitingTaskReview } from "@/lib/tasks/tasks";
 
 export const dynamic = "force-dynamic";
 
-/**
- * The Learn reviews waiting for the viewer, newest recording first: the
- * owner's on their own recordings (opened on their page), the organization
- * account's on shared ones (opened from the Organization library). The
- * organization account also decides the phrases members suggested, most
- * frequent first, alike ones grouped (Phase 6). Below, the recordings whose
- * proposed tasks wait for the viewer's review.
- */
 export default async function ReviewQueuePage() {
     const session = await requireAuth();
     const labels = await getVocabularyLabels();
     const i18n = await getExtracted();
     const organization = await userCuratesOrganizationNow(session.user.id);
     const orgUserId = await getOrgUserId();
-    const queues = isLearnDeploymentAvailable()
-        ? await Promise.all([
-              session.user.id !== orgUserId
-                  ? reviewQueue(session.user.id, false).then((rows) =>
-                        rows.map((row) => ({
-                            ...row,
-                            view: "private" as const,
-                        })),
-                    )
-                  : [],
-              organization && orgUserId
-                  ? reviewQueue(orgUserId, true).then((rows) =>
-                        rows.map((row) => ({ ...row, view: "org" as const })),
-                    )
-                  : [],
-          ])
+    const rows = isLearnDeploymentAvailable()
+        ? await reviewQueue(session.user.id)
         : [];
-    const rows = queues
-        .flat()
-        .sort((a, b) => b.startTime.getTime() - a.startTime.getTime());
     const taskRows = await recordingsAwaitingTaskReview(
         await taskViewer({ id: session.user.id, email: session.user.email }),
     );
@@ -71,6 +46,7 @@ export default async function ReviewQueuePage() {
                                   chatterItems.id,
                                   taskRows.map((row) => row.recordingId),
                               ),
+                              eq(chatterItems.userId, session.user.id),
                               sharedItemCondition(orgUserId),
                           ),
                       )

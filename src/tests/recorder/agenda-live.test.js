@@ -75,10 +75,13 @@ describe("panel-owned authenticated live stream", () => {
         const connection = vi.fn();
         fetch
             .mockResolvedValueOnce(
-                new Response(JSON.stringify({ error: "Capacity" }), {
-                    status: 429,
-                    headers: { "Retry-After": "25" },
-                }),
+                new Response(
+                    JSON.stringify({ error: "Capacity", code: "RATE_LIMITED" }),
+                    {
+                        status: 429,
+                        headers: { "Retry-After": "25" },
+                    },
+                ),
             )
             .mockResolvedValueOnce(
                 new Response(
@@ -103,11 +106,32 @@ describe("panel-owned authenticated live stream", () => {
         expect(fetch).toHaveBeenCalledTimes(2);
         expect(invalidate).toHaveBeenCalledTimes(1);
     });
+    it("reconnects after a proxy 403 once the SSE endpoint returns", async () => {
+        const invalidate = vi.fn();
+        fetch
+            .mockResolvedValueOnce(
+                new Response("<html>Proxy</html>", { status: 403 }),
+            )
+            .mockResolvedValueOnce(
+                new Response(": connected\n\n", {
+                    headers: { "Content-Type": "text/event-stream" },
+                }),
+            );
+        stop = subscribeAgenda("one", { invalidate });
+        await settle();
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(fetch).toHaveBeenCalledTimes(2);
+        expect(invalidate).toHaveBeenCalledOnce();
+    });
+
     it("backs off after failures and stops reconnecting after revocation", async () => {
         fetch.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(
-            new Response(JSON.stringify({ error: "Revoked" }), {
-                status: 403,
-            }),
+            new Response(
+                JSON.stringify({ error: "Revoked", code: "FORBIDDEN" }),
+                {
+                    status: 403,
+                },
+            ),
         );
         stop = subscribeAgenda("one", { invalidate: vi.fn() });
         await settle();

@@ -16,10 +16,13 @@ system audio to extensions.
 
 With **In-meeting prompt** turned on, an audible meeting shows a banner at the
 top of the meeting page. Read the participant notice, then click the recorder
-icon at the top right to record that tab directly. The banner shows your actual
-keyboard shortcut if assigned. On agenda tabs the icon opens the agenda and recording controls; recording starts from its consent button. If the icon is hidden, it explains how to pin it
-from Chrome's extensions menu. The banner itself does not start direct tab
-capture: **Share through Chrome’s dialog** keeps the existing picker path.
+icon to record the tab directly. The arrow points toward the toolbar, where
+the pinned icon blinks briefly and shows **REC?**. If the icon is unpinned,
+click **Chatterbox** in the puzzle-piece menu and use the pin for quicker
+access next time. The banner shows your keyboard shortcut when assigned.
+On agenda tabs the icon opens the agenda and recording controls. Use the
+panel's consent button to start recording. **Another tab or window…** opens
+Chrome's picker.
 
 1. In the popup, click
    **Consent confirmed · Record this tab**. This records the current tab directly,

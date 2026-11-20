@@ -37,6 +37,7 @@ export function createAgendaCard(container, { tab, onFolder }) {
         void render(lastSettings, state);
     });
     let lastSettings;
+    let unavailable = false;
     function open(pick = false) {
         void chrome.runtime
             .sendMessage({
@@ -70,7 +71,9 @@ export function createAgendaCard(container, { tab, onFolder }) {
             void render(settings, state);
         }, delay);
     }
-    async function render(settings, next) {
+    async function render(settings, next, disconnected = unavailable) {
+        if (unavailable && !disconnected) resetMatch();
+        unavailable = disconnected;
         state = next;
         lastSettings = settings;
         if (
@@ -103,6 +106,10 @@ export function createAgendaCard(container, { tab, onFolder }) {
             container.hidden = false;
             return;
         }
+        if (unavailable) {
+            clearTimeout(timer);
+            return;
+        }
         if (initialized && Date.now() - matchedAt >= 60000) initialized = false;
         if (!initialized) {
             container.hidden = true;
@@ -117,6 +124,7 @@ export function createAgendaCard(container, { tab, onFolder }) {
             if (state !== next || matchContext !== nextContext || initialized)
                 return;
             loading = undefined;
+            if (unavailable) return;
             if (!response?.ok || !Array.isArray(response.agendas)) {
                 container.hidden = false;
                 title.textContent = "";

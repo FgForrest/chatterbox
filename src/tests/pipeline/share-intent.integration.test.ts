@@ -552,7 +552,7 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
         ).resolves.toBeNull();
     });
 
-    it("routes an awaiting-share task proposal when an intended share executes", async () => {
+    it("applies an awaiting-share task proposal its owner may apply when an intended share executes", async () => {
         const targetItemId = "audio-task-target";
         const sourceItemId = "audio-task-source";
         await insertAudio(targetItemId);
@@ -597,10 +597,7 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
             })
             .from(taskUpdateProposals)
             .where(eq(taskUpdateProposals.id, proposal?.id ?? ""));
-        expect(routed).toEqual({
-            state: "awaiting_target_review",
-            routedTo: [ALICE],
-        });
+        expect(routed).toEqual({ state: "applied", routedTo: null });
     });
 
     it("shares mail exactly once even with a legacy proposed task", async () => {

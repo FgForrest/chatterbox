@@ -106,7 +106,7 @@ export async function shareRecordWasMerged(
     return row?.merged ?? false;
 }
 
-/** One actionable recent share per displayed record/fact, so folder flags do not depend on group pagination. */
+/** Every recent, not undone share that added a displayed record or fact, newest first. */
 export async function folderShareProblemRefs(
     scope: string,
     recordIds: string[],
@@ -123,13 +123,13 @@ export async function folderShareProblemRefs(
             select unnest(${sql.param(recordIds)}::text[]) as id, 'record' as kind
             union all select unnest(${sql.param(factIds)}::text[]), 'fact'
         )
-        select distinct on (target.kind, target.id) target.id, target.kind, event.id as event_id
+        select distinct on (target.kind, target.id, event.created_at, event.id) target.id, target.kind, event.id as event_id
         from targets target
         join almanac_share_changes change on change.user_id = ${scope} and change.added and change.removed_at is null
           and ((target.kind = 'record' and (change.record_person_id = target.id or change.record_entity_id = target.id))
             or (target.kind = 'fact' and change.kind = 'fact' and change.target_id = target.id))
         join almanac_share_events event on event.id = change.event_id and event.user_id = ${scope}
-          and event.created_at >= ${since}::timestamp and event.reviewed_at is null and event.undone_at is null
+          and event.created_at >= ${since}::timestamp and event.undone_at is null
         order by target.kind, target.id, event.created_at desc, event.id
     `);
 }

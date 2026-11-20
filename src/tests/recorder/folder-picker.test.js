@@ -144,7 +144,10 @@ describe("recorder folder API helpers", () => {
         vi.stubGlobal(
             "fetch",
             vi.fn(async () =>
-                Response.json({ error: "Folder not found" }, { status: 404 }),
+                Response.json(
+                    { error: "Folder not found", code: "NOT_FOUND" },
+                    { status: 404 },
+                ),
             ),
         );
         await expect(getRecorderFolder(auth, "gone")).rejects.toMatchObject({
@@ -203,6 +206,30 @@ describe("recorder folder combobox", () => {
             folderLabel: null,
             folderScope: null,
         });
+    });
+    it("keeps the remembered folder when a proxy returns HTML 404", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(
+                async () => new Response("<html>Proxy</html>", { status: 404 }),
+            ),
+        );
+        const ui = setup(
+            { folderId: saved.id, folderLabel: saved.label },
+            async ({ id }) => {
+                try {
+                    return {
+                        ok: true,
+                        folders: await getRecorderFolder(auth, id),
+                    };
+                } catch (error) {
+                    return { ok: false, status: error.status };
+                }
+            },
+        );
+        await vi.advanceTimersByTimeAsync(0);
+        expect(ui.input.value).toBe(shown(saved.label));
+        expect(ui.save).not.toHaveBeenCalled();
     });
     it("keeps the remembered folder after a temporary lookup failure", async () => {
         const ui = setup(

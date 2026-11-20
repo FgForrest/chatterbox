@@ -107,6 +107,7 @@ import { deleteSummaryForRecording } from "@/db/queries/retention";
 import { recordAccessState } from "@/lib/authz/access-state";
 import type { ActorContext } from "@/lib/authz/model";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
+import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
 import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { createPerson, mergePeople } from "@/lib/knowledge/people";
@@ -923,7 +924,6 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             ],
         });
 
-        await expect(share(LATER)).resolves.toBeUndefined();
         expect((await gatherFacts(LATER, "private", ALICE)).taskReview).toEqual(
             {
                 proposals: 0,
@@ -1210,7 +1210,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         });
     });
 
-    it("lets an Organization curator undo a match on a shared item", async () => {
+    it("reserves undo for the source item owner after sharing", async () => {
         const target = await addTask(alice, REC, {
             text: "Publish the launch brief",
             status: "open",
@@ -1229,7 +1229,18 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         await share(REC);
         await share(LATER);
 
-        await undoTaskMatch(org, LATER, target.id);
+        expect((await review(org, LATER)).tasks).toMatchObject([
+            { id: target.id, canUndoMatch: false },
+        ]);
+        await expect(
+            undoTaskMatch(org, LATER, target.id),
+        ).rejects.toMatchObject({
+            statusCode: 404,
+        });
+        expect((await review(alice, LATER)).tasks).toMatchObject([
+            { id: target.id, canUndoMatch: true },
+        ]);
+        await undoTaskMatch(alice, LATER, target.id);
 
         const [mention] = await db()
             .select({ decision: taskMentions.matchDecision })
@@ -1303,7 +1314,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         ]);
     });
 
-    it("shares while follow-up changes still wait for review", async () => {
+    it("waits to share while follow-up changes still need review", async () => {
         const task = await addTask(alice, LATER, {
             text: "Send the partner email",
             status: "open",
@@ -1314,6 +1325,13 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             userId: ALICE,
             kind: "done",
         });
+        await expect(share(REC)).rejects.toMatchObject({
+            code: "SHARE_REQUIREMENTS_UNMET",
+            details: {
+                problems: [{ kind: "tasks_unreviewed", waiting: "review" }],
+            },
+        });
+        await acceptReview(alice, REC);
         await expect(share(REC)).resolves.toBeUndefined();
     });
 
@@ -1682,7 +1700,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         ).toEqual([task.id]);
     });
 
-    it("gives an idp curator the shared-item rights and match-review right", async () => {
+    it("lets an idp curator edit shared tasks while the owner reviews matches", async () => {
         mockEnv.AUTHZ_MODE = "idp";
         try {
             await share();
@@ -1854,8 +1872,11 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                     matchDecision: "suggested",
                     ticked: true,
                 });
-            expect((await review(curator, LATER)).matches).toHaveLength(1);
-            await acceptReview(curator, LATER);
+            expect((await review(curator, LATER)).matches).toEqual([]);
+            await expect(acceptReview(curator, LATER)).rejects.toMatchObject({
+                statusCode: 404,
+            });
+            await acceptReview(alice, LATER);
             const [mention] = await db()
                 .select({ decision: taskMentions.matchDecision })
                 .from(taskMentions)
@@ -1879,7 +1900,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
     it.each([
         "local",
         "idp",
-    ] as const)("resolves %s curators for accepting and undoing shared matches", async (mode) => {
+    ] as const)("limits shared match review to the owner in %s mode", async (mode) => {
         mockEnv.AUTHZ_MODE = mode;
         try {
             const curator =
@@ -1918,21 +1939,23 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                     ticked: true,
                 })
                 .returning({ id: taskMentions.id });
+            await expect(
+                tickUpdateProposal(
+                    curator,
+                    LATER,
+                    mention?.id ?? "",
+                    false,
+                    task.version,
+                ),
+            ).rejects.toMatchObject({ statusCode: 403 });
             await tickUpdateProposal(
-                curator,
-                LATER,
-                mention?.id ?? "",
-                false,
-                task.version,
-            );
-            await tickUpdateProposal(
-                curator,
+                alice,
                 LATER,
                 mention?.id ?? "",
                 true,
                 task.version,
             );
-            await acceptReview(curator, LATER);
+            await acceptReview(alice, LATER);
             expect(
                 (
                     await db()
@@ -1946,7 +1969,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         }
     });
 
-    it("shows a shared recording's proposals to the home owner and curators", async () => {
+    it("shows a shared recording's proposals only to the home owner", async () => {
         await share();
         await db()
             .insert(recordingTasks)
@@ -1957,7 +1980,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 text: encryptText("Book the venue"),
                 source: "riffado",
             });
-        expect((await review(org)).proposals).toHaveLength(1);
+        expect((await review(org)).proposals).toEqual([]);
         expect((await review(alice)).proposals).toHaveLength(1);
         expect((await review(bob)).proposals).toEqual([]);
         await expect(acceptReview(alice, REC)).resolves.toMatchObject({
@@ -2013,7 +2036,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         ).toEqual([{ state: "applied" }]);
     });
 
-    it("waits for a private source to be shared, then routes by proposal kind", async () => {
+    it("waits for a private source to be shared, then applies what its owner may apply", async () => {
         await share(REC);
         const completionTarget = await addTask(alice, REC, {
             text: "Send the launch brief",
@@ -2106,28 +2129,34 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         );
 
         await share(LATER);
-        const routed = await db()
+        const settled = await db()
             .select({
-                id: taskUpdateProposals.id,
                 kind: taskUpdateProposals.kind,
                 state: taskUpdateProposals.state,
                 routedTo: taskUpdateProposals.routedTo,
             })
             .from(taskUpdateProposals)
             .where(eq(taskUpdateProposals.itemId, LATER));
-        expect(routed).toEqual(
+        expect(settled).toEqual(
             expect.arrayContaining([
-                expect.objectContaining({
-                    kind: "done",
-                    state: "awaiting_target_review",
-                    routedTo: expect.arrayContaining([ALICE, BOB]),
-                }),
-                expect.objectContaining({
-                    kind: "due",
-                    state: "awaiting_target_review",
-                    routedTo: [ALICE],
-                }),
+                { kind: "done", state: "applied", routedTo: null },
+                { kind: "due", state: "applied", routedTo: null },
             ]),
+        );
+        expect(await listRoutedTaskProposals(alice)).toEqual([]);
+        expect(await listRoutedTaskProposals(bob)).toEqual([]);
+        const targets = (await review(alice, REC)).tasks;
+        expect(targets).toContainEqual(
+            expect.objectContaining({
+                id: completionTarget.id,
+                status: "done",
+            }),
+        );
+        expect(targets).toContainEqual(
+            expect.objectContaining({
+                id: dueTarget.id,
+                dueDate: "2026-10-20",
+            }),
         );
         expect(
             await db()
@@ -2135,46 +2164,6 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 .from(taskMentions)
                 .where(eq(taskMentions.itemId, LATER)),
         ).toEqual(expect.arrayContaining([{ view: "org" }, { view: "org" }]));
-        expect(
-            (await listRoutedTaskProposals(bob)).map((row) => row.kind),
-        ).toEqual(["done"]);
-        expect(
-            new Set(
-                (await listRoutedTaskProposals(org)).map((row) => row.kind),
-            ),
-        ).toEqual(new Set(["done", "due"]));
-        expect(await countNewTasks(bob)).toBe(1);
-        expect(await countNewTasks(org)).toBe(2);
-
-        const completion = routed.find((row) => row.kind === "done");
-        const due = routed.find((row) => row.kind === "due");
-        if (!completion) throw new Error("missing routed completion");
-        if (!due) throw new Error("missing routed due proposal");
-        await expect(
-            rejectRoutedTaskProposal(org, LATER, due.id),
-        ).resolves.toMatchObject({ state: "rejected" });
-        const [rejected] = await db()
-            .select({
-                state: taskUpdateProposals.state,
-                decidedBy: taskUpdateProposals.decidedByUserId,
-                decidedAt: taskUpdateProposals.decidedAt,
-            })
-            .from(taskUpdateProposals)
-            .where(eq(taskUpdateProposals.id, due.id));
-        expect(rejected).toEqual({
-            state: "rejected",
-            decidedBy: orgUserId,
-            decidedAt: expect.any(Date),
-        });
-        await expect(
-            applyRoutedTaskProposal(alice, LATER, completion.id),
-        ).resolves.toMatchObject({ state: "applied" });
-        expect((await review(alice, REC)).tasks).toContainEqual(
-            expect.objectContaining({
-                id: completionTarget.id,
-                status: "done",
-            }),
-        );
     });
 
     it("reports only the stored state when rejection races with an apply", async () => {
@@ -2286,6 +2275,184 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                     reason: "task_invisible",
                 },
             ]),
+        );
+    });
+
+    it.each([
+        "after",
+        "before",
+    ] as const)("applies a curator's confirmed update to another member's shared task, source shared %s the review", async (when) => {
+        mockEnv.AUTHZ_MODE = "idp";
+        try {
+            await recordAccessState({
+                userId: CAROL,
+                issuer: "https://idp.example.test/realms/chatterbox",
+                subject: "carol-subject",
+                capabilities: ["use", "org.curate"],
+                source: "login",
+            });
+            const curator = await taskViewer(
+                { id: CAROL, email: "carol@example.test" },
+                {
+                    kind: "user",
+                    actorId: CAROL,
+                    issuer: "https://idp.example.test/realms/chatterbox",
+                    subject: "carol-subject",
+                    capabilities: new Set(["use", "org.curate"]),
+                    clientId: "chatterbox",
+                    clientPermissions: new Set(),
+                    verifiedAt: new Date(),
+                },
+            );
+            const carolRec = "rec-carol-follow-up";
+            const carolTranscript = await addRecording(
+                carolRec,
+                "2026-10-09T10:00:00Z",
+                CAROL,
+            );
+            await share(REC);
+            const target = await addTask(alice, REC, {
+                text: "Publish the launch notes",
+                status: "open",
+            });
+            if (when === "before") await share(carolRec, CAROL);
+            const summary = await upsertEnhancement({
+                userId: CAROL,
+                recordingId: carolRec,
+                summaryWriteMode: "regenerate",
+                kind: "audio",
+                transcriptionId: carolTranscript,
+                summary: "Summary.",
+                keyPoints: [],
+                actionItems: [],
+                source: "riffado",
+                provider: "openai",
+                model: "gpt",
+                allowReaped: true,
+                tasks: {
+                    source: "riffado",
+                    tasks: [],
+                    updates: [
+                        {
+                            taskId: target.id,
+                            kind: "due",
+                            dueDate: "2026-10-30",
+                            duePhrase: "by October 30",
+                            quote: "the notes go out by October 30",
+                            evidenceStartMs: 1_000,
+                        },
+                    ],
+                    reviewer: curator,
+                    fingerprintOf: taskFingerprint,
+                },
+            });
+            expect(summary.committed).toBe(true);
+            const [update] = (await review(curator, carolRec)).updates;
+            if (!update) throw new Error("missing follow-up proposal");
+            await tickUpdateProposal(
+                curator,
+                carolRec,
+                update.id,
+                true,
+                update.version,
+            );
+            await acceptReview(curator, carolRec);
+            vi.mocked(refreshExistingRecordingSidecars).mockClear();
+            if (when === "after") await share(carolRec, CAROL);
+
+            expect(
+                await db()
+                    .select({
+                        state: taskUpdateProposals.state,
+                        routedTo: taskUpdateProposals.routedTo,
+                    })
+                    .from(taskUpdateProposals)
+                    .where(eq(taskUpdateProposals.itemId, carolRec)),
+            ).toEqual([{ state: "applied", routedTo: null }]);
+            expect(await listRoutedTaskProposals(curator)).toEqual([]);
+            expect(await listRoutedTaskProposals(alice)).toEqual([]);
+            expect((await review(alice, REC)).tasks).toContainEqual(
+                expect.objectContaining({
+                    id: target.id,
+                    dueDate: "2026-10-30",
+                }),
+            );
+            if (when === "after")
+                expect(refreshExistingRecordingSidecars).toHaveBeenCalledWith(
+                    ALICE,
+                    REC,
+                );
+        } finally {
+            mockEnv.AUTHZ_MODE = "local";
+        }
+    });
+
+    it.each([
+        "after",
+        "before",
+    ] as const)("applies a due date and an assignee confirmed for one task, source shared %s the review", async (when) => {
+        await share(REC);
+        const target = await addTask(alice, REC, {
+            text: "Prepare the launch deck",
+            status: "open",
+        });
+        if (when === "before") await share(LATER);
+        await summarize(LATER, [], {
+            updates: [
+                {
+                    taskId: target.id,
+                    kind: "due",
+                    dueDate: "2026-10-20",
+                    duePhrase: "by October 20",
+                    quote: "the deck moved to October 20",
+                    evidenceStartMs: 2_000,
+                },
+                {
+                    taskId: target.id,
+                    kind: "assignee",
+                    dueDate: null,
+                    duePhrase: null,
+                    assigneePersonId: bobOrg,
+                    assigneeHint: null,
+                    assigneeCheck: false,
+                    quote: "Bob takes the deck",
+                    evidenceStartMs: 3_000,
+                },
+            ],
+        });
+        for (const update of (await review(alice, LATER)).updates) {
+            await tickUpdateProposal(
+                alice,
+                LATER,
+                update.id,
+                true,
+                update.version,
+            );
+        }
+        await acceptReview(alice, LATER);
+        if (when === "after") await share(LATER);
+
+        expect(
+            await db()
+                .select({
+                    kind: taskUpdateProposals.kind,
+                    state: taskUpdateProposals.state,
+                    reason: taskUpdateProposals.obsoleteReason,
+                })
+                .from(taskUpdateProposals)
+                .where(eq(taskUpdateProposals.itemId, LATER)),
+        ).toEqual(
+            expect.arrayContaining([
+                { kind: "due", state: "applied", reason: null },
+                { kind: "assignee", state: "applied", reason: null },
+            ]),
+        );
+        expect((await review(alice, REC)).tasks).toContainEqual(
+            expect.objectContaining({
+                id: target.id,
+                dueDate: "2026-10-20",
+                assignee: expect.objectContaining({ personId: bobOrg }),
+            }),
         );
     });
 
@@ -3399,7 +3566,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         expect(await recordingsAwaitingTaskReview(org)).toEqual([]);
     });
 
-    it("lists a shared recording's review for its owner and curators", async () => {
+    it("lists a shared recording's review for its owner", async () => {
         const open = await addTask(alice, LATER, {
             text: "Send the partner email",
             status: "open",
@@ -3409,14 +3576,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         await followUp(open.id, REC);
         await propose(LATER, "Draft the pricing page");
 
-        expect(await recordingsAwaitingTaskReview(org)).toEqual([
-            {
-                recordingId: REC,
-                kind: "audio",
-                title: `Recording ${REC}`,
-                proposals: 1,
-            },
-        ]);
+        expect(await recordingsAwaitingTaskReview(org)).toEqual([]);
         expect(await recordingsAwaitingTaskReview(alice)).toEqual([
             {
                 recordingId: LATER,
@@ -3801,22 +3961,21 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 .select({
                     state: taskUpdateProposals.state,
                     routedTo: taskUpdateProposals.routedTo,
-                    proposedAssigneePersonId:
-                        taskUpdateProposals.proposedAssigneePersonId,
                 })
                 .from(taskUpdateProposals)
                 .where(eq(taskUpdateProposals.id, handoff.id)),
-        ).toEqual([
-            {
-                state: "awaiting_target_review",
-                routedTo: [ALICE],
-                proposedAssigneePersonId: bobOrg,
-            },
-        ]);
-        expect(
-            (await listRoutedTaskProposals(org)).map((row) => row.id),
-        ).toContain(handoff.id);
+        ).toEqual([{ state: "applied", routedTo: null }]);
+        expect(await listRoutedTaskProposals(org)).toEqual([]);
+        expect((await review(alice, REC)).tasks).toContainEqual(
+            expect.objectContaining({
+                id: task.id,
+                assignee: expect.objectContaining({ personId: bobOrg }),
+            }),
+        );
 
+        const [current] = (await review(alice, REC)).tasks.filter(
+            (row) => row.id === task.id,
+        );
         const [drop] = await db()
             .insert(taskUpdateProposals)
             .values({
@@ -3826,7 +3985,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 kind: "drop",
                 state: "awaiting_target_review",
                 routedTo: [BOB],
-                version: task.version,
+                version: current?.version ?? task.version,
             })
             .returning({ id: taskUpdateProposals.id });
         expect(

@@ -15,6 +15,11 @@ import { meetCode } from "../../../extensions/recorder/lib/meet-code.js";
 import { formatMeetingTime } from "../../../extensions/recorder/lib/meeting-time.js";
 import { detectMeetingPlatform } from "../../../extensions/recorder/lib/platforms.js";
 
+import {
+    connectionError,
+    isConnectionError,
+} from "../../../extensions/recorder/lib/server-connection.js";
+
 const html = readFileSync("extensions/recorder/agenda/agenda.html", "utf8");
 const source = readFileSync(
     "extensions/recorder/agenda/agenda.js",
@@ -38,6 +43,13 @@ let subscribe;
 const el = (id) =>
     document.getElementById(id === "retry" ? "agenda-retry" : id);
 const settle = () => vi.advanceTimersByTimeAsync(0);
+
+function saveAgendaEdit(id, path, body) {
+    return request(`/${id}${path}`, {
+        method: path === "/text" ? "POST" : "PATCH",
+        body: JSON.stringify(body),
+    });
+}
 
 beforeEach(async () => {
     vi.useFakeTimers();
@@ -167,7 +179,20 @@ beforeEach(async () => {
                 },
             },
         },
-        runtime: { sendMessage: vi.fn(async () => ({ ok: true })) },
+        runtime: {
+            sendMessage: vi.fn(async ({ type, agendaId, edit }) =>
+                type === "edit-agenda"
+                    ? {
+                          ok: true,
+                          saved: await saveAgendaEdit(
+                              agendaId,
+                              edit.path,
+                              edit.body,
+                          ),
+                      }
+                    : { ok: true },
+            ),
+        },
         tabs: { create: vi.fn(async () => {}) },
     });
 });
@@ -201,6 +226,8 @@ async function start(doc = document, tabId = 7) {
         "panelRoomHeartbeat",
         "supportsAgendaRooms",
         "mountRoomCards",
+        "isConnectionError",
+        "saveAgendaEdit",
         `return (async () => { ${source} })();`,
     );
     await run(
@@ -239,6 +266,8 @@ async function start(doc = document, tabId = 7) {
             cards = { render: vi.fn(), destroy: vi.fn() };
             return cards;
         },
+        isConnectionError,
+        saveAgendaEdit,
     );
 }
 
@@ -818,11 +847,12 @@ describe("live panel collaboration", () => {
         ).not.toBeNull();
         expect(document.getElementById("prep")).toBeNull();
     });
-    it("links the edited agenda after a successful tick during recording", async () => {
+    it("registers a tick with the worker to save it and link the agenda during recording", async () => {
         session.recordingState = {
             state: "recording",
             sessionId: "session-one",
             agendaId: null,
+            tabId: 7,
             startedAt: new Date().toISOString(),
         };
         await start();
@@ -833,7 +863,66 @@ describe("live panel collaboration", () => {
             agendaId: "agenda-one",
             sessionId: "session-one",
             tabId: 7,
+            edit: { path: "/points/p1", body: { version: 2, discussed: true } },
         });
+    });
+    it("shows the live note when Stop makes the agenda read-only during a save", async () => {
+        session.recordingState = {
+            state: "recording",
+            sessionId: "session-one",
+            tabId: 7,
+        };
+        settings.serverDefaults = { agendaText: 1 };
+        data.textProtocol = 1;
+        data.points[0].note = "Saved note";
+        const doc = new Y.Doc();
+        const ytext = doc.getText("text");
+        ytext.insert(0, "Saved note");
+        const response = () => ({
+            field: "point:p1:note",
+            update: Buffer.from(Y.encodeStateAsUpdate(doc)).toString("base64"),
+            stateVector: Buffer.from(Y.encodeStateVector(doc)).toString(
+                "base64",
+            ),
+            version: 1,
+        });
+        const { promise: savingNote, resolve: finishSave } =
+            Promise.withResolvers();
+        const save = vi.fn(async (body) => {
+            await savingNote;
+            Y.applyUpdate(doc, Buffer.from(JSON.parse(body).update, "base64"));
+            return response();
+        });
+        request.mockImplementation(async (path, init) => {
+            if (path.endsWith("/text")) return save(init.body);
+            if (path.includes("/text?")) return response();
+            return structuredClone(data);
+        });
+        try {
+            await start();
+            el("points").querySelector(".note-editable").click();
+            const note = el("points").querySelector("textarea");
+            await settle();
+            expect(note.readOnly).toBe(false);
+            note.value = "Updated note";
+            note.dispatchEvent(new Event("input"));
+            await vi.advanceTimersByTimeAsync(250);
+            expect(save).toHaveBeenCalledOnce();
+            expect(ytext.toString()).toBe("Saved note");
+
+            await chrome.storage.session.set({
+                recordingState: { ...session.recordingState, stopped: true },
+            });
+
+            expect(el("points").querySelector("textarea")).toBeNull();
+            expect(
+                el("points").querySelector(".note-readonly").textContent,
+            ).toBe("Updated note");
+        } finally {
+            finishSave();
+            await settle();
+            doc.destroy();
+        }
     });
     it("reuses the shared CRDT binding, keeps a focused textarea/caret, and flushes its materialized version before ticking", async () => {
         settings.serverDefaults = { agendaLive: true, agendaText: 1 };
@@ -1554,4 +1643,183 @@ describe("#403 selection provenance", () => {
         if (mode === "explicit selection")
             expect(el("title").textContent).toBe("Acme review");
     });
+});
+
+it("keeps the last agenda readable offline and reconnects its stream on recovery", async () => {
+    settings.serverDefaults = { agendaLive: true };
+    await start();
+    expect(el("points").querySelector("input[type=checkbox]")).not.toBeNull();
+    expect(subscribe).toHaveBeenCalledTimes(1);
+    controlOptions.onConnection(true);
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(el("agenda").hidden).toBe(false);
+    expect(el("points").textContent).toContain("Schedule");
+    expect(el("points").querySelector("input[type=checkbox]")).toBeNull();
+    expect(el("change-agenda").disabled).toBe(true);
+    expect(el("away-hint").textContent).toBe(t("agendaConnectionReadOnly"));
+    const calls = request.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(request).toHaveBeenCalledTimes(calls);
+    data.title = "Acme review updated";
+    controlOptions.onConnection(false);
+    await settle();
+    expect(el("title").textContent).toBe("Acme review updated");
+    expect(el("points").querySelector("input[type=checkbox]")).not.toBeNull();
+    expect(subscribe).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+    true,
+    false,
+])("keeps an unsent collaborative note offline (access restored: %s)", async (allowed) => {
+    settings.serverDefaults = { agendaText: 1 };
+    data.textProtocol = 1;
+    const doc = new Y.Doc();
+    const ytext = doc.getText("text");
+    const response = {
+        field: "point:p1:note",
+        get update() {
+            return Buffer.from(Y.encodeStateAsUpdate(doc)).toString("base64");
+        },
+        get stateVector() {
+            return Buffer.from(Y.encodeStateVector(doc)).toString("base64");
+        },
+        version: 1,
+    };
+    let online = true;
+    let fail = false;
+    const base = request.getMockImplementation();
+    const send = vi.fn((body) => {
+        if (!online) throw connectionError("network");
+        Y.applyUpdate(doc, Buffer.from(JSON.parse(body).update, "base64"));
+        data.points[0].note = ytext.toString();
+        return response;
+    });
+    request.mockImplementation(async (path, init) => {
+        if (fail)
+            throw Object.assign(new Error("Forbidden"), {
+                kind: "server",
+                status: 403,
+            });
+        if (path.endsWith("/text")) return send(init.body);
+        if (path.includes("/text?")) return response;
+        return base(path, init);
+    });
+    await start();
+    el("points").querySelector(".link").click();
+    const note = el("points").querySelector(
+        'textarea[data-field="point:p1:note"]',
+    );
+    await settle();
+    note.value = "Keep this draft";
+    note.dispatchEvent(new Event("input"));
+    online = false;
+    await vi.advanceTimersByTimeAsync(250);
+    expect(send).toHaveBeenCalledTimes(1);
+    controlOptions.onConnection(true);
+    expect(el("points").querySelector("textarea")).toBeNull();
+    expect(el("points").textContent).toContain("Keep this draft");
+    expect(el("away-hint").textContent).toBe(t("agendaDraftWaiting"));
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(send).toHaveBeenCalledTimes(1);
+
+    online = true;
+    fail = !allowed;
+    controlOptions.onConnection(false);
+    await settle();
+    if (allowed) {
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(ytext.toString()).toBe("Keep this draft");
+        expect(el("points").textContent).toContain("Keep this draft");
+    } else {
+        expect(send).toHaveBeenCalledTimes(1);
+        expect(el("agenda").hidden).toBe(true);
+        expect(el("agenda-error").hidden).toBe(false);
+        expect(el("status").textContent).toBe(t("agendaDraftLost"));
+    }
+    doc.destroy();
+});
+
+it.each([
+    false,
+    true,
+])("flushes the old agenda draft before following a new automatic match (transient failure: %s)", async (transientFailure) => {
+    settings.serverDefaults = { agendas: true, agendaText: 1, agendaRooms: 1 };
+    settings.dataUseAcknowledgedAt = "now";
+    settings.hasApiKey = true;
+    data.textProtocol = 1;
+    session[agendaPanelKey(7)].roomAutomatic = true;
+    let matchId = "agenda-one";
+    chrome.runtime.sendMessage.mockImplementation(async ({ type }) =>
+        type === "room-agendas"
+            ? {
+                  ok: true,
+                  data: [{ id: matchId }],
+                  restricted: false,
+                  invitations: [],
+              }
+            : { ok: true, retryAfterMs: 30_000 },
+    );
+    const doc = new Y.Doc();
+    const state = () => ({
+        field: "point:p1:note",
+        update: Buffer.from(Y.encodeStateAsUpdate(doc)).toString("base64"),
+        stateVector: Buffer.from(Y.encodeStateVector(doc)).toString("base64"),
+        version: 1,
+    });
+    let refuse = transientFailure;
+    const persistDraft = vi.fn((body) => {
+        if (refuse)
+            throw Object.assign(new Error("Try again"), { status: 503 });
+        Y.applyUpdate(doc, Buffer.from(JSON.parse(body).update, "base64"));
+        return state();
+    });
+    request.mockImplementation(async (path, init) => {
+        if (path.startsWith("/agenda-two"))
+            return {
+                ...structuredClone(data),
+                id: "agenda-two",
+                title: "Next planning",
+            };
+        if (path.endsWith("/text")) return persistDraft(init.body);
+        if (path.includes("/text?")) return state();
+        return structuredClone(data);
+    });
+    try {
+        await start();
+        el("points").querySelector(".link").click();
+        await settle();
+        const note = el("points").querySelector("textarea");
+        note.value = "Save this to the first agenda";
+        note.dispatchEvent(new Event("input"));
+        controlOptions.onConnection(true);
+        await settle();
+        matchId = "agenda-two";
+        controlOptions.onConnection(false);
+        await settle();
+        if (transientFailure) {
+            expect(el("title").textContent).toBe("Acme review");
+            expect(el("points").textContent).toContain(
+                "Save this to the first agenda",
+            );
+            expect(el("status").textContent).not.toBe(t("agendaDraftLost"));
+            refuse = false;
+            el("retry").click();
+            await settle();
+        }
+        expect(doc.getText("text").toString()).toBe(
+            "Save this to the first agenda",
+        );
+        expect(el("title").textContent).toBe("Next planning");
+        expect(el("agenda-error").hidden).toBe(true);
+        expect(
+            request.mock.calls.findIndex(
+                ([path]) => path === "/agenda-one/text",
+            ),
+        ).toBeLessThan(
+            request.mock.calls.findIndex(([path]) => path === "/agenda-two"),
+        );
+    } finally {
+        doc.destroy();
+    }
 });

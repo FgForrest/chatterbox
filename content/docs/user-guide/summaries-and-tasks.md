@@ -65,6 +65,8 @@ A profile can run a summary 2 to 5 times and merge the results, so a point only 
 
 A summary looks for things someone agreed to do. A task no longer belongs to one summary: it collects mentions from recordings and mail filed in its folder scope. **Where it was said** opens the audio passage or highlights the relevant mail text. **Earlier mention** shows older evidence without changing the task.
 
+Only the owner can review task proposals from their recording or email, including after sharing it with the Organization. Before the first share of a recording, the owner finishes or skips its review. Mail can be shared with its task review still pending.
+
 When task changes are ready, the inline **Task review** widget opens after the summary. The workflow strip says **Review needed** and **Review tasks** jumps to it. If the tasks came from a summary you started yourself after the workflow, a compact **Task review** line offers **Review**; that explicit click opens the review window.
 
 ![Reviewing proposed tasks](images/task-review.png)
@@ -79,7 +81,7 @@ The Tasks heading has a checkbox to tick or untick the whole group and a selecte
 
 While you have changed nothing, **Skip** in the review header means “not now”. It records no rejections. After the first tick, edit, merge or added task, Skip disappears and stays hidden after a reload. Skipping hides the card and offers **Undo** for about eight seconds; leaving the page commits immediately. Finished and skipped reviews leave no extra line.
 
-The owner or another authorized reviewer can reopen **Skipped proposals (n)** under the summary, next to **Add task** or in the task list header. Closing that window keeps them skipped; finishing there is final. Later summaries keep this item’s review skipped until you finish it. **Speakers and summary only** in Learn can skip the subsequent task review in the same way.
+The owner can reopen **Skipped proposals (n)** under the summary, next to **Add task** or in the task list header. Closing that window keeps them skipped; finishing there is final. Later summaries keep this item’s review skipped until you finish it. The owner can also choose **Speakers and summary only** in Learn to skip the subsequent task review.
 
 The review shows one card per task. A match is the main decision; deadline, completion, **No longer needed**, and **Handed to someone else** changes for that task appear beneath it. An audio evidence button shows its time and changes to pause while that passage is playing. If the quote cannot be placed in the transcript, the review says so instead of opening an unhelpful link.
 
@@ -87,7 +89,7 @@ The review shows one card per task. A match is the main decision; deadline, comp
 
 ![Choosing an earlier task to merge into](images/task-merge-earlier.png)
 
-After accepting a match, the item's task list lets the item owner undo it, or lets curators do so on a shared item. Undoing separates this mention into its own task. Field changes already applied to the earlier task stay applied.
+Only the source item’s owner can undo an accepted match from that item’s task list. Undoing separates this mention into its own task. Field changes already applied to the earlier task stay applied.
 
 Accepted tasks are listed on the item. Tick one off when it is done, or use **Add task** to add one by hand. A task lives while at least one mention exists, even if the summary that first found it is replaced.
 
