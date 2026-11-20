@@ -43,6 +43,7 @@ import {
 } from "@/lib/pipeline/categorization";
 import { loadPrivateCategorizationPanel } from "@/lib/pipeline/categorization-presentation";
 import { markPhasesOutdatedForProfileChange } from "@/lib/pipeline/outdated";
+import { loadFolderWriteProcessing } from "@/lib/pipeline/presentation";
 import { recordIntendedPlacementInTx } from "@/lib/pipeline/share-intent";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
@@ -284,7 +285,10 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                 ),
             )
             .for("update");
-        const sharedFolderIds = new Set<string>();
+        const placements = new Map<
+            string,
+            "filed" | "withheld" | "intended" | "unchanged"
+        >();
         const organizationRootPlacementIds: string[] = [];
         if (orgUserId) {
             const sharedPlacements = await tx
@@ -318,8 +322,11 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                 restrictedAt,
                 restrictingAt,
             } of sharedPlacements) {
-                if (!withheld || restrictedAt || restrictingAt)
-                    sharedFolderIds.add(folderId);
+                if (
+                    (!withheld || restrictedAt || restrictingAt) &&
+                    intendedFolderIds.includes(folderId)
+                )
+                    placements.set(folderId, withheld ? "withheld" : "filed");
             }
             for (const folderId of retainedFolderIds) {
                 if (
@@ -390,9 +397,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             }
         }
         const requestedIntents = new Set(
-            intendedFolderIds.filter(
-                (folderId) => !sharedFolderIds.has(folderId),
-            ),
+            intendedFolderIds.filter((folderId) => !placements.has(folderId)),
         );
         const organizationIntentChanged =
             existingIntents.length !== requestedIntents.size ||
@@ -481,13 +486,23 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                     folderId,
                 })),
             );
+            for (const folderId of personalFolderIds)
+                placements.set(folderId, "filed");
         }
         for (const treeOwnerId of new Set(
             folders
                 .filter((folder) => folder.scope === "personal")
                 .map((folder) => folder.ownerId),
-        ))
-            await pruneRedundantAssignmentsInTx(tx, treeOwnerId, itemId);
+        )) {
+            const pruned = await pruneRedundantAssignmentsInTx(
+                tx,
+                treeOwnerId,
+                itemId,
+            );
+            for (const folderId of pruned)
+                if (placements.has(folderId))
+                    placements.set(folderId, "unchanged");
+        }
         if (rootPlacements.length > 0) {
             await tx
                 .insert(recordingFolderAssignments)
@@ -501,16 +516,24 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                 .onConflictDoNothing();
         }
         for (const folderId of requestedIntents) {
-            await recordIntendedPlacementInTx(tx, {
+            const placement = await recordIntendedPlacementInTx(tx, {
                 ownerUserId,
                 itemId,
                 folderId,
                 requestPipeline: false,
                 canCurate,
             });
+            placements.set(folderId, placement);
         }
         if (orgUserId) {
-            await pruneRedundantAssignmentsInTx(tx, orgUserId, itemId);
+            const pruned = await pruneRedundantAssignmentsInTx(
+                tx,
+                orgUserId,
+                itemId,
+            );
+            for (const folderId of pruned)
+                if (placements.has(folderId))
+                    placements.set(folderId, "unchanged");
             if (organizationRootPlacementIds.length > 0) {
                 await tx
                     .insert(recordingFolderAssignments)
@@ -589,7 +612,14 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                 at: now.toISOString(),
             },
         );
-        return { advance, organizationIntentChanged };
+        return {
+            advance,
+            organizationIntentChanged,
+            placements: [...placements].map(([folderId, placement]) => ({
+                folderId,
+                placement,
+            })),
+        };
     });
     await scheduleFolderExportProjection(ownerUserId);
     if (result.organizationIntentChanged && orgUserId) {
@@ -600,5 +630,13 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     return NextResponse.json({
         itemId,
         requestedGeneration: result.advance.requestedGeneration,
+        placement: "categorized",
+        placements: result.placements,
+        ...(await loadFolderWriteProcessing(
+            request,
+            ownerUserId,
+            itemId,
+            ownerUserId,
+        )),
     });
 });

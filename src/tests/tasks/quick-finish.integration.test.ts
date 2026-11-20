@@ -941,7 +941,13 @@ const turns = [
             .set({ revision: 1 })
             .where(eq(transcriptions.id, transcriptId));
         expect(await finishKnownFactsOnly(run.id, OWNER)).toBe(false);
-        expect((await loadReview(access)).run?.status).toBe("superseded");
+        expect((await loadReview(access)).run).toBeNull();
+        expect(
+            await db()
+                .select({ status: learnRuns.status })
+                .from(learnRuns)
+                .where(eq(learnRuns.id, run.id)),
+        ).toEqual([{ status: "superseded" }]);
         expect(await db().select().from(knowledgeFactEvidence)).toEqual([]);
     });
     it("keeps the correction pass and hold for a known-only run", async () => {

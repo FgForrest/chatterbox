@@ -12,6 +12,27 @@ import {
 } from "@/lib/recordings/language";
 import type { RecordingView } from "@/lib/sharing/view";
 
+/** Resolve the profile used to offer manual language regeneration. */
+export async function resolveRecordingLanguageProfile(
+    recordingId: string,
+    view: RecordingView,
+    ownerUserId: string,
+    actorUserId: string,
+) {
+    try {
+        return await resolveManualItemProfile(
+            recordingId,
+            view,
+            ownerUserId,
+            actorUserId,
+        );
+    } catch (error) {
+        if (error instanceof AppError && error.code === ErrorCode.CONFLICT)
+            return null;
+        throw error;
+    }
+}
+
 /** Language metadata and a manual regeneration offer, without queueing work. */
 export async function recordingLanguageMetadata(
     userId: string,
@@ -63,19 +84,12 @@ export async function recordingLanguageMetadata(
             ? detectLanguage(decryptText(row.title))
             : null;
     const profile = row
-        ? await resolveManualItemProfile(
+        ? await resolveRecordingLanguageProfile(
               recordingId,
               view,
               userId,
               actorUserId,
-          ).catch((error: unknown) => {
-              if (
-                  error instanceof AppError &&
-                  error.code === ErrorCode.CONFLICT
-              )
-                  return null;
-              throw error;
-          })
+          )
         : null;
     if (!profile)
         return {

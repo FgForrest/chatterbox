@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth-server";
 import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
 import { apiHandler } from "@/lib/errors";
+import { loadFolderWriteProcessing } from "@/lib/pipeline/presentation";
 import { confirmIntendedPlacements } from "@/lib/pipeline/share-intent";
 import { requireRecordingView } from "@/lib/sharing/access";
 
@@ -26,6 +27,15 @@ export const POST = apiHandler<ConfirmIntentContext>(
             access.ownerUserId,
             id,
         );
-        return NextResponse.json({ confirmed });
+        return NextResponse.json({
+            confirmed,
+            placement: "confirmed",
+            ...(await loadFolderWriteProcessing(
+                request,
+                access.ownerUserId,
+                id,
+                session.user.id,
+            )),
+        });
     },
 );

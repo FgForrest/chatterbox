@@ -567,7 +567,10 @@ describeWithDatabase("owner review before first Organization share", () => {
                 .where(eq(recordingFolderAssignments.itemId, ITEM)),
         ).toMatchObject([{ folderId: fromFolderId }]);
         await acceptReview(await owner(), ITEM);
-        await expect(move()).resolves.toBeUndefined();
+        await expect(move()).resolves.toEqual({
+            placement: "shared",
+            removal: "removed",
+        });
         expect(await shared()).toBe(true);
     });
 
@@ -1167,7 +1170,7 @@ describeWithDatabase("owner review before first Organization share", () => {
                 status: "ready",
             })
             .returning({ id: learnRuns.id });
-        await expect(share(MAIL)).resolves.toBeUndefined();
+        await expect(share(MAIL)).resolves.toBe("shared");
         expect(
             await db
                 .select({ status: learnRuns.status })
@@ -1179,7 +1182,7 @@ describeWithDatabase("owner review before first Organization share", () => {
         const asOwner = await owner();
         const asCurator = await curator();
         expect(await gate()).toEqual([]);
-        await expect(share(ITEM, `${FOLDER}-other`)).resolves.toBeUndefined();
+        await expect(share(ITEM, `${FOLDER}-other`)).resolves.toBe("filed");
         expect(await loadShareGate(db, MAIL, OWNER)).toEqual([]);
         expect(await pendingReviewCount(OWNER)).toBe(1);
         expect(await pendingReviewCount(orgUserId)).toBe(0);

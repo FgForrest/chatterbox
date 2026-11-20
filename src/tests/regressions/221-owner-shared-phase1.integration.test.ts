@@ -2029,7 +2029,10 @@ const content = {
                     contender,
                 ]);
                 expect(results).toEqual([
-                    { status: "fulfilled", value: undefined },
+                    {
+                        status: "fulfilled",
+                        value: { placement: "filed", removal: "removed" },
+                    },
                     { status: "fulfilled", value: undefined },
                 ]);
                 expect(deadlocks).toHaveLength(1);
