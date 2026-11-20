@@ -15,15 +15,22 @@ import type {
 import { trimHolds } from "@/lib/recordings/trim-proposal";
 import { isShareReviewProblem } from "@/lib/sharing/share-gate";
 
+function sameContent(
+    content: ContentRevisionInput | undefined,
+    input: ContentRevisionInput,
+): boolean {
+    return (
+        content?.contentId === input.contentId &&
+        content.contentSourceId === input.contentSourceId &&
+        content.contentRevision === input.contentRevision
+    );
+}
+
 function sameInput(
     record: PhaseRecord | undefined,
     input: ContentRevisionInput,
 ): boolean {
-    return (
-        record?.inputs?.contentId === input.contentId &&
-        record.inputs.contentSourceId === input.contentSourceId &&
-        record.inputs.contentRevision === input.contentRevision
-    );
+    return sameContent(record?.inputs, input);
 }
 
 function markPhase(
@@ -93,7 +100,9 @@ export function stepRequested(
     minimumGeneration?: number,
     retryNoProvider = false,
     retryHeld = false,
+    keepStoredTopics = false,
 ): boolean {
+    if (step === "topics" && keepStoredTopics) return true;
     const requested = record?.steps?.[step];
     return (
         requested?.contentId === input.contentId &&
@@ -579,6 +588,7 @@ function planReleasedAudio(
     facts: PipelineFacts,
     input: ContentRevisionInput,
     releaseGeneration: number,
+    keepStoredTopics: boolean,
     minimumGeneration?: number,
 ): PipelineAction[] {
     const actions: PipelineAction[] = [];
@@ -593,6 +603,7 @@ function planReleasedAudio(
                 : Math.max(releaseGeneration, minimumGeneration),
             retryNoProvider,
             true,
+            keepStoredTopics,
         );
     for (const step of ["topics", "summary"] as const) {
         if (
@@ -668,10 +679,21 @@ function planReleasedAudio(
 function planTranscriptAudio(
     facts: PipelineFacts,
     input: ContentRevisionInput & { timed: boolean },
+    keepStoredTopics: boolean,
     minimumGeneration?: number,
 ): PipelineAction[] {
     const actions: PipelineAction[] = [];
     const steps = { ...facts.phases.summary?.steps };
+    const notRequested = (step: SummaryStepName, retryNoProvider = false) =>
+        !stepRequested(
+            facts.phases.summary,
+            step,
+            input,
+            minimumGeneration,
+            retryNoProvider,
+            false,
+            keepStoredTopics,
+        );
     const providerSteps = input.timed
         ? (["topics", "summary"] as const)
         : (["summary"] as const);
@@ -684,7 +706,7 @@ function planTranscriptAudio(
         if (
             facts.profile?.automatic[step] &&
             !stepProviderAvailable(facts, step) &&
-            !stepRequested(facts.phases.summary, step, input, minimumGeneration)
+            notRequested(step)
         ) {
             if (
                 step === "summary" &&
@@ -705,14 +727,7 @@ function planTranscriptAudio(
     }
 
     if (!input.timed) {
-        if (
-            !stepRequested(
-                facts.phases.summary,
-                "topics",
-                input,
-                minimumGeneration,
-            )
-        ) {
+        if (notRequested("topics")) {
             actions.push(
                 skippedSummaryStepMarker(
                     facts,
@@ -726,13 +741,7 @@ function planTranscriptAudio(
     } else if (
         facts.profile?.automatic.topics &&
         stepProviderAvailable(facts, "topics") &&
-        !stepRequested(
-            facts.phases.summary,
-            "topics",
-            input,
-            minimumGeneration,
-            true,
-        )
+        notRequested("topics", true)
     ) {
         actions.push({
             type: "queueTopics",
@@ -753,13 +762,7 @@ function planTranscriptAudio(
         !facts.summary.manualRefreshOnly &&
         facts.profile?.automatic.summary &&
         stepProviderAvailable(facts, "summary") &&
-        !stepRequested(
-            facts.phases.summary,
-            "summary",
-            input,
-            minimumGeneration,
-            true,
-        )
+        notRequested("summary", true)
     ) {
         actions.push({
             type: "queueSummary",
@@ -1025,8 +1028,9 @@ function planProcessing(facts: PipelineFacts): PipelinePlan {
     const profileHasAutomaticStep =
         facts.profile?.transcribe?.automatic === true ||
         Object.values(facts.profile?.automatic ?? {}).some(Boolean);
+    const waitingForProcessAgain = processAgainPending(facts.phases);
     if (
-        processAgainPending(facts.phases) &&
+        waitingForProcessAgain &&
         !facts.manualOnly &&
         profileHasAutomaticStep &&
         facts.phases.trim?.state !== "outdated"
@@ -1187,6 +1191,13 @@ function planProcessing(facts: PipelineFacts): PipelinePlan {
         contentSourceId: content.contentSourceId,
         contentRevision: content.contentRevision,
     };
+    const summary = facts.phases.summary;
+    const keepStoredTopics =
+        !facts.summary.refreshRequested &&
+        !waitingForProcessAgain &&
+        (!summary?.inputs || sameInput(summary, input)) &&
+        facts.storedTopics?.some((stored) => sameContent(stored, input)) ===
+            true;
     const outdated = markPhasesOutdatedForInputs(
         facts.phases,
         input,
@@ -1194,6 +1205,7 @@ function planProcessing(facts: PipelineFacts): PipelinePlan {
         facts.at,
         facts.summary.stale,
         facts.summary.staleFingerprint,
+        keepStoredTopics && facts.summary.manualRefreshOnly === true,
     );
     for (const phase of outdated.changed) {
         const record = outdated.phases[phase];
@@ -1432,6 +1444,7 @@ function planProcessing(facts: PipelineFacts): PipelinePlan {
                     facts,
                     input,
                     learn.generation,
+                    keepStoredTopics,
                     summaryMinimumGeneration,
                 ),
             );
@@ -1440,6 +1453,7 @@ function planProcessing(facts: PipelineFacts): PipelinePlan {
                 ...planTranscriptAudio(
                     facts,
                     content,
+                    keepStoredTopics,
                     summaryMinimumGeneration,
                 ),
             );
