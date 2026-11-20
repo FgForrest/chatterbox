@@ -23,10 +23,18 @@ běží izolovaný skript lišty na Google Meetu (`meet.google.com`), webovém Z
 jejich subdomén. Chrome pro těchto sedm adres zobrazí obecné upozornění
 **Čtení a úprava dat na různých webech**, nikoli seznam jednotlivých webů. Ovládání zobrazuje jen v podporovaných místnostech schůzek.
 Nečte obsah stránek, neprovádí síťové požadavky a nikam neodesílá obsah stránek. Komunikuje pouze s procesem rozšíření na pozadí kvůli
-ovládání nahrávání a výběru složky. Hledání složek používá již propojený server;
+ovládání nahrávání a výběru složky. Pokud je štítek rozbalený a karta, ze které jste nahrávání spustili, je
+viditelná, proces předává izolovanému skriptu celkovou úroveň a úrovně čtyř
+frekvenčních pásem mikrofonu a zvoleného zdroje probíhající nahrávky.
+Platí to i při nahrávání jiné karty, okna nebo obrazovky. Skript nedostává zvukové vzorky
+a hodnoty neposílá webu schůzky ani propojenému serveru. Hledání složek používá
+již propojený server;
 klíč pro nahrávání se stránce schůzky nezpřístupňuje. Vypnutí přepínače odebere
 přístup k těmto webům, odregistruje skript a skryje jeho ovládání. Bez tohoto
-volitelného přístupu zůstává systémové oznámení. Na kartě s agendou ikona přepíná panel; upozornění účastníkům potvrzujete až tlačítkem nahrávání. Na ostatních kartách se dosavadní ovládání nemění. Potvrzení samo nezískává souhlas ostatních účastníků.
+volitelného přístupu zůstává systémové oznámení. Na kartě s agendou ikona přepíná boční panel. Při ručním nahrávání potvrzujete
+upozornění pro účastníky tlačítkem nahrávání v okně rozšíření nebo v bočním
+panelu. Výzva také ukazuje případnou klávesovou zkratku pro potvrzení souhlasu
+a přímé spuštění. Potřebný souhlas účastníků si zajistíte sami.
 
 Stránka schůzky může prostřednictvím posluchačů klávesnice ve fázi zachytávání sledovat stisky kláves při hledání složek v liště Klepny.
 
