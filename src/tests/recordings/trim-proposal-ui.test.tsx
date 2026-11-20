@@ -10,7 +10,6 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptView } from "@/components/dashboard/transcript-view";
 import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
-import { ItemWorkflow } from "@/components/pipeline/item-workflow";
 import {
     RecordingCutPanel,
     RecordingCutProvider,
@@ -21,6 +20,7 @@ import { projectProcessing } from "@/lib/pipeline/processing-status";
 import { deriveWorkflowStatus } from "@/lib/pipeline/workflow-status";
 import { deriveWorkflowWidgets } from "@/lib/pipeline/workflow-widgets";
 import type { StoredTrimProposal } from "@/lib/recordings/trim-proposal";
+import { ItemWorkflowWithDetail as ItemWorkflow } from "@/tests/pipeline/item-detail-test-harness";
 import { processingFixture } from "@/tests/pipeline/processing-fixture";
 import type { Recording } from "@/types/recording";
 

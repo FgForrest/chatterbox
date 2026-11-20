@@ -4,6 +4,7 @@ import { FileText, Loader2, Users, X } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useItemDetail } from "@/components/items/item-detail-store";
 import {
     CategorizePanel,
     type CategorizeSubmission,
@@ -28,7 +29,6 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useItemProcessing } from "@/hooks/use-item-processing";
 import {
     shareReviewHref,
     useShareProblemMessage,
@@ -273,7 +273,6 @@ export function ProcessingFolderRow({
 interface ItemWorkflowProps extends FolderActions {
     itemId: string;
     kind: "audio" | "mail";
-    initialData?: ItemProcessingPresentation | null;
     isOwn?: boolean;
     canWithdraw?: boolean;
     view?: "private" | "org";
@@ -283,14 +282,12 @@ interface ItemWorkflowProps extends FolderActions {
     onSummary?: () => void;
     onReviewLearn?: () => void;
     onReviewTasks?: () => void;
-    onProcessingChange?: (data: ItemProcessingPresentation | null) => void;
 }
 
 /** Processing strip plus the filing card or its settled folder/profile row. */
 export function ItemWorkflow({
     itemId,
     kind,
-    initialData,
     isOwn = true,
     canWithdraw = isOwn,
     view = "private",
@@ -308,7 +305,6 @@ export function ItemWorkflow({
     onSummary,
     onReviewLearn,
     onReviewTasks,
-    onProcessingChange,
 }: ItemWorkflowProps) {
     const i18n = useExtracted();
     const shareProblemMessage = useShareProblemMessage();
@@ -316,13 +312,9 @@ export function ItemWorkflow({
     const { skip: skipLearn, skipping: skippingLearn } =
         useSkipFailedLearn(itemId);
     const processingEnabled = canEdit || view === "org";
-    const { data, setData, workflow, refresh, stale } = useItemProcessing({
-        itemId,
-        kind,
-        view,
-        initialData,
-        enabled: processingEnabled,
-    });
+    const detail = useItemDetail();
+    if (!detail) throw new Error("ItemWorkflow requires ItemDetailProvider");
+    const { data, setData, workflow, refresh, stale } = detail;
     const [panelData, setPanelData] =
         useState<CategorizationPanelPresentation | null>(null);
     const foldersSignature = JSON.stringify(
@@ -348,10 +340,6 @@ export function ItemWorkflow({
         () => invalidateItemProcessing(itemId),
         [itemId],
     );
-
-    useEffect(() => {
-        onProcessingChange?.(data);
-    }, [data, onProcessingChange]);
 
     useEffect(() => {
         setPanelData((current) =>

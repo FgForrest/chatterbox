@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useItemDetail } from "@/components/items/item-detail-store";
 import { MailDetailPane } from "@/components/mail/mail-detail-pane";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
@@ -50,30 +51,27 @@ vi.mock("@/components/mail/mail-learn-card", () => ({
 }));
 
 vi.mock("@/components/pipeline/item-workflow", () => ({
-    ItemWorkflow: ({
-        initialData,
-        canCurate,
-    }: {
-        canCurate?: boolean;
-        initialData?: ItemProcessingPresentation | null;
-    }) => (
-        <>
-            <div data-testid="workflow-strip" />
-            <div data-testid="folder-row" data-can-curate={canCurate} />
-            {initialData?.intents.map((intent) => (
-                <span key={intent.folderId}>
-                    {intent.path}
-                    {intent.confirmationRequired && !intent.confirmed && (
-                        <button type="button">Share now</button>
-                    )}
-                    <button
-                        type="button"
-                        aria-label={`Cancel ${intent.path}`}
-                    />
-                </span>
-            ))}
-        </>
-    ),
+    ItemWorkflow: ({ canCurate }: { canCurate?: boolean }) => {
+        const processing = useItemDetail()?.data;
+        return (
+            <>
+                <div data-testid="workflow-strip" />
+                <div data-testid="folder-row" data-can-curate={canCurate} />
+                {processing?.intents.map((intent) => (
+                    <span key={intent.folderId}>
+                        {intent.path}
+                        {intent.confirmationRequired && !intent.confirmed && (
+                            <button type="button">Share now</button>
+                        )}
+                        <button
+                            type="button"
+                            aria-label={`Cancel ${intent.path}`}
+                        />
+                    </span>
+                ))}
+            </>
+        );
+    },
 }));
 
 const mail: Recording = {
@@ -198,10 +196,14 @@ describe("mail detail layout", () => {
             screen.getByTestId("folder-row").getAttribute("data-can-curate"),
         ).toBe("true");
         await screen.findByTestId("mail-summary");
-        expect(fetch).toHaveBeenCalledWith(
-            "/api/mail/mail-1?view=org",
-            expect.objectContaining({ signal: expect.any(AbortSignal) }),
-        );
+        const mailReads = vi
+            .mocked(fetch)
+            .mock.calls.map(([url]) => String(url))
+            .filter((url) => url.startsWith("/api/mail/mail-1?"));
+        expect(mailReads.sort()).toEqual([
+            "/api/mail/mail-1?content=1&view=org",
+            "/api/mail/mail-1?processing=1&view=org",
+        ]);
     });
     it.each([
         "Recent",
@@ -225,7 +227,7 @@ describe("mail detail layout", () => {
             />,
         );
         expect(fetch).toHaveBeenCalledWith(
-            "/api/mail/mail-1",
+            "/api/mail/mail-1?content=1",
             expect.objectContaining({ signal: expect.any(AbortSignal) }),
         );
         expect(

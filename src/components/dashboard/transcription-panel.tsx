@@ -10,6 +10,10 @@ import { TranscribeInBrowserButton } from "@/components/dashboard/transcribe-in-
 import { TranscriptChapterBar } from "@/components/dashboard/transcript-chapter-bar";
 import { TranscriptView } from "@/components/dashboard/transcript-view";
 import { HelpLink } from "@/components/help/help-button";
+import {
+    useItemContentView,
+    useItemPartVersion,
+} from "@/components/items/item-detail-store";
 import type { LearnMarks } from "@/components/learn/learn-marks";
 import { LearnReview } from "@/components/learn/learn-review";
 import { SpeakerAccentContext } from "@/components/people/speaker-accent-context";
@@ -56,6 +60,7 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ActionTooltip } from "@/components/ui/tooltip";
+import { useItemPartFetch } from "@/hooks/use-item-part-fetch";
 import { useLearnFollowUps } from "@/hooks/use-learn-follow-ups";
 import { useTranscriptTopics } from "@/hooks/use-transcript-topics";
 import type { SummarySource } from "@/hooks/use-transcription-summary";
@@ -227,14 +232,7 @@ export function TranscriptionPanel({
     const knownTranscriptExists =
         serverHasTranscript || recording.hasTranscript === true;
     const widgets = processing ? deriveWorkflowWidgets(processing) : null;
-    // The Organization view of a shared recording: the one recording, its
-    // summaries made with the Organization's templates.
-    const view =
-        recording.view === "received"
-            ? "received"
-            : shared
-              ? "org"
-              : recording.view;
+    const view = useItemContentView(recording.view, shared);
     const orgView = view === "org";
 
     const [activeSource, setActiveSource] = useState<string | undefined>(
@@ -396,7 +394,21 @@ export function TranscriptionPanel({
     // and highlights twice.
     const [topicJump, setTopicJump] = useState<{ index: number } | null>(null);
     // The ready review's proposals, shown in the transcript it was made on.
-    const [learnMarks, setLearnMarks] = useState<LearnMarks | null>(null);
+    const reviewKey = `${recording.id}:${view ?? "private"}:${activeTranscript?.source}:${activeTranscriptKey}`;
+    const [learnMarks, setLearnMarks] = useState<{
+        key: string;
+        marks: LearnMarks;
+    } | null>(null);
+    const handleLearnMarks = useCallback(
+        (marks: LearnMarks | null) => {
+            setLearnMarks((current) => {
+                if (marks) return { key: reviewKey, marks };
+                if (current?.key === reviewKey) return null;
+                return current;
+            });
+        },
+        [reviewKey],
+    );
     // Reviews finished here: a review names speakers without a new
     // revision, so the speaker tags mount afresh to read them again.
     const [reviewsFinished, setReviewsFinished] = useState(0);
@@ -415,45 +427,20 @@ export function TranscriptionPanel({
               view,
           )
         : null;
-    const [correctionsState, setCorrectionsState] = useState<{
-        url: string;
-        list: OverlayCorrection[];
-        canUndo: boolean;
-    } | null>(null);
     const [correctionsRead, setCorrectionsRead] = useState(0);
     const [showOriginal, setShowOriginal] = useState(false);
-    useEffect(() => {
-        if (!correctionsUrl) return;
-        // Read again after a review or an undo changed them.
-        void reviewsFinished;
-        void correctionsRead;
-        let cancelled = false;
-        fetch(correctionsUrl)
-            .then((response) => (response.ok ? response.json() : null))
-            .then(
-                (
-                    body: {
-                        corrections?: OverlayCorrection[];
-                        canUndo?: boolean;
-                    } | null,
-                ) => {
-                    if (cancelled) return;
-                    setCorrectionsState({
-                        url: correctionsUrl,
-                        list: body?.corrections ?? [],
-                        canUndo: body?.canUndo === true,
-                    });
-                },
-            )
-            .catch(() => {});
-        return () => {
-            cancelled = true;
-        };
-    }, [correctionsUrl, reviewsFinished, correctionsRead]);
-    const shownCorrections =
-        correctionsState && correctionsState.url === correctionsUrl
-            ? correctionsState
-            : null;
+    const correctionsVersion = useItemPartVersion(
+        "corrections",
+        correctionSource,
+    );
+    const { data: shownCorrections } = useItemPartFetch<{
+        corrections?: OverlayCorrection[];
+        canUndo?: boolean;
+    }>(
+        correctionsUrl,
+        JSON.stringify([correctionsVersion, reviewsFinished, correctionsRead]),
+        `${recording.id}:corrections:${correctionSource}`,
+    );
     const undoCorrection = useCallback(
         async (correctionId: string) => {
             const response = await fetch(
@@ -526,7 +513,7 @@ export function TranscriptionPanel({
         return () => clearTimeout(timer);
     }, [speakerJump, transcriptExpanded]);
     const attributionKey = activeTranscript
-        ? `${recording.id}:${activeTranscript.source}`
+        ? `${recording.id}:${view ?? "private"}:${activeTranscript.source}`
         : "";
     const [attributionsByKey, setAttributionsByKey] = useState<
         Record<string, SpeakerAttributions>
@@ -609,10 +596,14 @@ export function TranscriptionPanel({
         recordingId: string;
         source: SummarySource;
     }>({ recordingId: "", source: "riffado" });
-    const summarySource =
+    const selectedSummarySource =
         summarySelection.recordingId === recording.id
             ? summarySelection.source
-            : defaultSummarySource;
+            : undefined;
+    const summarySource =
+        selectedSummarySource === "plaud" && !canHavePlaudSummary
+            ? defaultSummarySource
+            : (selectedSummarySource ?? defaultSummarySource);
     const summaryTranscript =
         summarySource === "riffado"
             ? preferredTranscript(transcriptList)
@@ -622,7 +613,7 @@ export function TranscriptionPanel({
         [summaryTranscript],
     );
     const summaryAttributionKey = summaryTranscript
-        ? `${recording.id}:${summaryTranscript.source}`
+        ? `${recording.id}:${view ?? "private"}:${summaryTranscript.source}`
         : "";
     const summarySpeakerAttributions =
         attributionsByKey[summaryAttributionKey] ?? {};
@@ -1144,8 +1135,8 @@ export function TranscriptionPanel({
                                         onDetect={() => void detectTopics()}
                                         onSelect={handleSelectTopic}
                                         hasCorrections={
-                                            (shownCorrections?.list.length ??
-                                                0) > 0
+                                            (shownCorrections?.corrections
+                                                ?.length ?? 0) > 0
                                         }
                                         showOriginal={showOriginal}
                                         onShowOriginalChange={setShowOriginal}
@@ -1173,9 +1164,12 @@ export function TranscriptionPanel({
                                                 shownCorrections &&
                                                 !showOriginal
                                                     ? {
-                                                          list: shownCorrections.list,
+                                                          list:
+                                                              shownCorrections.corrections ??
+                                                              [],
                                                           canUndo:
-                                                              shownCorrections.canUndo &&
+                                                              shownCorrections.canUndo ===
+                                                                  true &&
                                                               !readOnly,
                                                           onUndo: (id) =>
                                                               void undoCorrection(
@@ -1187,8 +1181,9 @@ export function TranscriptionPanel({
                                             learnMarks={
                                                 canLearn &&
                                                 activeTranscript.source !==
-                                                    "mixed"
-                                                    ? learnMarks
+                                                    "mixed" &&
+                                                learnMarks?.key === reviewKey
+                                                    ? learnMarks.marks
                                                     : null
                                             }
                                         />
@@ -1205,7 +1200,7 @@ export function TranscriptionPanel({
                 (!widgets || widgets.learn.visible) && (
                     <SpeakerAccentContext value={accentPositions}>
                         <LearnReview
-                            key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}`}
+                            key={reviewKey}
                             recordingId={recording.id}
                             view={view}
                             source={
@@ -1223,7 +1218,7 @@ export function TranscriptionPanel({
                                     : undefined
                             }
                             onFinished={handleReviewFinished}
-                            onMarks={setLearnMarks}
+                            onMarks={handleLearnMarks}
                             frame={widgets?.learn.frame ?? "inline"}
                             widgetId={`recording-learn-review-${recording.id}`}
                             folderName={folderName}

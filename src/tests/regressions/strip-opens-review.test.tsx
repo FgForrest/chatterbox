@@ -11,7 +11,6 @@ import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LearnReview } from "@/components/learn/learn-review";
 import { MailLearnCard } from "@/components/mail/mail-learn-card";
-import { ItemWorkflow } from "@/components/pipeline/item-workflow";
 import {
     openWidget,
     useLinkedRecordingWidget,
@@ -27,6 +26,7 @@ import {
     deriveWorkflowWidgets,
     type WorkflowWidgetFrame,
 } from "@/lib/pipeline/workflow-widgets";
+import { ItemWorkflowWithDetail as ItemWorkflow } from "@/tests/pipeline/item-detail-test-harness";
 import { processingFixture } from "@/tests/pipeline/processing-fixture";
 import type { Recording } from "@/types/recording";
 

@@ -120,6 +120,7 @@ vi.mock("@/components/ui/select", () => ({
 interface HookState {
     summaryData: SummaryData | null;
     summaryLoaded: boolean;
+    summaryStatus?: "loading" | "ready" | "error";
     isSummarizing: boolean;
     summaryProgress: {
         phase: "passes" | "merging";
@@ -256,6 +257,53 @@ afterEach(() => {
 });
 
 describe.each(["audio", "mail"] as const)("%s summary widget", (kind) => {
+    it.each([
+        { hasText: true, collapsed: false },
+        { hasText: false, collapsed: false },
+        { hasText: true, collapsed: true },
+    ])("offers to retry a failed read with prior text $hasText and collapsed $collapsed", ({
+        hasText,
+        collapsed,
+    }) => {
+        state.summaryData = hasText ? summary() : null;
+        state.summaryLoaded = false;
+        state.summaryStatus = "error";
+        state.summaryExpanded = !collapsed;
+        const view = renderWidget(kind);
+        expect(
+            screen.getByText(
+                hasText
+                    ? "The summary could not be refreshed."
+                    : "The summary could not be loaded.",
+            ),
+        ).toBeTruthy();
+        if (hasText) {
+            expect(screen.getByText("A concise result")).toBeTruthy();
+            expect(
+                screen
+                    .getByRole("button", { name: "Re-summarize" })
+                    .hasAttribute("disabled"),
+            ).toBe(true);
+            expect(
+                screen
+                    .getByRole("button", { name: "Edit summary" })
+                    .hasAttribute("disabled"),
+            ).toBe(true);
+        }
+        fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+        expect(mocks.recheckSummary).toHaveBeenCalledOnce();
+        state.summaryData = summary();
+        state.summaryLoaded = true;
+        state.summaryStatus = "ready";
+        view.rerender(getWidget(kind));
+        expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+        expect(
+            screen
+                .getByRole("button", { name: "Edit summary" })
+                .hasAttribute("disabled"),
+        ).toBe(false);
+    });
+
     it("edits summary prose and key points in place and cancels without a write", () => {
         state.summaryData = summary({
             keyPoints: ["First point", "Second point"],

@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useItemProcessing } from "@/hooks/use-item-processing";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
+import { renderItemDetail } from "@/tests/pipeline/item-detail-test-harness";
 import { processingFixture } from "@/tests/pipeline/processing-fixture";
 
 vi.mock("@/components/tasks/task-api", () => ({
@@ -62,13 +62,11 @@ describe("server-driven processing refresh", () => {
             );
         vi.stubGlobal("fetch", fetchMock);
         const initial = processing(3_000);
-        renderHook(() =>
-            useItemProcessing({
-                itemId: initial.itemId,
-                kind: "audio",
-                initialData: initial,
-            }),
-        );
+        renderItemDetail({
+            itemId: initial.itemId,
+            kind: "audio",
+            initialData: initial,
+        });
         expect(vi.getTimerCount()).toBe(1);
         await act(async () => {
             await vi.advanceTimersByTimeAsync(2_999);
@@ -96,13 +94,11 @@ describe("server-driven processing refresh", () => {
             );
         vi.stubGlobal("fetch", fetchMock);
         const initial = processing(5_000);
-        renderHook(() =>
-            useItemProcessing({
-                itemId: initial.itemId,
-                kind: "audio",
-                initialData: initial,
-            }),
-        );
+        renderItemDetail({
+            itemId: initial.itemId,
+            kind: "audio",
+            initialData: initial,
+        });
         await act(async () => {
             window.dispatchEvent(new Event("focus"));
         });
@@ -132,13 +128,11 @@ describe("server-driven processing refresh", () => {
             );
         vi.stubGlobal("fetch", fetchMock);
         const initial = processing(5_000);
-        const { result } = renderHook(() =>
-            useItemProcessing({
-                itemId: initial.itemId,
-                kind: "audio",
-                initialData: initial,
-            }),
-        );
+        const { result } = renderItemDetail({
+            itemId: initial.itemId,
+            kind: "audio",
+            initialData: initial,
+        });
         await act(async () => {
             await result.current.refresh();
         });
@@ -163,13 +157,11 @@ describe("server-driven processing refresh", () => {
             .mockRejectedValueOnce(new Error("offline"));
         vi.stubGlobal("fetch", fetchMock);
         const initial = processing();
-        const { result } = renderHook(() =>
-            useItemProcessing({
-                itemId: initial.itemId,
-                kind: "audio",
-                initialData: initial,
-            }),
-        );
+        const { result } = renderItemDetail({
+            itemId: initial.itemId,
+            kind: "audio",
+            initialData: initial,
+        });
         for (let i = 0; i < 3; i++)
             await act(async () => {
                 await result.current.refresh();
@@ -186,13 +178,11 @@ describe("server-driven processing refresh", () => {
         );
         vi.stubGlobal("fetch", fetchMock);
         const initial = processing();
-        const { result } = renderHook(() =>
-            useItemProcessing({
-                itemId: initial.itemId,
-                kind: "audio",
-                initialData: initial,
-            }),
-        );
+        const { result } = renderItemDetail({
+            itemId: initial.itemId,
+            kind: "audio",
+            initialData: initial,
+        });
         act(() => {
             result.current.setData({ ...initial, processAgain: true });
             invalidateItemProcessing(initial.itemId);
@@ -215,21 +205,17 @@ describe("server-driven processing refresh", () => {
         vi.stubGlobal("fetch", fetchMock);
         const first = processing(5_000, "item-zurna");
         const second = processing(60_000, "item-tavro");
-        const { result, rerender } = renderHook(
-            ({ initial }) =>
-                useItemProcessing({
-                    itemId: initial.itemId,
-                    kind: "audio",
-                    initialData: initial,
-                }),
-            { initialProps: { initial: first } },
-        );
+        const { result, rerender } = renderItemDetail({
+            itemId: first.itemId,
+            kind: "audio",
+            initialData: first,
+        });
         act(() => {
             void result.current.refresh();
             window.dispatchEvent(new Event("focus"));
         });
         expect(fetchMock).toHaveBeenCalledTimes(1);
-        rerender({ initial: second });
+        rerender({ itemId: second.itemId, kind: "audio", initialData: second });
         await act(async () => {
             resolve(Response.json({ processing: first }));
         });
@@ -255,13 +241,11 @@ describe("server-driven processing refresh", () => {
                 }),
             );
         vi.stubGlobal("fetch", fetchMock);
-        const { result } = renderHook(() =>
-            useItemProcessing({
-                itemId: initial.itemId,
-                kind: "audio",
-                initialData: initial,
-            }),
-        );
+        const { result } = renderItemDetail({
+            itemId: initial.itemId,
+            kind: "audio",
+            initialData: initial,
+        });
         act(() => {
             void result.current.refresh();
             invalidateItemProcessing(initial.itemId);
@@ -285,13 +269,11 @@ describe("server-driven processing refresh", () => {
                 }),
         );
         vi.stubGlobal("fetch", fetchMock);
-        const { result, unmount } = renderHook(() =>
-            useItemProcessing({
-                itemId: initial.itemId,
-                kind: "audio",
-                initialData: initial,
-            }),
-        );
+        const { result, unmount } = renderItemDetail({
+            itemId: initial.itemId,
+            kind: "audio",
+            initialData: initial,
+        });
         act(() => {
             void result.current.refresh();
             invalidateItemProcessing(initial.itemId);
@@ -307,13 +289,11 @@ describe("server-driven processing refresh", () => {
         const fetchMock = vi.fn();
         vi.stubGlobal("fetch", fetchMock);
         const initial = processing(60_000, "item-unmount-felno");
-        const { unmount } = renderHook(() =>
-            useItemProcessing({
-                itemId: initial.itemId,
-                kind: "audio",
-                initialData: initial,
-            }),
-        );
+        const { unmount } = renderItemDetail({
+            itemId: initial.itemId,
+            kind: "audio",
+            initialData: initial,
+        });
         unmount();
         expect(vi.getTimerCount()).toBe(0);
         await act(async () => {
@@ -326,17 +306,227 @@ describe("server-driven processing refresh", () => {
     it("does not fetch or schedule while disabled", async () => {
         const fetchMock = vi.fn();
         vi.stubGlobal("fetch", fetchMock);
-        renderHook(() =>
-            useItemProcessing({
-                itemId: "item-disabled",
-                kind: "audio",
-                enabled: false,
-            }),
-        );
+        renderItemDetail({
+            itemId: "item-disabled",
+            kind: "audio",
+            enabled: false,
+        });
         await act(async () => {
             window.dispatchEvent(new Event("focus"));
         });
         expect(fetchMock).not.toHaveBeenCalled();
         expect(vi.getTimerCount()).toBe(0);
     });
+});
+
+function versioned(initial: ReturnType<typeof processing>, item: string) {
+    return {
+        ...initial,
+        phases: {
+            categorize: {
+                state: "done" as const,
+                generation: 1,
+                at: initial.nextCheckAt,
+            },
+        },
+        versions: {
+            item,
+            tasks: "tasks",
+            folders: "folders",
+            title: "title",
+            transcripts: {},
+            summaries: {},
+            learn: {},
+            corrections: {},
+            speakers: {},
+        },
+    };
+}
+
+it("backs off after invalidation until the item version moves", async () => {
+    const initial = processing(60_000, "item-backoff");
+    const fetchMock = vi
+        .fn()
+        .mockImplementationOnce(async () =>
+            Response.json({ processing: versioned(initial, "old") }),
+        )
+        .mockImplementationOnce(async () =>
+            Response.json({ processing: versioned(initial, "old") }),
+        )
+        .mockImplementation(async () =>
+            Response.json({ processing: versioned(initial, "new") }),
+        );
+    vi.stubGlobal("fetch", fetchMock);
+    const seed = versioned(initial, "old");
+    renderItemDetail({
+        itemId: initial.itemId,
+        kind: "audio",
+        initialData: seed,
+    });
+    await act(async () => invalidateItemProcessing(initial.itemId));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(999));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    await act(async () => vi.advanceTimersByTimeAsync(59_999));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+});
+
+it("tries the private projection after an Organization 404 for the owner", async () => {
+    const initial = processing(60_000, "item-owner-fallback");
+    const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response("", { status: 404 }))
+        .mockImplementation(async () => Response.json({ processing: initial }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderItemDetail({
+        itemId: initial.itemId,
+        kind: "audio",
+        view: "org",
+        isOwn: true,
+    });
+    await act(async () => result.current.refresh());
+    expect(fetchMock.mock.calls).toEqual([
+        [
+            `/api/recordings/${initial.itemId}?processing=1&view=org`,
+            { signal: expect.any(AbortSignal) },
+        ],
+        [
+            `/api/recordings/${initial.itemId}?processing=1`,
+            { signal: expect.any(AbortSignal) },
+        ],
+    ]);
+    expect(result.current.data).toEqual(initial);
+    expect(result.current.status).toBe("ready");
+});
+
+it("retries an unavailable item on invalidation", async () => {
+    const initial = processing(60_000, "item-available-again");
+    const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response("", { status: 404 }))
+        .mockImplementation(async () => Response.json({ processing: initial }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderItemDetail({
+        itemId: initial.itemId,
+        kind: "audio",
+    });
+    await act(async () => result.current.refresh());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.status).toBe("unavailable");
+    expect(vi.getTimerCount()).toBe(0);
+
+    await act(async () => invalidateItemProcessing(initial.itemId));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.status).toBe("ready");
+    expect(result.current.data).toEqual(initial);
+});
+
+it("uses the initial response as the baseline and retries through the full window", async () => {
+    const initial = versioned(
+        processing(60_000, "item-initial-invalidation"),
+        "unchanged",
+    );
+    const first = Promise.withResolvers<Response>();
+    const times: number[] = [];
+    const started = Date.now();
+    const fetchMock = vi.fn(() => {
+        times.push(Date.now() - started);
+        return times.length === 1
+            ? first.promise
+            : Promise.resolve(Response.json({ processing: initial }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderItemDetail({ itemId: initial.itemId, kind: "audio" });
+    act(() => invalidateItemProcessing(initial.itemId));
+    expect(times).toEqual([0]);
+    await act(async () =>
+        first.resolve(Response.json({ processing: initial })),
+    );
+
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(times).toEqual([0, 0, 1_000, 3_000, 7_000, 15_000, 30_000]);
+    await act(async () => vi.advanceTimersByTimeAsync(59_999));
+    expect(times).toHaveLength(7);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(times.at(-1)).toBe(90_000);
+});
+
+it.each([
+    "item change",
+    "row change",
+    "hidden",
+] as const)("skips a late owner fallback after %s", async (change) => {
+    const org = processing(60_000, "item-fallback-org");
+    const other = processing(60_000, "item-fallback-other");
+    const pending = Promise.withResolvers<Response>();
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+        if (url.endsWith("view=org")) return pending.promise;
+        return Response.json({
+            processing: url.includes(other.itemId) ? other : org,
+        });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result, rerender } = renderItemDetail({
+        itemId: org.itemId,
+        kind: "audio",
+        view: "org",
+        isOwn: true,
+    });
+
+    if (change === "hidden") {
+        act(() => visibility("hidden"));
+    } else {
+        rerender({
+            itemId: change === "row change" ? org.itemId : other.itemId,
+            kind: "audio",
+        });
+        await act(async () => {});
+        expect(fetchMock.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    }
+
+    await act(async () => pending.resolve(new Response("", { status: 404 })));
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+        `/api/recordings/${org.itemId}?processing=1&view=org`,
+        ...(change === "hidden"
+            ? []
+            : [
+                  `/api/recordings/${change === "row change" ? org.itemId : other.itemId}?processing=1`,
+              ]),
+    ]);
+    if (change === "hidden") {
+        expect(vi.getTimerCount()).toBe(0);
+        await act(async () => visibility("visible"));
+        expect(fetchMock.mock.calls[1]?.[0]).toContain("view=org");
+    } else {
+        expect(result.current.status).toBe("ready");
+    }
+});
+
+it("counts a hung read as a failure and starts the queued refresh after 20 seconds", async () => {
+    const initial = processing(60_000, "item-read-timeout");
+    const next = Promise.withResolvers<Response>();
+    const fetchMock = vi
+        .fn((_url: string, _init?: RequestInit) => next.promise)
+        .mockImplementationOnce(() => new Promise<Response>(() => {}));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderItemDetail({
+        itemId: initial.itemId,
+        kind: "audio",
+    });
+    act(() => invalidateItemProcessing(initial.itemId));
+    await act(async () => vi.advanceTimersByTimeAsync(19_999));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(fetchMock.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.status).toBe("error");
+    await act(async () => next.resolve(Response.json({ processing: initial })));
+    expect(result.current.status).toBe("ready");
 });

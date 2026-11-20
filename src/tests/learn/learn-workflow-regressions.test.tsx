@@ -9,10 +9,13 @@ import {
     waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+    ItemDetailProvider,
+    useItemDetail,
+} from "@/components/items/item-detail-store";
 import { LearnReview } from "@/components/learn/learn-review";
 import { MailLearnCard } from "@/components/mail/mail-learn-card";
 import { WorkflowStrip } from "@/components/pipeline/workflow-indicator";
-import { useItemProcessing } from "@/hooks/use-item-processing";
 import type { MailDetail } from "@/lib/mail/detail";
 import { onItemProcessingInvalidated } from "@/lib/pipeline/item-processing-events";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
@@ -140,11 +143,7 @@ const REVIEW_PROCESSING: ItemProcessingPresentation = processingFixture({
 });
 
 function FinishReviewWorkflow() {
-    const { workflow } = useItemProcessing({
-        itemId: "recording-finish",
-        kind: "audio",
-        initialData: REVIEW_PROCESSING,
-    });
+    const workflow = useItemDetail()?.workflow;
     return (
         <>
             {workflow && <WorkflowStrip workflow={workflow} />}
@@ -554,7 +553,15 @@ it("moves the workflow strip off Review Learn after finishing without a reload",
                 return new Response("{}", { status: 404 });
             }),
         );
-        render(<FinishReviewWorkflow />);
+        render(
+            <ItemDetailProvider
+                itemId="recording-finish"
+                kind="audio"
+                initialData={REVIEW_PROCESSING}
+            >
+                <FinishReviewWorkflow />
+            </ItemDetailProvider>,
+        );
         await act(async () => {
             await Promise.resolve();
             await Promise.resolve();

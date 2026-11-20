@@ -2,7 +2,7 @@
 
 import { ArrowLeft } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { KnowledgePanel } from "@/components/dashboard/folder-knowledge-panel";
 import {
     RecordingPlayer,
@@ -14,6 +14,10 @@ import {
     TranscriptionPanel,
     type TranscriptOption,
 } from "@/components/dashboard/transcription-panel";
+import {
+    ItemDetailProvider,
+    useItemDetail,
+} from "@/components/items/item-detail-store";
 import { RecordingAgenda } from "@/components/meetings/recording-agenda";
 import { ItemWorkflow } from "@/components/pipeline/item-workflow";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
@@ -26,7 +30,6 @@ import { TrimProposalCard } from "@/components/recordings/trim-proposal-card";
 import { ReceivedItemBanner } from "@/components/sharing/person-sharing";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import { hasAudio } from "@/lib/recordings/audio-availability";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import { cn } from "@/lib/utils";
@@ -112,7 +115,25 @@ interface Props {
  * the next recording in `visibleRecordings`; the back-affordance is
  * mobile-only because desktop has both panes visible at once.
  */
-export function WorkstationDetailPane({
+export function WorkstationDetailPane(props: Props) {
+    const { currentRecording: recording } = props;
+    if (!recording) return <WorkstationDetailContent {...props} />;
+    const isOwn = recording.isOwn !== false;
+    return (
+        <ItemDetailProvider
+            itemId={recording.id}
+            kind="audio"
+            view={recording.view}
+            isOwn={isOwn}
+            enabled={isOwn || recording.view === "org"}
+            initialShared={props.recordingShared}
+        >
+            <WorkstationDetailContent {...props} />
+        </ItemDetailProvider>
+    );
+}
+
+function WorkstationDetailContent({
     currentRecording,
     userId,
     itemLinkQuery,
@@ -126,7 +147,7 @@ export function WorkstationDetailPane({
     onFolderCreated,
     canCurate,
     transcriptReadOnly,
-    recordingShared = false,
+    recordingShared: sharedOnOpen = false,
     onSelectRecording,
     onRenamed,
     onDelete,
@@ -155,22 +176,9 @@ export function WorkstationDetailPane({
         [audioAvailable],
     );
     const playedLink = useRef<string | null>(null);
-    const [processingState, setProcessingState] = useState<{
-        itemId: string;
-        data: ItemProcessingPresentation | null;
-    } | null>(null);
-    const currentRecordingId = currentRecording?.id;
-    const processing =
-        processingState && processingState.itemId === currentRecordingId
-            ? processingState.data
-            : null;
-    const handleProcessingChange = useCallback(
-        (data: ItemProcessingPresentation | null) => {
-            if (!currentRecordingId) return;
-            setProcessingState({ itemId: currentRecordingId, data });
-        },
-        [currentRecordingId],
-    );
+    const detail = useItemDetail();
+    const processing = detail?.data ?? null;
+    const recordingShared = detail?.shared ?? sharedOnOpen;
     useEffect(() => {
         if (!currentRecording || !playback) return;
         const params = new URLSearchParams(
@@ -405,9 +413,6 @@ export function WorkstationDetailPane({
                                                 `recording-task-review-${currentRecording.id}`,
                                             )
                                         }
-                                        onProcessingChange={
-                                            handleProcessingChange
-                                        }
                                     />
                                 )}
                                 <RecordingAgenda
@@ -472,7 +477,7 @@ export function WorkstationDetailPane({
                                             {!currentRecording.audioReaped ||
                                             hasTranscript ? (
                                                 <TranscriptionPanel
-                                                    key={`${currentRecording.id}:${currentRecording.view ?? "private"}:${contentRevision}:${currentRecording.audioReaped ? 1 : 0}:${hasTranscript ? 1 : 0}:${currentRecording.hasSummary ? 1 : 0}`}
+                                                    key={`${currentRecording.id}:${contentRevision}:${currentRecording.audioReaped ? 1 : 0}:${hasTranscript ? 1 : 0}:${currentRecording.hasSummary ? 1 : 0}`}
                                                     recording={currentRecording}
                                                     itemLinkQuery={
                                                         itemLinkQuery
