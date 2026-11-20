@@ -18,6 +18,7 @@ import {
     RECORDING_SOURCE_FOLDER_DRAG_TYPE,
     RECORDING_SOURCE_SCOPE_DRAG_TYPES,
 } from "@/lib/folders/drag";
+import type { CategorizationPanelPresentation } from "@/lib/pipeline/categorization-presentation";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import { processingFixture } from "@/tests/pipeline/processing-fixture";
 import type { FolderOrganization, RecordingFolder } from "@/types/folder";
@@ -120,23 +121,35 @@ const intent = {
     confirmationRequired: false,
     confirmed: false,
 };
+const callsProfile = {
+    id: "profile-2",
+    name: "Calls",
+    scope: "personal",
+} as const;
 
 function projection({
+    waitingForCategorize,
     shared = false,
     intentVisible = false,
     filed = [] as RecordingFolder[],
     again = false,
+}: {
+    waitingForCategorize?: "needs_folder" | "needs_profile";
+    shared?: boolean;
+    intentVisible?: boolean;
+    filed?: RecordingFolder[];
+    again?: boolean;
 } = {}) {
     return {
         ...processingFixture({
             itemId: item.id,
             kind: "audio",
-            legacy: true,
+            legacy: !waitingForCategorize,
             manualOnly: false,
             phases: {
                 categorize: {
-                    state: "done",
-                    reason: "legacy",
+                    state: waitingForCategorize ? "waiting" : "done",
+                    reason: waitingForCategorize ?? "legacy",
                     generation: 1,
                     at: item.startTime,
                 },
@@ -193,6 +206,7 @@ function folderSnapshot(filed: RecordingFolder[]): FolderOrganization {
 function open(
     initial = projection(),
     view: "private" | "org" | "received" = "private",
+    panel: Partial<CategorizationPanelPresentation> = {},
 ) {
     const folder =
         view === "org"
@@ -269,15 +283,32 @@ function open(
             }
             return response;
         }
-        if (url.endsWith("/categorize"))
+        if (url.endsWith("/categorize/preview"))
             return Response.json({
-                itemId: item.id,
-                folders: [],
-                selectedFolderIds: [],
-                profiles: [
-                    { id: "profile-2", name: "Calls", scope: "personal" },
-                ],
+                resolution: {
+                    status: "resolved",
+                    profile: callsProfile,
+                    manualOnly: false,
+                    source: "folder",
+                },
             });
+        if (url.endsWith("/categorize")) {
+            const data: CategorizationPanelPresentation = {
+                itemId: item.id,
+                folders: dashboardFolders.map((folder) => ({
+                    ...folder,
+                    path: folder.name,
+                })),
+                selectedFolderIds: [],
+                profiles: [callsProfile],
+                currentProfile: null,
+                currentManualOnly: false,
+                canCreateOrganizationFolders: false,
+                resolution: { status: "choose", candidates: [] },
+                ...panel,
+            };
+            return Response.json(data);
+        }
         if (url.includes("/withdraw-preview"))
             return Response.json({ retentionSeconds: null, deletionAt: null });
         return Response.json({});
@@ -409,10 +440,172 @@ async function file(name: string) {
     );
 }
 
+async function chooseFilingFolder(form: HTMLElement, folder: RecordingFolder) {
+    fireEvent.click(within(form).getByRole("combobox", { name: "Folder" }));
+    fireEvent.click(
+        screen.getByRole("option", {
+            name: new RegExp(`^${folder.name}( |$)`),
+        }),
+    );
+    await waitFor(() =>
+        expect(
+            within(form).getByRole("combobox", { name: "Profile" }).textContent,
+        ).toBe(callsProfile.name),
+    );
+}
+
 afterEach(() => {
     cleanup();
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+});
+
+it.each([
+    { outcome: "refused", success: false },
+    { outcome: "saved", success: true },
+])("shows only the saving folder row until the filing is $outcome", async ({
+    success,
+}) => {
+    const app = open(projection({ waitingForCategorize: "needs_folder" }));
+    const form = await screen.findByRole("region", {
+        name: "Categorize recording",
+    });
+    await chooseFilingFolder(form, privateFolder);
+    fireEvent.click(within(form).getByRole("combobox", { name: "Profile" }));
+    fireEvent.click(screen.getByRole("option", { name: "Nothing automatic" }));
+    const submit = within(form).getByRole("button", {
+        name: "Categorize recording",
+    });
+    fireEvent.click(submit);
+    await waitFor(() => expect(app.writes).toHaveLength(1));
+
+    const row = screen.getByTestId("processing-folder-row");
+    const chip = within(row).getByRole("button", { name: "Remove from Notes" });
+    expect(chip.parentElement?.classList.contains("opacity-60")).toBe(true);
+    expect(chipContent(chip).getByRole("status").textContent).toBe("Saving…");
+    expect(
+        screen.queryByRole("region", { name: "Categorize recording" }),
+    ).toBeNull();
+    expect(form.isConnected).toBe(true);
+    expect(JSON.parse(app.writes[0].body ?? "")).toEqual({
+        folderIds: [privateFolder.id],
+        manualOnly: true,
+    });
+
+    await act(async () =>
+        app.writes[0].reply.resolve(
+            success
+                ? Response.json({
+                      placement: "categorized",
+                      processing: projection({ filed: [privateFolder] }),
+                  })
+                : new Response(null, { status: 500 }),
+        ),
+    );
+    if (success) {
+        expect(form.isConnected).toBe(false);
+        const saved = within(screen.getByTestId("processing-folder-row"));
+        expect(
+            saved.getByRole("button", { name: "Remove from Notes" }),
+        ).toBeTruthy();
+        expect(saved.queryByText("Saving…")).toBeNull();
+    } else {
+        expect(
+            screen.getByRole("region", { name: "Categorize recording" }),
+        ).toBe(form);
+        expect(
+            within(form).getByRole("combobox", { name: "Folder" }).textContent,
+        ).toContain(privateFolder.name);
+        expect(
+            within(form).getByRole("combobox", { name: "Profile" }).textContent,
+        ).toBe("Nothing automatic");
+        expect(submit).toHaveProperty("disabled", false);
+        expect(mocks.error).toHaveBeenCalledWith(
+            "The item could not be filed.",
+            expect.anything(),
+        );
+        expect(screen.queryByTestId("processing-folder-row")).toBeNull();
+        expect(
+            within(listRow("Planning session")).queryByText(privateFolder.name),
+        ).toBeNull();
+    }
+});
+
+it("keeps only the busy profile form visible and posts the current placements and intents", async () => {
+    const placement = {
+        filed: [privateRoot, privateFolder],
+        intentVisible: true,
+    };
+    const app = open(
+        projection({ ...placement, waitingForCategorize: "needs_profile" }),
+        "private",
+        { selectedFolderIds: [privateFolder.id] },
+    );
+    const form = await screen.findByRole("region", {
+        name: "Categorize recording",
+    });
+    fireEvent.click(within(form).getByRole("combobox", { name: "Profile" }));
+    fireEvent.click(screen.getByRole("option", { name: callsProfile.name }));
+    const submit = within(form).getByRole("button", {
+        name: "Categorize recording",
+    });
+    expect(submit).toHaveProperty("disabled", false);
+    fireEvent.click(submit);
+    await waitFor(() => expect(app.writes).toHaveLength(1));
+
+    expect(screen.getByRole("region", { name: "Categorize recording" })).toBe(
+        form,
+    );
+    expect(submit).toHaveProperty("disabled", true);
+    expect(screen.queryByTestId("processing-folder-row")).toBeNull();
+    expect(screen.queryByText("Saving…")).toBeNull();
+    expect(JSON.parse(app.writes[0].body ?? "")).toEqual({
+        folderIds: [privateFolder.id, intent.folderId],
+        profileId: callsProfile.id,
+    });
+    await act(async () =>
+        app.writes[0].reply.resolve(
+            Response.json({
+                placement: "categorized",
+                processing: projection(placement),
+            }),
+        ),
+    );
+});
+
+it("retains a restricted Organization placement absent from the filing choices", async () => {
+    const app = open(
+        projection({
+            filed: [restricted],
+            waitingForCategorize: "needs_folder",
+        }),
+        "private",
+        { folders: [{ ...orgFolder, path: orgFolder.name }] },
+    );
+    const form = await screen.findByRole("region", {
+        name: "Categorize recording",
+    });
+    await chooseFilingFolder(form, orgFolder);
+    fireEvent.click(
+        within(form).getByRole("button", { name: "Categorize recording" }),
+    );
+    await waitFor(() => expect(app.writes).toHaveLength(1));
+
+    expect(JSON.parse(app.writes[0].body ?? "")).toEqual({
+        folderIds: [orgFolder.id, restricted.id],
+        profileId: callsProfile.id,
+    });
+    await act(async () =>
+        app.writes[0].reply.resolve(
+            Response.json({
+                placement: "categorized",
+                processing: projection({
+                    filed: [restricted],
+                    intentVisible: true,
+                }),
+            }),
+        ),
+    );
 });
 
 it("removes only the refused share chip while a second filing waits", async () => {
