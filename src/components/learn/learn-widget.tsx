@@ -15,6 +15,10 @@ import { toast } from "sonner";
 import { useTimeZone } from "use-intl/react";
 import { HelpLink } from "@/components/help/help-button";
 import {
+    useItemDetail,
+    useItemPartVersion,
+} from "@/components/items/item-detail-store";
+import {
     type CalendarChoice,
     calendarChoiceFor,
 } from "@/components/learn/calendar-choice";
@@ -81,6 +85,7 @@ import { HeadingCount } from "@/components/ui/heading-count";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { useDeferredReviewCommit } from "@/hooks/use-deferred-review-commit";
+import { useItemPartReadRevision } from "@/hooks/use-item-part-fetch";
 import { useSkipFailedLearn } from "@/hooks/use-skip-failed-learn";
 import { followJob } from "@/lib/jobs/client";
 import {
@@ -212,6 +217,8 @@ export function LearnWidget({
     view,
     source = "riffado",
     turns = EMPTY_TURNS,
+    transcriptIdentity,
+    transcriptPending = false,
     durationMs,
     confirmedAttributions = {},
     unknownLabels,
@@ -232,6 +239,8 @@ export function LearnWidget({
     view?: RecordingView;
     source?: "plaud" | "riffado";
     turns?: readonly TranscriptTurn[];
+    transcriptIdentity?: string;
+    transcriptPending?: boolean;
     durationMs?: number | null;
     confirmedAttributions?: SpeakerAttributions;
     unknownLabels?: ReadonlySet<string>;
@@ -260,8 +269,37 @@ export function LearnWidget({
     const speakerLabel = useSpeakerLabel();
     const labels = useVocabularyLabels();
     const sectionPrefix = useId();
-    const [state, setState] = useState<ReviewState | null>(null);
+    const detail = useItemDetail();
+    const version = useItemPartVersion(
+        "learn",
+        kind === "audio" ? source : "mail",
+    );
+    const identity = transcriptIdentity ?? `${kind}:${recordingId}:${source}`;
+    const [loaded, setLoaded] = useState<{
+        identity: string;
+        review: ReviewState | null;
+    }>();
+    const state = loaded?.identity === identity ? loaded.review : null;
+    const currentIdentity = useRef(identity);
+    currentIdentity.current = identity;
+    const pendingTranscript = useRef(transcriptPending);
+    pendingTranscript.current = transcriptPending;
+    const setState = useCallback(
+        (change: (state: ReviewState | null) => ReviewState | null) => {
+            if (currentIdentity.current !== identity) return;
+            setLoaded((current) => ({
+                identity,
+                review: change(
+                    current?.identity === identity ? current.review : null,
+                ),
+            }));
+        },
+        [identity],
+    );
     const [open, setOpen] = useState(initialOpen);
+    useEffect(() => {
+        if (initialOpen) setOpen(true);
+    }, [initialOpen]);
     const [highlightedRecord, setHighlightedRecord] = useState<string | null>(
         null,
     );
@@ -287,6 +325,7 @@ export function LearnWidget({
     // The same drafts, for a Finish clicked before they re-rendered (a
     // name typed and Finish clicked at once).
     const drafts = useRef(new Set<Promise<unknown>>());
+    const draftEpoch = useRef(0);
     // One item's drafts go one after another, each on the version the one
     // before it left (a name, then a type, changed at once).
     const queues = useRef(new Map<string, Promise<unknown>>());
@@ -306,48 +345,126 @@ export function LearnWidget({
         [kind, recordingId, view, source],
     );
 
-    const observedRun = useRef<string | null>(null);
+    const observedRun = useRef<{
+        identity: string;
+        status: string | null;
+    } | null>(null);
     const reviewRunId = useRef<string | null>(null);
-    const load = useCallback(async (): Promise<ReviewState | null> => {
-        const response = await fetch(url("review"));
-        if (!response.ok) return null;
-        const next = (await response.json()) as ReviewState;
-        if (reviewRunId.current !== next.run?.id) {
-            reviewRunId.current = next.run?.id ?? null;
-            setNonSpeakerChanged(false);
-        }
-        versions.current = new Map(
-            (next.items ?? []).map((item) => [item.id, item.version]),
-        );
-        draftChoices.current = new Map(
-            (next.items ?? []).map((item) => [item.id, item.choice]),
-        );
-        const previousStatus = observedRun.current;
-        observedRun.current = next.run?.status ?? null;
-        if (
-            (previousStatus === "queued" || previousStatus === "running") &&
-            next.run?.status !== "queued" &&
-            next.run?.status !== "running"
-        )
-            invalidateItemProcessing(recordingId);
-        setState(next);
-        return next;
-    }, [recordingId, url]);
+    const latestRead = useRef(0);
+    const reviewUrl = url("review");
+    const revision = useItemPartReadRevision(reviewUrl, identity, version);
+    const currentUrl = useRef(reviewUrl);
+    currentUrl.current = reviewUrl;
+    const load = useCallback(
+        async (
+            signal?: AbortSignal,
+            recovery?: { itemId: string; latestDraft: () => boolean },
+        ): Promise<ReviewState | null> => {
+            if (
+                pendingTranscript.current ||
+                currentUrl.current !== reviewUrl ||
+                currentIdentity.current !== identity
+            )
+                return null;
+            const read = ++latestRead.current;
+            const current = () =>
+                !signal?.aborted &&
+                !pendingTranscript.current &&
+                latestRead.current === read &&
+                currentUrl.current === reviewUrl &&
+                currentIdentity.current === identity;
+            try {
+                while (current()) {
+                    if (signal && drafts.current.size > 0) {
+                        await Promise.allSettled([...drafts.current]);
+                        continue;
+                    }
+                    const epoch = draftEpoch.current;
+                    const response = await fetch(
+                        reviewUrl,
+                        signal ? { signal } : undefined,
+                    );
+                    if (!response.ok || !current()) return null;
+                    const next = (await response.json()) as ReviewState;
+                    if (!current() || !Array.isArray(next.items)) return null;
+                    if (signal && epoch !== draftEpoch.current) continue;
+                    const runId = next.run?.id ?? null;
+                    if (reviewRunId.current !== runId) {
+                        reviewRunId.current = runId;
+                        setNonSpeakerChanged(false);
+                    }
+                    for (const item of next.items) {
+                        const queued = queues.current.has(item.id);
+                        const recovering = item.id === recovery?.itemId;
+                        if (queued && !recovering) continue;
+                        versions.current.set(item.id, item.version);
+                        if (!queued || recovery?.latestDraft())
+                            draftChoices.current.set(item.id, item.choice);
+                    }
+                    const previousStatus =
+                        observedRun.current?.identity === identity
+                            ? observedRun.current.status
+                            : null;
+                    observedRun.current = {
+                        identity,
+                        status: next.run?.status ?? null,
+                    };
+                    if (
+                        (previousStatus === "queued" ||
+                            previousStatus === "running") &&
+                        next.run?.status !== "queued" &&
+                        next.run?.status !== "running"
+                    )
+                        invalidateItemProcessing(recordingId);
+                    setState((previous) => {
+                        if (next.run?.id !== previous?.run?.id || !previous)
+                            return next;
+                        return {
+                            ...next,
+                            items: next.items.map((item) => {
+                                if (
+                                    queues.current.has(item.id) &&
+                                    item.id !== recovery?.itemId
+                                )
+                                    return (
+                                        previous.items.find(
+                                            ({ id }) => id === item.id,
+                                        ) ?? item
+                                    );
+                                return item;
+                            }),
+                        };
+                    });
+                    return next;
+                }
+            } catch {
+                return null;
+            }
+            return null;
+        },
+        [identity, recordingId, reviewUrl, setState],
+    );
 
     useEffect(() => {
-        observedRun.current = null;
-        void load();
-    }, [load]);
+        void revision;
+        if (transcriptPending) return;
+        const controller = new AbortController();
+        void load(controller.signal);
+        return () => controller.abort();
+    }, [load, transcriptPending, revision]);
 
-    // A run this page did not start (another tab, a reload while it ran)
-    // is followed here until it is ready or ends.
     const learningElsewhere =
+        !detail &&
         !running &&
         (state?.run?.status === "queued" || state?.run?.status === "running");
     useEffect(() => {
         if (!learningElsewhere) return;
-        const timer = setInterval(() => void load(), pollMs);
-        return () => clearInterval(timer);
+        const controller = new AbortController();
+        const timer = setInterval(() => void load(controller.signal), pollMs);
+        return () => {
+            controller.abort();
+            clearInterval(timer);
+        };
     }, [learningElsewhere, load, pollMs]);
 
     const skipReason = useSkipReason();
@@ -484,14 +601,23 @@ export function LearnWidget({
         speakerOnly = false,
     ): Promise<void> => {
         if (item.kind !== "speaker" && !speakerOnly) setNonSpeakerChanged(true);
+        draftEpoch.current++;
         draftChoices.current.set(item.id, choice);
         setSaving((count) => count + 1);
         const before = queues.current.get(item.id) ?? Promise.resolve();
         // After the save before it, however that went: one failure must
         // not swallow the edits made after it.
-        const sent = before
+        const sent: Promise<void> = before
             .catch(() => undefined)
-            .then(() => keep(item, decision, choice, speakerOnly))
+            .then(() =>
+                keep(
+                    item,
+                    decision,
+                    choice,
+                    speakerOnly,
+                    () => queues.current.get(item.id) === sent,
+                ),
+            )
             .finally(() => setSaving((count) => count - 1));
         queues.current.set(item.id, sent);
         drafts.current.add(sent);
@@ -560,6 +686,7 @@ export function LearnWidget({
         decision: "accepted" | "rejected" | null,
         choice: Record<string, unknown> | null,
         speakerOnly: boolean,
+        latestDraft: () => boolean,
     ) => {
         let response: Response;
         try {
@@ -584,7 +711,7 @@ export function LearnWidget({
             await handleLearnReviewFailure(
                 response,
                 i18n("Could not keep that decision"),
-                load,
+                () => load(undefined, { itemId: item.id, latestDraft }),
                 getApiErrorMessage,
             );
             return;
@@ -608,6 +735,7 @@ export function LearnWidget({
     /** Work on the items done outside the review: Finish waits for it. */
     const track = useCallback(function track<T>(work: Promise<T>): Promise<T> {
         setSaving((count) => count + 1);
+        draftEpoch.current++;
         drafts.current.add(work);
         return work.finally(() => {
             drafts.current.delete(work);

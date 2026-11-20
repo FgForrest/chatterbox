@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useItemProcessing } from "@/hooks/use-item-processing";
-import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
+import { renderItemDetail } from "@/tests/pipeline/item-detail-test-harness";
 import { processingFixture } from "@/tests/pipeline/processing-fixture";
 
 vi.mock("@/components/tasks/task-api", () => ({
@@ -57,13 +56,11 @@ describe("#221 processing timers across client clock skew", () => {
             Response.json({ processing: initial }),
         );
         vi.stubGlobal("fetch", fetchMock);
-        renderHook(() =>
-            useItemProcessing({
-                itemId: initial.itemId,
-                kind: "audio",
-                initialData: initial,
-            }),
-        );
+        renderItemDetail({
+            itemId: initial.itemId,
+            kind: "audio",
+            initialData: initial,
+        });
         await act(async () => {
             await vi.advanceTimersByTimeAsync(2_999);
         });
@@ -88,13 +85,11 @@ describe("#221 processing timers across client clock skew", () => {
             Response.json({ processing: initial }),
         );
         vi.stubGlobal("fetch", fetchMock);
-        renderHook(() =>
-            useItemProcessing({
-                itemId: initial.itemId,
-                kind: "audio",
-                initialData: initial,
-            }),
-        );
+        renderItemDetail({
+            itemId: initial.itemId,
+            kind: "audio",
+            initialData: initial,
+        });
         for (let i = 0; i < 3; i++) {
             await act(async () => {
                 await vi.advanceTimersByTimeAsync(59_999);
@@ -109,32 +104,28 @@ describe("#221 processing timers across client clock skew", () => {
     });
     it.each([
         401, 403, 404,
-    ])("stops all refresh triggers after HTTP %s, then allows a different item", async (status) => {
+    ])("pauses background polling after HTTP %s and retries on focus", async (status) => {
         const initial = processing(60_000);
-        const fetchMock = vi.fn(async () => new Response("", { status }));
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce(new Response("", { status }))
+            .mockImplementation(async () =>
+                Response.json({ processing: initial }),
+            );
         vi.stubGlobal("fetch", fetchMock);
-        const { result, rerender } = renderHook(
-            ({ itemId }) => useItemProcessing({ itemId, kind: "audio" }),
-            { initialProps: { itemId: initial.itemId } },
-        );
-        await act(async () => {
-            await result.current.refresh();
+        const { result } = renderItemDetail({
+            itemId: initial.itemId,
+            kind: "audio",
         });
+        await act(async () => result.current.refresh());
+        expect(result.current.status).toBe("unavailable");
         expect(fetchMock).toHaveBeenCalledTimes(1);
         expect(vi.getTimerCount()).toBe(0);
-        await act(async () => {
-            await vi.advanceTimersByTimeAsync(900_000);
-            window.dispatchEvent(new Event("focus"));
-            document.dispatchEvent(new Event("visibilitychange"));
-            invalidateItemProcessing(initial.itemId);
-            await result.current.refresh();
-        });
+        await act(async () => vi.advanceTimersByTimeAsync(900_000));
         expect(fetchMock).toHaveBeenCalledTimes(1);
-        rerender({ itemId: "item-polling-zurna" });
-        await act(async () => {
-            await result.current.refresh();
-        });
+        await act(async () => window.dispatchEvent(new Event("focus")));
         expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(result.current.status).toBe("ready");
     });
     it("requests only the mail processing projection in the selected view", async () => {
         const initial = processing(60_000);
@@ -142,19 +133,18 @@ describe("#221 processing timers across client clock skew", () => {
             Response.json({ processing: initial }),
         );
         vi.stubGlobal("fetch", fetchMock);
-        const { result } = renderHook(() =>
-            useItemProcessing({
-                itemId: initial.itemId,
-                kind: "mail",
-                view: "org",
-                initialData: initial,
-            }),
-        );
+        const { result } = renderItemDetail({
+            itemId: initial.itemId,
+            kind: "mail",
+            view: "org",
+            initialData: initial,
+        });
         await act(async () => {
             await result.current.refresh();
         });
         expect(fetchMock).toHaveBeenCalledWith(
             `/api/mail/${initial.itemId}?processing=1&view=org`,
+            { signal: expect.any(AbortSignal) },
         );
     });
 });

@@ -9,11 +9,12 @@ import {
     moveRecordingBetweenFolders,
     removeRecordingFromFolder,
     resolveReadableFolder,
-    unshareRecording,
+    unshareRecordingWithOutcome,
 } from "@/lib/folders/folders";
 import { isSummaryStale } from "@/lib/learn/summary-refresh";
 import { requireMeetingAccess } from "@/lib/meetings/access";
 import { refreshMeetingFolderContext } from "@/lib/meetings/service";
+import { loadFolderWriteProcessing } from "@/lib/pipeline/presentation";
 import { requireRecordingAccess } from "@/lib/sharing/access";
 
 type IdContext = { params: Promise<{ id: string }> };
@@ -80,7 +81,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         await request.json().catch(() => null),
         "folderId",
     );
-    await addRecordingToFolder({
+    const placement = await addRecordingToFolder({
         userId: session.user.id,
         recordingId: id,
         folderId,
@@ -91,6 +92,13 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     // made with the owner's may be stale there (it says so on its view).
     return NextResponse.json({
         assigned: true,
+        placement,
+        ...(await loadFolderWriteProcessing(
+            request,
+            access.ownerUserId,
+            id,
+            session.user.id,
+        )),
         // Shared already: a failure here says nothing about the share.
         summaryStale: await isSummaryStale(session.user.id, id).catch(
             () => false,
@@ -110,7 +118,7 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
             403,
         );
     const body = await request.json().catch(() => null);
-    await moveRecordingBetweenFolders({
+    const placement = await moveRecordingBetweenFolders({
         userId: session.user.id,
         recordingId: id,
         fromFolderId: readString(body, "fromFolderId"),
@@ -123,7 +131,16 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
     });
     if (access.kind === "meeting" && access.ownerUserId === session.user.id)
         await refreshMeetingFolderContext(access.ownerUserId, id);
-    return NextResponse.json({ moved: true });
+    return NextResponse.json({
+        moved: true,
+        ...placement,
+        ...(await loadFolderWriteProcessing(
+            request,
+            access.ownerUserId,
+            id,
+            session.user.id,
+        )),
+    });
 });
 
 /**
@@ -188,14 +205,27 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
         body !== null &&
         (body as { organization?: unknown }).organization === true
     ) {
-        await unshareRecording(session.user.id, id, {
-            withdraw: (body as { withdraw?: unknown }).withdraw === true,
-        });
+        const unshared = await unshareRecordingWithOutcome(
+            session.user.id,
+            id,
+            {
+                withdraw: (body as { withdraw?: unknown }).withdraw === true,
+            },
+        );
         if (access.kind === "meeting" && access.ownerUserId === session.user.id)
             await refreshMeetingFolderContext(access.ownerUserId, id);
-        return NextResponse.json({ shared: false });
+        return NextResponse.json({
+            shared: false,
+            placement: unshared ? "unshared" : "unchanged",
+            ...(await loadFolderWriteProcessing(
+                request,
+                access.ownerUserId,
+                id,
+                session.user.id,
+            )),
+        });
     }
-    await removeRecordingFromFolder({
+    const placement = await removeRecordingFromFolder({
         userId: session.user.id,
         recordingId: id,
         folderId: readString(body, "folderId"),
@@ -203,5 +233,14 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
     });
     if (access.kind === "meeting" && access.ownerUserId === session.user.id)
         await refreshMeetingFolderContext(access.ownerUserId, id);
-    return NextResponse.json({ assigned: false });
+    return NextResponse.json({
+        assigned: false,
+        placement,
+        ...(await loadFolderWriteProcessing(
+            request,
+            access.ownerUserId,
+            id,
+            session.user.id,
+        )),
+    });
 });

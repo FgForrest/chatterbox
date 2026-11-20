@@ -18,6 +18,7 @@ import {
     RECORDING_SOURCE_FOLDER_DRAG_TYPE,
     RECORDING_SOURCE_SCOPE_DRAG_TYPES,
 } from "@/lib/folders/drag";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 import type { RecordingFolder } from "@/types/folder";
 
 const { refresh, push, replace } = vi.hoisted(() => ({
@@ -133,6 +134,32 @@ const orgFolder: RecordingFolder = {
     parentId: orgRoot.id,
     kind: "custom",
 };
+function filedResponse(folder: RecordingFolder) {
+    return Response.json({
+        placement: "filed",
+        processing: {
+            ...processingFixture({
+                itemId: "audio",
+                kind: "audio",
+                legacy: true,
+                manualOnly: false,
+                phases: {},
+                profile: null,
+                placements: [{ ...folder, path: folder.name }],
+                intents: [],
+                outputs: { transcript: false, summary: false, learn: false },
+                processAgain: false,
+                processAgainReason: null,
+                learnFindingsWaiting: 0,
+                taskReviewWaiting: 0,
+                jobs: { transcription: null, summary: null },
+                failures: [],
+            }),
+            access: { role: "owner", shared: false, contentView: "private" },
+        },
+    });
+}
+
 const props: ComponentProps<typeof Workstation> = {
     recordings: [],
     transcriptions: new Map(),
@@ -392,7 +419,7 @@ describe("folder row menu", () => {
         false,
         true,
     ])("refreshes owner item markers after filing into a folder with sharing=%s", async (sharedWithPeople) => {
-        const fetchMock = vi.fn(async () => Response.json({}));
+        const fetchMock = vi.fn(async () => filedResponse(privateFolder));
         vi.stubGlobal("fetch", fetchMock);
         workstation(false, false, sharedWithPeople);
         const transfer = {
@@ -425,7 +452,7 @@ describe("folder row menu", () => {
         };
         const source = { ...privateFolder, id: "source", name: "Other folder" };
         window.history.replaceState({}, "", "/dashboard?folder=child");
-        const fetchMock = vi.fn(async () => Response.json({}));
+        const fetchMock = vi.fn(async () => filedResponse(child));
         vi.stubGlobal("fetch", fetchMock);
         workstation(false, false, true, {
             folders: [

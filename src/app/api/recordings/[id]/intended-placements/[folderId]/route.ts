@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth-server";
 import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
 import { apiHandler } from "@/lib/errors";
+import { loadFolderWriteProcessing } from "@/lib/pipeline/presentation";
 import { cancelIntendedPlacement } from "@/lib/pipeline/share-intent";
 import { requireRecordingView } from "@/lib/sharing/access";
 
@@ -16,6 +17,19 @@ export const DELETE = apiHandler<IntentContext>(async (request, context) => {
     const access = await requireRecordingView(session.user.id, id, "private", {
         kinds: ALL_ITEM_KINDS,
     });
-    await cancelIntendedPlacement(access.ownerUserId, id, folderId);
-    return NextResponse.json({ cancelled: true });
+    const removed = await cancelIntendedPlacement(
+        access.ownerUserId,
+        id,
+        folderId,
+    );
+    return NextResponse.json({
+        cancelled: true,
+        placement: removed ? "removed" : "unchanged",
+        ...(await loadFolderWriteProcessing(
+            request,
+            access.ownerUserId,
+            id,
+            session.user.id,
+        )),
+    });
 });

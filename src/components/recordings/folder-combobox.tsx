@@ -43,6 +43,7 @@ interface FolderComboboxProps {
     assignedIds?: ReadonlySet<string>;
     sharing?: boolean;
     createOnlyWhenEmpty?: boolean;
+    closeOnSelect?: boolean;
     createForm?: (
         query: string,
         back: () => void,
@@ -111,6 +112,7 @@ function FolderComboboxBody({
     assignedIds,
     sharing,
     createOnlyWhenEmpty,
+    closeOnSelect = false,
     createForm,
     entries,
     value,
@@ -208,15 +210,16 @@ function FolderComboboxBody({
                         onTab={close}
                         onSelect={async (folderId) => {
                             if (saving || assignedIds?.has(folderId)) return;
-                            setSaving(true);
+                            if (!closeOnSelect) setSaving(true);
                             try {
                                 const result = onValueChange(folderId);
+                                if (closeOnSelect) close();
                                 if (result) await result;
                                 if (folderId) rememberFolder(folderId);
-                                close();
+                                if (!closeOnSelect) close();
                             } catch {
                             } finally {
-                                setSaving(false);
+                                if (!closeOnSelect) setSaving(false);
                             }
                         }}
                         onCreate={

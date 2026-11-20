@@ -26,6 +26,7 @@ export function FolderPicker({
     allowCreate = true,
     actionTrigger,
     anchorRef,
+    closeOnSelect,
     "aria-label": ariaLabel,
 }: {
     folders: RecordingFolder[];
@@ -43,6 +44,7 @@ export function FolderPicker({
     allowCreate?: boolean;
     actionTrigger?: ReactNode;
     anchorRef?: RefObject<HTMLButtonElement | null>;
+    closeOnSelect?: boolean;
 }) {
     const i18n = useExtracted();
     const label = useFolderLabel();
@@ -80,6 +82,7 @@ export function FolderPicker({
             aria-label={ariaLabel ?? title ?? i18n("Choose a folder")}
             popupTitle={title}
             onValueChange={onSelect}
+            closeOnSelect={closeOnSelect}
             createOnlyWhenEmpty
             createForm={
                 allowCreate && parents.length > 0
@@ -95,13 +98,14 @@ export function FolderPicker({
                               onCancel={back}
                               onCreated={async (folder) => {
                                   onCreated?.(folder);
+                                  if (closeOnSelect) close();
                                   try {
                                       await onSelect(folder.id);
                                       rememberFolder(folder.id);
-                                      close();
+                                      if (!closeOnSelect) close();
                                   } catch {
                                   } finally {
-                                      back();
+                                      if (!closeOnSelect) back();
                                   }
                               }}
                           />

@@ -372,6 +372,7 @@ describe("transcription dialog", () => {
         await waitFor(() =>
             expect(fetchMock).toHaveBeenCalledWith(
                 "/api/recordings/rec-1/review?source=plaud",
+                expect.objectContaining({ signal: expect.any(AbortSignal) }),
             ),
         );
         await act(async () => {});
@@ -383,6 +384,7 @@ describe("transcription dialog", () => {
         ).toBeTruthy();
         expect(fetchMock).toHaveBeenCalledWith(
             "/api/recordings/rec-1/review?source=riffado",
+            expect.objectContaining({ signal: expect.any(AbortSignal) }),
         );
         expect(screen.getByText("Text from riffado")).toBeTruthy();
         expect(

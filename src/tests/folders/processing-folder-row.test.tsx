@@ -9,10 +9,10 @@ import {
     waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ItemWorkflow } from "@/components/pipeline/item-workflow";
 import type { CategorizationPanelPresentation } from "@/lib/pipeline/categorization-presentation";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
+import { ItemWorkflowWithDetail as ItemWorkflow } from "@/tests/pipeline/item-detail-test-harness";
 import { processingFixture } from "@/tests/pipeline/processing-fixture";
 import type { RecordingFolder } from "@/types/folder";
 
@@ -289,7 +289,6 @@ describe("processing folder row", () => {
     });
 
     it("loads the owner's processing in the Organization view without actions", async () => {
-        const onProcessingChange = vi.fn();
         const memberProcessing = structuredClone(processing);
         for (const step of Object.values(memberProcessing.steps))
             step.actions = [];
@@ -302,18 +301,15 @@ describe("processing folder row", () => {
             initialData: undefined,
             isOwn: false,
             view: "org",
-            onProcessingChange,
         });
 
         await waitFor(() =>
             expect(fetchMock).toHaveBeenCalledWith(
                 "/api/recordings/item-1?processing=1&view=org",
+                { signal: expect.any(AbortSignal) },
             ),
         );
-        await waitFor(() =>
-            expect(onProcessingChange).toHaveBeenCalledWith(memberProcessing),
-        );
-        expect(screen.getByLabelText("Workflow")).toBeTruthy();
+        expect(await screen.findByLabelText("Workflow")).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Share now" })).toBeNull();
     });
 

@@ -17,7 +17,7 @@ import {
 import { useEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const speakerMounts = vi.hoisted(() => ({ count: 0 }));
+const speaker = vi.hoisted(() => ({ mounts: 0, reads: 0 }));
 vi.mock("sonner", () => ({
     toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
 }));
@@ -37,10 +37,14 @@ vi.mock("@/hooks/use-transcription-summary", () => ({
     }),
 }));
 vi.mock("@/components/people/speaker-tags", () => ({
-    SpeakerTags: () => {
+    SpeakerTags: ({ refreshKey }: { refreshKey: number }) => {
         useEffect(() => {
-            speakerMounts.count++;
+            speaker.mounts++;
         }, []);
+        useEffect(() => {
+            void refreshKey;
+            speaker.reads++;
+        }, [refreshKey]);
         return null;
     },
     confirmedAttributions: () => ({}),
@@ -110,12 +114,13 @@ describe("after a review is finished", () => {
                 onTranscriptStale={onTranscriptStale}
             />,
         );
-        const before = speakerMounts.count;
+        const before = { ...speaker };
         fireEvent.click(
             screen.getByRole("button", { name: "finish the review" }),
         );
         expect(onTranscriptStale).toHaveBeenCalled();
-        expect(speakerMounts.count).toBe(before + 1);
+        expect(speaker.reads).toBe(before.reads + 1);
+        expect(speaker.mounts).toBe(before.mounts);
     });
 
     it("counts the People badge again", async () => {

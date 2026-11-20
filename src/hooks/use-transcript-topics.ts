@@ -1,8 +1,10 @@
 "use client";
 
 import { useExtracted } from "next-intl";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useItemPartVersion } from "@/components/items/item-detail-store";
+import { useItemPartReadRevision } from "@/hooks/use-item-part-fetch";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import { followJob } from "@/lib/jobs/client";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
@@ -41,6 +43,8 @@ export function useTranscriptTopics(
     enabled: boolean,
     view?: RecordingView,
     probeRevision = 0,
+    paused = false,
+    transcriptIdentity = source,
 ) {
     const i18n = useExtracted();
     // `i18n` is a new function every render. The callbacks the mount check
@@ -53,19 +57,41 @@ export function useTranscriptTopics(
             "Topic detection is taking unusually long. It continues in the background.",
         ),
     };
-    const [detected, setDetected] = useState<
-        Partial<Record<string, TranscriptTopic[]>>
-    >({});
+    const version = useItemPartVersion("transcripts", source);
+    const identity = `${recordingId}:${transcriptIdentity}`;
+    const topicUrl = withRecordingView(
+        `/api/recordings/${recordingId}/topics?source=${source}`,
+        view,
+    );
+    const revision = useItemPartReadRevision(topicUrl, identity, version);
+    const scope = useMemo(() => ({ identity, topicUrl }), [identity, topicUrl]);
+    const currentScope = useRef(scope);
+    currentScope.current = scope;
+    const waitingForTranscript = useRef(paused);
+    waitingForTranscript.current = paused;
+    const [detected, setDetected] = useState<{
+        identity: string;
+        topics: TranscriptTopic[] | null;
+    }>();
     const [detecting, setDetecting] = useState<string | null>(null);
     const abortRef = useRef<AbortController | null>(null);
+    const detectionEpoch = useRef(0);
 
     useEffect(() => () => abortRef.current?.abort(), []);
 
-    const topics = source ? (detected[source] ?? stored ?? null) : null;
+    let topics: TranscriptTopic[] | null = null;
+    if (source) {
+        if (detected?.identity === identity) {
+            topics = detected.topics;
+        } else {
+            topics = stored ?? null;
+        }
+    }
 
     /** Stops whatever this hook is following and starts over. */
     const restart = useCallback((topicSource: TopicSource) => {
         abortRef.current?.abort();
+        detectionEpoch.current++;
         const controller = new AbortController();
         abortRef.current = controller;
         setDetecting(topicSource);
@@ -85,17 +111,10 @@ export function useTranscriptTopics(
     /** Reads back the topics a completed job stored, and shows them. */
     const showStored = useCallback(
         async (
-            topicSource: TopicSource,
             signal: AbortSignal,
             announce: boolean,
         ): Promise<{ jobId: string; jobKind?: string | null } | null> => {
-            const response = await fetch(
-                withRecordingView(
-                    `/api/recordings/${recordingId}/topics?source=${topicSource}`,
-                    view,
-                ),
-                { signal },
-            );
+            const response = await fetch(topicUrl, { signal });
             if (!response.ok) {
                 toast.error(
                     await getApiErrorMessage(
@@ -114,21 +133,21 @@ export function useTranscriptTopics(
                 return { jobId: body.jobId, jobKind: body.jobKind };
             }
             const next: TranscriptTopic[] = body.topics ?? [];
-            setDetected((current) => ({ ...current, [topicSource]: next }));
+            if (
+                !signal.aborted &&
+                !waitingForTranscript.current &&
+                currentScope.current === scope
+            )
+                setDetected({ identity, topics: next });
             if (announce) toast.success(messagesRef.current.detected);
             return null;
         },
-        [recordingId, view],
+        [identity, scope, topicUrl],
     );
 
     /** Follows a job to its end and says how it went. */
     const settle = useCallback(
-        async (
-            topicSource: TopicSource,
-            jobId: string,
-            signal: AbortSignal,
-            jobKind?: string | null,
-        ) => {
+        async (jobId: string, signal: AbortSignal, jobKind?: string | null) => {
             invalidateItemProcessing(recordingId);
             const deadline = new AbortController();
             const stop = () => deadline.abort();
@@ -158,7 +177,6 @@ export function useTranscriptTopics(
                         return;
                     }
                     const next = await showStored(
-                        topicSource,
                         signal,
                         currentJobKind !== "pipeline.advance",
                     );
@@ -175,20 +193,16 @@ export function useTranscriptTopics(
         [recordingId, showStored],
     );
 
-    // biome-ignore lint/correctness/useExhaustiveDependencies: probeRevision is an intentional re-check trigger
     useEffect(() => {
-        if (!enabled || !isTopicSource(source)) return;
+        void revision;
+        void probeRevision;
+        if (!enabled || paused || !isTopicSource(source)) return;
         const topicSource = source;
         const probe = new AbortController();
+        const epoch = detectionEpoch.current;
         let following: AbortController | null = null;
         (async () => {
-            const response = await fetch(
-                withRecordingView(
-                    `/api/recordings/${recordingId}/topics?source=${topicSource}`,
-                    view,
-                ),
-                { signal: probe.signal },
-            );
+            const response = await fetch(topicUrl, { signal: probe.signal });
             if (!response.ok || probe.signal.aborted) return;
             const {
                 jobId,
@@ -200,21 +214,21 @@ export function useTranscriptTopics(
                 topics?: TranscriptTopic[] | null;
             };
             // A click that came first owns the job already.
-            if (probe.signal.aborted || abortRef.current) return;
+            if (
+                probe.signal.aborted ||
+                abortRef.current ||
+                epoch !== detectionEpoch.current
+            )
+                return;
             if (!jobId) {
-                // Nothing running: what is saved now replaces topics an
-                // earlier detection here left on screen.
-                const replacement = Array.isArray(saved) ? saved : undefined;
-                setDetected((current) =>
-                    current[topicSource] === undefined
-                        ? current
-                        : { ...current, [topicSource]: replacement },
-                );
+                if (Array.isArray(saved) || saved === null) {
+                    setDetected({ identity, topics: saved });
+                }
                 return;
             }
             following = restart(topicSource);
             try {
-                await settle(topicSource, jobId, following.signal, jobKind);
+                await settle(jobId, following.signal, jobKind);
             } finally {
                 release(following);
             }
@@ -228,14 +242,16 @@ export function useTranscriptTopics(
             following?.abort();
         };
     }, [
-        recordingId,
         source,
         enabled,
-        view,
+        topicUrl,
         restart,
         release,
         settle,
         probeRevision,
+        revision,
+        identity,
+        paused,
     ]);
 
     const detect = useCallback(async () => {
@@ -247,13 +263,7 @@ export function useTranscriptTopics(
         let followed = false;
 
         try {
-            const response = await fetch(
-                withRecordingView(
-                    `/api/recordings/${recordingId}/topics?source=${topicSource}`,
-                    view,
-                ),
-                { method: "POST", signal },
-            );
+            const response = await fetch(topicUrl, { method: "POST", signal });
             if (!response.ok) {
                 toast.error(await getApiErrorMessage(response, failed));
                 return;
@@ -261,13 +271,18 @@ export function useTranscriptTopics(
             const body = await response.json();
             if (response.status !== 202) {
                 const next: TranscriptTopic[] = body.topics ?? [];
-                setDetected((current) => ({ ...current, [topicSource]: next }));
+                if (
+                    !signal.aborted &&
+                    !waitingForTranscript.current &&
+                    currentScope.current === scope
+                )
+                    setDetected({ identity, topics: next });
                 toast.success(detected);
                 return;
             }
             // The job outlived the request; follow it until it settles.
             followed = true;
-            await settle(topicSource, body.jobId, signal);
+            await settle(body.jobId, signal);
         } catch (error) {
             if (signal.aborted) return;
             console.error("Topic detection failed:", error);
@@ -276,7 +291,16 @@ export function useTranscriptTopics(
             if (!followed) invalidateItemProcessing(recordingId);
             release(controller);
         }
-    }, [recordingId, source, view, restart, release, settle]);
+    }, [
+        identity,
+        recordingId,
+        scope,
+        source,
+        topicUrl,
+        restart,
+        release,
+        settle,
+    ]);
 
     return {
         topics,

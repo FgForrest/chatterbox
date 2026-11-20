@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import {
+    act,
     cleanup,
     fireEvent,
     render,
@@ -11,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     CategorizePanel,
     type CategorizePanelData,
+    type CategorizeSubmission,
 } from "@/components/pipeline/categorize-panel";
 
 vi.mock("next-intl", () => ({
@@ -506,13 +508,23 @@ describe("CategorizePanel", () => {
         );
     });
 
-    it("posts the single folder and chosen profile optimistically", async () => {
-        const onOptimisticCategorize = vi.fn(() => vi.fn());
+    it("hands the selected folder and profile to the queue before posting", async () => {
+        let startWrite: (() => Promise<unknown>) | undefined;
+        const onSubmit = vi.fn(
+            async (
+                _submission: CategorizeSubmission,
+                write: () => Promise<unknown>,
+            ) => {
+                await new Promise<void>((resolve, reject) => {
+                    startWrite = () => write().then(() => resolve(), reject);
+                });
+            },
+        );
         const fetchMock = vi.fn(async () =>
             Response.json({ requestedGeneration: 2 }),
         );
         vi.stubGlobal("fetch", fetchMock);
-        renderPanel(base, { onOptimisticCategorize });
+        renderPanel(base, { onSubmit });
 
         fireEvent.click(screen.getByRole("combobox", { name: "Profile" }));
         fireEvent.click(screen.getByText("Sales calls"));
@@ -521,7 +533,9 @@ describe("CategorizePanel", () => {
         );
 
         const submission = { folderIds: ["notes"], profileId: "profile-2" };
-        expect(onOptimisticCategorize).toHaveBeenCalledWith(submission);
+        expect(onSubmit).toHaveBeenCalledWith(submission, expect.any(Function));
+        expect(fetchMock).not.toHaveBeenCalled();
+        await act(async () => startWrite?.());
         await waitFor(() =>
             expect(fetchMock).toHaveBeenCalledWith(
                 "/api/recordings/item-1/categorize",

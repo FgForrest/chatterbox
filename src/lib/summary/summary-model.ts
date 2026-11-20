@@ -6,6 +6,7 @@ import {
     chatCompletionWithUsage,
     usageAttemptFetch,
 } from "@/lib/ai/usage-attempt";
+import { providerBaseUrl } from "@/lib/ai/validate-base-url";
 import { AppError, ErrorCode, mapErrorToAppError } from "@/lib/errors";
 import { retryWithBackoff } from "@/lib/jobs/backoff";
 import { isRetryableError } from "@/lib/jobs/retryable";
@@ -90,7 +91,7 @@ export async function summaryModelFor(
     const openai = new OpenAI({
         fetch: usageAttemptFetch,
         apiKey: credentials.apiKey,
-        baseURL: credentials.baseUrl || undefined,
+        baseURL: providerBaseUrl(credentials.baseUrl),
         maxRetries: resolved.organizationCredential ? 0 : undefined,
     });
 

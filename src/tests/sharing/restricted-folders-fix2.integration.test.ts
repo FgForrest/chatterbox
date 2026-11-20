@@ -1246,9 +1246,10 @@ suite("restricted folders review 2 (PostgreSQL)", () => {
         const spy = vi
             .spyOn(intendedPlacements, "recordIntendedPlacementInTx")
             .mockImplementationOnce(async (...args) => {
-                await record(...args);
+                const placement = await record(...args);
                 read.release();
                 await resume.promise;
+                return placement;
             });
         const incoming = saveUploadedAudio({
             userId: "member",

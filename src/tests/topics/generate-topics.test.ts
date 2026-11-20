@@ -14,7 +14,7 @@ import {
     userSettings,
     users,
 } from "@/db/schema";
-import { ErrorCode } from "@/lib/errors";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 // Without corrections a model reads the stored turns as they are.
@@ -165,6 +165,7 @@ function stage(
     turns: unknown = TURNS,
     stored?: { topics: unknown; topicsInputFingerprint: string | null },
     confirmedLanguage: string | null = null,
+    baseUrl = "",
 ) {
     const transcript = {
         id: "tr-1",
@@ -186,7 +187,7 @@ function stage(
         [
             {
                 apiKey: "key",
-                baseUrl: "",
+                baseUrl,
                 provider: "openai",
                 defaultModel: "gpt-4o-mini",
                 isDefaultEnhancement: true,
@@ -222,6 +223,22 @@ describe("generateTopicsForTranscript", () => {
     });
     afterEach(() => {
         createMock.mockReset();
+        vi.unstubAllGlobals();
+    });
+
+    it("rejects non-http(s) base URLs before fetch", async () => {
+        stage(TURNS, undefined, null, "file:");
+        const fetch = vi.fn();
+        vi.stubGlobal("fetch", fetch);
+
+        const error = await run().catch((error: unknown) => error);
+        expect(error).toBeInstanceOf(AppError);
+        expect(error).toMatchObject({
+            code: ErrorCode.INVALID_INPUT,
+            statusCode: 400,
+        });
+        expect(createMock).not.toHaveBeenCalled();
+        expect(fetch).not.toHaveBeenCalled();
     });
 
     it.each([

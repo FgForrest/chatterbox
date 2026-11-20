@@ -457,10 +457,14 @@ describeWithDatabase("categorize route", () => {
                 }),
             ]),
         );
+        await db()
+            .update(users)
+            .set({ uiLocale: locale })
+            .where(eq(users.id, OWNER));
         const presentation = await loadPrivateItemProcessing(
             OWNER,
             ITEM,
-            OTHER,
+            OWNER,
             "cs-CZ",
         );
         expect(presentation?.placements).toEqual(

@@ -63,7 +63,7 @@ export const POST = apiHandler(async (request: Request) => {
         );
     }
 
-    const urlCheck = await validateAiBaseUrl(baseUrl, {
+    const urlCheck = await validateAiBaseUrl(body?.baseUrl, {
         isHosted: env.IS_HOSTED,
     });
     if (!urlCheck.ok) {
@@ -73,8 +73,9 @@ export const POST = apiHandler(async (request: Request) => {
     }
 
     const preset = findPreset(provider);
-    const effectiveBaseUrl =
-        baseUrl || preset?.baseUrl || "https://api.openai.com/v1";
+    const effectiveBaseUrl = baseUrl.trim()
+        ? baseUrl
+        : preset?.baseUrl || "https://api.openai.com/v1";
 
     if (provider === "OpenRouter") {
         const models = await fetchOpenRouterAudioModels(

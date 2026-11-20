@@ -121,7 +121,8 @@ vi.mock("@/lib/sharing/run-context", () => ({
         actsForOrganization: false,
     }),
 }));
-vi.mock("@/lib/sharing/writer", () => ({
+vi.mock("@/lib/sharing/writer", async (importOriginal) => ({
+    ...(await importOriginal()),
     contentWriterRefusalNow: async () => null,
     contentWriterRefusal: async () => null,
     sharingOrgUserId: async () => null,

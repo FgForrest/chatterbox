@@ -3,8 +3,9 @@
 import { Check, Loader2, X } from "lucide-react";
 import Link from "next/link";
 import { useExtracted } from "next-intl";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useItemPartVersion } from "@/components/items/item-detail-store";
 import { useSpeakerSource } from "@/components/learn/speaker-source";
 import { speakerAccent } from "@/components/people/speaker-accents";
 import { SpeakerPicker } from "@/components/people/speaker-picker";
@@ -12,6 +13,7 @@ import type { PlayAtTarget } from "@/components/playback/play-at-button";
 import { SpeakerTurnChip } from "@/components/playback/play-turn-button";
 import { usePlayback } from "@/components/playback/playback-context";
 import { useProductName } from "@/components/product-name-provider";
+import { useItemPartFetch } from "@/hooks/use-item-part-fetch";
 import { parseApiError, toastApiError } from "@/lib/api-errors";
 import { speakerGroups } from "@/lib/knowledge/speaker-groups";
 import {
@@ -20,6 +22,7 @@ import {
     speakerAnchorId,
 } from "@/lib/knowledge/speaker-references";
 import type { SpeakerProposalContext } from "@/lib/learn/output";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import { type RecordingView, withRecordingView } from "@/lib/sharing/view";
 
 export interface TranscriptSpeakerTag {
@@ -30,6 +33,9 @@ export interface TranscriptSpeakerTag {
 interface SpeakerTagsProps {
     recordingId: string;
     source: string;
+    transcriptIdentity?: string;
+    transcriptPending?: boolean;
+    refreshKey?: number;
     speakers: TranscriptSpeakerTag[];
     attributions: SpeakerAttributions;
     onAttributionsChange: (attributions: SpeakerAttributions) => void;
@@ -52,7 +58,7 @@ interface SpeakerTagsProps {
      */
     shownVersion?: TranscriptVersionRef;
     /** The transcript on screen was replaced: reload the page's transcripts. */
-    onStale?: () => void;
+    onStale?: (reason: "transcript" | "sharing") => void;
     /**
      * Show the names without changing them: the Organization manages the
      * speakers of a shared recording.
@@ -135,7 +141,8 @@ export function unknownSpeakerLabels(
 }
 
 /** What the speakers route answers, reads and writes alike. */
-interface SpeakersResponse {
+/** Speakers and the stored transcript revision they describe. */
+export interface SpeakersResponse {
     /** The transcript shown, and its version; every change names both. */
     transcriptionId?: string;
     revision?: number;
@@ -171,6 +178,9 @@ export function confirmedAttributions(
 export function SpeakerTags({
     recordingId,
     source,
+    transcriptIdentity,
+    transcriptPending,
+    refreshKey,
     speakers,
     attributions,
     onAttributionsChange,
@@ -189,102 +199,84 @@ export function SpeakerTags({
         `/api/recordings/${recordingId}/speakers?source=${encodeURIComponent(source)}`,
         view,
     );
-    const [openLabel, setOpenLabel] = useState<string | null>(null);
-    const [openVoices, setOpenVoices] = useState<string[]>([]);
+    const [picker, setPicker] = useState<{
+        identity: string;
+        label: string;
+        voices: string[];
+        version: TranscriptVersionRef | null;
+    } | null>(null);
     const [unlinkingLabels, setUnlinkingLabels] = useState<readonly string[]>(
         [],
     );
     const [savingLabel, setSavingLabel] = useState<string | null>(null);
-    const [unknownLabels, setUnknownLabels] = useState<ReadonlySet<string>>(
-        () => new Set(),
-    );
-    const [suggestions, setSuggestions] = useState<
-        Readonly<Record<string, SpeakerSuggestion>>
-    >({});
-    const [version, setVersion] = useState<TranscriptVersionRef | null>(null);
     const shownId = shownVersion?.transcriptionId;
     const shownRevision = shownVersion?.revision;
-    // Latest callback without re-reading the speakers when its identity
-    // changes on a re-render.
+    const identity =
+        transcriptIdentity ??
+        `${recordingId}:${source}:${shownId}:${shownRevision}`;
+    const scope = useMemo(
+        () => ({ identity, speakersUrl }),
+        [identity, speakersUrl],
+    );
+    const currentScope = useRef<typeof scope | null>(scope);
+    useEffect(() => {
+        currentScope.current = scope;
+        return () => {
+            currentScope.current = null;
+        };
+    }, [scope]);
     const onStaleRef = useRef(onStale);
     onStaleRef.current = onStale;
+    const version = useItemPartVersion("speakers", source);
+    const [loaded, setLoaded] = useState<{
+        identity: string;
+        body: SpeakersResponse;
+    }>();
+    const { reload: load, setData: setSpeakerData } =
+        useItemPartFetch<SpeakersResponse>(speakersUrl, version, identity, {
+            paused: transcriptPending,
+            fallbackRevision: refreshKey,
+            onLoad: applyResponse,
+        });
 
-    // The panel mounts a new instance for another transcript; an answer
-    // arriving after that belongs to the one it replaced.
-    const mounted = useRef(true);
-    useEffect(() => {
-        mounted.current = true;
-        return () => {
-            mounted.current = false;
-        };
-    }, []);
+    function applyResponse(body: SpeakersResponse) {
+        if (
+            shownVersion &&
+            typeof body.transcriptionId === "string" &&
+            typeof body.revision === "number" &&
+            (body.transcriptionId !== shownId ||
+                body.revision !== shownRevision)
+        ) {
+            onStaleRef.current?.("transcript");
+            return;
+        }
+        setLoaded({ identity, body });
+        onAttributionsChange(confirmedAttributions(body.speakers));
+        onUnknownLabelsChange?.(unknownSpeakerLabels(body.speakers));
+    }
 
-    const applyResponse = useCallback(
-        (body: SpeakersResponse) => {
-            if (!mounted.current) return;
-            const read =
-                typeof body.transcriptionId === "string" &&
-                typeof body.revision === "number"
-                    ? {
-                          transcriptionId: body.transcriptionId,
-                          revision: body.revision,
-                      }
-                    : null;
-            // Speakers of a newer transcript than the text on screen would
-            // put names on the wrong lines: fetch the text instead.
-            if (
-                read &&
-                shownId !== undefined &&
-                (read.transcriptionId !== shownId ||
-                    read.revision !== shownRevision)
-            ) {
-                onStaleRef.current?.();
-                return;
-            }
-            onAttributionsChange(confirmedAttributions(body.speakers));
-            setUnknownLabels(unknownSpeakerLabels(body.speakers));
-            onUnknownLabelsChange?.(unknownSpeakerLabels(body.speakers));
-            setSuggestions(suggestedSpeakers(body.speakers));
-            if (read) setVersion(read);
-        },
-        [onAttributionsChange, onUnknownLabelsChange, shownId, shownRevision],
-    );
+    const body = loaded?.identity === identity ? loaded.body : undefined;
+    const unknownLabels = unknownSpeakerLabels(body?.speakers);
+    const suggestions = suggestedSpeakers(body?.speakers);
+    const readVersion =
+        typeof body?.transcriptionId === "string" &&
+        typeof body?.revision === "number"
+            ? { transcriptionId: body.transcriptionId, revision: body.revision }
+            : null;
+    const seenVersion = shownVersion ?? readVersion;
+    const openPicker =
+        picker?.identity === identity &&
+        picker.version?.transcriptionId === seenVersion?.transcriptionId &&
+        picker.version?.revision === seenVersion?.revision
+            ? picker
+            : null;
+    if (picker && !openPicker) setPicker(null);
 
-    const load = useCallback(
-        async (isCancelled: () => boolean = () => false) => {
-            const body = await fetch(speakersUrl)
-                .then(async (response) =>
-                    response.ok
-                        ? ((await response.json()) as SpeakersResponse)
-                        : null,
-                )
-                .catch(() => null);
-            if (body && !isCancelled()) applyResponse(body);
-        },
-        [applyResponse, speakersUrl],
-    );
-
-    useEffect(() => {
-        let cancelled = false;
-        setOpenLabel(null);
-        setVersion(null);
-        void load(() => cancelled);
-        return () => {
-            cancelled = true;
-        };
-    }, [load]);
-
-    /** Save an answer for one label; `null` takes the answer back. */
     async function attribute(
         label: string,
         choice: SpeakerChoice | null,
+        seen = seenVersion,
     ): Promise<boolean> {
-        // The text on screen, else what the speakers were read at; neither
-        // before the first read, or when it failed.
-        const seen =
-            shownId !== undefined && shownRevision !== undefined
-                ? { transcriptionId: shownId, revision: shownRevision }
-                : version;
         if (!seen) {
             toast.error(
                 i18n("The speakers are still loading. Try again in a moment."),
@@ -318,7 +310,9 @@ export function SpeakerTags({
                           "This transcript changed meanwhile. Its speakers were reloaded; try again.",
                       ),
             );
-            onStaleRef.current?.();
+            onStaleRef.current?.(
+                error.code === "RECORDING_SHARED" ? "sharing" : "transcript",
+            );
             await load();
             return false;
         }
@@ -333,7 +327,11 @@ export function SpeakerTags({
             return false;
         }
 
-        applyResponse((await response.json()) as SpeakersResponse);
+        const body = (await response.json()) as SpeakersResponse;
+        if (currentScope.current === scope && setSpeakerData(body)) {
+            applyResponse(body);
+            invalidateItemProcessing(recordingId);
+        }
         return true;
     }
 
@@ -341,7 +339,7 @@ export function SpeakerTags({
         setUnlinkingLabels(labels);
         try {
             for (const label of labels) {
-                if (!mounted.current) break;
+                if (currentScope.current !== scope) break;
                 if (!(await attribute(label, null))) {
                     await load();
                     break;
@@ -359,7 +357,7 @@ export function SpeakerTags({
     if (speakers.length === 0) return null;
 
     const openSpeaker = speakers.find(
-        (speaker) => speaker.speaker === openLabel,
+        (speaker) => speaker.speaker === openPicker?.label,
     );
     const segmentClass =
         "inline-flex h-full min-h-7 min-w-7 items-center justify-center px-2 transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-60";
@@ -415,6 +413,66 @@ export function SpeakerTags({
                                 })
                               : speaker.label);
 
+                    const renderLabel = () => {
+                        if (
+                            readOnly &&
+                            attribution?.personId &&
+                            view !== "received"
+                        ) {
+                            return (
+                                <Link
+                                    href={`/almanac/${attribution.personId}`}
+                                    className={`${segmentClass} min-w-0 break-words pr-3 text-left`}
+                                >
+                                    {label}
+                                </Link>
+                            );
+                        }
+                        if (readOnly) {
+                            return (
+                                <span className="min-w-0 pl-2 pr-3 break-words">
+                                    {label}
+                                </span>
+                            );
+                        }
+                        return (
+                            <button
+                                type="button"
+                                className={`${segmentClass} min-w-0 break-words text-left ${suggestion || attribution || unknown ? "" : "pr-3"}`}
+                                disabled={saving}
+                                aria-haspopup="dialog"
+                                onClick={() => {
+                                    setPicker({
+                                        identity,
+                                        voices: labels,
+                                        label: speaker.speaker,
+                                        version: seenVersion,
+                                    });
+                                }}
+                                title={
+                                    suggestion
+                                        ? [
+                                              !suggestion.carried &&
+                                                  speakerSource(
+                                                      suggestion.proposal ?? {},
+                                                  ),
+                                              suggestion.carried
+                                                  ? i18n(
+                                                        "Suggested from the previous transcript.",
+                                                    )
+                                                  : null,
+                                              i18n("Pick someone else"),
+                                          ]
+                                              .filter(Boolean)
+                                              .join(" ")
+                                        : undefined
+                                }
+                            >
+                                {label}
+                            </button>
+                        );
+                    };
+
                     return (
                         <SpeakerTurnChip
                             key={speaker.speaker}
@@ -461,52 +519,7 @@ export function SpeakerTags({
                             {labels.slice(1).map((label) => (
                                 <span key={label} id={speakerAnchorId(label)} />
                             ))}
-                            {readOnly ? (
-                                attribution?.personId && view !== "received" ? (
-                                    <Link
-                                        href={`/almanac/${attribution.personId}`}
-                                        className={`${segmentClass} min-w-0 break-words pr-3 text-left`}
-                                    >
-                                        {label}
-                                    </Link>
-                                ) : (
-                                    <span className="min-w-0 pl-2 pr-3 break-words">
-                                        {label}
-                                    </span>
-                                )
-                            ) : (
-                                <button
-                                    type="button"
-                                    className={`${segmentClass} min-w-0 break-words text-left ${suggestion || attribution || unknown ? "" : "pr-3"}`}
-                                    disabled={saving}
-                                    aria-haspopup="dialog"
-                                    onClick={() => {
-                                        setOpenVoices(labels);
-                                        setOpenLabel(speaker.speaker);
-                                    }}
-                                    title={
-                                        suggestion
-                                            ? [
-                                                  !suggestion.carried &&
-                                                      speakerSource(
-                                                          suggestion.proposal ??
-                                                              {},
-                                                      ),
-                                                  suggestion.carried
-                                                      ? i18n(
-                                                            "Suggested from the previous transcript.",
-                                                        )
-                                                      : null,
-                                                  i18n("Pick someone else"),
-                                              ]
-                                                  .filter(Boolean)
-                                                  .join(" ")
-                                            : undefined
-                                    }
-                                >
-                                    {label}
-                                </button>
-                            )}
+                            {renderLabel()}
                             {!readOnly && suggestion && (
                                 <>
                                     <button
@@ -600,7 +613,7 @@ export function SpeakerTags({
                     {i18n("Managed by the Organization")}
                 </p>
             )}
-            {!readOnly && openSpeaker && (
+            {!readOnly && openPicker && openSpeaker && (
                 <SpeakerPicker
                     label={openSpeaker.label}
                     personId={
@@ -610,8 +623,8 @@ export function SpeakerTags({
                         )?.personId
                     }
                     voices={
-                        openVoices.length > 1
-                            ? openVoices.flatMap((label) => {
+                        openPicker.voices.length > 1
+                            ? openPicker.voices.flatMap((label) => {
                                   const voice = speakers.find(
                                       (speaker) => speaker.speaker === label,
                                   );
@@ -631,19 +644,35 @@ export function SpeakerTags({
                             : undefined
                     }
                     activeVoice={openSpeaker.speaker}
-                    onVoiceChange={setOpenLabel}
+                    onVoiceChange={(label) =>
+                        setPicker((current) =>
+                            current ? { ...current, label } : null,
+                        )
+                    }
                     nextVoiceTurn={
                         nextSpeakerTurn
                             ? (label) => nextSpeakerTurn(label)
                             : undefined
                     }
-                    onUnlinkVoice={(label) => attribute(label, null)}
-                    organizationOnly={view === "org"}
-                    onPick={(choice) => attribute(openSpeaker.speaker, choice)}
-                    onMarkUnknown={() =>
-                        attribute(openSpeaker.speaker, { unknown: true })
+                    onUnlinkVoice={(label) =>
+                        attribute(label, null, openPicker.version)
                     }
-                    onClose={() => setOpenLabel(null)}
+                    organizationOnly={view === "org"}
+                    onPick={(choice) =>
+                        attribute(
+                            openSpeaker.speaker,
+                            choice,
+                            openPicker.version,
+                        )
+                    }
+                    onMarkUnknown={() =>
+                        attribute(
+                            openSpeaker.speaker,
+                            { unknown: true },
+                            openPicker.version,
+                        )
+                    }
+                    onClose={() => setPicker(null)}
                 />
             )}
         </>

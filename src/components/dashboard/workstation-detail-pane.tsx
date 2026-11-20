@@ -2,7 +2,7 @@
 
 import { ArrowLeft } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { KnowledgePanel } from "@/components/dashboard/folder-knowledge-panel";
 import {
     RecordingPlayer,
@@ -14,6 +14,11 @@ import {
     TranscriptionPanel,
     type TranscriptOption,
 } from "@/components/dashboard/transcription-panel";
+import {
+    ItemDetailProvider,
+    useItemDetail,
+} from "@/components/items/item-detail-store";
+import type { ItemOperationQueue } from "@/components/items/item-operation-queue";
 import { RecordingAgenda } from "@/components/meetings/recording-agenda";
 import { ItemWorkflow } from "@/components/pipeline/item-workflow";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
@@ -26,8 +31,11 @@ import { TrimProposalCard } from "@/components/recordings/trim-proposal-card";
 import { ReceivedItemBanner } from "@/components/sharing/person-sharing";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import { hasAudio } from "@/lib/recordings/audio-availability";
+import {
+    preferredLearnTranscript,
+    preferredTranscript,
+} from "@/lib/transcription/preferred-source";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import { cn } from "@/lib/utils";
 import type {
@@ -47,6 +55,8 @@ interface TranscriptionData {
 }
 
 interface Props {
+    operationQueue?: ItemOperationQueue;
+    organizationEventRevision?: number;
     currentRecording: Recording | null;
     userId?: string;
     itemLinkQuery?: string;
@@ -77,6 +87,7 @@ interface Props {
     backLabel?: string;
     /** When true, the pane is hidden (mobile list view active). */
     hiddenOnMobile: boolean;
+    detailVisible?: boolean;
     initialPlaybackSpeed: number | undefined;
     initialVolume: number | undefined;
     initialAutoPlayNext: boolean | undefined;
@@ -95,11 +106,6 @@ interface Props {
         fromFolderId: string,
         toFolderId: string,
     ) => Promise<void>;
-    /**
-     * Bumped when someone else changes the Organization view of the current
-     * recording, so its panels reload what they show.
-     */
-    contentRevision?: number;
 }
 
 /**
@@ -112,7 +118,31 @@ interface Props {
  * the next recording in `visibleRecordings`; the back-affordance is
  * mobile-only because desktop has both panes visible at once.
  */
-export function WorkstationDetailPane({
+export function WorkstationDetailPane(props: Props) {
+    const { currentRecording: recording } = props;
+    if (!recording) return <WorkstationDetailContent {...props} />;
+    const isOwn = recording.isOwn !== false;
+    return (
+        <ItemDetailProvider
+            operationQueue={props.operationQueue}
+            itemId={recording.id}
+            kind="audio"
+            view={recording.view}
+            isOwn={isOwn}
+            enabled={isOwn || recording.view === "org"}
+            initialShared={props.recordingShared}
+            transcripts={props.transcripts ?? []}
+            titleVersion={recording.titleVersion}
+            renderedHasSummary={recording.hasSummary}
+            refreshDashboard={props.onTranscriptStale}
+            detailVisible={props.detailVisible ?? !props.hiddenOnMobile}
+        >
+            <WorkstationDetailContent {...props} />
+        </ItemDetailProvider>
+    );
+}
+
+function WorkstationDetailContent({
     currentRecording,
     userId,
     itemLinkQuery,
@@ -126,7 +156,7 @@ export function WorkstationDetailPane({
     onFolderCreated,
     canCurate,
     transcriptReadOnly,
-    recordingShared = false,
+    recordingShared: sharedOnOpen = false,
     onSelectRecording,
     onRenamed,
     onDelete,
@@ -144,7 +174,7 @@ export function WorkstationDetailPane({
     onAddToFolder,
     onRemoveFromFolder,
     onMoveBetweenFolders,
-    contentRevision = 0,
+    organizationEventRevision,
 }: Props) {
     const i18n = useExtracted();
     const [knowledgeItem, setKnowledgeItem] = useState<string | null>(null);
@@ -155,22 +185,9 @@ export function WorkstationDetailPane({
         [audioAvailable],
     );
     const playedLink = useRef<string | null>(null);
-    const [processingState, setProcessingState] = useState<{
-        itemId: string;
-        data: ItemProcessingPresentation | null;
-    } | null>(null);
-    const currentRecordingId = currentRecording?.id;
-    const processing =
-        processingState && processingState.itemId === currentRecordingId
-            ? processingState.data
-            : null;
-    const handleProcessingChange = useCallback(
-        (data: ItemProcessingPresentation | null) => {
-            if (!currentRecordingId) return;
-            setProcessingState({ itemId: currentRecordingId, data });
-        },
-        [currentRecordingId],
-    );
+    const detail = useItemDetail();
+    const processing = detail?.data ?? null;
+    const recordingShared = detail?.shared ?? sharedOnOpen;
     useEffect(() => {
         if (!currentRecording || !playback) return;
         const params = new URLSearchParams(
@@ -196,6 +213,21 @@ export function WorkstationDetailPane({
         playedLink.current = link;
         playback.play(startMs);
     }, [currentRecording, itemLinkQuery, playback]);
+    let workflowTranscripts: readonly { source: string }[];
+    if (transcripts) {
+        workflowTranscripts = transcripts;
+    } else if (currentTranscription?.text) {
+        workflowTranscripts = [
+            { source: currentTranscription.source ?? "riffado" },
+        ];
+    } else {
+        workflowTranscripts = [];
+    }
+    const workflowTranscript = preferredTranscript(workflowTranscripts)?.source;
+    const workflowLearnTranscript = preferredLearnTranscript(
+        workflowTranscripts,
+        processing?.phases.learn?.inputs?.contentSourceId,
+    )?.source;
     const hasTranscript =
         currentRecording?.hasTranscript ??
         Boolean(
@@ -304,7 +336,9 @@ export function WorkstationDetailPane({
                                         title: currentRecording.filename,
                                         view: currentRecording.view,
                                     }}
-                                    contentRevision={contentRevision}
+                                    organizationEventRevision={
+                                        organizationEventRevision
+                                    }
                                     onBack={() => setKnowledgeItem(null)}
                                     onReview={(source) => {
                                         setKnowledgeItem(null);
@@ -388,25 +422,25 @@ export function WorkstationDetailPane({
                                         onLearn={() =>
                                             openWidget(
                                                 `recording-learn-review-${currentRecording.id}`,
+                                                workflowLearnTranscript,
                                             )
                                         }
                                         onSummary={() =>
                                             openWidget(
                                                 `recording-summary-${currentRecording.id}`,
+                                                workflowTranscript,
                                             )
                                         }
                                         onReviewLearn={() =>
                                             openWidget(
                                                 `recording-learn-review-${currentRecording.id}`,
+                                                workflowLearnTranscript,
                                             )
                                         }
                                         onReviewTasks={() =>
                                             openWidget(
                                                 `recording-task-review-${currentRecording.id}`,
                                             )
-                                        }
-                                        onProcessingChange={
-                                            handleProcessingChange
                                         }
                                     />
                                 )}
@@ -472,7 +506,7 @@ export function WorkstationDetailPane({
                                             {!currentRecording.audioReaped ||
                                             hasTranscript ? (
                                                 <TranscriptionPanel
-                                                    key={`${currentRecording.id}:${currentRecording.view ?? "private"}:${contentRevision}:${currentRecording.audioReaped ? 1 : 0}:${hasTranscript ? 1 : 0}:${currentRecording.hasSummary ? 1 : 0}`}
+                                                    key={currentRecording.id}
                                                     recording={currentRecording}
                                                     itemLinkQuery={
                                                         itemLinkQuery

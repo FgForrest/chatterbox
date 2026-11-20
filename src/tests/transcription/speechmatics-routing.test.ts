@@ -1,4 +1,12 @@
-import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import {
+    afterEach,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    type Mock,
+    vi,
+} from "vitest";
 import type * as EncryptionFieldsModule from "@/lib/encryption/fields";
 import type * as AgendaContextModule from "@/lib/meetings/pipeline-context";
 import type * as AlmanacTermsModule from "@/lib/transcription/almanac-terms";
@@ -110,10 +118,12 @@ vi.mock("@/lib/pipeline/trigger", () => ({
 }));
 
 import { db } from "@/db";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { resolveMeetingRoster } from "@/lib/integrations/google/meeting-roster";
 import { loadRecordingAgenda } from "@/lib/meetings/pipeline-context";
 import { almanacTermsFor } from "@/lib/transcription/almanac-terms";
 import { transcribeRecording } from "@/lib/transcription/transcribe-recording";
+import { emitEvent } from "@/lib/webhooks/emit";
 
 interface CredentialRow {
     provider: string;
@@ -281,14 +291,77 @@ function requests(): { url: string; method: string; init: RequestInit }[] {
     });
 }
 
-describe("Speechmatics credentials route to the Batch jobs API, not the OpenAI SDK", () => {
-    beforeEach(() => {
-        vi.clearAllMocks();
-        audioCreate.mockReset();
-        chatCreate.mockReset();
-        installBatchApi();
+beforeEach(() => {
+    vi.clearAllMocks();
+    audioCreate.mockReset();
+    chatCreate.mockReset();
+});
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe("Transcription base URL routing", () => {
+    it.each([
+        "OpenAI",
+        "OpenRouter",
+        "Speechmatics",
+        "ElevenLabs",
+    ])("%s rejects non-http(s) base URLs and emits a failure event", async (provider) => {
+        vi.stubGlobal("fetch", vi.fn());
+        mockDbForCredential({
+            provider,
+            baseUrl: "file:",
+            defaultModel: "example",
+        });
+
+        const error = await transcribeRecording("user-sm", "rec-sm").catch(
+            (error: unknown) => error,
+        );
+        expect(error).toBeInstanceOf(AppError);
+        expect(error).toMatchObject({
+            code: ErrorCode.INVALID_INPUT,
+            statusCode: 400,
+        });
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+        expect(audioCreate).not.toHaveBeenCalled();
+        expect(chatCreate).not.toHaveBeenCalled();
+        expect(emitEvent).toHaveBeenCalledExactlyOnceWith(
+            "transcription.failed",
+            "user-sm",
+            "rec-sm",
+            { error: "Enter a valid absolute URL using HTTP or HTTPS." },
+        );
     });
 
+    it("uses the fixed Gemini endpoint regardless of the stored base URL", async () => {
+        const fetch = vi.fn().mockResolvedValueOnce(
+            jsonResponse({
+                candidates: [
+                    { content: { parts: [{ text: "Example transcript." }] } },
+                ],
+            }),
+        );
+        vi.stubGlobal("fetch", fetch);
+        mockDbForCredential({
+            provider: "Google Gemini",
+            baseUrl: "file:",
+            defaultModel: "gemini-3.8-flash",
+        });
+
+        await expect(
+            transcribeRecording("user-sm", "rec-sm"),
+        ).resolves.toMatchObject({
+            success: true,
+            text: "Example transcript.",
+        });
+        expect(fetch).toHaveBeenCalledExactlyOnceWith(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+            expect.objectContaining({ method: "POST" }),
+        );
+    });
+});
+
+describe("Speechmatics credentials route to the Batch jobs API, not the OpenAI SDK", () => {
+    beforeEach(installBatchApi);
     it("submits a job with the configured model and language", async () => {
         mockDbForCredential({
             provider: "Speechmatics",

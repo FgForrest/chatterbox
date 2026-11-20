@@ -47,6 +47,7 @@ export type ProcessingInput = Omit<
 >;
 
 export interface ProcessingPermissions {
+    advancePending?: boolean;
     canChange: boolean;
     canFile: boolean;
     reviewUntil?: string;
@@ -412,11 +413,13 @@ export function projectProcessing(
             ? [Math.max(0, Date.parse(step.waitingFor.retryAt) - now.getTime())]
             : [],
     );
-    const busy = allSteps.some(
-        (step) =>
-            ["queued", "running"].includes(step.state) &&
-            step.waitingFor?.status !== "retry",
-    );
+    const busy =
+        permissions.advancePending ||
+        allSteps.some(
+            (step) =>
+                ["queued", "running"].includes(step.state) &&
+                step.waitingFor?.status !== "retry",
+        );
     const stalled = allSteps.some((step) => step.state === "stalled");
     const holds = allSteps
         .flatMap((step) =>
