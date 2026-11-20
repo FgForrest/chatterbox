@@ -9,9 +9,9 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ConfirmDialogProvider } from "@/components/confirm-dialog";
-import { ItemWorkflow } from "@/components/pipeline/item-workflow";
 import { RestrictedFolderProvider } from "@/components/sharing/restricted-folder-context";
 import type { CategorizationPanelPresentation } from "@/lib/pipeline/categorization-presentation";
+import { ItemWorkflowWithDetail as ItemWorkflow } from "@/tests/pipeline/item-detail-test-harness";
 import { processingFixture } from "@/tests/pipeline/processing-fixture";
 import type { RecordingFolder } from "@/types/folder";
 

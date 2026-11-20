@@ -8,10 +8,10 @@ import {
     screen,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ItemWorkflow } from "@/components/pipeline/item-workflow";
 import { WorkflowStrip } from "@/components/pipeline/workflow-indicator";
 import type { ProcessingStep } from "@/lib/pipeline/processing-status";
 import { deriveWorkflowStatus } from "@/lib/pipeline/workflow-status";
+import { ItemWorkflowWithDetail as ItemWorkflow } from "@/tests/pipeline/item-detail-test-harness";
 import { processingFixture } from "@/tests/pipeline/processing-fixture";
 
 vi.mock("next-intl", () => ({

@@ -946,8 +946,12 @@ export function Workstation({
         () => sharedRecordingIds(folderOrganization),
         [folderOrganization],
     );
+    const committedSharedIds = useMemo(
+        () => sharedRecordingIds(initialFolderOrganization),
+        [initialFolderOrganization],
+    );
     const selectedShared = selectedRecording
-        ? sharedIds.has(selectedRecording.id)
+        ? committedSharedIds.has(selectedRecording.id)
         : false;
     const selectedTranscriptReadOnly = selectedRecording
         ? !canChangeItem({
@@ -1354,9 +1358,16 @@ export function Workstation({
         [...recordings, ...orgRecordings].map((recording) => recording.id),
     );
     useOrgEvents(organizationLibrary !== null, (event) => {
+        const openItem = currentRecordingRef.current;
+        if (
+            openItem &&
+            (event.type === "tree" || event.recordingId === openItem.id)
+        ) {
+            invalidateItemProcessing(openItem.id);
+        }
         const effect = orgEventEffect(
             event,
-            currentRecordingRef.current,
+            openItem,
             libraryIdsRef.current,
             tabEventOrigin(),
         );

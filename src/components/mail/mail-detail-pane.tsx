@@ -16,6 +16,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { KnowledgePanel } from "@/components/dashboard/folder-knowledge-panel";
 import { MarkdownActions } from "@/components/dashboard/markdown-actions";
+import {
+    ItemDetailProvider,
+    useItemContentView,
+    useItemDetail,
+} from "@/components/items/item-detail-store";
 import { ItemHeader } from "@/components/items/item-header";
 import { MailLearnCard } from "@/components/mail/mail-learn-card";
 import { MailSummaryCard } from "@/components/mail/mail-summary-card";
@@ -35,7 +40,6 @@ import { useDateTimeFormatter } from "@/hooks/use-date-time-formatter";
 import { formatBytes } from "@/lib/format-bytes";
 import type { MailDetail, MailParticipantView } from "@/lib/mail/detail";
 import { mailHtmlDocument } from "@/lib/mail/mail-html-document";
-import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import { deriveWorkflowWidgets } from "@/lib/pipeline/workflow-widgets";
 import { canChangeItem } from "@/lib/sharing/change-permission";
 import { withRecordingView } from "@/lib/sharing/view";
@@ -79,10 +83,6 @@ interface Props {
     canCurate?: boolean;
 }
 
-type MailDetailResponse = MailDetail & {
-    processing: ItemProcessingPresentation | null;
-};
-
 function person(participant: MailParticipantView): string {
     if (participant.name && participant.address) {
         return `${participant.name} <${participant.address}>`;
@@ -122,10 +122,28 @@ function evidenceRange(params: URLSearchParams) {
  * that can run nothing and fetch nothing. A mail shared into the
  * Organization reads the same for everyone, who cannot delete it.
  */
-export function MailDetailPane({
+export function MailDetailPane(props: Props) {
+    const { mail } = props;
+    const isOwn = mail.isOwn !== false;
+    return (
+        <ItemDetailProvider
+            key={mail.id}
+            itemId={mail.id}
+            kind="mail"
+            view={mail.view}
+            isOwn={isOwn}
+            enabled={isOwn || mail.view === "org"}
+            initialShared={props.shared}
+        >
+            <MailDetailContent {...props} />
+        </ItemDetailProvider>
+    );
+}
+
+function MailDetailContent({
     mail,
     itemLinkQuery,
-    shared = false,
+    shared: sharedOnOpen = false,
     dateTimeFormat,
     onBackToList,
     backLabel,
@@ -146,9 +164,11 @@ export function MailDetailPane({
     const locale = useLocale();
     const formatDateTime = useDateTimeFormatter();
     const [knowledgeItem, setKnowledgeItem] = useState<string | null>(null);
-    const [detail, setDetail] = useState<MailDetailResponse | null>(null);
-    const [processing, setProcessing] =
-        useState<ItemProcessingPresentation | null>(null);
+    const [detail, setDetail] = useState<MailDetail | null>(null);
+    const itemDetail = useItemDetail();
+    const processing = itemDetail?.data ?? null;
+    const shared = itemDetail?.shared ?? sharedOnOpen;
+    const contentView = useItemContentView(mail.view, sharedOnOpen);
     const [failed, setFailed] = useState(false);
     const [formatted, setFormatted] = useState<string | null>(null);
     const [showFormatted, setShowFormatted] = useState(false);
@@ -182,24 +202,21 @@ export function MailDetailPane({
 
     useEffect(() => {
         const controller = new AbortController();
-        setDetail(null);
-        setProcessing(null);
         setFailed(false);
         setFormatted(null);
         setShowFormatted(false);
         setMessageCollapsed(false);
         fetch(
             withRecordingView(
-                `/api/mail/${encodeURIComponent(mail.id)}`,
+                `/api/mail/${encodeURIComponent(mail.id)}?content=1`,
                 mail.view,
             ),
             { signal: controller.signal },
         )
             .then(async (response) => {
                 if (!response.ok) throw new Error(String(response.status));
-                const body = (await response.json()) as MailDetailResponse;
-                setDetail(body);
-                setProcessing(body.processing);
+                const body = (await response.json()) as MailDetail;
+                if (!controller.signal.aborted) setDetail(body);
             })
             .catch((error: unknown) => {
                 if (!controller.signal.aborted) {
@@ -268,10 +285,7 @@ export function MailDetailPane({
         isOrgAccount,
         canCurate,
     });
-    const contentMail =
-        shared && mail.view !== "received"
-            ? { ...mail, view: "org" as const }
-            : mail;
+    const contentMail = { ...mail, view: contentView };
     const metadata = [
         mail.mail?.from ?? i18n("Unknown sender"),
         formatDateTime(
@@ -422,8 +436,6 @@ export function MailDetailPane({
                         itemId={mail.id}
                         kind="mail"
                         canCurate={canCurate}
-                        initialData={processing}
-                        onProcessingChange={setProcessing}
                         folders={folders}
                         folderAssignments={folderAssignments}
                         onSelectFolder={onSelectFolder}

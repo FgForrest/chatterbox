@@ -724,10 +724,10 @@ const itemId = "item-veln";
                 folderId: "mail-folder-zurna",
             });
         }
-        function mailResponse(view: "private" | "org", processing = true) {
+        function mailResponse(view: "private" | "org", query = "processing=1") {
             return mailGet(
                 new Request(
-                    `http://localhost/api/mail/mail-veln?view=${view}${processing ? "&processing=1" : ""}`,
+                    `http://localhost/api/mail/mail-veln?view=${view}&${query}`,
                 ),
                 { params: Promise.resolve({ id: "mail-veln" }) },
             );
@@ -748,14 +748,14 @@ const itemId = "item-veln";
                 viewer === owner ? 200 : 404,
             );
             mocks.loadMailDetail.mockResolvedValue({ title: "Fixture mail" });
-            expect((await mailResponse("org", false)).status).toBe(200);
+            expect((await mailResponse("org", "")).status).toBe(200);
             expect(mocks.loadMailDetail).toHaveBeenCalledWith(
                 viewer,
                 "mail-veln",
                 "org",
             );
             mocks.loadMailDetail.mockClear();
-            expect((await mailResponse("private", false)).status).toBe(
+            expect((await mailResponse("private", "")).status).toBe(
                 viewer === owner ? 200 : 404,
             );
             if (viewer !== owner)
@@ -765,6 +765,22 @@ const itemId = "item-veln";
                     viewer,
                     "mail-veln",
                 );
+        });
+        it("returns authorized mail content without a projection in content mode", async () => {
+            await makeMail();
+            mocks.loadMailDetail.mockResolvedValue({ title: "Fixture mail" });
+            const body = await mailResponse("private", "content=1");
+            expect(body.status).toBe(200);
+            expect(await body.json()).toEqual({ title: "Fixture mail" });
+            const combined = await mailResponse("private", "");
+            expect(await combined.json()).toMatchObject({
+                title: "Fixture mail",
+                processing: { itemId: "mail-veln" },
+            });
+            mocks.viewer = "member-felno";
+            expect((await mailResponse("private", "content=1")).status).toBe(
+                404,
+            );
         });
         it("rejects unavailable mail views, tombstones, missing mail and audio ids", async () => {
             await makeMail();

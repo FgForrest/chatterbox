@@ -17,10 +17,12 @@ const summary = vi.hoisted(() => ({ disabled: false, run: vi.fn() }));
 vi.mock("@/components/summary/summary-widget", () => ({
     SummaryWidget: ({
         source,
+        canSwitchSource,
         onSourceChange,
         onResummarizeReady,
     }: {
         source: string;
+        canSwitchSource: boolean;
         onSourceChange: (source: "plaud" | "riffado") => void;
         onResummarizeReady: (
             action: { run: () => void; disabled: boolean } | null,
@@ -31,7 +33,7 @@ vi.mock("@/components/summary/summary-widget", () => ({
             onResummarizeReady({ run: summary.run, disabled });
             return () => onResummarizeReady(null);
         }, [onResummarizeReady, disabled]);
-        return (
+        return canSwitchSource ? (
             <button
                 type="button"
                 onClick={() =>
@@ -40,7 +42,7 @@ vi.mock("@/components/summary/summary-widget", () => ({
             >
                 Switch summary source
             </button>
-        );
+        ) : null;
     },
 }));
 vi.mock("@/components/learn/learn-review", () => ({ LearnReview: () => null }));
@@ -66,6 +68,7 @@ function panelElement(
     hasTopics = true,
     readOnly = false,
     isTranscribing = false,
+    deviceSn = "local",
 ) {
     return (
         <PlaybackProvider
@@ -78,7 +81,7 @@ function panelElement(
                     duration: 60000,
                     filesize: 100,
                     startTime: new Date(0).toISOString(),
-                    deviceSn: "local",
+                    deviceSn,
                 }}
                 transcripts={[
                     {
@@ -205,7 +208,8 @@ describe("transcript card behavior", () => {
                     : { speakers: [], corrections: [] },
             ),
         );
-        const view = panel();
+        const plaudPanel = () => panelElement(true, false, false, "SN-1");
+        const view = render(plaudPanel());
         const button = await screen.findByRole("button", {
             name: "Re-summarize",
         });
@@ -221,11 +225,11 @@ describe("transcript card behavior", () => {
         await waitFor(() => expect(button).toHaveProperty("disabled", false));
         expect(summary.run).not.toHaveBeenCalled();
         summary.disabled = true;
-        view.rerender(panelElement());
+        view.rerender(plaudPanel());
         await waitFor(() => expect(button).toHaveProperty("disabled", true));
         fireEvent.click(button);
         summary.disabled = false;
-        view.rerender(panelElement());
+        view.rerender(plaudPanel());
         await waitFor(() => expect(button).toHaveProperty("disabled", false));
         expect(summary.run).not.toHaveBeenCalled();
         fireEvent.click(button);
