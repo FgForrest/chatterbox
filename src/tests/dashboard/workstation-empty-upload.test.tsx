@@ -334,17 +334,19 @@ vi.mock("@/components/dashboard/workstation-detail-pane", () => ({
         onSelectRecording,
         onDelete,
         onBackToList,
-        contentRevision,
+        organizationEventRevision,
     }: {
         currentRecording: Recording | null;
         itemLinkQuery: string;
         onSelectRecording: (recording: Recording) => void;
         onDelete: (recording: Recording) => Promise<void>;
         onBackToList: () => void;
-        contentRevision: number;
+        organizationEventRevision: number;
     }) => (
         <div>
-            <span data-testid="content-revision">{contentRevision}</span>
+            <span data-testid="organization-event-revision">
+                {organizationEventRevision}
+            </span>
             Selected: {currentRecording?.filename ?? "none"}
             <span data-testid="item-link-query">{itemLinkQuery}</span>
             <button
@@ -2336,12 +2338,13 @@ describe("Workstation task event origins", () => {
                 vi.advanceTimersByTime(300);
             });
             expect(mocks.refresh).not.toHaveBeenCalled();
-            expect(screen.getByTestId("content-revision").textContent).toBe(
-                "0",
-            );
+            expect(
+                screen.getByTestId("organization-event-revision").textContent,
+            ).toBe("0");
             for (const origin of ["other-tab", undefined]) {
                 const before = Number(
-                    screen.getByTestId("content-revision").textContent,
+                    screen.getByTestId("organization-event-revision")
+                        .textContent,
                 );
                 act(() =>
                     mocks.orgEvent?.({
@@ -2355,7 +2358,10 @@ describe("Workstation task event origins", () => {
                 });
                 expect(mocks.refresh).toHaveBeenCalled();
                 expect(
-                    Number(screen.getByTestId("content-revision").textContent),
+                    Number(
+                        screen.getByTestId("organization-event-revision")
+                            .textContent,
+                    ),
                 ).toBe(before + (view === "org" ? 1 : 0));
                 mocks.refresh.mockClear();
             }

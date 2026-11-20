@@ -176,11 +176,7 @@ export function toTranscriptList(
     ];
 }
 
-/**
- * A short hash of what a transcript's speaker labels come from, so the
- * speaker tags can tell a re-transcription from a refetch of the same text.
- */
-export function transcriptFingerprint(
+function transcriptFingerprint(
     transcript: TranscriptOption | undefined,
 ): string {
     if (!transcript) return "";

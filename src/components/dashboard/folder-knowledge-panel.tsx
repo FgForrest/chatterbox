@@ -37,13 +37,13 @@ type KnowledgeScope =
 export function FolderKnowledgePanel(props: {
     folder: RecordingFolder;
     onBack: () => void;
-    contentRevision?: number;
+    organizationEventRevision?: number;
 }) {
     return (
         <KnowledgePanel
             scope={{ kind: "folder", folder: props.folder }}
             onBack={props.onBack}
-            contentRevision={props.contentRevision}
+            organizationEventRevision={props.organizationEventRevision}
         />
     );
 }
@@ -52,12 +52,12 @@ export function KnowledgePanel({
     scope,
     onBack,
     onReview,
-    contentRevision = 0,
+    organizationEventRevision = 0,
 }: {
     scope: KnowledgeScope;
     onBack: () => void;
     onReview?: (source?: string) => void;
-    contentRevision?: number;
+    organizationEventRevision?: number;
 }) {
     const i18n = useExtracted();
     const label = useFolderLabel();
@@ -84,7 +84,7 @@ export function KnowledgePanel({
         `${endpoint}?tab=${tab}&offset=${offset}`,
         scope.kind === "item" ? scope.view : undefined,
     );
-    const key = `${url}:${contentRevision}:${retry}`;
+    const key = `${url}:${organizationEventRevision}:${retry}`;
     const data = cache[key];
     useEffect(() => {
         if (data) return;

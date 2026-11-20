@@ -206,9 +206,6 @@ function MailDetailContent({
     useEffect(() => {
         const controller = new AbortController();
         setFailed(false);
-        setFormatted(null);
-        setShowFormatted(false);
-        setMessageCollapsed(false);
         fetch(
             withRecordingView(
                 `/api/mail/${encodeURIComponent(mail.id)}?content=1`,

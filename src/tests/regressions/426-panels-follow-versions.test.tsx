@@ -362,12 +362,11 @@ it("keeps a picked tab and the card instance through a first summary, revision s
     await screen.findByLabelText("Workflow");
     fireEvent.click(screen.getByText("Plaud", { selector: "button" }));
     expect(screen.getByText("plaud transcript 1")).toBeTruthy();
-    const legacyRevision = { contentRevision: 1 };
     view.rerender(
         <WorkstationDetailPane
             {...props}
-            {...legacyRevision}
             currentRecording={{ ...item, hasSummary: true }}
+            organizationEventRevision={1}
         />,
     );
     expect(screen.getByText("plaud transcript 1")).toBeTruthy();
@@ -375,6 +374,7 @@ it("keeps a picked tab and the card instance through a first summary, revision s
         <WorkstationDetailPane
             {...props}
             currentRecording={{ ...item, hasSummary: true, view: "org" }}
+            organizationEventRevision={1}
         />,
     );
     expect(screen.getByText("plaud transcript 1")).toBeTruthy();

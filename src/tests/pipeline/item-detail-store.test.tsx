@@ -53,7 +53,7 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
-describe("server-driven processing refresh", () => {
+describe("item detail store processing refresh", () => {
     it("keeps one timer, follows successive deadlines, and continues while idle", async () => {
         const fetchMock = vi
             .fn()
