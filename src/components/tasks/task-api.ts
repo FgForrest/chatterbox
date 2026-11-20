@@ -57,8 +57,9 @@ function recordingUrl(recordingId: string, path = "") {
 
 export function fetchRecordingTasks(
     recordingId: string,
+    signal?: AbortSignal,
 ): Promise<RecordingTasks> {
-    return send(recordingUrl(recordingId));
+    return send(recordingUrl(recordingId), { signal });
 }
 
 export function changeTask(

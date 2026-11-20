@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
     and,
     count,
@@ -20,9 +21,31 @@ import {
     taskMentions,
     taskUpdateProposals,
     transcriptCorrections,
+    transcriptions,
     transcriptSpeakers,
 } from "@/db/schema";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
+
+/** Read the same title marker for the dashboard and the processing projection. */
+export function itemTitleVersion() {
+    return sql<string>`md5(${chatterItems.title}::text)`;
+}
+
+/** Read the stored topics marker without decrypting the topics. */
+export function transcriptTopicsVersion() {
+    return sql<string | null>`md5(${transcriptions.topics}::text)`;
+}
+
+/** Identify the text revision and persisted topics rendered by the dashboard. */
+export function transcriptPartVersion(
+    id: string,
+    revision: number,
+    topics: string | null,
+) {
+    return createHash("sha256")
+        .update(JSON.stringify([id, revision, topics]))
+        .digest("hex");
+}
 
 /** Version of the remarks on the current owner-scoped summary. */
 export function summaryRemarksVersion() {

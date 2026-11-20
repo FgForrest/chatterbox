@@ -199,16 +199,19 @@ it("drops the guessed edit, refreshes, and evicts after five minutes of failed d
     expect(fetch).toHaveBeenCalledTimes(attempts);
 });
 
-it("clears an active detached read and its timers when the registry is cleared", async () => {
+it("clears an active detached read, its timers and its folder edit when the registry is cleared", async () => {
     vi.useFakeTimers();
+    const finish = vi.fn();
     const refreshDashboard = vi.fn();
-    const registry = new ItemOperationRegistry(() => vi.fn(), refreshDashboard);
+    const registry = new ItemOperationRegistry(() => finish, refreshDashboard);
     const read = deferred<Response>();
     const fetch = vi.fn((_path: string, _options: RequestInit) => read.promise);
     vi.stubGlobal("fetch", fetch);
     const queue = registry.get(base.itemId, detachedScope);
     await queue.enqueueOperation(filing);
+    expect(finish).not.toHaveBeenCalled();
     registry.clear();
+    expect(finish).toHaveBeenCalledExactlyOnceWith();
     expect(registry.find(base.itemId)).toBeUndefined();
     expect(fetch.mock.calls[0][1].signal?.aborted).toBe(true);
     expect(vi.getTimerCount()).toBe(0);

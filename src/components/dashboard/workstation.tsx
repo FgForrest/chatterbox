@@ -921,13 +921,14 @@ export function Workstation({
               (folder) => folder.id === selectedFolderId,
           ) ?? null)
         : null;
-    const showingItemRef = useRef(false);
-    showingItemRef.current =
+    const showingItem =
         (wideLayout || mobileView === "detail") &&
         selectedFolder?.access !== false &&
         !(tasksFolderId && tasksFolderId === selectedFolder?.id) &&
         !(knowledgeFolderId && knowledgeFolderId === selectedFolder?.id) &&
         !currentMeetingId;
+    const showingItemRef = useRef(showingItem);
+    showingItemRef.current = showingItem;
     useEffect(() => {
         if (!folderOrganization.folders.some((folder) => folder.restricting))
             return;
@@ -2348,6 +2349,206 @@ export function Workstation({
         ? (navigation.counts.get(settingsFolder.id) ?? 0)
         : 0;
     const railCollapsed = libraryPreferences.preferences.collapsed;
+    function renderDetail() {
+        if (selectedFolder?.access === false) return null;
+        if (tasksFolderId && selectedFolder?.id === tasksFolderId) {
+            return (
+                <FolderTasksPanel
+                    key={tasksFolderId}
+                    folder={selectedFolder}
+                    organization={folderOrganization}
+                    isOrgAccount={isOrgAccount}
+                    onBack={closeFolderView}
+                />
+            );
+        }
+        if (knowledgeFolderId && selectedFolder?.id === knowledgeFolderId) {
+            return (
+                <FolderKnowledgePanel
+                    key={knowledgeFolderId}
+                    folder={selectedFolder}
+                    contentRevision={orgContentRevision}
+                    onBack={closeFolderView}
+                />
+            );
+        }
+        if (currentMeetingId) {
+            return (
+                <div
+                    className={cn(
+                        "min-w-0 space-y-4 lg:block lg:self-start",
+                        mobileView === "list" && "hidden",
+                    )}
+                >
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="lg:hidden"
+                        onClick={() => {
+                            setMobileView("list");
+                            window.history.replaceState(
+                                { mobileView: "list" },
+                                "",
+                                window.location.href,
+                            );
+                            noteDashboardUrlChange();
+                        }}
+                    >
+                        {selectedFolder
+                            ? folderLabel(selectedFolder)
+                            : i18n("Recent")}
+                    </Button>
+                    <AgendaBody
+                        key={currentMeetingId}
+                        id={currentMeetingId}
+                        userId={userId}
+                        active={mobileView === "detail" || wideLayout}
+                        recordings={[
+                            ...visibleRecordings,
+                            ...visibleOrgRecordings,
+                        ]}
+                        folders={folderOrganization.folders}
+                        onChanged={reloadMeetings}
+                        onDeleted={() => {
+                            setCurrentMeetingId(null);
+                            navigateRecent();
+                        }}
+                        onRecording={(id) => {
+                            reloadMeetings();
+                            window.location.assign(
+                                `/dashboard?recording=${encodeURIComponent(id)}`,
+                            );
+                        }}
+                    />
+                </div>
+            );
+        }
+        if (
+            visibleRecordings.length === 0 &&
+            visibleOrgRecordings.length === 0 &&
+            meetings.length === 0 &&
+            pendingUploads.length === 0
+        ) {
+            return (
+                <div className="hidden min-w-0 lg:block lg:self-start">
+                    <WorkstationEmptyState
+                        isSyncing={isAutoSyncing}
+                        onSync={handleSync}
+                        onUpload={triggerUpload}
+                        hasFilingFolder={hasFilingFolder}
+                        onNewFolder={() => setFirstLevelFolderOpen(true)}
+                    />
+                </div>
+            );
+        }
+        if (selectedRecording?.kind === "mail") {
+            return (
+                <MailDetailPane
+                    mail={selectedRecording}
+                    itemLinkQuery={itemLinkQuery}
+                    shared={selectedShared}
+                    dateTimeFormat={initialSettings.dateTimeFormat}
+                    backLabel={
+                        selectedFolder
+                            ? folderLabel(selectedFolder)
+                            : i18n("Recent")
+                    }
+                    onBackToList={() => {
+                        setMobileView("list");
+                        writeSelection(
+                            selectedRecording,
+                            selectedFolderId,
+                            "replace",
+                            "list",
+                        );
+                    }}
+                    hiddenOnMobile={mobileView === "list"}
+                    onChanged={refresh}
+                    onFolderCreated={handleFolderCreated}
+                    folders={folderOrganization.folders}
+                    folderAssignments={settledAssignments}
+                    operationQueue={itemQueue(selectedRecording)}
+                    onSelectFolder={selectFolderByUser}
+                    onAddToFolder={(itemId, folderId) =>
+                        handleFolderAssignment(itemId, folderId, true)
+                    }
+                    onRemoveFromFolder={(itemId, folderId, withdraw) =>
+                        handleFolderAssignment(
+                            itemId,
+                            folderId,
+                            false,
+                            withdraw,
+                        )
+                    }
+                    onMoveBetweenFolders={handleMoveBetweenFolders}
+                    isOrgAccount={isOrgAccount}
+                    canCurate={canCurate}
+                />
+            );
+        }
+        return (
+            <WorkstationDetailPane
+                userId={userId}
+                currentRecording={selectedRecording}
+                canCurate={canCurate}
+                itemLinkQuery={itemLinkQuery}
+                currentTranscription={currentTranscription}
+                transcripts={currentTranscriptVariants}
+                isCurrentTranscribing={isCurrentTranscribing}
+                visibleRecordings={locationRecordings}
+                onTranscribe={handleTranscribe}
+                onTranscribeComplete={refresh}
+                onTranscriptStale={refresh}
+                onFolderCreated={handleFolderCreated}
+                transcriptReadOnly={selectedTranscriptReadOnly}
+                recordingShared={selectedShared}
+                onSelectRecording={selectRecordingAutomatically}
+                onRenamed={handleRenamed}
+                onDelete={handleDelete}
+                onArtifactsChanged={refresh}
+                backLabel={
+                    selectedFolder
+                        ? folderLabel(selectedFolder)
+                        : i18n("Recent")
+                }
+                onBackToList={() => {
+                    setMobileView("list");
+                    writeSelection(
+                        selectedRecording,
+                        selectedFolderId,
+                        "replace",
+                        "list",
+                    );
+                }}
+                hiddenOnMobile={mobileView === "list"}
+                detailVisible={showingItem}
+                initialPlaybackSpeed={initialSettings.defaultPlaybackSpeed}
+                initialVolume={initialSettings.defaultVolume}
+                initialAutoPlayNext={initialSettings.autoPlayNext}
+                scrubberStyle={initialSettings.playerScrubber}
+                folders={folderOrganization.folders}
+                folderAssignments={settledAssignments}
+                operationQueue={
+                    selectedRecording ? itemQueue(selectedRecording) : undefined
+                }
+                onSelectFolder={selectFolderByUser}
+                onAddToFolder={(recordingId, folderId) =>
+                    handleFolderAssignment(recordingId, folderId, true)
+                }
+                onRemoveFromFolder={(recordingId, folderId, withdraw) =>
+                    handleFolderAssignment(
+                        recordingId,
+                        folderId,
+                        false,
+                        withdraw,
+                    )
+                }
+                onMoveBetweenFolders={handleMoveBetweenFolders}
+                contentRevision={orgContentRevision}
+            />
+        );
+    }
+
     return (
         <LibraryPreferencesContext.Provider value={libraryPreferences}>
             <div className="bg-background">
@@ -2635,213 +2836,7 @@ export function Workstation({
                                 />
                             )}
                         </div>
-                        {selectedFolder?.access ===
-                        false ? null : tasksFolderId &&
-                          selectedFolder?.id === tasksFolderId ? (
-                            <FolderTasksPanel
-                                key={tasksFolderId}
-                                folder={selectedFolder}
-                                organization={folderOrganization}
-                                isOrgAccount={isOrgAccount}
-                                onBack={closeFolderView}
-                            />
-                        ) : knowledgeFolderId &&
-                          selectedFolder?.id === knowledgeFolderId ? (
-                            <FolderKnowledgePanel
-                                key={knowledgeFolderId}
-                                folder={selectedFolder}
-                                contentRevision={orgContentRevision}
-                                onBack={closeFolderView}
-                            />
-                        ) : currentMeetingId ? (
-                            <div
-                                className={cn(
-                                    "min-w-0 space-y-4 lg:block lg:self-start",
-                                    mobileView === "list" && "hidden",
-                                )}
-                            >
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="lg:hidden"
-                                    onClick={() => {
-                                        setMobileView("list");
-                                        window.history.replaceState(
-                                            { mobileView: "list" },
-                                            "",
-                                            window.location.href,
-                                        );
-                                        noteDashboardUrlChange();
-                                    }}
-                                >
-                                    {selectedFolder
-                                        ? folderLabel(selectedFolder)
-                                        : i18n("Recent")}
-                                </Button>
-                                <AgendaBody
-                                    key={currentMeetingId}
-                                    id={currentMeetingId}
-                                    userId={userId}
-                                    active={
-                                        mobileView === "detail" || wideLayout
-                                    }
-                                    recordings={[
-                                        ...visibleRecordings,
-                                        ...visibleOrgRecordings,
-                                    ]}
-                                    folders={folderOrganization.folders}
-                                    onChanged={reloadMeetings}
-                                    onDeleted={() => {
-                                        setCurrentMeetingId(null);
-                                        navigateRecent();
-                                    }}
-                                    onRecording={(id) => {
-                                        reloadMeetings();
-                                        window.location.assign(
-                                            `/dashboard?recording=${encodeURIComponent(id)}`,
-                                        );
-                                    }}
-                                />
-                            </div>
-                        ) : visibleRecordings.length === 0 &&
-                          visibleOrgRecordings.length === 0 &&
-                          meetings.length === 0 &&
-                          pendingUploads.length === 0 ? (
-                            <div className="hidden min-w-0 lg:block lg:self-start">
-                                <WorkstationEmptyState
-                                    isSyncing={isAutoSyncing}
-                                    onSync={handleSync}
-                                    onUpload={triggerUpload}
-                                    hasFilingFolder={hasFilingFolder}
-                                    onNewFolder={() =>
-                                        setFirstLevelFolderOpen(true)
-                                    }
-                                />
-                            </div>
-                        ) : selectedRecording?.kind === "mail" ? (
-                            <MailDetailPane
-                                mail={selectedRecording}
-                                itemLinkQuery={itemLinkQuery}
-                                shared={selectedShared}
-                                dateTimeFormat={initialSettings.dateTimeFormat}
-                                backLabel={
-                                    selectedFolder
-                                        ? folderLabel(selectedFolder)
-                                        : i18n("Recent")
-                                }
-                                onBackToList={() => {
-                                    setMobileView("list");
-                                    writeSelection(
-                                        selectedRecording,
-                                        selectedFolderId,
-                                        "replace",
-                                        "list",
-                                    );
-                                }}
-                                hiddenOnMobile={mobileView === "list"}
-                                onChanged={refresh}
-                                onFolderCreated={handleFolderCreated}
-                                folders={folderOrganization.folders}
-                                folderAssignments={settledAssignments}
-                                operationQueue={itemQueue(selectedRecording)}
-                                onSelectFolder={selectFolderByUser}
-                                onAddToFolder={(itemId, folderId) =>
-                                    handleFolderAssignment(
-                                        itemId,
-                                        folderId,
-                                        true,
-                                    )
-                                }
-                                onRemoveFromFolder={(
-                                    itemId,
-                                    folderId,
-                                    withdraw,
-                                ) =>
-                                    handleFolderAssignment(
-                                        itemId,
-                                        folderId,
-                                        false,
-                                        withdraw,
-                                    )
-                                }
-                                onMoveBetweenFolders={handleMoveBetweenFolders}
-                                isOrgAccount={isOrgAccount}
-                                canCurate={canCurate}
-                            />
-                        ) : (
-                            <WorkstationDetailPane
-                                userId={userId}
-                                currentRecording={selectedRecording}
-                                canCurate={canCurate}
-                                itemLinkQuery={itemLinkQuery}
-                                currentTranscription={currentTranscription}
-                                transcripts={currentTranscriptVariants}
-                                isCurrentTranscribing={isCurrentTranscribing}
-                                visibleRecordings={locationRecordings}
-                                onTranscribe={handleTranscribe}
-                                onTranscribeComplete={refresh}
-                                onTranscriptStale={refresh}
-                                onFolderCreated={handleFolderCreated}
-                                transcriptReadOnly={selectedTranscriptReadOnly}
-                                recordingShared={selectedShared}
-                                onSelectRecording={selectRecordingAutomatically}
-                                onRenamed={handleRenamed}
-                                onDelete={handleDelete}
-                                onArtifactsChanged={refresh}
-                                backLabel={
-                                    selectedFolder
-                                        ? folderLabel(selectedFolder)
-                                        : i18n("Recent")
-                                }
-                                onBackToList={() => {
-                                    setMobileView("list");
-                                    writeSelection(
-                                        selectedRecording,
-                                        selectedFolderId,
-                                        "replace",
-                                        "list",
-                                    );
-                                }}
-                                hiddenOnMobile={mobileView === "list"}
-                                initialPlaybackSpeed={
-                                    initialSettings.defaultPlaybackSpeed
-                                }
-                                initialVolume={initialSettings.defaultVolume}
-                                initialAutoPlayNext={
-                                    initialSettings.autoPlayNext
-                                }
-                                scrubberStyle={initialSettings.playerScrubber}
-                                folders={folderOrganization.folders}
-                                folderAssignments={settledAssignments}
-                                operationQueue={
-                                    selectedRecording
-                                        ? itemQueue(selectedRecording)
-                                        : undefined
-                                }
-                                onSelectFolder={selectFolderByUser}
-                                onAddToFolder={(recordingId, folderId) =>
-                                    handleFolderAssignment(
-                                        recordingId,
-                                        folderId,
-                                        true,
-                                    )
-                                }
-                                onRemoveFromFolder={(
-                                    recordingId,
-                                    folderId,
-                                    withdraw,
-                                ) =>
-                                    handleFolderAssignment(
-                                        recordingId,
-                                        folderId,
-                                        false,
-                                        withdraw,
-                                    )
-                                }
-                                onMoveBetweenFolders={handleMoveBetweenFolders}
-                                contentRevision={orgContentRevision}
-                            />
-                        )}
+                        {renderDetail()}
                     </div>
                 </div>
             </div>

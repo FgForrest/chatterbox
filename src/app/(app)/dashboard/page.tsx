@@ -5,6 +5,11 @@ import { db } from "@/db";
 import { recordingItemJoin } from "@/db/items";
 import { recordingHasAgenda } from "@/db/queries/agenda-presence";
 import {
+    itemTitleVersion,
+    transcriptPartVersion,
+    transcriptTopicsVersion,
+} from "@/db/queries/item-content-versions";
+import {
     listOutgoingSharedItemIds,
     receivedItemCondition,
 } from "@/db/queries/item-shares";
@@ -65,12 +70,14 @@ type TranscriptRow = {
     model: string | null;
     turns: unknown;
     topics: unknown;
+    topicsVersion: string | null;
 };
 
 type TranscriptVariant = {
     source: string;
     text: string;
     version: { transcriptionId: string; revision: number };
+    contentVersion: string;
     language?: string;
     provider?: string;
     model?: string;
@@ -101,6 +108,11 @@ function buildTranscriptVariants(
                 transcriptionId: transcript.id,
                 revision: transcript.revision,
             },
+            contentVersion: transcriptPartVersion(
+                transcript.id,
+                transcript.revision,
+                transcript.topicsVersion,
+            ),
             language: transcript.detectedLanguage || undefined,
             provider: transcript.provider ?? undefined,
             model: transcript.model ?? undefined,
@@ -149,6 +161,7 @@ async function loadOrganizationLibrary(
             hasAgenda: recordingHasAgenda(),
             userId: recordings.userId,
             filename: chatterItems.title,
+            titleVersion: itemTitleVersion(),
             duration: recordings.duration,
             startTime: chatterItems.occurredAt,
             filesize: recordings.filesize,
@@ -175,7 +188,10 @@ async function loadOrganizationLibrary(
         .orderBy(desc(chatterItems.occurredAt));
     const [transcriptRows, summaryRows] = await Promise.all([
         db
-            .select({ transcription: transcriptions })
+            .select({
+                transcription: transcriptions,
+                topicsVersion: transcriptTopicsVersion(),
+            })
             .from(transcriptions)
             .innerJoin(
                 recordings,
@@ -196,7 +212,12 @@ async function loadOrganizationLibrary(
                         : sharedRecordingCondition(orgUserId),
                 ),
             )
-            .then((found) => found.map((row) => row.transcription)),
+            .then((found) =>
+                found.map(({ transcription, topicsVersion }) => ({
+                    ...transcription,
+                    topicsVersion,
+                })),
+            ),
         db
             .select({ recordingId: aiEnhancements.itemId })
             .from(aiEnhancements)
@@ -300,6 +321,7 @@ export default async function DashboardPage() {
                 id: recordings.id,
                 hasAgenda: recordingHasAgenda(),
                 filename: chatterItems.title,
+                titleVersion: itemTitleVersion(),
                 duration: recordings.duration,
                 startTime: chatterItems.occurredAt,
                 filesize: recordings.filesize,
@@ -341,6 +363,7 @@ export default async function DashboardPage() {
                 // from the text because only these carry timings.
                 turns: transcriptions.turns,
                 topics: transcriptions.topics,
+                topicsVersion: transcriptTopicsVersion(),
             })
             .from(transcriptions)
             .where(eq(transcriptions.userId, session.user.id)),

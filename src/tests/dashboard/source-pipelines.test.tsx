@@ -575,7 +575,7 @@ describe("independent transcript and summary pipelines", () => {
         );
     });
 
-    it("mounts the speaker tags afresh for a new text, not for a refetch", () => {
+    it("keeps the speaker tags mounted through a refetch and re-transcription", () => {
         const recording = {
             id: "rec-1",
             filename: "Meeting.ogg",
@@ -609,7 +609,7 @@ describe("independent transcript and summary pipelines", () => {
 
         // Re-transcribed: the voices are numbered the other way round.
         rerender(panel("speaker_1: Hi\nspeaker_0: Hello"));
-        expect(speakerTagMounts).toEqual(["riffado", "riffado"]);
+        expect(speakerTagMounts).toEqual(["riffado"]);
     });
 
     it("hides the summary source switch for an uploaded recording", () => {

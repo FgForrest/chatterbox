@@ -32,6 +32,10 @@ import { ReceivedItemBanner } from "@/components/sharing/person-sharing";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { hasAudio } from "@/lib/recordings/audio-availability";
+import {
+    preferredLearnTranscript,
+    preferredTranscript,
+} from "@/lib/transcription/preferred-source";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import { cn } from "@/lib/utils";
 import type {
@@ -52,6 +56,7 @@ interface TranscriptionData {
 
 interface Props {
     operationQueue?: ItemOperationQueue;
+    contentRevision?: number;
     currentRecording: Recording | null;
     userId?: string;
     itemLinkQuery?: string;
@@ -82,6 +87,7 @@ interface Props {
     backLabel?: string;
     /** When true, the pane is hidden (mobile list view active). */
     hiddenOnMobile: boolean;
+    detailVisible?: boolean;
     initialPlaybackSpeed: number | undefined;
     initialVolume: number | undefined;
     initialAutoPlayNext: boolean | undefined;
@@ -100,11 +106,6 @@ interface Props {
         fromFolderId: string,
         toFolderId: string,
     ) => Promise<void>;
-    /**
-     * Bumped when someone else changes the Organization view of the current
-     * recording, so its panels reload what they show.
-     */
-    contentRevision?: number;
 }
 
 /**
@@ -130,6 +131,11 @@ export function WorkstationDetailPane(props: Props) {
             isOwn={isOwn}
             enabled={isOwn || recording.view === "org"}
             initialShared={props.recordingShared}
+            transcripts={props.transcripts ?? []}
+            titleVersion={recording.titleVersion}
+            renderedHasSummary={recording.hasSummary}
+            refreshDashboard={props.onTranscriptStale}
+            detailVisible={props.detailVisible ?? !props.hiddenOnMobile}
         >
             <WorkstationDetailContent {...props} />
         </ItemDetailProvider>
@@ -168,7 +174,7 @@ function WorkstationDetailContent({
     onAddToFolder,
     onRemoveFromFolder,
     onMoveBetweenFolders,
-    contentRevision = 0,
+    contentRevision,
 }: Props) {
     const i18n = useExtracted();
     const [knowledgeItem, setKnowledgeItem] = useState<string | null>(null);
@@ -207,6 +213,21 @@ function WorkstationDetailContent({
         playedLink.current = link;
         playback.play(startMs);
     }, [currentRecording, itemLinkQuery, playback]);
+    let workflowTranscripts: readonly { source: string }[];
+    if (transcripts) {
+        workflowTranscripts = transcripts;
+    } else if (currentTranscription?.text) {
+        workflowTranscripts = [
+            { source: currentTranscription.source ?? "riffado" },
+        ];
+    } else {
+        workflowTranscripts = [];
+    }
+    const workflowTranscript = preferredTranscript(workflowTranscripts)?.source;
+    const workflowLearnTranscript = preferredLearnTranscript(
+        workflowTranscripts,
+        processing?.phases.learn?.inputs?.contentSourceId,
+    )?.source;
     const hasTranscript =
         currentRecording?.hasTranscript ??
         Boolean(
@@ -399,16 +420,19 @@ function WorkstationDetailContent({
                                         onLearn={() =>
                                             openWidget(
                                                 `recording-learn-review-${currentRecording.id}`,
+                                                workflowLearnTranscript,
                                             )
                                         }
                                         onSummary={() =>
                                             openWidget(
                                                 `recording-summary-${currentRecording.id}`,
+                                                workflowTranscript,
                                             )
                                         }
                                         onReviewLearn={() =>
                                             openWidget(
                                                 `recording-learn-review-${currentRecording.id}`,
+                                                workflowLearnTranscript,
                                             )
                                         }
                                         onReviewTasks={() =>
@@ -480,7 +504,7 @@ function WorkstationDetailContent({
                                             {!currentRecording.audioReaped ||
                                             hasTranscript ? (
                                                 <TranscriptionPanel
-                                                    key={`${currentRecording.id}:${contentRevision}:${currentRecording.audioReaped ? 1 : 0}:${hasTranscript ? 1 : 0}:${currentRecording.hasSummary ? 1 : 0}`}
+                                                    key={currentRecording.id}
                                                     recording={currentRecording}
                                                     itemLinkQuery={
                                                         itemLinkQuery

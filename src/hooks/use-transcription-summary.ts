@@ -132,6 +132,7 @@ interface UseTranscriptionSummaryOptions {
     /** `org` reads and writes the Organization view of a shared recording. */
     view?: RecordingView;
     version?: string;
+    transcriptPending?: boolean;
     /** Profile channel of the item being summarized. */
     profileChannel?: ProfileChannel;
 }
@@ -145,6 +146,7 @@ export function useTranscriptionSummary({
     transcriptionText,
     view,
     version,
+    transcriptPending,
     profileChannel = "audio",
 }: UseTranscriptionSummaryOptions) {
     const summaryUrl = useCallback(
@@ -237,6 +239,7 @@ export function useTranscriptionSummary({
         {
             cachedData: readUrl ? summaryCache.current.get(readUrl) : undefined,
             onLoad: handleSummaryRead,
+            paused: transcriptPending,
         },
     );
     const setSummary = useCallback(

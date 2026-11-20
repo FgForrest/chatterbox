@@ -11,3 +11,17 @@ export function preferredTranscript<T extends { source: string }>(
     }
     return undefined;
 }
+
+/** Use the Learn step's source when present, otherwise prefer a supported transcript. */
+export function preferredLearnTranscript<T extends { source: string }>(
+    rows: readonly T[],
+    stepSource?: string,
+): T | undefined {
+    const supported = rows.filter(
+        ({ source }) => source === "riffado" || source === "plaud",
+    );
+    return (
+        supported.find(({ source }) => source === stepSource) ??
+        preferredTranscript(supported)
+    );
+}

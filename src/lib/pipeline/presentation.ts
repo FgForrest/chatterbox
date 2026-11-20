@@ -3,8 +3,11 @@ import { and, count, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     itemTaskRowsVersion,
+    itemTitleVersion,
     loadTranscriptOverlayVersions,
     summaryRemarksVersion,
+    transcriptPartVersion,
+    transcriptTopicsVersion,
 } from "@/db/queries/item-content-versions";
 import { loadPipelineProcessingJobs } from "@/db/queries/pipeline-processing";
 import {
@@ -435,7 +438,7 @@ export async function loadPrivateItemProcessing(
             kind: chatterItems.kind,
             shared: sql<boolean>`${shared}`,
             summaryDueAt: chatterItems.summaryDueAt,
-            title: sql<string>`md5(${chatterItems.title}::text)`,
+            title: itemTitleVersion(),
             titleEditedAt: chatterItems.titleEditedAt,
             confirmedLanguage: recordings.confirmedLanguage,
             taskRowsVersion: itemTaskRowsVersion(isOwner, contentScope),
@@ -701,9 +704,7 @@ export async function loadPrivateItemProcessing(
                       id: transcriptions.id,
                       revision: transcriptions.revision,
                       source: transcriptions.source,
-                      topics: sql<
-                          string | null
-                      >`md5(${transcriptions.topics}::text)`,
+                      topics: transcriptTopicsVersion(),
                   })
                   .from(transcriptions)
                   .where(
@@ -1031,7 +1032,11 @@ export async function loadPrivateItemProcessing(
         a.source.localeCompare(b.source),
     )) {
         const { source, id, revision, topics } = transcript;
-        transcriptVersions[source] = version(id, revision, topics);
+        transcriptVersions[source] = transcriptPartVersion(
+            id,
+            revision,
+            topics,
+        );
         const corrections = overlays.corrections.find((row) => row.id === id);
         correctionVersions[source] = version(
             id,

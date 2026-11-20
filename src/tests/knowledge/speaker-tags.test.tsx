@@ -397,6 +397,44 @@ describe("SpeakerTags", () => {
             });
         });
 
+        it.each([
+            { ...VERSION, revision: VERSION.revision + 1 },
+            { transcriptionId: "replacement", revision: VERSION.revision },
+        ])("closes a picker when the displayed transcript changes to %j", async (next) => {
+            const fetchMock = stubFetch({});
+            const onAttributionsChange = vi.fn();
+            const { rerender } = renderTags(onAttributionsChange, undefined, {
+                shownVersion: VERSION,
+            });
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Speaker 0" }),
+            );
+            expect(await screen.findByRole("combobox")).toBeTruthy();
+
+            rerender(
+                <SpeakerTagsHarness
+                    onAttributionsChange={onAttributionsChange}
+                    shownVersion={next}
+                />,
+            );
+            expect(screen.queryByRole("combobox")).toBeNull();
+            expect(
+                fetchMock.mock.calls.filter(
+                    ([, init]) => init?.method === "PUT",
+                ),
+            ).toEqual([]);
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Speaker 0" }),
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Unknown speaker" }),
+            );
+            const put = fetchMock.mock.calls.find(
+                ([, init]) => init?.method === "PUT",
+            );
+            expect(JSON.parse(String(put?.[1]?.body))).toMatchObject(next);
+        });
+
         it("gets no names from a newer transcript, and is reloaded instead", async () => {
             stubFetch({
                 readVersion: { ...VERSION, revision: VERSION.revision + 1 },
@@ -421,8 +459,8 @@ describe("SpeakerTags", () => {
             expect(screen.queryByRole("link", { name: "Jan" })).toBeNull();
         });
 
-        it("is reloaded when a change finds it replaced", async () => {
-            stubFetch({ conflict: true });
+        it("sends the picker’s original revision and reloads on a stale choice", async () => {
+            const fetchMock = stubFetch({ conflict: true });
             const onStale = vi.fn();
             renderTags(vi.fn(), undefined, { shownVersion: VERSION, onStale });
 
@@ -433,7 +471,13 @@ describe("SpeakerTags", () => {
                 await screen.findByRole("button", { name: "Unknown speaker" }),
             );
 
-            await waitFor(() => expect(onStale).toHaveBeenCalled());
+            await waitFor(() =>
+                expect(onStale).toHaveBeenCalledWith("transcript"),
+            );
+            const put = fetchMock.mock.calls.find(
+                ([, init]) => init?.method === "PUT",
+            );
+            expect(JSON.parse(String(put?.[1]?.body))).toMatchObject(VERSION);
         });
     });
 
@@ -693,7 +737,12 @@ describe("SpeakerTags", () => {
         const { rerender } = renderTags(initialChange);
         await screen.findByRole("button", { name: "Jan" });
 
-        rerender(<SpeakerTagsHarness onAttributionsChange={refreshedChange} />);
+        rerender(
+            <SpeakerTagsHarness
+                onAttributionsChange={refreshedChange}
+                view="org"
+            />,
+        );
 
         await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
         expect(screen.getByRole("button", { name: "Jan" })).toBeDefined();
