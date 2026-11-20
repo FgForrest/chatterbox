@@ -21,6 +21,7 @@ import {
 import { toast } from "sonner";
 import { MarkdownActions } from "@/components/dashboard/markdown-actions";
 import { HelpLink } from "@/components/help/help-button";
+import { useItemPartVersion } from "@/components/items/item-detail-store";
 import { Markdown } from "@/components/markdown";
 import { RecordingAgendaContext } from "@/components/meetings/recording-agenda-context";
 import { ProvenanceLine } from "@/components/pipeline/provenance-line";
@@ -97,6 +98,7 @@ interface SummaryWidgetProps {
     taskWidgetId: string;
     learnHold?: SummaryLearnHold;
     refreshKey?: string | number;
+    transcriptPending?: boolean;
     onResummarizeReady?: (
         action: { run: () => void; disabled: boolean } | null,
     ) => void;
@@ -125,6 +127,7 @@ export function SummaryWidget({
     taskWidgetId,
     learnHold = null,
     refreshKey = 0,
+    transcriptPending,
     onResummarizeReady,
 }: SummaryWidgetProps) {
     const i18n = useExtracted();
@@ -141,10 +144,12 @@ export function SummaryWidget({
     const [confirmRun, setConfirmRun] = useState<
         (SummaryVersion & { profileId?: string }) | null
     >(null);
+    const version = useItemPartVersion("summaries", source);
     const {
         summaryData,
         agendaPresence,
         summaryLoaded = true,
+        summaryStatus: summaryReadStatus,
         isSummarizing,
         summaryProgress,
         summaryElapsedMs,
@@ -162,6 +167,8 @@ export function SummaryWidget({
         summarySource: source,
         transcriptionText: contentText,
         view,
+        version,
+        transcriptPending,
         profileChannel: kind,
     });
     const contextKey = `${itemId}:${source}:${view ?? "private"}`;
@@ -188,19 +195,24 @@ export function SummaryWidget({
     const hasSummary = Boolean(summaryData?.summary);
     const working = isSummarizing || (pipelineWorking && !hasSummary);
     const showingProgress = working && !hasSummary;
-    const summaryOpen = workflowVisible
-        ? !(widget?.collapsed ?? false) || workflowExpanded
-        : summaryExpanded;
-    const summaryLine = isWorkflowWidgetLineVisible({
-        workflowVisible,
-        collapsed: widget?.collapsed ?? false,
-        expanded: workflowExpanded,
-        working: showingProgress,
-        frame: widget?.frame ?? "inline",
-    });
+    const summaryReadFailed = summaryReadStatus === "error";
+    const summaryOpen =
+        summaryReadFailed ||
+        (workflowVisible
+            ? !(widget?.collapsed ?? false) || workflowExpanded
+            : summaryExpanded);
+    const summaryLine =
+        !summaryReadFailed &&
+        isWorkflowWidgetLineVisible({
+            workflowVisible,
+            collapsed: widget?.collapsed ?? false,
+            expanded: workflowExpanded,
+            working: showingProgress,
+            frame: widget?.frame ?? "inline",
+        });
     const tone = widget?.tone ?? "quiet";
     const requestSummary = (profileId?: string) => {
-        if (editing) return;
+        if (editing || !summaryLoaded) return;
         if (summaryData?.editedAt)
             setConfirmRun({
                 profileId,
@@ -360,7 +372,7 @@ export function SummaryWidget({
         }
         wasSummarizing.current = isSummarizing;
     }, [isSummarizing, recheckSummary]);
-    const taskState = useRecordingTasks(itemId, `${source}:${summariesMade}`);
+    const taskState = useRecordingTasks(itemId, summariesMade);
 
     const selectedProfileName = summaryProfileOptions.find(
         (profile) => profile.id === summaryProfileId,
@@ -430,45 +442,48 @@ export function SummaryWidget({
 
     const headerActions = (
         <div className="flex shrink-0 items-center justify-end gap-1">
-            {source === "riffado" && canChange && !editing && (
-                <ActionTooltip
-                    label={
-                        working
-                            ? i18n("Generating…")
-                            : hasSummary
-                              ? i18n("Re-summarize")
-                              : i18n("Summarize")
-                    }
-                >
-                    <Button
-                        aria-label={
+            {source === "riffado" &&
+                canChange &&
+                !editing &&
+                (summaryLoaded || hasSummary || working) && (
+                    <ActionTooltip
+                        label={
                             working
                                 ? i18n("Generating…")
                                 : hasSummary
                                   ? i18n("Re-summarize")
                                   : i18n("Summarize")
                         }
-                        onClick={runSummary}
-                        size="icon-sm"
-                        variant="ghost"
-                        disabled={
-                            working ||
-                            !summaryLoaded ||
-                            summaryProfilesLoading ||
-                            !summaryProfileId ||
-                            !canSummarize
-                        }
                     >
-                        {working ? (
-                            <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
-                        ) : hasSummary ? (
-                            <RefreshCw className="size-4" />
-                        ) : (
-                            <Sparkles className="size-4" />
-                        )}
-                    </Button>
-                </ActionTooltip>
-            )}
+                        <Button
+                            aria-label={
+                                working
+                                    ? i18n("Generating…")
+                                    : hasSummary
+                                      ? i18n("Re-summarize")
+                                      : i18n("Summarize")
+                            }
+                            onClick={runSummary}
+                            size="icon-sm"
+                            variant="ghost"
+                            disabled={
+                                working ||
+                                !summaryLoaded ||
+                                summaryProfilesLoading ||
+                                !summaryProfileId ||
+                                !canSummarize
+                            }
+                        >
+                            {working ? (
+                                <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+                            ) : hasSummary ? (
+                                <RefreshCw className="size-4" />
+                            ) : (
+                                <Sparkles className="size-4" />
+                            )}
+                        </Button>
+                    </ActionTooltip>
+                )}
             {canCorrect && (
                 <>
                     <ActionTooltip label={i18n("Edit summary")}>
@@ -479,7 +494,7 @@ export function SummaryWidget({
                             size="icon-sm"
                             variant="ghost"
                             aria-label={i18n("Edit summary")}
-                            disabled={working}
+                            disabled={working || !summaryLoaded}
                             onClick={() =>
                                 setEditing({
                                     summaryId: summaryData?.summaryId ?? "",
@@ -511,7 +526,7 @@ export function SummaryWidget({
                                 size="icon-sm"
                                 variant="ghost"
                                 aria-label={i18n("Summary remarks")}
-                                disabled={working}
+                                disabled={working || !summaryLoaded}
                                 onClick={() => setRemarksOpen(true)}
                             >
                                 <MessageSquareText className="size-4" />
@@ -537,6 +552,7 @@ export function SummaryWidget({
                     kind="summary"
                     source={source}
                     view={view}
+                    disabled={!summaryLoaded}
                 />
             )}
         </div>
@@ -559,6 +575,7 @@ export function SummaryWidget({
                 key={contextKey}
                 summary={editing.summary}
                 keyPoints={editing.keyPoints}
+                disabled={!summaryLoaded}
                 onCancel={closeEditor}
                 onSave={(text, points) =>
                     saveSummary(
@@ -572,8 +589,8 @@ export function SummaryWidget({
                 }
             />
         );
-    } else if (!summaryLoaded) {
-        summaryContent = (
+    } else if (!hasSummary && !summaryLoaded && !showingProgress) {
+        summaryContent = summaryReadFailed ? null : (
             <p className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
                 {i18n("Loading…")}
@@ -866,7 +883,7 @@ export function SummaryWidget({
                 (canCorrect ? (
                     <button
                         type="button"
-                        disabled={working}
+                        disabled={working || !summaryLoaded}
                         className="inline-flex items-center gap-1 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                         onClick={() => setRemarksOpen(true)}
                     >
@@ -955,6 +972,9 @@ export function SummaryWidget({
                                                                   <button
                                                                       type="button"
                                                                       className="font-semibold underline decoration-current/40 underline-offset-2 hover:decoration-current focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                                                                      disabled={
+                                                                          !summaryLoaded
+                                                                      }
                                                                       onClick={
                                                                           runSummary
                                                                       }
@@ -981,6 +1001,9 @@ export function SummaryWidget({
                                                                   <button
                                                                       type="button"
                                                                       className="font-semibold underline decoration-current/40 underline-offset-2 hover:decoration-current focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                                                                      disabled={
+                                                                          !summaryLoaded
+                                                                      }
                                                                       onClick={
                                                                           runSummary
                                                                       }
@@ -1006,6 +1029,24 @@ export function SummaryWidget({
                 }
             >
                 <div className="space-y-4">
+                    {summaryReadFailed && (
+                        <div className="flex flex-wrap items-center gap-2">
+                            <output className="text-sm text-muted-foreground">
+                                {hasSummary
+                                    ? i18n(
+                                          "The summary could not be refreshed.",
+                                      )
+                                    : i18n("The summary could not be loaded.")}
+                            </output>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={recheckSummary}
+                            >
+                                {i18n("Try again")}
+                            </Button>
+                        </div>
+                    )}
                     {summaryContent}
                     {!editing && (
                         <RecordingTasks
@@ -1045,6 +1086,7 @@ export function SummaryWidget({
                             <Button
                                 type="button"
                                 variant="link"
+                                disabled={!summaryLoaded}
                                 onClick={() => {
                                     setConfirmRun(null);
                                     setRemarksOpen(true);
@@ -1063,6 +1105,7 @@ export function SummaryWidget({
                             </Button>
                             <Button
                                 type="button"
+                                disabled={!summaryLoaded}
                                 onClick={() => {
                                     const confirmed = confirmRun;
                                     setConfirmRun(null);
@@ -1089,6 +1132,7 @@ export function SummaryWidget({
                     itemId={itemId}
                     view={view}
                     profileId={summaryProfileId}
+                    disabled={!summaryLoaded}
                     onClose={() => setRemarksOpen(false)}
                     onRun={() =>
                         void handleSummarize(undefined, {

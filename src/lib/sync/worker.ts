@@ -2,6 +2,7 @@ import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { plaudConnections, users } from "@/db/schema";
 import { env } from "@/lib/env";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { captureServerException } from "@/lib/posthog-server";
 import { syncRecordingsForUser } from "@/lib/sync/sync-recordings";
 
@@ -70,17 +71,35 @@ async function tick(): Promise<void> {
         let errors = 0;
         for (const userId of userIds) {
             try {
-                await syncRecordingsForUser(userId, "background");
-                synced++;
+                const result = await syncRecordingsForUser(
+                    userId,
+                    "background",
+                );
+                if (result.skipped) continue;
+                if (result.errors.length > 0 || result.needsReconnect) {
+                    errors++;
+                    const code = result.errorCode
+                        ? ` code=${result.errorCode}`
+                        : "";
+                    console.error(
+                        `[background-sync] user=${userId} errors=${result.errors.length} needsReconnect=${Boolean(result.needsReconnect)} skipped=false${code}`,
+                    );
+                } else {
+                    synced++;
+                }
             } catch (error) {
                 errors++;
+                const code =
+                    error instanceof AppError
+                        ? error.code
+                        : ErrorCode.INTERNAL_ERROR;
                 console.error(
-                    `[background-sync] failed for user ${userId}:`,
-                    error,
+                    `[background-sync] user=${userId} errors=1 needsReconnect=false skipped=false code=${code}`,
                 );
-                captureServerException(error, {
+                captureServerException(new Error("Background sync failed"), {
                     source: "worker:sync",
                     distinctId: userId,
+                    code,
                 });
             }
         }
@@ -89,8 +108,13 @@ async function tick(): Promise<void> {
             console.log(`[background-sync] synced=${synced} errors=${errors}`);
         }
     } catch (error) {
-        console.error("[background-sync] tick failed:", error);
-        captureServerException(error, { source: "worker:sync" });
+        const code =
+            error instanceof AppError ? error.code : ErrorCode.INTERNAL_ERROR;
+        console.error("[background-sync] tick failed", { code });
+        captureServerException(new Error("Background sync tick failed"), {
+            source: "worker:sync",
+            code,
+        });
     } finally {
         running = false;
     }

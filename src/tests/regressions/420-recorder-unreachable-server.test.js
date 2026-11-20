@@ -75,11 +75,24 @@ const h = vi.hoisted(() => {
         tabs: {
             get: async (id) => tabs.get(id),
             query: async () => [...tabs.values()],
-            sendMessage: vi.fn(async () => ({ visible: true })),
+            sendMessage: vi.fn(async (_id, payload) => ({
+                visible: true,
+                consentShown:
+                    payload.view === "prompt" &&
+                    !payload.disconnected &&
+                    !payload.agendaPanel &&
+                    !payload.policyRequired &&
+                    Boolean(payload.shortcut),
+            })),
             onUpdated: event("tab-updated"),
             onRemoved: event("tab-removed"),
         },
-        commands: { onCommand: event("command"), getAll: async () => [] },
+        commands: {
+            onCommand: event("command"),
+            getAll: async () => [
+                { name: "toggle-recording", shortcut: "Alt+Shift+R" },
+            ],
+        },
         alarms: {
             create: vi.fn(async (name, value) => alarms.set(name, value)),
             get: async (name) => alarms.get(name),
@@ -1325,7 +1338,10 @@ describe("recorder worker outage recovery", () => {
             startConnectionError: true,
             error: null,
         });
-        expect(h.session.armedTabs[tab.id].promptVisible).toBe(true);
+        expect(h.session.armedTabs[tab.id]).toMatchObject({
+            promptVisible: true,
+            consentShown: false,
+        });
         expect(h.session.serverConnection.state).toBe("unreachable");
         fetchMock.mockImplementation(async (url) =>
             url.endsWith("/config")
@@ -1336,6 +1352,9 @@ describe("recorder worker outage recovery", () => {
                   }),
         );
         await send("recorder-connection-retry");
+        await vi.waitFor(() =>
+            expect(h.session.armedTabs[tab.id].consentShown).toBe(true),
+        );
         await h.listeners.command("toggle-recording");
         expect(h.session.recordingState).toMatchObject({
             state: "recording",

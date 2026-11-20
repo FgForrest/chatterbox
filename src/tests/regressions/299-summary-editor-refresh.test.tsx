@@ -12,8 +12,10 @@ import {
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
+import { ItemDetailProvider } from "@/components/items/item-detail-store";
 import { SummaryWidget } from "@/components/summary/summary-widget";
 import type { SummaryData } from "@/hooks/use-transcription-summary";
+import { processingFixture } from "@/tests/pipeline/processing-fixture";
 
 vi.mock("next-intl", () => ({
     useLocale: () => "en",
@@ -25,7 +27,16 @@ vi.mock("@/components/product-name-provider", () => ({
     useProductName: () => "Chatterbox",
 }));
 vi.mock("@/components/dashboard/markdown-actions", () => ({
-    MarkdownActions: () => null,
+    MarkdownActions: ({ disabled }: { disabled?: boolean }) => (
+        <>
+            <button type="button" disabled={disabled}>
+                Copy Markdown
+            </button>
+            <button type="button" disabled={disabled}>
+                Download Markdown
+            </button>
+        </>
+    ),
 }));
 vi.mock("@/components/dashboard/recording-language", () => ({
     RecordingLanguage: () => null,
@@ -144,10 +155,171 @@ const widget = (kind: "audio" | "mail", refreshKey: number) => (
     />
 );
 
+function versionedWidget(kind: "audio" | "mail", version: string) {
+    const projection = {
+        ...processingFixture({
+            itemId: "item",
+            kind,
+            legacy: false,
+            manualOnly: false,
+            phases: {},
+            profile: null,
+            placements: [],
+            intents: [],
+            outputs: { transcript: true, summary: true, learn: false },
+            processAgain: false,
+            processAgainReason: null,
+            learnFindingsWaiting: 0,
+            taskReviewWaiting: 0,
+            jobs: { transcription: null, summary: null },
+            failures: [],
+        }),
+        versions: {
+            item: version,
+            summaries: { riffado: version },
+            transcripts: {},
+            learn: {},
+            speakers: {},
+            corrections: {},
+            folders: "",
+            tasks: "",
+            title: "",
+        },
+    };
+    return (
+        <ItemDetailProvider
+            itemId="item"
+            kind={kind}
+            enabled={false}
+            initialData={projection}
+        >
+            {widget(kind, 0)}
+        </ItemDetailProvider>
+    );
+}
+
 describe.each([
     "audio",
     "mail",
 ] as const)("%s real summary hook and widget", (kind) => {
+    it.each([
+        "remarks",
+        "editor",
+    ] as const)("keeps the %s draft usable during a pending version refresh", async (draftKind) => {
+        const view = render(versionedWidget(kind, "1"));
+        const edit = await screen.findByRole<HTMLButtonElement>("button", {
+            name: "Edit summary",
+        });
+        const rerun = screen.getByRole<HTMLButtonElement>("button", {
+            name: "Re-summarize",
+        });
+        const copy = screen.getByRole<HTMLButtonElement>("button", {
+            name: "Copy Markdown",
+        });
+        const download = screen.getByRole<HTMLButtonElement>("button", {
+            name: "Download Markdown",
+        });
+        const isRemark = draftKind === "remarks";
+        fireEvent.click(
+            isRemark
+                ? screen.getByRole("button", { name: "Summary remarks" })
+                : edit,
+        );
+        const field = await screen.findByLabelText<HTMLTextAreaElement>(
+            isRemark ? "New remark" : /Summary text/,
+        );
+        const dialog = isRemark ? screen.getByRole("dialog") : null;
+        const save = screen.getByRole<HTMLButtonElement>("button", {
+            name: isRemark ? "Correct summary" : "Save",
+        });
+        fireEvent.change(field, { target: { value: "Keep this draft" } });
+        expect(save.disabled).toBe(false);
+
+        const pending = Promise.withResolvers<Response>();
+        const original = requests.getMockImplementation();
+        requests.mockImplementation((url, init) =>
+            String(url).includes("/summary?") && !init?.method
+                ? pending.promise
+                : (original?.(url, init) ??
+                  Promise.resolve(new Response(null, { status: 404 }))),
+        );
+        requests.mockClear();
+        view.rerender(versionedWidget(kind, "2"));
+        await waitFor(() =>
+            expect(
+                requests.mock.calls.some(([url]) =>
+                    String(url).includes("/summary?"),
+                ),
+            ).toBe(true),
+        );
+
+        expect(field.isConnected).toBe(true);
+        expect(field.value).toBe("Keep this draft");
+        expect(field.readOnly).toBe(false);
+        expect(save.disabled).toBe(false);
+        if (dialog) {
+            expect(screen.getByRole("dialog")).toBe(dialog);
+            for (const action of [edit, rerun, copy, download]) {
+                expect(action.isConnected).toBe(true);
+                expect(action.disabled).toBe(false);
+            }
+        }
+        await act(async () =>
+            pending.resolve(Response.json({ ...summary, revision: 1 })),
+        );
+        expect(field.isConnected).toBe(true);
+        expect(field.value).toBe("Keep this draft");
+    });
+
+    it.each([
+        "remarks",
+        "editor",
+    ] as const)("keeps the %s draft across a failed version refresh and recovery", async (draftKind) => {
+        const view = render(versionedWidget(kind, "1"));
+        const isRemark = draftKind === "remarks";
+        fireEvent.click(
+            await screen.findByRole("button", {
+                name: isRemark ? "Summary remarks" : "Edit summary",
+            }),
+        );
+        const field = await screen.findByLabelText<HTMLTextAreaElement>(
+            isRemark ? "New remark" : /Summary text/,
+        );
+        const dialog = isRemark ? screen.getByRole("dialog") : null;
+        const save = screen.getByRole<HTMLButtonElement>("button", {
+            name: isRemark ? "Correct summary" : "Save",
+        });
+        fireEvent.change(field, { target: { value: "Keep this draft" } });
+        expect(save.disabled).toBe(false);
+
+        const original = requests.getMockImplementation();
+        if (!original) throw new Error("missing fetch fixture");
+        requests.mockImplementation((url, init) =>
+            String(url).includes("/summary?") && !init?.method
+                ? Promise.resolve(new Response(null, { status: 500 }))
+                : original(url, init),
+        );
+        view.rerender(versionedWidget(kind, "2"));
+        await screen.findByText("The summary could not be refreshed.");
+
+        expect(field.isConnected).toBe(true);
+        expect(field.value).toBe("Keep this draft");
+        expect(field.disabled).toBe(false);
+        expect(field.readOnly).toBe(!isRemark);
+        expect(save.disabled).toBe(true);
+        if (dialog) expect(screen.getByRole("dialog")).toBe(dialog);
+
+        requests.mockImplementation(original);
+        summary = { ...summary, revision: 1 };
+        view.rerender(versionedWidget(kind, "3"));
+        await waitFor(() => expect(save.disabled).toBe(false));
+
+        expect(field.isConnected).toBe(true);
+        expect(field.value).toBe("Keep this draft");
+        expect(field.readOnly).toBe(false);
+        if (dialog) expect(screen.getByRole("dialog")).toBe(dialog);
+    });
+
     it.each([
         "profile-unavailable",
         "provider-unavailable",

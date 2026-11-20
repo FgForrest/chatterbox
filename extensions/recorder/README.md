@@ -14,15 +14,19 @@ system audio to extensions.
 
 ## How it works
 
-With **In-meeting prompt** turned on, an audible meeting shows a banner at the
-top of the meeting page. Read the participant notice, then click the recorder
-icon to record the tab directly. The arrow points toward the toolbar, where
-the pinned icon blinks briefly and shows **REC?**. If the icon is unpinned,
-click **Chatterbox** in the puzzle-piece menu and use the pin for quicker
-access next time. The banner shows your keyboard shortcut when assigned.
-On agenda tabs the icon opens the agenda and recording controls. Use the
-panel's consent button to start recording. **Another tab or window…** opens
-Chrome's picker.
+In 0.9.11, **In-meeting prompt** shows a notice when a supported meeting
+becomes audible. Read the participant reminder, click **Chatterbox** in Chrome's
+toolbar, then choose **Consent confirmed · Record this tab** in the popup. The
+pinned icon blinks for up to 20 seconds, and the **REC?** badge remains afterwards.
+If the icon is unpinned, open Chrome's puzzle-piece menu and click **Chatterbox**.
+Use the pin beside its name to keep it in the toolbar. An assigned shortcut starts
+capture directly. Close the notice with **×** to dismiss it for this meeting.
+When Chatterbox is unreachable, the notice shows the connection failure and the
+start instructions return on recovery.
+
+On agenda tabs the icon opens the agenda panel with the same recording controls.
+Unconfirmed Auto policy opens Options. Once the policy is confirmed, Auto keeps
+its direct toolbar start and stop action.
 
 1. In the popup, click
    **Consent confirmed · Record this tab**. This records the current tab directly,
@@ -46,12 +50,14 @@ Chrome's picker.
    You can download a playable copy from that authenticated recording page.
 
 Choose **Target folder in Chatterbox** before starting, or change it while
-recording in the popup, recorder window, or in-page recording pill. **File later**
+recording in the popup, recorder window, or in-page recording pill. The pill has
+elapsed time, your target folder, and Stop. On the tab that started the
+recording, its meters show the microphone and selected source of the recording
+in progress. Use its red dot to collapse or expand it. **File later**
 leaves it unfiled. The selected folder survives interrupted uploads and is
 remembered for the next recording. Older servers show the start folder read-only.
-The pill also shows elapsed time and **Stop**, and its red dot collapses or
-expands the controls. When capture stops, it briefly confirms that upload
-continues in the extension. If a changed folder is unavailable when saving, the
+When capture stops, the pill briefly confirms that upload continues in the
+extension. If a changed folder is unavailable when saving, the
 server uses the start folder instead.
 
 On supporting servers, an accessible restricted Organization folder shows an olive
@@ -117,8 +123,7 @@ the existing system notification appears. Its **Consent confirmed · Record**
 button uses Chrome's audio picker (with the microphone check first if needed).
 Choose the meeting tab and enable **Share tab audio**. Clicking the notification
 body opens Options at **In-meeting prompt** when meeting-site access is missing;
-if access exists but the banner cannot mount, it focuses the meeting tab. **Not now** or the banner's close
-button dismisses the prompt for that meeting.
+if access exists but the notice cannot mount, it focuses the meeting tab. **Not now** dismisses the system notification for that meeting.
 
 **In-meeting prompt** is optional. Enable it from the one-time popup card,
 Options, or the ready screen after the same three setup steps. Chrome requests

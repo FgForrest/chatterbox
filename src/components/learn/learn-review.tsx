@@ -14,6 +14,8 @@ export function LearnReview({
     view,
     source,
     turns,
+    transcriptIdentity,
+    transcriptPending,
     durationMs,
     confirmedAttributions,
     unknownLabels,
@@ -32,6 +34,8 @@ export function LearnReview({
     view?: RecordingView;
     source: "plaud" | "riffado";
     turns: readonly TranscriptTurn[];
+    transcriptIdentity?: string;
+    transcriptPending?: boolean;
     durationMs?: number | null;
     confirmedAttributions?: SpeakerAttributions;
     unknownLabels?: ReadonlySet<string>;
@@ -53,6 +57,8 @@ export function LearnReview({
             view={view}
             source={source}
             turns={turns}
+            transcriptIdentity={transcriptIdentity}
+            transcriptPending={transcriptPending}
             durationMs={durationMs}
             confirmedAttributions={confirmedAttributions}
             unknownLabels={unknownLabels}

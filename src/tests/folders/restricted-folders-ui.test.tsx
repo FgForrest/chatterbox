@@ -780,10 +780,9 @@ it("a restricted item header shows the path and only the authorized reader proje
     );
 });
 function Filing() {
-    const confirm = useConfirmOrganizationFiling(
-        [locked, openFolder],
-        [assignment],
-    );
+    const confirm = useConfirmOrganizationFiling([locked, openFolder], () => [
+        assignment.folderId,
+    ]);
     const [keep, setKeep] = useState(false);
     return (
         <>

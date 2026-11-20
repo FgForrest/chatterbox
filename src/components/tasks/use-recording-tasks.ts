@@ -3,6 +3,7 @@
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useItemPartVersion } from "@/components/items/item-detail-store";
 import { announceLearnReviewsChanged } from "@/components/learn/review-events";
 import {
     acceptTaskReview,
@@ -19,6 +20,7 @@ import {
     undoTaskMatch,
 } from "@/components/tasks/task-api";
 import { useDeferredReviewCommit } from "@/hooks/use-deferred-review-commit";
+import { useItemPartReadRevision } from "@/hooks/use-item-part-fetch";
 import type {
     RecordingTasks,
     TaskChange,
@@ -96,7 +98,38 @@ export function useRecordingTasks(
 ): RecordingTasksState {
     const i18n = useExtracted();
     const deferred = useDeferredReviewCommit();
-    const [data, setData] = useState<RecordingTasks | null>(null);
+    const version = useItemPartVersion("tasks");
+    const revision = useItemPartReadRevision(
+        null,
+        recordingId,
+        version,
+        reloadKey,
+    );
+    const [loaded, setLoaded] = useState<{
+        recordingId: string;
+        data: RecordingTasks | null;
+    }>();
+    const data = loaded?.recordingId === recordingId ? loaded.data : null;
+    const currentId = useRef(recordingId);
+    currentId.current = recordingId;
+    const setData = useCallback(
+        (
+            change:
+                | RecordingTasks
+                | null
+                | ((previous: RecordingTasks | null) => RecordingTasks | null),
+        ) => {
+            if (currentId.current !== recordingId) return;
+            setLoaded((current) => {
+                if (typeof change !== "function")
+                    return { recordingId, data: change };
+                const previous =
+                    current?.recordingId === recordingId ? current.data : null;
+                return { recordingId, data: change(previous) };
+            });
+        },
+        [recordingId],
+    );
     const [failed, setFailed] = useState(false);
     const [accepting, setAccepting] = useState(false);
     const dataRef = useRef<RecordingTasks | null>(null);
@@ -105,32 +138,57 @@ export function useRecordingTasks(
     const versions = useRef(new Map<string, number>());
     const pending = useRef(new Map<string, Promise<unknown>>());
 
-    const reload = useCallback(async () => {
-        try {
-            const loaded = await fetchRecordingTasks(recordingId);
-            versions.current = new Map([
-                ...[...loaded.tasks, ...loaded.proposals].map(
-                    (row) => [row.id, row.version] as const,
-                ),
-                ...loaded.updates.map(
-                    (row) => [`update:${row.id}`, row.version] as const,
-                ),
-                ...loaded.matches.map(
-                    (row) => [`match:${row.id}`, row.version] as const,
-                ),
-            ]);
-            setData(loaded);
-            setFailed(false);
-        } catch {
-            setFailed(true);
-        }
-    }, [recordingId]);
+    const latestRead = useRef(0);
+    const writeEpoch = useRef(0);
+    const reload = useCallback(
+        async (signal?: AbortSignal) => {
+            const read = ++latestRead.current;
+            const current = () =>
+                !signal?.aborted &&
+                latestRead.current === read &&
+                currentId.current === recordingId;
+            try {
+                while (current()) {
+                    if (signal && pending.current.size > 0) {
+                        await Promise.allSettled([...pending.current.values()]);
+                        continue;
+                    }
+                    const epoch = writeEpoch.current;
+                    const loaded = await fetchRecordingTasks(
+                        recordingId,
+                        signal,
+                    );
+                    if (!current()) return;
+                    if (signal && epoch !== writeEpoch.current) continue;
+                    const rows = [
+                        ...[...loaded.tasks, ...loaded.proposals].map(
+                            (row) => [row.id, row.version] as const,
+                        ),
+                        ...loaded.updates.map(
+                            (row) => [`update:${row.id}`, row.version] as const,
+                        ),
+                        ...loaded.matches.map(
+                            (row) => [`match:${row.id}`, row.version] as const,
+                        ),
+                    ];
+                    versions.current = new Map(rows);
+                    setData(loaded);
+                    setFailed(false);
+                    return;
+                }
+            } catch {
+                if (current()) setFailed(true);
+            }
+        },
+        [recordingId, setData],
+    );
 
     useEffect(() => {
-        void reloadKey;
-        setData(null);
-        void reload();
-    }, [reload, reloadKey]);
+        void revision;
+        const controller = new AbortController();
+        void reload(controller.signal);
+        return () => controller.abort();
+    }, [reload, revision]);
 
     const markChanged = () =>
         setData((current) =>
@@ -174,6 +232,7 @@ export function useRecordingTasks(
                     pending.current.delete(key);
                 }
             });
+        writeEpoch.current++;
         pending.current.set(key, run);
         return run;
     };

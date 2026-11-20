@@ -56,8 +56,11 @@ export function createPromptIconBlink(sessionLoaded, clearBlinkCopy, { paintBadg
             await setIcon(tabId, { path: ICON_PATHS });
             await restoreBadge(tabId);
             if (entry?.promptVisible || entry?.bannerPrompt) {
-                prompts.set(tabId, { restored: true });
-                await clearBlinkCopy(tabId, typeof stored[key] === "number" ? stored[key] : null);
+                const record = stored[key];
+                const used = typeof record === "object" && record !== null ? record.used === true : Boolean(record);
+                if (used) prompts.set(tabId, { used: true, restored: true });
+                else await chrome.storage.session.remove(key);
+                await clearBlinkCopy(tabId, record?.until ?? (typeof record === "number" ? record : null));
             } else await chrome.storage.session.remove(key);
         }));
     }).catch(() => {});
@@ -73,7 +76,7 @@ export function createPromptIconBlink(sessionLoaded, clearBlinkCopy, { paintBadg
         blink.until = Date.now() + BLINK_MS;
         try {
             // Persist before sending the deadline so a new worker can repair both the icon and copy.
-            await chrome.storage.session.set({ [`${PREFIX}${tabId}`]: blink.until });
+            await chrome.storage.session.set({ [`${PREFIX}${tabId}`]: { until: blink.until, used: false } });
         } catch {
             blink.until = null;
         }
@@ -115,6 +118,11 @@ export function createPromptIconBlink(sessionLoaded, clearBlinkCopy, { paintBadg
                 await Promise.all([finish(), clearBlinkCopy(tabId, blink.until)]);
                 return;
             }
+            if (!blink.used) {
+                blink.used = true;
+                await chrome.storage.session.set({ [`${PREFIX}${tabId}`]: { until: blink.until, used: true } }).catch(() => {});
+                if (!isCurrent()) return;
+            }
             await paintBadge(tabId, highlighted, isCurrent);
             if (!isCurrent()) return;
             highlighted = !highlighted;
@@ -128,11 +136,13 @@ export function createPromptIconBlink(sessionLoaded, clearBlinkCopy, { paintBadg
         return Boolean(blink?.started && !blink.finished);
     }
 
-    async function stop(tabId, updateCopy = false) {
+    async function stop(tabId, updateCopy = false, keepWindow = false) {
         if (!prompts.has(tabId)) await restored;
         const blink = prompts.get(tabId);
-        if (!blink) return;
-        prompts.delete(tabId);
+        if (!blink || (keepWindow && blink.paused)) return;
+        const used = keepWindow && blink.used;
+        if (used) prompts.set(tabId, { used: true, restored: true, paused: true });
+        else prompts.delete(tabId);
         clearTimeout(blink.timer);
         if (!blink.until && !blink.restored) return;
         await Promise.all([
@@ -143,5 +153,5 @@ export function createPromptIconBlink(sessionLoaded, clearBlinkCopy, { paintBadg
         if (!prompts.has(tabId)) await chrome.storage.session.remove(`${PREFIX}${tabId}`).catch(() => {});
     }
 
-    return { reserve, start, stop, isBlinking };
+    return { reserve, start, stop, isBlinking, pause: (tabId) => stop(tabId, false, true) };
 }

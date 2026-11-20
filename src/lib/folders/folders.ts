@@ -1771,7 +1771,7 @@ export async function pruneRedundantAssignmentsInTx(
     tx: Tx,
     treeOwnerId: string,
     recordingId: string,
-): Promise<void> {
+): Promise<ReadonlySet<string>> {
     const [folders, assignments] = await Promise.all([
         tx
             .select({
@@ -1835,6 +1835,7 @@ export async function pruneRedundantAssignmentsInTx(
                 ),
             );
     }
+    return redundant;
 }
 
 async function deferUnprofiledRecordingInTx(
@@ -1925,14 +1926,7 @@ async function deferUnprofiledRecordingInTx(
     return true;
 }
 
-/**
- * Share an owner's item into one Organization folder in the caller's
- * transaction. Takes the Organization tree, people and item locks in the
- * established order. A refused gate returns its problems without writing.
- * Items whose tasks the share changed are added to `taskTargets`; the
- * caller passes them to `taskTargetsChanged` after commit.
- */
-export async function shareItemToOrganizationFolderInTx(
+async function fileItemInOrganizationFolderInTx(
     tx: Tx,
     input: {
         ownerUserId: string;
@@ -1943,7 +1937,10 @@ export async function shareItemToOrganizationFolderInTx(
         directFiling?: boolean;
         taskTargets?: TaskTargetChanges;
     },
-): Promise<ShareGateProblem[]> {
+): Promise<
+    | { placement: "refused"; problems: ShareGateProblem[] }
+    | { placement: "shared" | "filed" | "intended" | "withheld" | "unchanged" }
+> {
     await lockOrgTree(tx);
     await lockOrgPeople(tx);
     await lockItemForFolderMutation(tx, input.itemId, input.ownerUserId);
@@ -2028,13 +2025,18 @@ export async function shareItemToOrganizationFolderInTx(
             view: "private",
             reason: "placement",
         });
-        return [];
+        return { placement: "withheld" };
     }
     const releasedAt = await placementReleaseTimeInTx(
         tx,
         input.ownerUserId,
         input.itemId,
         input.orgUserId,
+    );
+    const wasShared = await isRecordingShared(
+        input.itemId,
+        input.orgUserId,
+        tx,
     );
     if (kind === "meeting") {
         await tx
@@ -2055,15 +2057,20 @@ export async function shareItemToOrganizationFolderInTx(
             });
         await notifyRestrictedAudienceInTx(tx, folder.id);
         await dropReleasedAudienceInTx(tx, folder.id);
-        await pruneRedundantAssignmentsInTx(tx, input.orgUserId, input.itemId);
+        const pruned = await pruneRedundantAssignmentsInTx(
+            tx,
+            input.orgUserId,
+            input.itemId,
+        );
         await notifyFolderReceiversInTx(tx, input.ownerUserId, input.itemId);
-        return [];
+        return {
+            placement: pruned.has(folder.id)
+                ? "unchanged"
+                : wasShared
+                  ? "filed"
+                  : "shared",
+        };
     }
-    const wasShared = await isRecordingShared(
-        input.itemId,
-        input.orgUserId,
-        tx,
-    );
     if (
         !wasShared &&
         kind === "audio" &&
@@ -2071,13 +2078,13 @@ export async function shareItemToOrganizationFolderInTx(
         input.directFiling &&
         (await deferUnprofiledRecordingInTx(tx, input))
     )
-        return [];
+        return { placement: "intended" };
     const problems = wasShared
         ? []
         : kind === "mail"
           ? await mailShareProblems(tx, input.itemId, input.ownerUserId)
           : await loadShareGate(tx, input.itemId, input.ownerUserId);
-    if (problems.length > 0) return problems;
+    if (problems.length > 0) return { placement: "refused", problems };
 
     if (kind === "mail") {
         try {
@@ -2093,11 +2100,21 @@ export async function shareItemToOrganizationFolderInTx(
                 error instanceof AppError &&
                 error.code === ErrorCode.SHARE_REQUIREMENTS_UNMET
             ) {
-                return mailShareProblems(tx, input.itemId, input.ownerUserId);
+                const problems = await mailShareProblems(
+                    tx,
+                    input.itemId,
+                    input.ownerUserId,
+                );
+                if (problems.length > 0)
+                    return { placement: "refused", problems };
             }
             throw error;
         }
-        await pruneRedundantAssignmentsInTx(tx, input.orgUserId, input.itemId);
+        const pruned = await pruneRedundantAssignmentsInTx(
+            tx,
+            input.orgUserId,
+            input.itemId,
+        );
         await requestAdvanceInTx(tx, {
             itemId: input.itemId,
             userId: input.ownerUserId,
@@ -2105,7 +2122,13 @@ export async function shareItemToOrganizationFolderInTx(
             reason: "placement",
         });
         await bindPlacementProfileInTx(tx, input);
-        return [];
+        return {
+            placement: pruned.has(folder.id)
+                ? "unchanged"
+                : wasShared
+                  ? "filed"
+                  : "shared",
+        };
     }
 
     await tx
@@ -2126,7 +2149,11 @@ export async function shareItemToOrganizationFolderInTx(
         });
     await notifyRestrictedAudienceInTx(tx, folder.id);
     await dropReleasedAudienceInTx(tx, folder.id);
-    await pruneRedundantAssignmentsInTx(tx, input.orgUserId, input.itemId);
+    const pruned = await pruneRedundantAssignmentsInTx(
+        tx,
+        input.orgUserId,
+        input.itemId,
+    );
     await requestAdvanceInTx(tx, {
         itemId: input.itemId,
         userId: input.ownerUserId,
@@ -2135,7 +2162,7 @@ export async function shareItemToOrganizationFolderInTx(
     });
     if (wasShared) {
         await bindPlacementProfileInTx(tx, input);
-        return [];
+        return { placement: pruned.has(folder.id) ? "unchanged" : "filed" };
     }
 
     const names = await publishSpeakerNamesInTx(tx, {
@@ -2160,7 +2187,20 @@ export async function shareItemToOrganizationFolderInTx(
         ...assignees,
     ]);
     await bindPlacementProfileInTx(tx, input);
-    return [];
+    return { placement: pruned.has(folder.id) ? "unchanged" : "shared" };
+}
+
+/**
+ * Share an owner's item into an Organization folder under the tree, people
+ * and item locks. Returns any share-gate refusals and collects task changes
+ * for the caller to publish after commit.
+ */
+export async function shareItemToOrganizationFolderInTx(
+    tx: Tx,
+    input: Parameters<typeof fileItemInOrganizationFolderInTx>[1],
+): Promise<ShareGateProblem[]> {
+    const result = await fileItemInOrganizationFolderInTx(tx, input);
+    return result.placement === "refused" ? result.problems : [];
 }
 
 /**
@@ -2178,7 +2218,7 @@ export async function addRecordingToFolder(input: {
     userId: string;
     recordingId: string;
     folderId: string;
-}): Promise<void> {
+}) {
     const target = await resolveFilingFolder(input.userId, input.folderId);
     if (!target) {
         throw new AppError(
@@ -2203,11 +2243,11 @@ export async function addRecordingToFolder(input: {
     assertWritable(target);
 
     let taskTargets: TaskTargetChanges = new Map();
-    const problems = await retryOnDeadlock(() => {
+    const result = await retryOnDeadlock(() => {
         taskTargets = new Map();
         return db.transaction(async (tx) => {
             if (target.scope === "org") {
-                return shareItemToOrganizationFolderInTx(tx, {
+                const result = await fileItemInOrganizationFolderInTx(tx, {
                     ownerUserId: input.userId,
                     itemId: input.recordingId,
                     folderId: target.folder.id,
@@ -2216,6 +2256,17 @@ export async function addRecordingToFolder(input: {
                     directFiling: true,
                     taskTargets,
                 });
+                if (result.placement === "refused") {
+                    throw new AppError(
+                        ErrorCode.SHARE_REQUIREMENTS_UNMET,
+                        kind === "mail"
+                            ? "Finish the review before sharing"
+                            : "Name every speaker and finish the review before sharing",
+                        409,
+                        { problems: result.problems },
+                    );
+                }
+                return result;
             }
             await lockCategorizableFolderInTx(
                 tx,
@@ -2238,7 +2289,7 @@ export async function addRecordingToFolder(input: {
                     folderId: target.folder.id,
                 })
                 .onConflictDoNothing();
-            await pruneRedundantAssignmentsInTx(
+            const pruned = await pruneRedundantAssignmentsInTx(
                 tx,
                 target.ownerId,
                 input.recordingId,
@@ -2255,19 +2306,11 @@ export async function addRecordingToFolder(input: {
                 view: "private",
                 reason: "placement",
             });
-            return [];
+            return {
+                placement: pruned.has(target.folder.id) ? "unchanged" : "filed",
+            } as const;
         });
     });
-    if (problems.length > 0) {
-        throw new AppError(
-            ErrorCode.SHARE_REQUIREMENTS_UNMET,
-            kind === "mail"
-                ? "Finish the review before sharing"
-                : "Name every speaker and finish the review before sharing",
-            409,
-            { problems },
-        );
-    }
     nudge();
     if (target.scope === "org") {
         await orgTreeChanged(target.folder.id);
@@ -2275,6 +2318,7 @@ export async function addRecordingToFolder(input: {
         await scheduleFolderExportProjection(input.userId);
     }
     await taskTargetsChanged(taskTargets);
+    return result.placement;
 }
 
 /**
@@ -2293,7 +2337,7 @@ export async function removeRecordingFromFolder(input: {
      * last Organization folder withdraws it.
      */
     withdraw?: boolean;
-}): Promise<void> {
+}): Promise<"removed" | "unshared" | "unchanged"> {
     const orgUserId = await getOrgUserId();
     const target = await resolvePlacementSource(
         input.userId,
@@ -2303,7 +2347,7 @@ export async function removeRecordingFromFolder(input: {
         if (error instanceof AppError && error.statusCode === 404) return null;
         throw error;
     });
-    if (!target) return;
+    if (!target) return "unchanged";
 
     if (target.scope === "personal") {
         const unfiledOwner = await db.transaction(async (tx) => {
@@ -2376,11 +2420,11 @@ export async function removeRecordingFromFolder(input: {
             await notifyPersonShareChanged(unfiledOwner);
         nudge();
         await scheduleFolderExportProjection(input.userId);
-        return;
+        return unfiledOwner ? "removed" : "unchanged";
     }
 
     const canCurate = await userCuratesOrganizationNow(input.userId);
-    await retryOnDeadlock(() =>
+    const placement = await retryOnDeadlock(() =>
         db.transaction(async (tx) => {
             await lockOrgTree(tx);
             const currentTarget = await resolvePlacementSource(
@@ -2405,7 +2449,7 @@ export async function removeRecordingFromFolder(input: {
                         ),
                     ),
                 );
-            if (!placement) return;
+            if (!placement) return "unchanged";
             if (currentTarget.folder.restrictingAt)
                 await requireOwnedRecording(
                     tx,
@@ -2458,7 +2502,7 @@ export async function removeRecordingFromFolder(input: {
                     view: "private",
                     reason: "placement",
                 });
-                return;
+                return "removed";
             }
             await requireMayWithdraw(
                 input.userId,
@@ -2478,7 +2522,7 @@ export async function removeRecordingFromFolder(input: {
                 ))
             ) {
                 if (input.userId === orgUserId) throw notSharedForCurator();
-                return;
+                return "unchanged";
             }
             await tx
                 .delete(recordingFolderAssignments)
@@ -2495,14 +2539,12 @@ export async function removeRecordingFromFolder(input: {
             // which whoever removes it confirms knowing what the owner's
             // retention will then delete. A client that thought another folder remained learns it
             // here, and nothing changed.
-            if (
-                !input.withdraw &&
-                !(await isRecordingShared(
-                    input.recordingId,
-                    target.ownerId,
-                    tx,
-                ))
-            ) {
+            const stillShared = await isRecordingShared(
+                input.recordingId,
+                target.ownerId,
+                tx,
+            );
+            if (!input.withdraw && !stillShared) {
                 throw new AppError(
                     ErrorCode.WITHDRAW_UNCONFIRMED,
                     "This is the recording's last Organization folder; removing it takes the recording out of the Organization",
@@ -2524,13 +2566,7 @@ export async function removeRecordingFromFolder(input: {
                 .where(eq(chatterItems.id, input.recordingId))
                 .limit(1);
             if (owner) {
-                if (
-                    await isRecordingShared(
-                        input.recordingId,
-                        target.ownerId,
-                        tx,
-                    )
-                ) {
+                if (stillShared) {
                     await bindPlacementProfileInTx(tx, {
                         itemId: input.recordingId,
                         ownerUserId: owner.userId,
@@ -2544,10 +2580,12 @@ export async function removeRecordingFromFolder(input: {
                     reason: "placement",
                 });
             }
+            return stillShared ? "removed" : "unshared";
         }),
     );
     nudge();
     await orgTreeChanged();
+    return placement;
 }
 
 /**
@@ -2560,10 +2598,19 @@ export async function removeRecordingFromFolder(input: {
 export async function unshareRecording(
     userId: string,
     recordingId: string,
-    { withdraw = false }: { withdraw?: boolean } = {},
+    options?: { withdraw?: boolean },
 ): Promise<void> {
+    await unshareRecordingWithOutcome(userId, recordingId, options);
+}
+
+/** Withdraw the item and report whether it was shared when the request committed. */
+export async function unshareRecordingWithOutcome(
+    userId: string,
+    recordingId: string,
+    { withdraw = false }: { withdraw?: boolean } = {},
+): Promise<boolean> {
     const orgUserId = await getOrgUserId();
-    if (!orgUserId) return;
+    if (!orgUserId) return false;
     await requireMayWithdraw(userId, recordingId, orgUserId);
     const withdrew = await retryOnDeadlock(() =>
         db.transaction(async (tx) => {
@@ -2606,6 +2653,7 @@ export async function unshareRecording(
         nudge();
         await orgTreeChanged();
     }
+    return withdrew;
 }
 
 /**
@@ -2811,7 +2859,7 @@ export async function moveRecordingBetweenFolders(input: {
     fromFolderId: string;
     toFolderId: string;
     withdraw?: boolean;
-}): Promise<void> {
+}) {
     const orgUserId = await getOrgUserId();
     const canCurate = await userCuratesOrganizationNow(input.userId);
     const targets = await Promise.all([
@@ -2825,7 +2873,7 @@ export async function moveRecordingBetweenFolders(input: {
         resolveFilingFolder(input.userId, input.toFolderId, db, canCurate),
     ]);
     let taskTargets: TaskTargetChanges = new Map();
-    await retryOnDeadlock(() => {
+    const result = await retryOnDeadlock(() => {
         taskTargets = new Map();
         return db.transaction(async (tx) => {
             if (targets.some((target) => target.scope === "org"))
@@ -2851,7 +2899,8 @@ export async function moveRecordingBetweenFolders(input: {
                     "Every recording already appears in Private",
                     400,
                 );
-            if (from.folder.id === to.folder.id) return;
+            if (from.folder.id === to.folder.id)
+                return { placement: "unchanged" } as const;
             const [source] = await tx
                 .select({
                     userId: recordingFolderAssignments.userId,
@@ -2923,8 +2972,14 @@ export async function moveRecordingBetweenFolders(input: {
                     input.recordingId,
                     from.folder.id,
                 );
+            let placement:
+                | "filed"
+                | "shared"
+                | "intended"
+                | "withheld"
+                | "unchanged" = "filed";
             if (to.scope === "org" && (boundary || from.scope !== to.scope)) {
-                const problems = await shareItemToOrganizationFolderInTx(tx, {
+                const result = await fileItemInOrganizationFolderInTx(tx, {
                     ownerUserId: input.userId,
                     itemId: input.recordingId,
                     folderId: to.folder.id,
@@ -2933,13 +2988,14 @@ export async function moveRecordingBetweenFolders(input: {
                     directFiling: true,
                     taskTargets,
                 });
-                if (problems.length)
+                if (result.placement === "refused")
                     throw new AppError(
                         ErrorCode.SHARE_REQUIREMENTS_UNMET,
                         ErrorCode.SHARE_REQUIREMENTS_UNMET,
                         409,
-                        { problems },
+                        { problems: result.problems },
                     );
+                placement = result.placement;
             } else {
                 const releasedAt =
                     to.scope === "org"
@@ -2990,16 +3046,14 @@ export async function moveRecordingBetweenFolders(input: {
                     ),
                 );
             await dropReleasedAudienceInTx(tx, from.folder.id);
+            let unshared = false;
             if (wasShared && organizationId) {
-                if (
-                    !boundary &&
-                    !input.withdraw &&
-                    !(await isRecordingShared(
-                        input.recordingId,
-                        organizationId,
-                        tx,
-                    ))
-                )
+                unshared = !(await isRecordingShared(
+                    input.recordingId,
+                    organizationId,
+                    tx,
+                ));
+                if (!boundary && !input.withdraw && unshared)
                     throw new AppError(
                         ErrorCode.WITHDRAW_UNCONFIRMED,
                         "Removing the last Organization placement needs withdraw: true",
@@ -3021,7 +3075,7 @@ export async function moveRecordingBetweenFolders(input: {
                 input.recordingId,
                 to.folder.id,
             );
-            await pruneRedundantAssignmentsInTx(
+            const pruned = await pruneRedundantAssignmentsInTx(
                 tx,
                 to.ownerId,
                 input.recordingId,
@@ -3038,12 +3092,17 @@ export async function moveRecordingBetweenFolders(input: {
                 view: from.scope === "org" && !ownerOnly ? "org" : "private",
                 reason: "placement",
             });
+            return {
+                placement: pruned.has(to.folder.id) ? "unchanged" : placement,
+                removal: unshared ? "unshared" : "removed",
+            } as const;
         });
     });
     nudge();
     if (orgUserId) await orgTreeChanged();
     await scheduleFolderExportProjection(input.userId);
     await taskTargetsChanged(taskTargets);
+    return result;
 }
 
 /**

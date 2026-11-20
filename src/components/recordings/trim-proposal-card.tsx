@@ -5,6 +5,8 @@ import { useExtracted, useFormatter } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useTimeZone } from "use-intl/react";
+import { useItemDetail } from "@/components/items/item-detail-store";
+import { processAgainOperation } from "@/components/items/process-again-operation";
 import { WorkflowWidget } from "@/components/pipeline/workflow-widget";
 import { useProductName } from "@/components/product-name-provider";
 import { useRecordingCut } from "@/components/recordings/recording-cut";
@@ -108,6 +110,7 @@ function TrimProposalBody({
     };
     const [selected, setSelected] = useState({ start: true, end: true });
     const [dismissed, setDismissed] = useState<string | null>(null);
+    const detail = useItemDetail();
     const [saving, setSaving] = useState(false);
     const identity = proposal ? `${processing.itemId}:${proposal.id}` : "";
     const [shown, setShown] = useState(identity);
@@ -129,12 +132,18 @@ function TrimProposalBody({
     const retry = async () => {
         setSaving(true);
         try {
-            const response = await fetch(
-                `/api/recordings/${processing.itemId}/process-again`,
-                { method: "POST" },
-            );
-            if (!response.ok) throw new Error("retry_failed");
-            invalidateItemProcessing(processing.itemId);
+            if (detail?.itemId === processing.itemId) {
+                await detail.enqueueOperation(
+                    processAgainOperation(processing.itemId),
+                );
+            } else {
+                const response = await fetch(
+                    `/api/recordings/${processing.itemId}/process-again`,
+                    { method: "POST" },
+                );
+                if (!response.ok) throw new Error("retry_failed");
+                invalidateItemProcessing(processing.itemId);
+            }
         } catch {
             toast.error(i18n("Processing could not start. Try again."));
         } finally {
@@ -152,7 +161,7 @@ function TrimProposalBody({
                     className="ml-3"
                     variant="outline"
                     size="sm"
-                    disabled={saving}
+                    disabled={saving || detail?.pendingProcessAgain}
                     onClick={() => void retry()}
                 >
                     {i18n("Try trim proposal again")}

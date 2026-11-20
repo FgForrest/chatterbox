@@ -648,7 +648,7 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
                 recordingId: itemId,
                 folderId: orgWeeklyFolderId,
             }),
-        ).resolves.toBeUndefined();
+        ).resolves.toBe("shared");
         expect(await assigned()).toEqual(
             [weeklyFolderId, orgWeeklyFolderId].sort(),
         );

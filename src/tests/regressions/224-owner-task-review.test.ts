@@ -345,7 +345,7 @@ describeWithDatabase("#224 owner Task review and sharing", () => {
                 },
             });
         } else {
-            await expect(share()).resolves.toBeUndefined();
+            await expect(share()).resolves.toBe("shared");
             expect(
                 await listRecordingTasks(assignee, "review-item"),
             ).toMatchObject({
@@ -366,7 +366,7 @@ describeWithDatabase("#224 owner Task review and sharing", () => {
         await expect(acceptReview(owner, "review-item")).resolves.toMatchObject(
             { accepted: 1 },
         );
-        if (kind === "audio") await expect(share()).resolves.toBeUndefined();
+        if (kind === "audio") await expect(share()).resolves.toBe("shared");
         expect(await listTasks(assignee, query)).toMatchObject([
             { text: "Send the report", status: "open", canClose: true },
         ]);

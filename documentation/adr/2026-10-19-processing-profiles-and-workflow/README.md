@@ -1,14 +1,14 @@
 ---
 title: Items are filed before anything is processed, and a processing profile is a recipe with one automatic switch per step
 date: 2026-10-19
-updated: 2026-11-18 21:03
+updated: 2026-11-20 13:28
 status: superseded
 kind: feature
 issues: []
 prs: [134, 135, 138, 139, 140, 141, 145, 156, 159]
-areas: [src/lib/pipeline, src/lib/profiles, src/components/pipeline, src/hooks/use-item-processing.ts, src/lib/tasks, src/lib/recordings/title-after-summary.ts, src/lib/folders/permissions.ts, src/db/schema.ts]
+areas: [src/lib/pipeline, src/lib/profiles, src/components/pipeline, src/lib/tasks, src/lib/recordings/title-after-summary.ts, src/lib/folders/permissions.ts, src/db/schema.ts]
 supersedes: [2026-10-07-tasks-from-summaries, 2026-09-23-shared-organization-scope, 2026-10-18-inbound-mail]
-superseded-by: [2026-10-19-provider-defaults-and-no-fallback, 2026-10-21-tasks-accepted-automatically, 2026-10-22-owner-reviews-tasks-sharing-ungated, 2026-10-22-pipeline-steps-settle-their-jobs, 2026-11-08-ai-trim-proposal-before-learn, 2026-11-18-owner-review-before-share]
+superseded-by: [2026-10-19-provider-defaults-and-no-fallback, 2026-10-21-tasks-accepted-automatically, 2026-10-22-owner-reviews-tasks-sharing-ungated, 2026-10-22-pipeline-steps-settle-their-jobs, 2026-11-08-ai-trim-proposal-before-learn, 2026-11-18-owner-review-before-share, 2026-11-20-one-store-per-open-item]
 relates: [2026-09-13-durable-job-queue, 2026-10-02-almanac-guided-transcript-correction, 2026-10-14-identity-provider-authorization, 2026-10-22-summary-reads-the-preferred-transcript]
 ---
 
@@ -37,6 +37,11 @@ sweeps ([pipeline steps settle their jobs](../2026-10-22-pipeline-steps-settle-t
 rest of the campaign still holds.
 
 **Superseded in part** by [AI trim proposals before Learn](../2026-11-08-ai-trim-proposal-before-learn.md): Audio processing gains an internal trim phase before Learn, enabled even for old profile revisions unless automation is suppressed. The six visible positions and other profile rules stay.
+
+**Superseded in part.** PR #145 compared phase records after a person's action because unrelated
+fields could change in the first differing reply. The item store now retries against the item
+version, which covers part changes and advance generations. The rest of the campaign still holds
+as amended above. [Use one client store per open item](../2026-11-20-one-store-per-open-item.md)
 
 ## Why
 
@@ -169,8 +174,6 @@ else") shipped as extensions; a "reopen" outcome did not.
   with the same header and footer; bodies never branch on the frame, and their tests run once per
   frame (`describe.each(["inline", "dialog"])`). `src/lib/pipeline/workflow-status.ts` and
   `workflow-widgets.ts` derive the strip and widget states as pure functions.
-  `src/hooks/use-item-processing.ts` refetches after the person's own action and compares phase
-  records only, because the first differing reply often differed for an unrelated reason (PR #145).
 - **Organization folder permissions:** `src/lib/folders/permissions.ts` and `folders.ts`. "Curator"
   is the Organization account without an IdP and `org.curate` with IdP authorization.
 - **Contract changes (PR #134, breaking):** `transcription.completed` no longer carries a freshly
@@ -195,7 +198,7 @@ else") shipped as extensions; a "reopen" outcome did not.
   PR #145: 3,739 unit and 4,914 database tests.
 - Tests to start from: `src/tests/pipeline/characterization.test.ts` (today's behaviour pinned
   before the driver took over), `plan.test.ts`, `advance-job.integration.test.ts`,
-  `trigger.integration.test.ts`, `workflow-widget.test.tsx`, `use-item-processing.test.tsx`;
+  `trigger.integration.test.ts`, `workflow-widget.test.tsx`, `item-detail-store.test.tsx`;
   `src/tests/profiles/default-rule.test.ts`, `org-provider-rate-limit.integration.test.ts`;
   `src/tests/tasks/candidates.integration.test.ts`, `ranking.test.ts`;
   `src/tests/folders/folder-permissions.integration.test.ts`;
@@ -214,6 +217,9 @@ else") shipped as extensions; a "reopen" outcome did not.
   ungated when [the owner's task review came back](../2026-10-22-owner-reviews-tasks-sharing-ungated.md).
   Step bookkeeping had two sources of truth, which
   [pipeline steps settle their jobs](../2026-10-22-pipeline-steps-settle-their-jobs.md) replaced.
+- The delayed workflow refresh after filing or another action is resolved. A pending advance now
+  gets a 5 s polling ceiling, and client invalidations retry until the item version moves or the
+  retry window ends. [Use one client store per open item](../2026-11-20-one-store-per-open-item.md)
 - **Self-host behaviour change:** a new account must create a folder before anything is processed,
   and a headless v1 client that opens sessions without `folderId` produces recordings that wait.
 - **Hosted:** no Learn; hosted users get the pipeline without it.

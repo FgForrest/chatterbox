@@ -12,11 +12,13 @@ import { parseKeyPoints } from "@/lib/summary/key-points";
 export function SummaryEditor({
     summary,
     keyPoints,
+    disabled = false,
     onSave,
     onCancel,
 }: {
     summary: string;
     keyPoints: string[];
+    disabled?: boolean;
     onSave: (
         summary: string,
         keyPoints: string[],
@@ -35,6 +37,7 @@ export function SummaryEditor({
             className="space-y-4"
             onSubmit={async (event) => {
                 event.preventDefault();
+                if (disabled || saving) return;
                 setSaving(true);
                 const saved = await onSave(text, parseKeyPoints(points));
                 setSaving(false);
@@ -70,6 +73,7 @@ export function SummaryEditor({
                         value={text}
                         onChange={(event) => setText(event.target.value)}
                         disabled={saving}
+                        readOnly={disabled}
                         maxLength={200_000}
                     />
                     <p className="text-xs text-muted-foreground">
@@ -92,6 +96,7 @@ export function SummaryEditor({
                         value={points}
                         onChange={(event) => setPoints(event.target.value)}
                         disabled={saving}
+                        readOnly={disabled}
                     />
                 </div>
             </div>
@@ -104,7 +109,7 @@ export function SummaryEditor({
                 onCancel={onCancel}
                 type="submit"
                 saving={saving}
-                saveDisabled={!text.trim()}
+                saveDisabled={disabled || !text.trim()}
             />
             <p className="border-t pt-3 text-xs text-muted-foreground">
                 {i18n("Edit tasks in the task list below the summary.")}

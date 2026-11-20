@@ -54,6 +54,14 @@ function bound() {
     };
 }
 describe("#221 explicit processing response", () => {
+    it("checks again within five seconds while an advance is pending", () => {
+        const idle = projectProcessing(base, [], owner, now);
+        const permissions = { ...owner, advancePending: true };
+        const pending = projectProcessing(base, [], permissions, now);
+
+        expect(pending.nextCheckInMs).toBeLessThanOrEqual(5_000);
+        expect(pending.steps).toEqual(idle.steps);
+    });
     it.each([
         "pending",
         "processing",

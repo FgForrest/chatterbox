@@ -9,6 +9,8 @@ import {
 } from "../../../extensions/recorder/lib/agendas.js";
 import { STATE } from "../../../extensions/recorder/lib/constants.js";
 import { localizeDocument, t } from "../../../extensions/recorder/lib/i18n.js";
+import { meetingTarget } from "../../../extensions/recorder/lib/meeting-target.js";
+import "../../../extensions/recorder/lib/recording-levels.js";
 import { isWaitingForUpload } from "../../../extensions/recorder/lib/upload-state.js";
 import {
     createFolderField,
@@ -68,6 +70,7 @@ async function popup() {
         microphonePermission: async () => "granted",
         originOf: (url) => new URL(url).origin,
         detectMeetingPlatform: () => null,
+        meetingTarget,
         customNoticeText: () => "",
         effectivePlatformModes: () => ({}),
         getSettings: async () => settings,

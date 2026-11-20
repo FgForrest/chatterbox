@@ -6,6 +6,7 @@ import {
     render,
     screen,
     waitFor,
+    within,
 } from "@testing-library/react";
 import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -377,6 +378,73 @@ describe("independent transcript and summary pipelines", () => {
         expect(summaryOptions.at(-1)?.summarySource).toBe("riffado");
     });
 
+    it.each([
+        false,
+        true,
+    ])("selects available sources on the Organization row with Plaud transcript selected %s", (selectPlaudTranscript) => {
+        const custom = {
+            source: "riffado",
+            text: "Custom text",
+            provider: "openai",
+            model: "whisper-1",
+        };
+        const plaud = {
+            source: "plaud",
+            text: "Plaud text",
+            provider: "plaud",
+            model: "plaud-native",
+        };
+        const row = (view: "private" | "org") => (
+            <TranscriptionPanel
+                recording={{
+                    id: "rec-summary-row-swap",
+                    filename: "Meeting.ogg",
+                    duration: 60_000,
+                    filesize: 1024,
+                    startTime: new Date(0).toISOString(),
+                    deviceSn: "SN-1",
+                    view,
+                }}
+                transcripts={view === "private" ? [custom, plaud] : [custom]}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+            />
+        );
+        const { rerender } = render(row("private"));
+        fireEvent.click(
+            within(
+                screen.getByRole("group", { name: "Summary source" }),
+            ).getByRole("button", { name: "Plaud" }),
+        );
+        expect(summaryOptions.at(-1)?.summarySource).toBe("plaud");
+        if (selectPlaudTranscript) {
+            fireEvent.click(
+                within(
+                    screen.getByRole("group", { name: "Transcript source" }),
+                ).getByRole("button", { name: "Plaud" }),
+            );
+            expect(screen.getByTestId("transcript-source").textContent).toBe(
+                "plaud",
+            );
+        } else {
+            expect(screen.getByTestId("transcript-source").textContent).toBe(
+                "riffado",
+            );
+        }
+
+        rerender(row("org"));
+        expect(screen.getByTestId("transcript-source").textContent).toBe(
+            "riffado",
+        );
+        expect(
+            screen.queryByRole("group", { name: "Summary source" }),
+        ).toBeNull();
+        expect(summaryOptions.at(-1)).toMatchObject({
+            summarySource: "riffado",
+            transcriptionText: "Custom text",
+        });
+    });
+
     it("opens the linked automatic summary before the workflow reaches it, with Plaud still selected for the transcript", async () => {
         const base = completedProcessing();
         render(
@@ -507,7 +575,7 @@ describe("independent transcript and summary pipelines", () => {
         );
     });
 
-    it("mounts the speaker tags afresh for a new text, not for a refetch", () => {
+    it("keeps the speaker tags mounted through a refetch and re-transcription", () => {
         const recording = {
             id: "rec-1",
             filename: "Meeting.ogg",
@@ -541,7 +609,7 @@ describe("independent transcript and summary pipelines", () => {
 
         // Re-transcribed: the voices are numbered the other way round.
         rerender(panel("speaker_1: Hi\nspeaker_0: Hello"));
-        expect(speakerTagMounts).toEqual(["riffado", "riffado"]);
+        expect(speakerTagMounts).toEqual(["riffado"]);
     });
 
     it("hides the summary source switch for an uploaded recording", () => {

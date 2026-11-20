@@ -3,40 +3,30 @@
 import { useExtracted } from "next-intl";
 import { useCallback } from "react";
 import { useOptionalConfirm } from "@/components/confirm-dialog";
-import type {
-    RecordingFolder,
-    RecordingFolderAssignment,
-} from "@/types/folder";
+import type { RecordingFolder } from "@/types/folder";
 
 /** Confirm publication when an item with a restricted placement is filed openly. */
 export function useConfirmOrganizationFiling(
     folders: RecordingFolder[],
-    assignments: RecordingFolderAssignment[],
+    getFolderIds: (itemId: string) => readonly string[],
 ) {
     const i18n = useExtracted();
     const confirm = useOptionalConfirm();
     return useCallback(
         (itemId: string, folderId: string) => {
             const target = folders.find((folder) => folder.id === folderId);
-            const restrictedSource = assignments.some(
-                (entry) =>
-                    entry.recordingId === itemId &&
-                    folders.some(
-                        (folder) =>
-                            folder.id === entry.folderId &&
-                            (folder.restricted || folder.restricting),
-                    ),
+            const assignedIds = new Set(getFolderIds(itemId));
+            const restrictedSource = folders.some(
+                (folder) =>
+                    assignedIds.has(folder.id) &&
+                    (folder.restricted || folder.restricting),
             );
-            const published = assignments.some(
-                (entry) =>
-                    entry.recordingId === itemId &&
-                    folders.some(
-                        (folder) =>
-                            folder.id === entry.folderId &&
-                            folder.scope === "org" &&
-                            !folder.restricted &&
-                            !folder.restricting,
-                    ),
+            const published = folders.some(
+                (folder) =>
+                    assignedIds.has(folder.id) &&
+                    folder.scope === "org" &&
+                    !folder.restricted &&
+                    !folder.restricting,
             );
             if (
                 !restrictedSource ||
@@ -59,6 +49,6 @@ export function useConfirmOrganizationFiling(
                 return true as const;
             });
         },
-        [assignments, folders, confirm, i18n],
+        [getFolderIds, folders, confirm, i18n],
     );
 }

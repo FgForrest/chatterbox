@@ -44,17 +44,18 @@ export const GET = apiHandler(async (request: Request) => {
     let errorMessage: string | null = null;
 
     try {
-        const [devices, active, trash] = await Promise.all([
+        const [devices, active] = await Promise.all([
             client.listDevices(),
             client.getRecordings(0, 1, 0),
-            client.getRecordings(0, 1, 1),
         ]);
+        const trash = await client.getRecordings(0, 1, 1);
         reachable = true;
         deviceCount = devices.data_devices?.length ?? 0;
         activeRecordingCount =
             active.data_file_total ?? active.data_file_list?.length ?? 0;
-        trashedRecordingCount =
-            trash.data_file_total ?? trash.data_file_list?.length ?? 0;
+        trashedRecordingCount = client.usingPlaudV4
+            ? null
+            : (trash.data_file_total ?? trash.data_file_list?.length ?? 0);
     } catch (err) {
         errorMessage = err instanceof Error ? err.message : String(err);
     }
