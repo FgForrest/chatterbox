@@ -1,6 +1,7 @@
 import { providerFetch } from "@/lib/ai/provider-fetch";
 import { providerBaseUrl } from "@/lib/ai/validate-base-url";
 import { env } from "@/lib/env";
+import { fetchTranscription } from "@/lib/transcription/fetch";
 import {
     renderTurnsAsText,
     type TimedTextUnit,
@@ -239,11 +240,10 @@ export async function speechmaticsTranscribe({
         buildSpeechmaticsConfig({ modelId, diarize, language, vocabulary }),
     );
 
-    const created = await providerFetch(`${base}/jobs`, {
+    const created = await fetchTranscription(`${base}/jobs`, {
         method: "POST",
         headers: auth,
         body: form,
-        signal: AbortSignal.timeout(env.WHISPER_REQUEST_TIMEOUT_MS),
     });
     if (!created.ok) {
         throw new SpeechmaticsTranscribeError(

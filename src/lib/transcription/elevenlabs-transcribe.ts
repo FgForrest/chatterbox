@@ -1,6 +1,5 @@
-import { providerFetch } from "@/lib/ai/provider-fetch";
 import { providerBaseUrl } from "@/lib/ai/validate-base-url";
-import { env } from "@/lib/env";
+import { fetchTranscription } from "@/lib/transcription/fetch";
 import {
     renderTurnsAsText,
     type TimedTextUnit,
@@ -129,11 +128,10 @@ export async function elevenLabsTranscribe({
         }
     }
 
-    const response = await providerFetch(resolveElevenLabsUrl(baseUrl), {
+    const response = await fetchTranscription(resolveElevenLabsUrl(baseUrl), {
         method: "POST",
         headers: { "xi-api-key": apiKey },
         body: form,
-        signal: AbortSignal.timeout(env.WHISPER_REQUEST_TIMEOUT_MS),
     });
 
     if (!response.ok) {

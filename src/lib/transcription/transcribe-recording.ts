@@ -16,8 +16,8 @@ import {
     getTranscriptionStyle,
 } from "@/lib/ai/provider-presets";
 import {
+    createUsageAttemptFetch,
     createUsageFetch,
-    usageAttemptFetch,
     withUsageFailure,
 } from "@/lib/ai/usage-attempt";
 import { recordAiUsage } from "@/lib/ai/usage-cost";
@@ -86,6 +86,7 @@ import {
     elevenLabsTakesKeyterms,
     elevenLabsTranscribe,
 } from "@/lib/transcription/elevenlabs-transcribe";
+import { fetchTranscription } from "@/lib/transcription/fetch";
 import {
     buildTranscriptionParams,
     getResponseFormat,
@@ -944,11 +945,11 @@ async function transcribeRecordingInner(
                 turns = result.turns;
             } else {
                 const openai = new OpenAI({
-                    fetch: usageAttemptFetch,
+                    fetch: createUsageAttemptFetch(fetchTranscription),
                     apiKey,
                     baseURL: baseUrl,
                     timeout: env.WHISPER_REQUEST_TIMEOUT_MS,
-                    maxRetries: resolved.organizationCredential ? 0 : undefined,
+                    maxRetries: 0,
                 });
 
                 if (transcriptionStyle === "chat") {

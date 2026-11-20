@@ -81,7 +81,10 @@ beforeEach(() => {
             },
         );
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+});
 
 describe("hosted provider fetch", () => {
     const requestPaths = {
@@ -97,18 +100,21 @@ describe("hosted provider fetch", () => {
 
     describe.each(
         Object.entries(requestPaths),
-    )("%s error classification", (_name, run) => {
+    )("%s error classification", (name, run) => {
         it.each([
             "EAI_AGAIN",
             "ENOTFOUND",
             "empty answer",
-        ])("retries DNS failures (%s)", async (code) => {
+        ])("preserves the final DNS failure (%s)", async (code) => {
+            vi.useFakeTimers();
             if (code === "empty answer") lookup.mockResolvedValue([]);
             else
                 lookup.mockRejectedValue(
                     Object.assign(new Error("DNS failed"), { code }),
                 );
-            const error: unknown = await run().catch((error: unknown) => error);
+            const result = run().catch((error: unknown) => error);
+            await vi.runAllTimersAsync();
+            const error: unknown = await result;
             expect(mapErrorToAppError(error)).toMatchObject({
                 code: ErrorCode.SERVICE_UNAVAILABLE,
                 statusCode: 503,
@@ -116,6 +122,9 @@ describe("hosted provider fetch", () => {
             });
             expect(isRetryableError(error)).toBe(true);
             expect(transport).not.toHaveBeenCalled();
+            expect(lookup).toHaveBeenCalledTimes(
+                name === "elevenLabs" && code !== "EAI_AGAIN" ? 3 : 1,
+            );
         });
 
         it("does not retry private DNS answers", async () => {

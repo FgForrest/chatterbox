@@ -15,7 +15,10 @@ const IPV6_DOCUMENTATION_PREFIX = BigInt(0x20010db8);
 export type PublicAddress = { address: string; family: 4 | 6 };
 
 export class PublicHostnameResolutionError extends Error {
-    constructor(label: string) {
+    constructor(
+        label: string,
+        readonly code?: string,
+    ) {
         super(`${label} host could not be resolved`);
         this.name = "PublicHostnameResolutionError";
     }
@@ -209,12 +212,18 @@ export async function resolvePublicHostname(
             all: true,
             verbatim: true,
         } as const);
-    } catch {
-        throw new PublicHostnameResolutionError(label);
+    } catch (error) {
+        const code =
+            error instanceof Error &&
+            "code" in error &&
+            typeof error.code === "string"
+                ? error.code
+                : undefined;
+        throw new PublicHostnameResolutionError(label, code);
     }
 
     if (addresses.length === 0) {
-        throw new PublicHostnameResolutionError(label);
+        throw new PublicHostnameResolutionError(label, "ENOTFOUND");
     }
     if (addresses.some((address) => isPrivateIpAddress(address.address))) {
         throw new Error(`${label} must resolve to public IP addresses`);

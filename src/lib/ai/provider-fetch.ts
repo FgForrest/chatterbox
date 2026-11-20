@@ -37,11 +37,13 @@ async function resolveProviderAddresses(url: URL): Promise<PublicAddress[]> {
         return await resolvePublicHostname(url.hostname);
     } catch (error) {
         if (error instanceof PublicHostnameResolutionError) {
-            throw new AppError(
+            const failure = new AppError(
                 ErrorCode.SERVICE_UNAVAILABLE,
                 "The AI provider host could not be resolved. Please try again later.",
                 503,
             );
+            Object.defineProperty(failure, "cause", { value: error });
+            throw failure;
         }
         throw new AppError(
             ErrorCode.INVALID_INPUT,
