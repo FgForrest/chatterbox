@@ -5,7 +5,7 @@ updated: 2026-11-20 13:35
 status: accepted
 kind: fix
 issues: [426]
-prs: [427, 430, 432, 435]
+prs: [427, 430, 432, 435, 436]
 areas: [src/components/items, src/components/dashboard, src/components/mail, src/lib/pipeline/presentation.ts, src/lib/pipeline/processing-status.ts, src/db/queries/item-content-versions.ts]
 supersedes: [2026-10-19-processing-profiles-and-workflow, 2026-10-22-pipeline-steps-settle-their-jobs]
 superseded-by: []

@@ -40,7 +40,7 @@ field, a filename date disagrees with `date:`, a value is not one of the allowed
 
 | Date | Record | Kind | Status | Refs |
 |------|--------|------|--------|------|
-| 2026-11-20 | [Use one client store per open item](2026-11-20-one-store-per-open-item.md) | fix | accepted | [#426](https://github.com/FgForrest/chatterbox/issues/426), [PR #427](https://github.com/FgForrest/chatterbox/pull/427), [PR #430](https://github.com/FgForrest/chatterbox/pull/430), [PR #432](https://github.com/FgForrest/chatterbox/pull/432), [PR #435](https://github.com/FgForrest/chatterbox/pull/435) |
+| 2026-11-20 | [Use one client store per open item](2026-11-20-one-store-per-open-item.md) | fix | accepted | [#426](https://github.com/FgForrest/chatterbox/issues/426), [PR #427](https://github.com/FgForrest/chatterbox/pull/427), [PR #430](https://github.com/FgForrest/chatterbox/pull/430), [PR #432](https://github.com/FgForrest/chatterbox/pull/432), [PR #435](https://github.com/FgForrest/chatterbox/pull/435), [PR #436](https://github.com/FgForrest/chatterbox/pull/436) |
 | 2026-11-19 | [Point the meeting prompt at the toolbar and blink the pinned recorder icon](2026-11-19-recorder-prompt-points-at-icon.md) | fix | accepted | [#421](https://github.com/FgForrest/chatterbox/issues/421), [PR #424](https://github.com/FgForrest/chatterbox/pull/424) |
 | 2026-11-19 | [The recorder preserves encrypted buffers when its server is unreachable](2026-11-19-recorder-unreachable-server.md) | fix | accepted | [#420](https://github.com/FgForrest/chatterbox/issues/420), [PR #423](https://github.com/FgForrest/chatterbox/pull/423) |
 | 2026-11-18 | [Owners finish reviews before recordings are shared with the Organization](2026-11-18-owner-review-before-share.md) | feature | accepted |  |
