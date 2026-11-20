@@ -135,7 +135,10 @@ export class ItemOperationQueue {
     dispose() {
         this.disposed = true;
         this.stopDetachedRead();
-        for (const entry of this.pending) entry.awaitingRead?.resolve();
+        for (const entry of this.pending) {
+            entry.finishFolderEdit?.();
+            entry.awaitingRead?.resolve();
+        }
         this.openItem = undefined;
         this.publish([]);
         this.listeners.clear();
@@ -184,7 +187,6 @@ export class ItemOperationQueue {
         if (!entry) return;
         const controller = new AbortController();
         const deadline = setTimeout(() => {
-            for (const pending of this.pending) pending.finishFolderEdit?.();
             this.dispose();
             this.lifecycle.onReadExpired?.();
         }, DETACHED_READ_LIMIT_MS);
