@@ -1,7 +1,7 @@
 ---
 title: Use one client store per open item
 date: 2026-11-20
-updated: 2026-11-20 13:35
+updated: 2026-11-20 14:55
 status: accepted
 kind: fix
 issues: [426]
@@ -85,11 +85,16 @@ server's `access.contentView` controls when content reads change scope.
   operation. A write can settle the detail with its returned projection. Otherwise, only a projection
   read requested after the write answered can settle it. The dashboard applies the same ordering
   to its folder snapshot and keeps the edit until a snapshot requested after the answer arrives.
-- The maintainer's transcript rule sets the default once per visit. A visible workflow on the first
-  projection chooses its source in workflow order (Custom, Mix, Plaud). Otherwise the preferred
-  source supplies the default. A cold open provisionally shows the workflow order. After choosing
-  the default, only an explicit tab selection, a workflow action targeting a source, or the current
-  transcript disappearing can change it. Learn actions select the source Learn uses.
+- The maintainer's transcript rule: until the person picks a tab, it follows the transcript the
+  workflow works on; without a workflow, it follows the preferred-source setting. The store sets the
+  unpicked tab on the first projection, in workflow order (Custom, Mix, Plaud) when a workflow is
+  visible, and a cold open shows the workflow order first. After that the tab changes only when the
+  workflow's transcript first appears (once, while unpicked), the shown transcript disappears, the
+  person picks a tab, or a workflow action targets another source. Learn actions select the source
+  Learn uses. A workflow merely starting or finishing does not move the tab, so it never flips back
+  and forth while the person reads.
+- Each part reads once when the detail opens: the first server version adopts the read already in
+  flight for the same URL and identity.
 - The detail keeps its panel instances across private and Organization rows for the same item.
   When projected transcript or title versions get ahead of the server-rendered props, the store
   requests a dashboard refresh and briefly holds dependent reads. Learn serves reviews only for the
