@@ -272,6 +272,55 @@ describe.each([
     });
 
     it.each([
+        "remarks",
+        "editor",
+    ] as const)("keeps the %s draft across a failed version refresh and recovery", async (draftKind) => {
+        const view = render(versionedWidget(kind, "1"));
+        const isRemark = draftKind === "remarks";
+        fireEvent.click(
+            await screen.findByRole("button", {
+                name: isRemark ? "Summary remarks" : "Edit summary",
+            }),
+        );
+        const field = await screen.findByLabelText<HTMLTextAreaElement>(
+            isRemark ? "New remark" : /Summary text/,
+        );
+        const dialog = isRemark ? screen.getByRole("dialog") : null;
+        const save = screen.getByRole<HTMLButtonElement>("button", {
+            name: isRemark ? "Correct summary" : "Save",
+        });
+        fireEvent.change(field, { target: { value: "Keep this draft" } });
+        expect(save.disabled).toBe(false);
+
+        const original = requests.getMockImplementation();
+        if (!original) throw new Error("missing fetch fixture");
+        requests.mockImplementation((url, init) =>
+            String(url).includes("/summary?") && !init?.method
+                ? Promise.resolve(new Response(null, { status: 500 }))
+                : original(url, init),
+        );
+        view.rerender(versionedWidget(kind, "2"));
+        await screen.findByText("The summary could not be refreshed.");
+
+        expect(field.isConnected).toBe(true);
+        expect(field.value).toBe("Keep this draft");
+        expect(field.disabled).toBe(false);
+        expect(field.readOnly).toBe(!isRemark);
+        expect(save.disabled).toBe(true);
+        if (dialog) expect(screen.getByRole("dialog")).toBe(dialog);
+
+        requests.mockImplementation(original);
+        summary = { ...summary, revision: 1 };
+        view.rerender(versionedWidget(kind, "3"));
+        await waitFor(() => expect(save.disabled).toBe(false));
+
+        expect(field.isConnected).toBe(true);
+        expect(field.value).toBe("Keep this draft");
+        expect(field.readOnly).toBe(false);
+        if (dialog) expect(screen.getByRole("dialog")).toBe(dialog);
+    });
+
+    it.each([
         "profile-unavailable",
         "provider-unavailable",
     ])("keeps remark deletion available with %s", async (reason) => {

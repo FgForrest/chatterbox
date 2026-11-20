@@ -407,6 +407,29 @@ it("tries the private projection after an Organization 404 for the owner", async
     expect(result.current.status).toBe("ready");
 });
 
+it.each([
+    401, 403, 404,
+])("never tries the private projection after an Organization %i for a non-owner", async (status) => {
+    const initial = processing(60_000, "item-member-unavailable");
+    const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response("", { status }))
+        .mockImplementation(async () => Response.json({ processing: initial }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderItemDetail({
+        itemId: initial.itemId,
+        kind: "audio",
+        view: "org",
+        isOwn: false,
+    });
+    await act(async () => result.current.refresh());
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+        `/api/recordings/${initial.itemId}?processing=1&view=org`,
+    ]);
+    expect(result.current.status).toBe("unavailable");
+    expect(result.current.data).toBeNull();
+});
+
 it("retries an unavailable item on invalidation", async () => {
     const initial = processing(60_000, "item-available-again");
     const fetchMock = vi
