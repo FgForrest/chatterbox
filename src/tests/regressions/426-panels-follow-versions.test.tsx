@@ -214,6 +214,103 @@ afterEach(() => {
     vi.clearAllMocks();
 });
 
+it("reads each recording part once on a cold open and once when its version changes", async () => {
+    const projectionRead = Promise.withResolvers<Response>();
+    const initial = projection();
+    const base = {
+        ...initial,
+        outputs: { ...initial.outputs, summary: true },
+        versions: {
+            ...initial.versions,
+            summaries: { riffado: "summary-1" },
+            corrections: { riffado: "corrections-1" },
+        },
+    };
+    const api = `/api/recordings/${item.id}`;
+    const parts = [
+        `${api}/summary?source=riffado`,
+        `${api}/corrections?source=riffado`,
+        `${api}/speakers?source=riffado`,
+        `${api}/language`,
+        `${api}/review?source=riffado`,
+        `${api}/topics?source=riffado`,
+        `${api}/tasks`,
+    ];
+    const replies = new Map<string, unknown>([
+        [
+            parts[0],
+            { summary: "The schedule is confirmed.", source: "riffado" },
+        ],
+        [parts[1], { corrections: [] }],
+        [parts[2], { speakers: [] }],
+        [parts[3], { confirmedLanguage: "cs", canChange: true }],
+        [parts[4], review()],
+        [parts[5], { topics: [] }],
+        [parts[6], { tasks: [], proposals: [], updates: [], matches: [] }],
+    ]);
+    const inFlight = new Map(
+        [parts[0], parts[1], parts[4], parts[5], parts[6]].map((url) => [
+            url,
+            Promise.withResolvers<Response>(),
+        ]),
+    );
+    let projectionResolved = false;
+    const remote = server((url) => {
+        if (url.includes("processing=1") && !projectionResolved)
+            return projectionRead.promise;
+        if (!replies.has(url)) return;
+        return inFlight.get(url)?.promise ?? Response.json(replies.get(url));
+    }, base);
+    const requests = () =>
+        parts.map((part) =>
+            remote.fetch.mock.calls.filter(([url]) => url === part),
+        );
+
+    render(
+        <WorkstationDetailPane
+            {...props}
+            currentRecording={{ ...item, view: undefined, hasSummary: true }}
+            transcripts={[transcript("riffado")]}
+        />,
+    );
+    await waitFor(() =>
+        expect(requests().map((calls) => calls.length)).toEqual(
+            parts.map(() => 1),
+        ),
+    );
+    expect(await screen.findByText("Czech")).toBeTruthy();
+    projectionResolved = true;
+    await act(async () =>
+        projectionRead.resolve(Response.json({ processing: base })),
+    );
+    expect(requests().map((calls) => calls.length)).toEqual(parts.map(() => 1));
+    for (const calls of requests())
+        expect(calls[0][1]?.signal?.aborted).toBe(false);
+    await act(async () => {
+        for (const [url, reply] of inFlight)
+            reply.resolve(Response.json(replies.get(url)));
+        inFlight.clear();
+    });
+    expect(await screen.findByText("The schedule is confirmed.")).toBeTruthy();
+    expect(requests().map((calls) => calls.length)).toEqual(parts.map(() => 1));
+
+    await remote.update({
+        ...base,
+        versions: {
+            ...base.versions,
+            item: "item-2",
+            summaries: { riffado: "summary-2" },
+            corrections: { riffado: "corrections-2" },
+            speakers: { riffado: "speakers-2" },
+            language: "language-2",
+            learn: { riffado: "run-2" },
+            transcripts: { riffado: "riffado-2" },
+            tasks: "tasks-2",
+        },
+    });
+    expect(requests().map((calls) => calls.length)).toEqual(parts.map(() => 2));
+});
+
 it.each([
     "riffado",
     "mixed",
@@ -455,12 +552,11 @@ it("keeps a picked tab and the card instance through a first summary, revision s
     await screen.findByLabelText("Workflow");
     fireEvent.click(screen.getByText("Plaud", { selector: "button" }));
     expect(screen.getByText("plaud transcript 1")).toBeTruthy();
-    const legacyRevision = { contentRevision: 1 };
     view.rerender(
         <WorkstationDetailPane
             {...props}
-            {...legacyRevision}
             currentRecording={{ ...item, hasSummary: true }}
+            organizationEventRevision={1}
         />,
     );
     expect(screen.getByText("plaud transcript 1")).toBeTruthy();
@@ -468,6 +564,7 @@ it("keeps a picked tab and the card instance through a first summary, revision s
         <WorkstationDetailPane
             {...props}
             currentRecording={{ ...item, hasSummary: true, view: "org" }}
+            organizationEventRevision={1}
         />,
     );
     expect(screen.getByText("plaud transcript 1")).toBeTruthy();

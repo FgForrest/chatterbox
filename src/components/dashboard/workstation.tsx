@@ -269,7 +269,8 @@ export function Workstation({
                 ? null
                 : newest(newcomer ? orgRecordings : libraryRecordings),
     );
-    const [orgContentRevision, setOrgContentRevision] = useState(0);
+    const [organizationEventRevision, setOrganizationEventRevision] =
+        useState(0);
     const {
         settingsOpen,
         setSettingsOpen,
@@ -1000,9 +1001,6 @@ export function Workstation({
     const locationTranscriptions = locationIsOrg
         ? organizationTranscriptions
         : transcriptions;
-    // A shared recording is changed for the Organization, by its curators
-    // (or the organization account), on the Organization view; read-only
-    // there for anyone else, and in its owner's private copy.
     const sharedIds = useMemo(
         () => sharedRecordingIds(folderOrganization),
         [folderOrganization],
@@ -1443,7 +1441,7 @@ export function Workstation({
         );
         if (!effect.refresh) return;
         if (effect.refetchContent)
-            setOrgContentRevision((revision) => revision + 1);
+            setOrganizationEventRevision((revision) => revision + 1);
         if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
         refreshTimerRef.current = setTimeout(() => refresh(), 300);
     });
@@ -2367,7 +2365,7 @@ export function Workstation({
                 <FolderKnowledgePanel
                     key={knowledgeFolderId}
                     folder={selectedFolder}
-                    contentRevision={orgContentRevision}
+                    organizationEventRevision={organizationEventRevision}
                     onBack={closeFolderView}
                 />
             );
@@ -2544,7 +2542,7 @@ export function Workstation({
                     )
                 }
                 onMoveBetweenFolders={handleMoveBetweenFolders}
-                contentRevision={orgContentRevision}
+                organizationEventRevision={organizationEventRevision}
             />
         );
     }

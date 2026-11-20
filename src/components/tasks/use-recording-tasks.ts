@@ -20,6 +20,7 @@ import {
     undoTaskMatch,
 } from "@/components/tasks/task-api";
 import { useDeferredReviewCommit } from "@/hooks/use-deferred-review-commit";
+import { useItemPartReadRevision } from "@/hooks/use-item-part-fetch";
 import type {
     RecordingTasks,
     TaskChange,
@@ -97,7 +98,13 @@ export function useRecordingTasks(
 ): RecordingTasksState {
     const i18n = useExtracted();
     const deferred = useDeferredReviewCommit();
-    const version = useItemPartVersion("tasks") ?? reloadKey;
+    const version = useItemPartVersion("tasks");
+    const revision = useItemPartReadRevision(
+        null,
+        recordingId,
+        version,
+        reloadKey,
+    );
     const [loaded, setLoaded] = useState<{
         recordingId: string;
         data: RecordingTasks | null;
@@ -177,11 +184,11 @@ export function useRecordingTasks(
     );
 
     useEffect(() => {
-        void version;
+        void revision;
         const controller = new AbortController();
         void reload(controller.signal);
         return () => controller.abort();
-    }, [reload, version]);
+    }, [reload, revision]);
 
     const markChanged = () =>
         setData((current) =>

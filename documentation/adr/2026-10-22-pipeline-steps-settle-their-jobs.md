@@ -1,14 +1,14 @@
 ---
 title: A pipeline step names its job and the worker settles both, one reconciler repairs drift, and the server says what each step waits for
 date: 2026-10-22
-updated: 2026-11-08 19:20
+updated: 2026-11-20 13:21
 status: superseded
 kind: fix
 issues: []
 prs: [209, 216, 220, 221]
-areas: [src/lib/pipeline, src/db/queries/pipeline-jobs.ts, src/db/queries/pipeline-reconciler.ts, src/db/queries/async-jobs.ts, src/lib/jobs, src/hooks/use-item-processing.ts, src/lib/summary]
+areas: [src/lib/pipeline, src/db/queries/pipeline-jobs.ts, src/db/queries/pipeline-reconciler.ts, src/db/queries/async-jobs.ts, src/lib/jobs, src/lib/summary]
 supersedes: [2026-10-19-processing-profiles-and-workflow]
-superseded-by: [2026-11-08-ai-trim-proposal-before-learn]
+superseded-by: [2026-11-08-ai-trim-proposal-before-learn, 2026-11-20-one-store-per-open-item]
 relates: [2026-10-22-owner-edits-shared-recording, 2026-09-13-durable-job-queue, 2026-10-22-summary-reads-the-preferred-transcript]
 ---
 
@@ -26,6 +26,11 @@ note; naming speakers does not gate the summary; and where workflow order matter
 it, not the server.
 
 **Superseded in part** by [AI trim proposals before Learn](2026-11-08-ai-trim-proposal-before-learn.md): Automatic downstream work now rechecks the owner trim decision under writer locks. Explicit manual runs remain permissive, and job settlement and reconciliation keep their existing contracts.
+
+**Superseded in part.** The item store now owns client polling and retries on invalidation until
+the item version changes or the retry window ends. A pending pipeline advance counts as busy.
+Relative scheduling, settlement and reconciliation still apply.
+[Use one client store per open item](2026-11-20-one-store-per-open-item.md)
 
 ## Why
 
@@ -142,9 +147,9 @@ automatic and manual runs and sharing, per-handler settlement would be simple en
   share confirmation, the Organization) and the allowed actions. "Queued" appears only when a pending
   job row exists; a running step with no heartbeat for 120 s is reported as stalled. The
   Organization view gets the driving row's state with the viewer's own actions.
-- **Polling:** the response carries `nextCheckAt` and `nextCheckInMs`; the client
-  (`src/hooks/use-item-processing.ts`) schedules from the relative `nextCheckInMs`, because comparing
-  the server's absolute deadline with the browser's clock was a must-fix in review. One timer per
+- **Polling:** the response carries both `nextCheckAt` and `nextCheckInMs`. The client schedules
+  from the relative `nextCheckInMs` to avoid comparing the server's absolute deadline with the
+  browser's clock. One timer per
   item, a refetch on focus and visibility, no polling while hidden, and two failed fetches show a
   quiet "state may be stale, retry" line. The client's `inferUpcomingStates` guessing is gone.
 - **Summary fence (PR #209):** a run reads the item's profile revision once at its start and fences

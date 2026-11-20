@@ -763,13 +763,13 @@ export function useItemContentView(
     return (detail?.shared ?? shared) ? "org" : view;
 }
 
-/** Read the server's opaque version for an item part, optionally per source. */
+/** Read an opaque part version. An empty string marks a missing source in a loaded version map. */
 export function useItemPartVersion(
     part: keyof NonNullable<Projection["versions"]>,
     source?: string | null,
 ) {
     const version = useItemDetail()?.versions?.[part];
     if (typeof version === "string") return version;
-    if (!source) return undefined;
-    return version?.[source];
+    if (!version || !source) return undefined;
+    return version[source] ?? "";
 }

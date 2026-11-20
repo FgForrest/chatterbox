@@ -56,7 +56,7 @@ interface TranscriptionData {
 
 interface Props {
     operationQueue?: ItemOperationQueue;
-    contentRevision?: number;
+    organizationEventRevision?: number;
     currentRecording: Recording | null;
     userId?: string;
     itemLinkQuery?: string;
@@ -174,7 +174,7 @@ function WorkstationDetailContent({
     onAddToFolder,
     onRemoveFromFolder,
     onMoveBetweenFolders,
-    contentRevision,
+    organizationEventRevision,
 }: Props) {
     const i18n = useExtracted();
     const [knowledgeItem, setKnowledgeItem] = useState<string | null>(null);
@@ -336,7 +336,9 @@ function WorkstationDetailContent({
                                         title: currentRecording.filename,
                                         view: currentRecording.view,
                                     }}
-                                    contentRevision={contentRevision}
+                                    organizationEventRevision={
+                                        organizationEventRevision
+                                    }
                                     onBack={() => setKnowledgeItem(null)}
                                     onReview={(source) => {
                                         setKnowledgeItem(null);

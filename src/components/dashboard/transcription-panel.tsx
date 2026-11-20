@@ -176,11 +176,7 @@ export function toTranscriptList(
     ];
 }
 
-/**
- * A short hash of what a transcript's speaker labels come from, so the
- * speaker tags can tell a re-transcription from a refetch of the same text.
- */
-export function transcriptFingerprint(
+function transcriptFingerprint(
     transcript: TranscriptOption | undefined,
 ): string {
     if (!transcript) return "";
@@ -452,12 +448,10 @@ export function TranscriptionPanel({
     const { data: shownCorrections } = useItemPartFetch<{
         corrections?: OverlayCorrection[];
         canUndo?: boolean;
-    }>(
-        correctionsUrl,
-        JSON.stringify([correctionsVersion, reviewsFinished, correctionsRead]),
-        `${reviewKey}:corrections`,
-        { paused: activeTranscriptPending },
-    );
+    }>(correctionsUrl, correctionsVersion, `${reviewKey}:corrections`, {
+        paused: activeTranscriptPending,
+        refreshKey: `${reviewsFinished}:${correctionsRead}`,
+    });
     const undoCorrection = useCallback(
         async (correctionId: string) => {
             const response = await fetch(

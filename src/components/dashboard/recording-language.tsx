@@ -4,7 +4,10 @@ import { Languages, Pencil } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
-import { useItemPartVersion } from "@/components/items/item-detail-store";
+import {
+    useItemDetail,
+    useItemPartVersion,
+} from "@/components/items/item-detail-store";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -83,17 +86,15 @@ export function RecordingLanguage({
         view,
     );
     const version = useItemPartVersion("language");
+    const detail = useItemDetail();
     const { data: metadata, setData: setMetadata } =
-        useItemPartFetch<LanguageMetadata>(
-            url,
-            version ??
-                JSON.stringify([
-                    refreshKey,
-                    resummarizeDisabled,
-                    titleRefreshKey,
-                ]),
-            recordingId,
-        );
+        useItemPartFetch<LanguageMetadata>(url, version, recordingId, {
+            fallbackRevision: JSON.stringify([
+                refreshKey,
+                detail ? null : resummarizeDisabled,
+                titleRefreshKey,
+            ]),
+        });
     const name = (code: string) => recordingLanguageName(code, locale);
     const confirmed = metadata?.confirmedLanguage;
     const detected = normalizeDetectedLanguage(detectedLanguage);
