@@ -476,6 +476,8 @@ export function ItemWorkflow({
     if (categorizeReason === "needs_folder") filingMode = "folder";
     else if (profileReason) filingMode = "profile";
     filingMode = pendingFilingMode ?? filingMode;
+    const showPendingFolderRow =
+        pendingFilingMode !== null && detail.pendingFolderIds.size > 0;
 
     useEffect(() => {
         if (filingMode) loadPanel();
@@ -929,7 +931,7 @@ export function ItemWorkflow({
                 </output>
             )}
             {canEdit && filingMode && (
-                <div ref={filingRef}>
+                <div ref={filingRef} hidden={showPendingFolderRow}>
                     {panelData?.itemId === itemId ? (
                         <CategorizePanel
                             data={panelData}
@@ -954,9 +956,7 @@ export function ItemWorkflow({
                     )}
                 </div>
             )}
-            {(!canEdit ||
-                !filingMode ||
-                (pendingFilingMode && detail.pendingFolderIds.size > 0)) && (
+            {(!canEdit || !filingMode || showPendingFolderRow) && (
                 <ProcessingFolderRow
                     itemId={itemId}
                     kind={kind}
