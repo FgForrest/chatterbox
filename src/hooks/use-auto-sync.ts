@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDashboardRefresh } from "@/hooks/use-dashboard-refresh";
-import { getApiErrorMessage } from "@/lib/api-errors";
+import { parseApiError } from "@/lib/api-errors";
 
 interface UseAutoSyncOptions {
     interval?: number;
@@ -196,16 +196,18 @@ export function useAutoSync(options: UseAutoSyncOptions = {}) {
                         onSuccessRef.current?.(0);
                     }
                 } else {
-                    const errorMessage = await getApiErrorMessage(
-                        response,
-                        "Sync failed",
-                    );
+                    const { error, code } = await parseApiError(response);
+                    const errorMessage = error || "Sync failed";
 
                     setStatus((prev) => ({
                         ...prev,
                         lastSyncResult: {
                             success: false,
                             error: errorMessage,
+                            needsReconnect:
+                                code === "PLAUD_INVALID_TOKEN"
+                                    ? true
+                                    : undefined,
                         },
                     }));
 
