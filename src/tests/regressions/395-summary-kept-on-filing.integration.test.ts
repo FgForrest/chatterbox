@@ -1763,28 +1763,16 @@ async function mutate(
                 15_000,
             );
 
-            it.runIf(kind === "audio").each(["plaud", "mixed"] as const)(
-                "keeps completed %s inputs when the Organization profile prefers re-transcription",
-                async (source) => {
+            it.runIf(kind === "audio")(
+                "keeps completed Plaud inputs when the Organization profile prefers re-transcription",
+                async () => {
                     await db()
                         .update(transcriptions)
-                        .set({ source })
+                        .set({ source: "plaud" })
                         .where(eq(transcriptions.id, CONTENT));
-                    if (source === "mixed")
-                        await db()
-                            .insert(transcriptions)
-                            .values({
-                                id: "underlying-plaud",
-                                recordingId: ITEM,
-                                userId: OWNER,
-                                source: "plaud",
-                                provider: "test",
-                                model: "test",
-                                text: encryptText("Earlier Plaud text"),
-                            });
                     const inputs = {
                         contentId: CONTENT,
-                        contentSourceId: source,
+                        contentSourceId: "plaud",
                         contentRevision: 0,
                     };
                     await db()

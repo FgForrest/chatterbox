@@ -103,7 +103,6 @@ describe("profile-backed title generation", () => {
 
     it.each([
         "riffado",
-        "mixed",
         "plaud",
     ])("uses a generic language directive and Czech prompt wording for ces from %s", async (source) => {
         selectRows([{ source, detectedLanguage: "ces" }]);

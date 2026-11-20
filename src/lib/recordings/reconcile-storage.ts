@@ -96,7 +96,6 @@ async function storageKeyExists(
         storage.exists(sidecarKey(audioPath, "summary", "plaud")),
         storage.exists(sidecarKey(audioPath, "transcript", "riffado")),
         storage.exists(sidecarKey(audioPath, "summary", "riffado")),
-        storage.exists(sidecarKey(audioPath, "transcript", "mixed")),
     ]);
     return results.some(Boolean);
 }

@@ -299,15 +299,15 @@ describeWithDatabase(
                 .mockResolvedValueOnce(reply("Orion launch planning"));
         });
 
-        async function addTranscript(source: "riffado" | "mixed") {
+        async function addCustomTranscript() {
             await db()
                 .insert(transcriptions)
                 .values({
-                    id: `mira-${source}`,
+                    id: "mira-riffado",
                     recordingId: ITEM,
                     userId: USER,
-                    source,
-                    text: encryptText(`${source} launch plan`),
+                    source: "riffado",
+                    text: encryptText("riffado launch plan"),
                     detectedLanguage: "en",
                     provider: "mira",
                     model: "mira",
@@ -430,7 +430,7 @@ describeWithDatabase(
                 source: "summary",
                 fence: plaudInput,
             });
-            await addTranscript("riffado");
+            await addCustomTranscript();
             const later = await gatherFacts(ITEM, "private", USER);
             expect(later.summary).toMatchObject({
                 current: false,
@@ -441,18 +441,14 @@ describeWithDatabase(
             );
         });
 
-        it.each([
-            "plaud",
-            "mixed",
-        ])("manually summarizes and titles %s content without an existing summary phase", async (source) => {
-            if (source === "mixed") await addTranscript("mixed");
+        it("manually summarizes and titles Plaud content without an existing summary phase", async () => {
             expect(await runJob("manual")).toMatchObject({
                 outcome: { kind: "done" },
                 titleOutcome: { kind: "done" },
             });
             expect(await storedSummary()).toMatchObject({
                 source: "riffado",
-                inputs: { contentSourceId: source },
+                inputs: { contentSourceId: "plaud" },
             });
         });
 
@@ -540,16 +536,15 @@ describeWithDatabase(
             expect(createCompletion).not.toHaveBeenCalled();
         });
 
-        it.each([
-            "mixed",
-            "riffado",
-        ] as const)("uses %s ahead of Plaud for manual summary and transcript title input", async (source) => {
-            await addTranscript("mixed");
-            if (source === "riffado") await addTranscript("riffado");
+        it("uses Custom ahead of Plaud for manual summary and transcript title input", async () => {
+            await addCustomTranscript();
             expect(await readTitleInput(USER, ITEM)).toMatchObject({
-                text: `${source} launch plan`,
+                text: "riffado launch plan",
                 source: "transcript",
-                fence: { contentId: `mira-${source}`, contentSourceId: source },
+                fence: {
+                    contentId: "mira-riffado",
+                    contentSourceId: "riffado",
+                },
             });
             const result = await generateSummaryForRecording(USER, ITEM, {
                 trigger: "manual",
@@ -557,8 +552,8 @@ describeWithDatabase(
             expect(result.committed).toBe(true);
             expect(await storedSummary()).toMatchObject({
                 source: "riffado",
-                transcriptionId: `mira-${source}`,
-                inputs: { contentSourceId: source },
+                transcriptionId: "mira-riffado",
+                inputs: { contentSourceId: "riffado" },
             });
         });
 
@@ -609,11 +604,7 @@ describeWithDatabase(
             ).toMatchObject({ state: "done", inputs: plaudInput });
         });
 
-        it.each([
-            "plaud",
-            "mixed",
-        ])("recognizes the custom summary for task review with a %s transcript", async (source) => {
-            if (source === "mixed") await addTranscript("mixed");
+        it("recognizes the custom summary for task review with a Plaud transcript", async () => {
             await generateSummaryForRecording(USER, ITEM, {
                 trigger: "manual",
             });
@@ -643,7 +634,7 @@ describeWithDatabase(
                 (await gatherFacts(ITEM, "private", USER))
                     .learnCorrectionInFlight,
             ).toBe(true);
-            await addTranscript("riffado");
+            await addCustomTranscript();
             expect(
                 (await gatherFacts(ITEM, "private", USER))
                     .learnCorrectionInFlight,

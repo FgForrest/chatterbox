@@ -1044,12 +1044,10 @@ function planProcessing(facts: PipelineFacts): PipelinePlan {
               (profileTranscription?.plaudTranscript === "use" ||
               placementKeepsCompletedTranscript(
                   facts.phases,
-                  facts.trimContent ?? plaudTranscript,
+                  plaudTranscript,
                   minimumGeneration,
               )
-                  ? facts.trimContent?.contentSourceId === "mixed"
-                      ? facts.trimContent
-                      : plaudTranscript
+                  ? plaudTranscript
                   : null))
             : facts.content;
 
@@ -1176,7 +1174,6 @@ function planProcessing(facts: PipelineFacts): PipelinePlan {
     if (
         facts.item.kind === "audio" &&
         content.contentSourceId !== "riffado" &&
-        content.contentSourceId !== "mixed" &&
         content.contentSourceId !== "plaud"
     ) {
         return { actions: [], reason: "gone" };

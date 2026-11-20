@@ -1,7 +1,7 @@
 /** Transcript sources read for summaries and titles, most preferred first. */
-export const TRANSCRIPT_SOURCE_ORDER = ["riffado", "mixed", "plaud"] as const;
+export const TRANSCRIPT_SOURCE_ORDER = ["riffado", "plaud"] as const;
 
-/** Prefer a provider transcript, then an edit, then the imported transcript. */
+/** Prefer a provider transcript over the imported transcript. */
 export function preferredTranscript<T extends { source: string }>(
     rows: readonly T[],
 ): T | undefined {
@@ -17,11 +17,9 @@ export function preferredLearnTranscript<T extends { source: string }>(
     rows: readonly T[],
     stepSource?: string,
 ): T | undefined {
-    const supported = rows.filter(
-        ({ source }) => source === "riffado" || source === "plaud",
-    );
-    return (
-        supported.find(({ source }) => source === stepSource) ??
-        preferredTranscript(supported)
-    );
+    if (stepSource === "riffado" || stepSource === "plaud") {
+        const selected = rows.find(({ source }) => source === stepSource);
+        if (selected) return selected;
+    }
+    return preferredTranscript(rows);
 }

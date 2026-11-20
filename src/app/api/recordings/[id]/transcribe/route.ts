@@ -53,8 +53,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     const model = typeof body.model === "string" ? body.model : undefined;
     const attributionSource =
         body.attributionSource === "riffado" ||
-        body.attributionSource === "plaud" ||
-        body.attributionSource === "mixed"
+        body.attributionSource === "plaud"
             ? body.attributionSource
             : undefined;
     const retranscribe = body.retranscribe === true;

@@ -93,7 +93,10 @@ import {
 } from "@/lib/transcription/format";
 import { geminiTranscribe } from "@/lib/transcription/gemini-transcribe";
 import { mergeMeetingTerms } from "@/lib/transcription/meeting-terms";
-import { upsertTranscription } from "@/lib/transcription/persist";
+import {
+    type TranscriptSource,
+    upsertTranscription,
+} from "@/lib/transcription/persist";
 import {
     speechmaticsTakesVocabulary,
     speechmaticsTranscribe,
@@ -424,7 +427,7 @@ export interface TranscribeOptions {
     /** Override the language for one explicitly requested re-transcription. */
     language?: string;
     /** Transcript source whose confirmed speaker assignments may be carried forward. */
-    attributionSource?: "riffado" | "plaud" | "mixed";
+    attributionSource?: TranscriptSource;
     /**
      * Re-run the provider call even when a transcript already exists.
      * Used by the manual "Re-transcribe" button so a user clicking it
@@ -1102,8 +1105,7 @@ async function transcribeRecordingInner(
         if (
             !existingTranscription &&
             opts.force &&
-            opts.attributionSource &&
-            opts.attributionSource !== "riffado" &&
+            opts.attributionSource === "plaud" &&
             nextSpeakerCount > 0
         ) {
             await copyMatchingSpeakerAttributions({

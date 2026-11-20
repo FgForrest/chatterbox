@@ -677,12 +677,7 @@ async function summaryUsesOlderContent(
         return false;
     }
     const source = inputs.contentSourceId;
-    if (
-        source !== "mail" &&
-        source !== "riffado" &&
-        source !== "plaud" &&
-        source !== "mixed"
-    ) {
+    if (source !== "mail" && source !== "riffado" && source !== "plaud") {
         return false;
     }
     const [current] =

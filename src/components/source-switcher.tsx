@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ActionTooltip } from "@/components/ui/tooltip";
 
-/** Switches between Plaud, custom, and mixed content sources. */
+/** Switches between Plaud and custom content sources. */
 export function SourceSwitcher({
     ariaLabel,
     sources,
@@ -55,9 +55,7 @@ export function SourceSwitcher({
                                     >
                                         {source === "plaud"
                                             ? "Plaud"
-                                            : source === "mixed"
-                                              ? i18n("Mix")
-                                              : i18n("Custom")}
+                                            : i18n("Custom")}
                                     </DropdownMenuRadioItem>
                                 ))}
                             </DropdownMenuRadioGroup>
@@ -85,11 +83,7 @@ export function SourceSwitcher({
                                 : "text-muted-foreground hover:bg-background/50 hover:text-foreground"
                         }`}
                     >
-                        {source === "plaud"
-                            ? "Plaud"
-                            : source === "mixed"
-                              ? i18n("Mix")
-                              : i18n("Custom")}
+                        {source === "plaud" ? "Plaud" : i18n("Custom")}
                     </button>
                 ))}
             </fieldset>

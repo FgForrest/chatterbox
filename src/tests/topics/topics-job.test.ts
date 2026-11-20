@@ -30,7 +30,7 @@ describe("parseTopicsJobPayload", () => {
     it("rejects a missing recording or an unknown source, permanently", () => {
         for (const raw of [
             { source: "plaud" },
-            { recordingId: "rec-1", source: "mixed" },
+            { recordingId: "rec-1", source: "unknown" },
         ]) {
             expect(() => parseTopicsJobPayload(raw)).toThrow(
                 InvalidJobPayloadError,

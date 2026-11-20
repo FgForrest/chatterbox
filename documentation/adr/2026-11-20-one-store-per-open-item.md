@@ -1,7 +1,7 @@
 ---
 title: Use one client store per open item
 date: 2026-11-20
-updated: 2026-11-20 14:55
+updated: 2026-11-20 19:49
 status: accepted
 kind: fix
 issues: [426]
@@ -87,7 +87,7 @@ server's `access.contentView` controls when content reads change scope.
   to its folder snapshot and keeps the edit until a snapshot requested after the answer arrives.
 - The maintainer's transcript rule: until the person picks a tab, it follows the transcript the
   workflow works on; without a workflow, it follows the preferred-source setting. The store sets the
-  unpicked tab on the first projection, in workflow order (Custom, Mix, Plaud) when a workflow is
+  unpicked tab on the first projection, in workflow order (Custom, then Plaud) when a workflow is
   visible, and a cold open shows the workflow order first. After that the tab changes only when the
   workflow's transcript first appears (once, while unpicked), the shown transcript disappears, the
   person picks a tab, or a workflow action targets another source. Learn actions select the source

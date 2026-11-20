@@ -301,11 +301,8 @@ export function TranscriptionPanel({
         transcriptQuiet ||
         Boolean(transcriptionRunning && widgets?.transcript.frame === "dialog");
     const transcriptWidgetId = `recording-transcription-${recording.id}`;
-    let transcriptSourceLabel = name;
-    if (activeTranscript?.source === "plaud") transcriptSourceLabel = "Plaud";
-    if (activeTranscript?.source === "mixed") {
-        transcriptSourceLabel = i18n("Mix");
-    }
+    const transcriptSourceLabel =
+        activeTranscript?.source === "plaud" ? "Plaud" : name;
     const folderName =
         processing?.placements[0]?.name ?? processing?.intents[0]?.name;
     const startTranscription = (source?: string, retranscribe = false) => {
@@ -737,14 +734,9 @@ export function TranscriptionPanel({
                       items={[
                           {
                               key: "source",
-                              content:
-                                  activeTranscript.source === "plaud" ? (
-                                      <span>Plaud</span>
-                                  ) : (
-                                      activeTranscript.source === "mixed" && (
-                                          <span>{i18n("Mix")}</span>
-                                      )
-                                  ),
+                              content: activeTranscript.source === "plaud" && (
+                                  <span>Plaud</span>
+                              ),
                           },
                           {
                               key: "provider",
@@ -1040,14 +1032,9 @@ export function TranscriptionPanel({
                                                                         {candidate.source ===
                                                                         "plaud"
                                                                             ? "Plaud"
-                                                                            : candidate.source ===
-                                                                                "mixed"
-                                                                              ? i18n(
-                                                                                    "Mix",
-                                                                                )
-                                                                              : i18n(
-                                                                                    "Custom",
-                                                                                )}
+                                                                            : i18n(
+                                                                                  "Custom",
+                                                                              )}
                                                                     </DropdownMenuRadioItem>
                                                                 ),
                                                             )}
@@ -1212,8 +1199,6 @@ export function TranscriptionPanel({
                                             }
                                             learnMarks={
                                                 canLearn &&
-                                                activeTranscript.source !==
-                                                    "mixed" &&
                                                 learnMarks?.key === reviewKey
                                                     ? learnMarks.marks
                                                     : null

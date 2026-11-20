@@ -37,7 +37,6 @@ export async function copyExistingRecordingFiles(
         undefined,
         "plaud",
         "riffado",
-        "mixed",
     ].flatMap((source) =>
         (["transcript", "summary"] as const).map((kind) => ({
             source: sidecarKey(oldAudioPath, kind, source),

@@ -1551,7 +1551,6 @@ export const transcriptions = pgTable(
         // Provenance of this transcript, orthogonal to transcriptionType:
         //   'riffado' = produced by the user's own provider (server/browser)
         //   'plaud'   = imported from Plaud's native transcription
-        //   'mixed'   = user-edited combination of the above (see #204)
         source: varchar("source", { length: 20 }).notNull().default("riffado"),
         // Timed turns, encrypted like the text they were rendered from:
         // diarized speaker turns, or speakerless paragraphs from Whisper's
