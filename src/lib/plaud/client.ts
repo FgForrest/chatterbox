@@ -4,12 +4,29 @@ import type {
     PlaudApiError,
     PlaudDeviceListResponse,
     PlaudFileDetailResponse,
+    PlaudRecording,
     PlaudRecordingsResponse,
     PlaudTempUrlResponse,
+    PlaudV4ContentUrlResponse,
+    PlaudV4FileDetailResponse,
+    PlaudV4FolderChildrenResponse,
+    PlaudV4Node,
+    PlaudV4RecordingsResponse,
+    PlaudV4RenameResponse,
 } from "@/types/plaud";
 import { plaudFetch } from "./fetch";
 import { safeParseJson } from "./parse";
 import { DEFAULT_SERVER_KEY, PLAUD_SERVERS, PLAUD_USER_AGENT } from "./servers";
+import {
+    applyPlaudV4Detail,
+    isPlaudV4MigratedResponse,
+    mapPlaudV4Item,
+    PLAUD_V4_VERSION_CONFLICT_STATUS,
+    plaudV4AudioObjects,
+    plaudV4DetailToLegacy,
+    recordingIdToPlaudV4FileId,
+    sortPlaudRecordings,
+} from "./v4";
 import { resolveWorkspaceToken } from "./workspace";
 
 export interface PlaudUpdateFilenameResponse {
@@ -25,6 +42,8 @@ export interface PlaudMoveToTrashResponse {
 }
 
 export const DEFAULT_PLAUD_API_BASE = PLAUD_SERVERS[DEFAULT_SERVER_KEY].apiBase;
+const V4_PAGE_SIZE = 50;
+const V4_MAX_PAGES = 400;
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY = 1000;
 
@@ -61,6 +80,13 @@ export class PlaudClient {
     private resolvedWorkspaceId?: string;
     private workspaceFetchInFlight?: Promise<void>;
     private workspaceFallbackToUt = false;
+    private v4Mode = false;
+    private v4List?: Promise<PlaudRecording[]>;
+    private readonly v4SortedLists = new Map<string, PlaudRecording[]>();
+    private readonly v4Details = new Map<
+        string,
+        NonNullable<PlaudV4FileDetailResponse["data"]>
+    >();
 
     constructor(
         userToken: string,
@@ -78,6 +104,10 @@ export class PlaudClient {
 
     get usingUserTokenFallback(): boolean {
         return this.workspaceFallbackToUt;
+    }
+
+    get usingPlaudV4(): boolean {
+        return this.v4Mode;
     }
 
     private async ensureWorkspaceToken(): Promise<void> {
@@ -214,6 +244,12 @@ export class PlaudClient {
         return body;
     }
 
+    private detectMigration(body: unknown): boolean {
+        if (!isPlaudV4MigratedResponse(body)) return false;
+        this.v4Mode = true;
+        return true;
+    }
+
     async getRecordings(
         skip: number = 0,
         limit: number = 99999,
@@ -221,30 +257,222 @@ export class PlaudClient {
         sortBy: string = "edit_time",
         isDesc: boolean = true,
     ): Promise<PlaudRecordingsResponse> {
-        const params = new URLSearchParams({
-            skip: skip.toString(),
-            limit: limit.toString(),
-            is_trash: isTrash.toString(),
-            sort_by: sortBy,
-            is_desc: isDesc.toString(),
-        });
+        if (!this.v4Mode) {
+            const params = new URLSearchParams({
+                skip: skip.toString(),
+                limit: limit.toString(),
+                is_trash: isTrash.toString(),
+                sort_by: sortBy,
+                is_desc: isDesc.toString(),
+            });
 
-        return this.request<PlaudRecordingsResponse>(
-            `/file/simple/web?${params.toString()}`,
+            const body = await this.request<PlaudRecordingsResponse>(
+                `/file/simple/web?${params.toString()}`,
+            );
+            if (!this.detectMigration(body)) {
+                if (Array.isArray(body?.data_file_list)) return body;
+                throw new AppError(
+                    ErrorCode.PLAUD_API_ERROR,
+                    body?.msg ||
+                        "Plaud returned an invalid recordings list response.",
+                    400,
+                    { plaudStatus: body?.status },
+                );
+            }
+        }
+
+        if (isTrash !== 0) {
+            return {
+                status: 0,
+                msg: "success",
+                data_file_total: 0,
+                data_file_list: [],
+            };
+        }
+        if (!this.v4List) {
+            this.v4List = this.listAllRecordingsV4().catch((error) => {
+                this.v4List = undefined;
+                throw error;
+            });
+        }
+        const recordings = await this.v4List;
+        const sort =
+            sortBy === "create_time" || sortBy === "start_time"
+                ? "start_time"
+                : "edit_time";
+        const key = `${sort}:${isDesc}`;
+        let all = this.v4SortedLists.get(key);
+        if (!all) {
+            all = sortPlaudRecordings(recordings, sort, isDesc);
+            this.v4SortedLists.set(key, all);
+        }
+        return {
+            status: 0,
+            msg: "success",
+            data_file_total: all.length,
+            data_file_list: all.slice(skip, skip + limit),
+        };
+    }
+
+    private async listAllRecordingsV4(): Promise<PlaudRecording[]> {
+        const recordings = new Map<string, PlaudRecording>();
+        const seenCursors = new Set<string>();
+        let cursor: string | null | undefined;
+        for (let page = 0; page < V4_MAX_PAGES; page++) {
+            const params = new URLSearchParams({
+                sort_by: "created",
+                sort_order: "desc",
+                page_size: V4_PAGE_SIZE.toString(),
+            });
+            if (cursor) params.set("cursor", cursor);
+
+            const body = await this.request<PlaudV4RecordingsResponse>(
+                `/file-app/v4/recordings/all?${params.toString()}`,
+            );
+            if (body?.status !== 0 || !Array.isArray(body.data?.items)) {
+                throw new AppError(
+                    ErrorCode.PLAUD_API_ERROR,
+                    body?.msg ||
+                        "Plaud returned an invalid v4 recordings response.",
+                    400,
+                    { plaudStatus: body?.status },
+                );
+            }
+            for (const item of body.data.items) {
+                if (!item?.file_id) continue;
+                const recording = mapPlaudV4Item(item);
+                const previous = recordings.get(recording.id);
+                if (!previous || recording.version_ms > previous.version_ms) {
+                    recordings.set(recording.id, recording);
+                }
+            }
+            cursor = body.data.next_cursor;
+            if (!cursor) return [...recordings.values()];
+            if (seenCursors.has(cursor)) {
+                throw new AppError(
+                    ErrorCode.PLAUD_API_ERROR,
+                    "Plaud returned a repeated recordings cursor.",
+                    400,
+                );
+            }
+            seenCursors.add(cursor);
+        }
+
+        throw new AppError(
+            ErrorCode.PLAUD_API_ERROR,
+            "Plaud recording scan exceeded the page limit.",
+            400,
         );
+    }
+
+    private async getFileDetailV4(
+        recordingId: string,
+        { fresh = false }: { fresh?: boolean } = {},
+    ): Promise<NonNullable<PlaudV4FileDetailResponse["data"]>> {
+        const fileId = recordingIdToPlaudV4FileId(recordingId);
+        const cached = this.v4Details.get(fileId);
+        if (cached && !fresh) return cached;
+
+        const body = await this.request<PlaudV4FileDetailResponse>(
+            `/file-app/v4/files/detail/${encodeURIComponent(fileId)}`,
+        );
+        if (body?.status !== 0 || !body.data) {
+            throw new AppError(
+                ErrorCode.PLAUD_API_ERROR,
+                body?.msg || "Plaud returned an invalid v4 file detail.",
+                400,
+                { plaudStatus: body?.status },
+            );
+        }
+        this.v4Details.set(fileId, body.data);
+        return body.data;
+    }
+
+    /**
+     * Complete a recording listed through the v4 API (device serial, size,
+     * timezone) from its v4 detail. No-op for legacy listings, so callers
+     * can invoke it unconditionally before downloading.
+     */
+    async hydrateRecording(recording: PlaudRecording): Promise<PlaudRecording> {
+        if (recording.source !== "v4") return recording;
+        const detail = await this.getFileDetailV4(recording.id);
+        return applyPlaudV4Detail(recording, detail);
+    }
+
+    private async getAudioUrlV4(recordingId: string): Promise<string> {
+        const detail = await this.getFileDetailV4(recordingId);
+        for (const audio of plaudV4AudioObjects(detail)) {
+            if (audio.content_url) return audio.content_url;
+            if (audio.content_id) {
+                const urls = await this.resolveContentUrlsV4([
+                    audio.content_id,
+                ]);
+                const url = urls[audio.content_id];
+                if (typeof url === "string" && url) return url;
+            }
+        }
+
+        throw new AppError(
+            ErrorCode.PLAUD_API_ERROR,
+            "Plaud has no downloadable audio for this recording yet.",
+            400,
+        );
+    }
+
+    private async resolveContentUrlsV4(
+        contentIds: string[],
+    ): Promise<Record<string, string>> {
+        if (contentIds.length === 0) return {};
+        const body = await this.request<PlaudV4ContentUrlResponse>(
+            "/file-app/v4/files/content/url",
+            {
+                method: "POST",
+                body: JSON.stringify({ content_ids: contentIds }),
+            },
+        );
+        return body?.status === 0 ? (body.data?.url_map ?? {}) : {};
+    }
+
+    private async withContentUrlsV4(
+        detail: NonNullable<PlaudV4FileDetailResponse["data"]>,
+    ): Promise<NonNullable<PlaudV4FileDetailResponse["data"]>> {
+        const objects = detail.objects ?? [];
+        const missing = objects.flatMap((object) =>
+            (object.object_type === "TRANSCRIPT" ||
+                object.object_type === "SUMMARY") &&
+            object.task_status === 1 &&
+            !object.content_url &&
+            object.content_id
+                ? [object.content_id]
+                : [],
+        );
+        if (missing.length === 0) return detail;
+        const urls = await this.resolveContentUrlsV4(missing);
+        return {
+            ...detail,
+            objects: objects.map((object) => {
+                const url = object.content_id
+                    ? urls[object.content_id]
+                    : undefined;
+                return !object.content_url && typeof url === "string" && url
+                    ? { ...object, content_url: url }
+                    : object;
+            }),
+        };
     }
 
     async getTempUrl(
         fileId: string,
         isOpus: boolean = true,
     ): Promise<PlaudTempUrlResponse> {
-        const params = new URLSearchParams({
-            is_opus: isOpus ? "1" : "0",
-        });
-
-        return this.request<PlaudTempUrlResponse>(
-            `/file/temp-url/${fileId}?${params.toString()}`,
-        );
+        if (!this.v4Mode) {
+            const params = new URLSearchParams({ is_opus: isOpus ? "1" : "0" });
+            const body = await this.request<PlaudTempUrlResponse>(
+                `/file/temp-url/${fileId}?${params.toString()}`,
+            );
+            if (!this.detectMigration(body)) return body;
+        }
+        return { status: 0, temp_url: await this.getAudioUrlV4(fileId) };
     }
 
     async downloadRecording(
@@ -286,9 +514,20 @@ export class PlaudClient {
      * links to their bodies. Goes through `request`, so it inherits
      * workspace-token auth, retry/backoff, and 401 → PLAUD_INVALID_TOKEN.
      * NOTE: the response shape is unverified (see #204 / Phase 0).
+     * V4 content imports use fresh presigned links.
      */
     async getFileDetail(fileId: string): Promise<PlaudFileDetailResponse> {
-        return this.request<PlaudFileDetailResponse>(`/file/detail/${fileId}`);
+        if (!this.v4Mode) {
+            const body = await this.request<PlaudFileDetailResponse>(
+                `/file/detail/${fileId}`,
+            );
+            if (!this.detectMigration(body)) return body;
+        }
+        return plaudV4DetailToLegacy(
+            await this.withContentUrlsV4(
+                await this.getFileDetailV4(fileId, { fresh: true }),
+            ),
+        );
     }
 
     /**
@@ -338,18 +577,160 @@ export class PlaudClient {
         fileId: string,
         filename: string,
     ): Promise<PlaudUpdateFilenameResponse> {
-        return this.request<PlaudUpdateFilenameResponse>(`/file/${fileId}`, {
-            method: "PATCH",
-            body: JSON.stringify({ filename }),
+        if (!this.v4Mode) {
+            const body = await this.request<PlaudUpdateFilenameResponse>(
+                `/file/${fileId}`,
+                {
+                    method: "PATCH",
+                    body: JSON.stringify({ filename }),
+                },
+            );
+            if (!this.detectMigration(body)) return body;
+        }
+        return this.renameV4(fileId, filename);
+    }
+
+    private async renameV4(
+        recordingId: string,
+        name: string,
+    ): Promise<PlaudUpdateFilenameResponse> {
+        let fileNode: PlaudV4Node | undefined;
+        const renamed = await this.renameNodeV4(name, async () => {
+            const detail = await this.getFileDetailV4(recordingId, {
+                fresh: true,
+            });
+            fileNode = detail.node ?? undefined;
+            return { nodeId: fileNode?.node_id, version: fileNode?.version_ms };
         });
+
+        const folder = fileNode?.folder;
+        const previousName = fileNode?.name;
+        if (
+            folder?.folder_id &&
+            folder.name &&
+            folder.name === previousName &&
+            folder.name !== name
+        ) {
+            const folderId = folder.folder_id;
+            const parentId = fileNode?.breadcrumbs?.[0]?.node_id;
+            let fromResponse = renamed?.data?.parent_items?.find(
+                (p) => p.node_id === folderId && p.name !== undefined,
+            );
+            try {
+                await this.renameNodeV4(name, async () => {
+                    const current =
+                        fromResponse ??
+                        (parentId
+                            ? await this.findChildV4(parentId, folderId)
+                            : undefined);
+                    fromResponse = undefined;
+                    if (!current || current.name !== previousName) {
+                        return { skip: true };
+                    }
+                    return { nodeId: folderId, version: current.version_ms };
+                });
+            } catch (error) {
+                console.warn(
+                    "[plaud] v4 folder rename failed",
+                    error instanceof AppError
+                        ? error.code
+                        : ErrorCode.INTERNAL_ERROR,
+                );
+            }
+        }
+
+        return { status: 0, msg: "success", data_file: renamed?.data };
+    }
+
+    private async renameNodeV4(
+        name: string,
+        resolve: () => Promise<{
+            nodeId?: string;
+            version?: number;
+            skip?: boolean;
+        }>,
+    ): Promise<PlaudV4RenameResponse | undefined> {
+        let lastStatus: number | undefined;
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const { nodeId, version, skip } = await resolve();
+            if (skip) return undefined;
+            if (!nodeId || version === undefined) {
+                throw new AppError(
+                    ErrorCode.PLAUD_API_ERROR,
+                    "Plaud returned no node version to rename.",
+                    400,
+                );
+            }
+            const body = await this.request<PlaudV4RenameResponse>(
+                `/file-app/v4/nodes/rename/${encodeURIComponent(nodeId)}`,
+                {
+                    method: "PATCH",
+                    body: JSON.stringify({ name, origin_version: version }),
+                },
+            );
+            if (body?.status === 0) return body;
+            lastStatus = body?.status;
+            if (body?.status !== PLAUD_V4_VERSION_CONFLICT_STATUS) {
+                throw new AppError(
+                    ErrorCode.PLAUD_API_ERROR,
+                    body?.msg || "Plaud rejected the rename.",
+                    400,
+                    { plaudStatus: body?.status },
+                );
+            }
+        }
+        throw new AppError(
+            ErrorCode.PLAUD_API_ERROR,
+            "Plaud rename failed: node version conflict.",
+            400,
+            { plaudStatus: lastStatus },
+        );
+    }
+
+    private async findChildV4(
+        parentId: string,
+        childId: string,
+    ): Promise<PlaudV4Node | undefined> {
+        let cursor: string | undefined;
+        for (let page = 0; page < 10; page++) {
+            const params = new URLSearchParams({
+                node_id: parentId,
+                page_size: V4_PAGE_SIZE.toString(),
+            });
+            if (cursor) params.set("cursor", cursor);
+            const body = await this.request<PlaudV4FolderChildrenResponse>(
+                `/file-app/v4/folders/children?${params.toString()}`,
+            );
+            if (body?.status !== 0 || !Array.isArray(body.data?.items)) {
+                return undefined;
+            }
+            const items = body.data.items;
+            const hit = items.find((i) => i.node_id === childId);
+            if (hit) return hit;
+            const next = body?.data?.next_cursor;
+            if (!next || items.length === 0) return undefined;
+            cursor = next;
+        }
+        return undefined;
     }
 
     /** Move a Plaud recording to Trash. Plaud requires a separate action to permanently empty Trash. */
     async moveFileToTrash(fileId: string): Promise<PlaudMoveToTrashResponse> {
-        return this.request<PlaudMoveToTrashResponse>(`/file/${fileId}`, {
-            method: "PATCH",
-            body: JSON.stringify({ is_trash: true }),
-        });
+        if (!this.v4Mode) {
+            const body = await this.request<PlaudMoveToTrashResponse>(
+                `/file/${fileId}`,
+                {
+                    method: "PATCH",
+                    body: JSON.stringify({ is_trash: true }),
+                },
+            );
+            if (!this.detectMigration(body)) return body;
+        }
+        throw new AppError(
+            ErrorCode.PLAUD_API_ERROR,
+            "Moving to Plaud Trash is not supported for Plaud 4.0 accounts yet.",
+            400,
+        );
     }
 }
 

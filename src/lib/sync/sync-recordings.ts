@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { and, eq, isNull, ne, notInArray, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/db";
@@ -74,6 +75,7 @@ interface SyncResult {
      * show a reconnect banner.
      */
     needsReconnect?: boolean;
+    errorCode?: ErrorCode;
 }
 
 // Per-user in-flight dedup within one process. Cross-process correctness
@@ -286,18 +288,39 @@ async function hasUnseenPlaudContentGaps(
     return Boolean(row);
 }
 
-/**
- * Mutable per-sync-run flag. Once a new recording is blocked by the
- * storage cap, every subsequent new recording in the same run is skipped
- * without re-querying the user's byte total (new recordings only grow
- * storage, so once over cap it stays over within the run).
- */
 interface CapState {
     blocked: boolean;
+    pendingBytes: number;
+    lastCheck: Promise<unknown>;
+}
+
+function reserveStorageBytes(
+    capState: CapState,
+    userId: string,
+    bytes: number,
+): Promise<boolean> {
+    const check = capState.lastCheck.then(async () => {
+        if (capState.blocked) return false;
+        capState.pendingBytes += bytes;
+        let allowed = false;
+        try {
+            const cap = await enforceStorageCap({
+                userId,
+                additionalBytes: capState.pendingBytes,
+            });
+            allowed = cap.allowed;
+            capState.blocked = !allowed;
+            return allowed;
+        } finally {
+            if (!allowed) capState.pendingBytes -= bytes;
+        }
+    });
+    capState.lastCheck = check.catch(() => undefined);
+    return check;
 }
 
 async function processRecording(
-    plaudRecording: PlaudRecording,
+    listedRecording: PlaudRecording,
     context: SyncContext,
     plaudClient: Awaited<ReturnType<typeof createPlaudClient>>,
     storage: Awaited<ReturnType<typeof createUserStorageProvider>>,
@@ -311,6 +334,8 @@ async function processRecording(
     importCandidate?: ImportCandidate;
     capExceeded?: boolean;
 }> {
+    let plaudRecording = listedRecording;
+    let reservedBytes = 0;
     try {
         const [existing] = await db
             .select({
@@ -332,7 +357,10 @@ async function processRecording(
         if (existingRecording) seenRecordingIds.add(existingRecording.id);
         const recordingId = existingRecording?.id ?? nanoid();
 
-        const versionKey = plaudRecording.version_ms.toString();
+        const listedVersion = plaudRecording.version_ms;
+        const versionKey = listedVersion.toString();
+        const storedVersion = Number(existingRecording?.plaudVersion);
+        if (storedVersion > listedVersion) return { status: "skipped" };
 
         if (existingRecording?.cutAt) return { status: "skipped" };
 
@@ -373,7 +401,8 @@ async function processRecording(
 
         if (
             existingRecording &&
-            existingRecording.plaudVersion === versionKey
+            (existingRecording.plaudVersion === versionKey ||
+                storedVersion === listedVersion)
         ) {
             if (context.importPlaudContent && !existingRecording.deletedAt) {
                 const importCandidate = buildImportCandidate(
@@ -411,27 +440,50 @@ async function processRecording(
             return { status: "skipped" };
         }
 
-        // Storage cap: gate NEW recordings before spending Plaud egress.
-        // Updates replace an existing blob (roughly size-neutral) and are
-        // left untouched so a near-cap user can still receive edits.
-        if (!existingRecording) {
-            if (capState.blocked) {
+        if (!existingRecording && capState.blocked) {
+            return { status: "skipped", capExceeded: true };
+        }
+
+        const isV4 = plaudRecording.source === "v4";
+        if (isV4) {
+            plaudRecording = await plaudClient.hydrateRecording(plaudRecording);
+        }
+
+        if (!existingRecording && plaudRecording.filesize > 0) {
+            const bytes = plaudRecording.filesize;
+            if (!(await reserveStorageBytes(capState, context.userId, bytes))) {
                 return { status: "skipped", capExceeded: true };
             }
-            const cap = await enforceStorageCap({
-                userId: context.userId,
-                additionalBytes: plaudRecording.filesize,
-            });
-            if (!cap.allowed) {
-                capState.blocked = true;
-                return { status: "skipped", capExceeded: true };
-            }
+            reservedBytes = bytes;
         }
 
         const audioBuffer = await plaudClient.downloadRecording(
             plaudRecording.id,
             false,
         );
+
+        if (isV4 || !plaudRecording.filesize) {
+            const extraBytes = audioBuffer.length - reservedBytes;
+            if (!existingRecording && extraBytes > 0) {
+                if (
+                    !(await reserveStorageBytes(
+                        capState,
+                        context.userId,
+                        extraBytes,
+                    ))
+                ) {
+                    return { status: "skipped", capExceeded: true };
+                }
+                reservedBytes += extraBytes;
+            }
+            plaudRecording = {
+                ...plaudRecording,
+                filesize: audioBuffer.length,
+                file_md5: isV4
+                    ? createHash("md5").update(audioBuffer).digest("hex")
+                    : plaudRecording.file_md5,
+            };
+        }
 
         const sniffed = sniffAudio(audioBuffer);
         const fileExtension = sniffed.extension;
@@ -486,14 +538,23 @@ async function processRecording(
         if (existingRecording) {
             // Re-check under FOR UPDATE: a concurrent DELETE may have
             // tombstoned the row during the download/upload above.
-            const updated = await db.transaction(async (tx) => {
+            const update = await db.transaction(async (tx) => {
                 const [locked] = await tx
                     .select({
                         deletedAt: recordings.deletedAt,
                         cutAt: recordings.cutAt,
                         audioReapedAt: recordings.audioReapedAt,
+                        storagePath: recordings.storagePath,
                         titleEditedAt: chatterItems.titleEditedAt,
                         fileMd5: recordings.fileMd5,
+                        plaudVersion: recordings.plaudVersion,
+                        occurredAt: chatterItems.occurredAt,
+                        endTime: recordings.endTime,
+                        duration: recordings.duration,
+                        deviceSn: recordings.deviceSn,
+                        timezone: recordings.timezone,
+                        zonemins: recordings.zonemins,
+                        scene: recordings.scene,
                     })
                     .from(recordings)
                     .innerJoin(chatterItems, recordingItemJoin)
@@ -510,9 +571,15 @@ async function processRecording(
                     !locked ||
                     locked.deletedAt ||
                     locked.cutAt ||
-                    locked.audioReapedAt
-                )
-                    return false;
+                    locked.audioReapedAt ||
+                    Number(locked.plaudVersion) >= listedVersion
+                ) {
+                    return {
+                        updated: false,
+                        discardStagedAudio:
+                            !overwrites && locked?.storagePath !== storageKey,
+                    };
+                }
                 if (overwrites) {
                     await storage.uploadFile(
                         storageKey,
@@ -525,9 +592,37 @@ async function processRecording(
                 // under the lock, so a rename committed during the download
                 // above still wins.
                 const now = new Date();
+                const start =
+                    isV4 && !plaudRecording.v4HasStartTime
+                        ? locked.occurredAt
+                        : occurredAt;
+                const duration =
+                    isV4 && !plaudRecording.v4HasDuration
+                        ? locked.duration
+                        : recordingData.duration;
                 await tx
                     .update(recordings)
-                    .set({ ...recordingData, updatedAt: now })
+                    .set({
+                        ...recordingData,
+                        ...(isV4 && {
+                            duration,
+                            endTime:
+                                plaudRecording.v4HasStartTime ||
+                                plaudRecording.v4HasDuration
+                                    ? new Date(start.getTime() + duration)
+                                    : locked.endTime,
+                            deviceSn:
+                                plaudRecording.serial_number || locked.deviceSn,
+                            timezone: plaudRecording.timezone_iana
+                                ? plaudRecording.timezone
+                                : locked.timezone,
+                            zonemins: plaudRecording.timezone_iana
+                                ? plaudRecording.zonemins
+                                : locked.zonemins,
+                            scene: locked.scene,
+                        }),
+                        updatedAt: now,
+                    })
                     .where(
                         and(
                             eq(recordings.id, existingRecording.id),
@@ -537,8 +632,11 @@ async function processRecording(
                 await tx
                     .update(chatterItems)
                     .set({
-                        ...(locked.titleEditedAt ? {} : { title }),
-                        occurredAt,
+                        ...(locked.titleEditedAt ||
+                        (isV4 && !plaudRecording.filename.trim())
+                            ? {}
+                            : { title }),
+                        occurredAt: start,
                         updatedAt: now,
                     })
                     .where(
@@ -552,14 +650,15 @@ async function processRecording(
                     from: locked.fileMd5,
                     to: plaudRecording.file_md5,
                 });
-                return true;
+                return { updated: true, discardStagedAudio: false };
             });
 
-            if (!updated) {
+            if (!update.updated) {
                 // Best-effort cleanup of the orphaned blob, when one was
                 // written beside the recording's audio.
                 try {
-                    if (!overwrites) await storage.deleteFile(storageKey);
+                    if (update.discardStagedAudio)
+                        await storage.deleteFile(storageKey);
                 } catch (cleanupError) {
                     console.error(
                         `Failed to clean up orphaned storage object ${storageKey} after concurrent delete:`,
@@ -607,6 +706,8 @@ async function processRecording(
                     requestArrivalInTx(tx, { ...input, canCurate }),
             },
         );
+        capState.pendingBytes -= reservedBytes;
+        reservedBytes = 0;
 
         seenRecordingIds.add(newRecording.id);
 
@@ -624,10 +725,19 @@ async function processRecording(
             ),
         };
     } catch (error) {
+        if (
+            listedRecording.source === "v4" &&
+            error instanceof AppError &&
+            error.code === ErrorCode.PLAUD_INVALID_TOKEN
+        ) {
+            throw error;
+        }
         return {
             status: "error",
             error: `Failed to sync ${plaudRecording.filename}: ${error}`,
         };
+    } finally {
+        capState.pendingBytes -= reservedBytes;
     }
 }
 
@@ -646,6 +756,7 @@ async function processBatch(
     newRecordingNames: string[];
     importCandidates: ImportCandidate[];
     capExceeded: boolean;
+    connectionError?: AppError;
 }> {
     const results = await Promise.allSettled(
         batch.map((rec) =>
@@ -663,6 +774,7 @@ async function processBatch(
     let newCount = 0;
     let updatedCount = 0;
     let capExceeded = false;
+    let connectionError: AppError | undefined;
     const errors: string[] = [];
     const newRecordingIds: string[] = [];
     const newRecordingNames: string[] = [];
@@ -689,6 +801,11 @@ async function processBatch(
                 errors.push(error);
             }
             if (importCandidate) importCandidates.push(importCandidate);
+        } else if (
+            result.reason instanceof AppError &&
+            result.reason.code === ErrorCode.PLAUD_INVALID_TOKEN
+        ) {
+            connectionError = result.reason;
         } else {
             errors.push(`Batch processing error: ${result.reason}`);
         }
@@ -702,6 +819,7 @@ async function processBatch(
         newRecordingNames,
         importCandidates,
         capExceeded,
+        connectionError,
     };
 }
 
@@ -837,7 +955,11 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
         const storage = await createUserStorageProvider(userId);
         const allNewRecordingNames: string[] = [];
         const importCandidates: ImportCandidate[] = [];
-        const capState: CapState = { blocked: false };
+        const capState: CapState = {
+            blocked: false,
+            pendingBytes: 0,
+            lastCheck: Promise.resolve(),
+        };
         const seenRecordingIds = new Set<string>();
 
         let page = 0;
@@ -890,6 +1012,8 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
                 result.errors.push(...batchResult.errors);
                 allNewRecordingNames.push(...batchResult.newRecordingNames);
                 importCandidates.push(...batchResult.importCandidates);
+                if (batchResult.connectionError)
+                    throw batchResult.connectionError;
             }
 
             // Once over the storage cap, every further new recording is a
@@ -1007,6 +1131,8 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
 
         return result;
     } catch (error) {
+        result.errorCode =
+            error instanceof AppError ? error.code : ErrorCode.INTERNAL_ERROR;
         const errorMessage =
             error instanceof Error ? error.message : String(error);
 

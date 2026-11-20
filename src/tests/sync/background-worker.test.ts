@@ -1,4 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ErrorCode } from "@/lib/errors";
+import { captureServerException } from "@/lib/posthog-server";
+import {
+    claimUsersForSync,
+    startBackgroundSyncWorker,
+} from "@/lib/sync/worker";
 
 const { dbMock, envMock, syncMock } = vi.hoisted(() => ({
     dbMock: {
@@ -28,9 +34,8 @@ vi.mock("@/db/schema", () => ({
     },
 }));
 vi.mock("@/lib/env", () => ({ env: envMock }));
+vi.mock("@/lib/posthog-server", () => ({ captureServerException: vi.fn() }));
 vi.mock("@/lib/sync/sync-recordings", () => syncMock);
-
-import { claimUsersForSync } from "@/lib/sync/worker";
 
 function stubClaimQuery(rows: { userId: string }[]) {
     const where = vi.fn().mockReturnValue({
@@ -92,20 +97,80 @@ describe("startBackgroundSyncWorker", () => {
 
     afterEach(() => {
         vi.useRealTimers();
+        vi.restoreAllMocks();
     });
 
-    it("schedules a tick when BACKGROUND_SYNC_ENABLED is true (default)", async () => {
-        vi.resetModules();
-        const { startBackgroundSyncWorker } = await import("@/lib/sync/worker");
-        startBackgroundSyncWorker();
-        expect(vi.getTimerCount()).toBeGreaterThan(0);
-    });
-
-    it("does not schedule anything when BACKGROUND_SYNC_ENABLED is false", async () => {
+    it("does not schedule anything when BACKGROUND_SYNC_ENABLED is false", () => {
         envMock.BACKGROUND_SYNC_ENABLED = false;
-        vi.resetModules();
-        const { startBackgroundSyncWorker } = await import("@/lib/sync/worker");
         startBackgroundSyncWorker();
         expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("counts returned failures and reconnects without logging user content or counting skips", async () => {
+        const log = vi.spyOn(console, "log").mockImplementation(() => {});
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        const thrown = new Error(
+            "Unexpected sync failure with a private title",
+        );
+        stubClaimQuery(
+            [
+                "healthy",
+                "partial",
+                "reconnect",
+                "failed",
+                "skipped",
+                "threw",
+            ].map((userId) => ({ userId })),
+        );
+        syncMock.syncRecordingsForUser
+            .mockResolvedValueOnce({ errors: [] })
+            .mockResolvedValueOnce({
+                errors: ["Failed to sync Example Meeting"],
+            })
+            .mockResolvedValueOnce({ errors: [], needsReconnect: true })
+            .mockResolvedValueOnce({
+                errors: ["Sensitive upstream message"],
+                errorCode: ErrorCode.PLAUD_API_ERROR,
+            })
+            .mockResolvedValueOnce({
+                errors: ["No Plaud connection found"],
+                skipped: "no_connection",
+            })
+            .mockRejectedValueOnce(thrown);
+
+        startBackgroundSyncWorker();
+        await vi.advanceTimersByTimeAsync(30_000);
+
+        expect(error.mock.calls).toEqual([
+            [
+                "[background-sync] user=partial errors=1 needsReconnect=false skipped=false",
+            ],
+            [
+                "[background-sync] user=reconnect errors=0 needsReconnect=true skipped=false",
+            ],
+            [
+                "[background-sync] user=failed errors=1 needsReconnect=false skipped=false code=PLAUD_API_ERROR",
+            ],
+            [
+                "[background-sync] user=threw errors=1 needsReconnect=false skipped=false code=INTERNAL_ERROR",
+            ],
+        ]);
+        expect(log.mock.calls).toEqual([
+            ["[background-sync] synced=1 errors=4"],
+        ]);
+        expect(captureServerException).toHaveBeenCalledExactlyOnceWith(
+            new Error("Background sync failed"),
+            {
+                source: "worker:sync",
+                distinctId: "threw",
+                code: ErrorCode.INTERNAL_ERROR,
+            },
+        );
+        const [reported] = vi.mocked(captureServerException).mock.calls[0];
+        expect(reported).not.toBe(thrown);
+        if (!(reported instanceof Error))
+            throw new Error("Expected a sanitized error");
+        expect(reported.stack).not.toContain("private title");
+        expect(reported.message).not.toContain("private title");
     });
 });
