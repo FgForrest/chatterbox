@@ -22,6 +22,7 @@ import {
     useItemDetail,
 } from "@/components/items/item-detail-store";
 import { ItemHeader } from "@/components/items/item-header";
+import type { ItemOperationQueue } from "@/components/items/item-operation-queue";
 import { MailLearnCard } from "@/components/mail/mail-learn-card";
 import { MailSummaryCard } from "@/components/mail/mail-summary-card";
 import { ItemWorkflow } from "@/components/pipeline/item-workflow";
@@ -52,6 +53,7 @@ import type {
 import type { Recording } from "@/types/recording";
 
 interface Props {
+    operationQueue?: ItemOperationQueue;
     mail: Recording;
     itemLinkQuery?: string;
     /** The private item has been shared into the Organization. */
@@ -127,6 +129,7 @@ export function MailDetailPane(props: Props) {
     const isOwn = mail.isOwn !== false;
     return (
         <ItemDetailProvider
+            operationQueue={props.operationQueue}
             key={mail.id}
             itemId={mail.id}
             kind="mail"

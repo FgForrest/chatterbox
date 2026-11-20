@@ -2,11 +2,28 @@ import { NextResponse } from "next/server";
 import { requireApiSession, requireApiSessionActor } from "@/lib/auth-server";
 import { actsForOrganization } from "@/lib/authz/curator";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import {
+    dashboardFolderOrganization,
+    listDashboardReceivedShares,
+} from "@/lib/folders/dashboard-organization";
 import { createFolder, listFolderOrganization } from "@/lib/folders/folders";
 
 export const GET = apiHandler(async (request: Request) => {
     const session = await requireApiSession(request);
-    return NextResponse.json(await listFolderOrganization(session.user.id));
+    const userId = session.user.id;
+    if (new URL(request.url).searchParams.get("dashboard") === "1") {
+        const [organization, receivedShares] = await Promise.all([
+            listFolderOrganization(userId),
+            listDashboardReceivedShares(userId),
+        ]);
+        return NextResponse.json(
+            dashboardFolderOrganization(organization, receivedShares),
+            {
+                headers: { "Cache-Control": "private, no-store" },
+            },
+        );
+    }
+    return NextResponse.json(await listFolderOrganization(userId));
 });
 
 export const POST = apiHandler(async (request: Request) => {

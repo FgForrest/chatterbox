@@ -5,6 +5,12 @@ import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useItemDetail } from "@/components/items/item-detail-store";
+import { ItemFolderSaving } from "@/components/items/item-folder-chip";
+import {
+    type ItemOperationResult,
+    itemOperationResult,
+} from "@/components/items/item-operation-queue";
+import { processAgainOperation } from "@/components/items/process-again-operation";
 import {
     CategorizePanel,
     type CategorizeSubmission,
@@ -39,6 +45,8 @@ import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events"
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import type { WorkflowActionCode } from "@/lib/pipeline/workflow-status";
 import { isShareReviewProblem } from "@/lib/sharing/share-gate";
+import { withRecordingView } from "@/lib/sharing/view";
+import { cn } from "@/lib/utils";
 import type {
     RecordingFolder,
     RecordingFolderAssignment,
@@ -102,6 +110,7 @@ export function ProcessingFolderRow({
     onFolderCreated,
 }: ProcessingFolderRowProps) {
     const i18n = useExtracted();
+    const detail = useItemDetail();
     const profileChoice = processing?.manualOnly
         ? MANUAL_ONLY
         : (processing?.profile?.id ?? "");
@@ -110,7 +119,10 @@ export function ProcessingFolderRow({
             type="button"
             variant="outline"
             size="sm"
-            className="h-7 max-w-[min(18rem,70vw)] rounded-full px-2.5 text-xs"
+            className={cn(
+                "h-7 max-w-[min(18rem,70vw)] rounded-full px-2.5 text-xs",
+                detail?.pendingProfile && "opacity-60",
+            )}
             onMouseEnter={onLoadPanel}
             onFocus={onLoadPanel}
             data-testid="profile-chip"
@@ -124,6 +136,7 @@ export function ProcessingFolderRow({
                     ? ` · ${i18n("Nothing automatic")}`
                     : ""}
             </span>
+            {detail?.pendingProfile && <ItemFolderSaving />}
             {!processing.legacy &&
                 processing.profile?.scope === "organization" && (
                     <Users
@@ -161,7 +174,14 @@ export function ProcessingFolderRow({
                     processing?.intents.map((intent) => (
                         <span
                             key={intent.folderId}
-                            className="inline-flex min-h-7 items-center overflow-hidden rounded-full border border-dashed border-organization/40 bg-organization/5 text-xs"
+                            className={cn(
+                                "inline-flex min-h-7 items-center overflow-hidden rounded-full border border-dashed border-organization/40 bg-organization/5 text-xs",
+                                (detail?.pendingIntents ||
+                                    detail?.pendingFolderIds.has(
+                                        intent.folderId,
+                                    )) &&
+                                    "opacity-60",
+                            )}
                         >
                             <span className="inline-flex items-center gap-1.5 px-2.5 text-foreground">
                                 <Users
@@ -170,6 +190,10 @@ export function ProcessingFolderRow({
                                 />
                                 <span>{intent.path}</span>
                             </span>
+                            {(detail?.pendingIntents ||
+                                detail?.pendingFolderIds.has(
+                                    intent.folderId,
+                                )) && <ItemFolderSaving />}
                             {intent.confirmationRequired &&
                                 !intent.confirmed && (
                                     <Button
@@ -284,6 +308,45 @@ interface ItemWorkflowProps extends FolderActions {
     onReviewTasks?: () => void;
 }
 
+function previewProfile(
+    current: ItemProcessingPresentation,
+    chosen: CategorizationPanelPresentation["profiles"][number] | undefined,
+) {
+    return chosen
+        ? {
+              ...chosen,
+              revisionId: current.profile?.revisionId ?? "pending",
+              automatic: current.profile?.automatic ?? {
+                  transcribe: false,
+                  learn: false,
+                  summary: false,
+              },
+          }
+        : current.profile;
+}
+
+async function profileFolderIds(
+    itemId: string,
+    projection: ItemProcessingPresentation | null,
+) {
+    if (projection) {
+        return [
+            ...new Set([
+                ...projection.placements
+                    .filter((folder) => folder.parentId !== null)
+                    .map((folder) => folder.id),
+                ...projection.intents.map((intent) => intent.folderId),
+            ]),
+        ];
+    }
+    const response = await fetch(
+        `/api/recordings/${encodeURIComponent(itemId)}/categorize`,
+    );
+    if (!response.ok) throw new Error(String(response.status));
+    const panel: CategorizationPanelPresentation = await response.json();
+    return panel.selectedFolderIds;
+}
+
 /** Processing strip plus the filing card or its settled folder/profile row. */
 export function ItemWorkflow({
     itemId,
@@ -314,7 +377,7 @@ export function ItemWorkflow({
     const processingEnabled = canEdit || view === "org";
     const detail = useItemDetail();
     if (!detail) throw new Error("ItemWorkflow requires ItemDetailProvider");
-    const { data, setData, workflow, refresh, stale } = detail;
+    const { data, enqueueOperation, workflow, refresh, stale } = detail;
     const [panelData, setPanelData] =
         useState<CategorizationPanelPresentation | null>(null);
     const foldersSignature = JSON.stringify(
@@ -418,242 +481,298 @@ export function ItemWorkflow({
         if (filingMode) loadPanel();
     }, [filingMode, loadPanel]);
 
-    const cancelIntent = useCallback(
-        async (folderId: string) => {
-            if (!data) return;
-            const previous = data;
-            setData({
-                ...data,
-                intents: data.intents.filter(
-                    (intent) => intent.folderId !== folderId,
-                ),
-                steps:
-                    data.intents.length === 1
-                        ? {
-                              ...data.steps,
-                              share: {
-                                  state: "skipped",
-                                  reason: "cancelled",
-                                  waitingFor: null,
-                                  actions: [],
-                              },
-                          }
-                        : data.steps,
-            });
-            try {
-                const response = await fetch(
-                    `/api/recordings/${encodeURIComponent(itemId)}/intended-placements/${encodeURIComponent(folderId)}`,
-                    { method: "DELETE" },
-                );
-                if (!response.ok) throw new Error(String(response.status));
-                invalidate();
-                onChanged?.();
-            } catch {
-                setData(previous);
-                toast.error(
-                    i18n(
-                        "The intended Organization placement could not be cancelled.",
-                    ),
-                );
-            }
-        },
-        [data, i18n, invalidate, itemId, onChanged, setData],
-    );
-
-    const shareNow = useCallback(async () => {
-        if (!data) return;
-        const previous = data;
-        setData({
-            ...data,
-            intents: data.intents.map((intent) => ({
-                ...intent,
-                confirmationRequired: false,
-                confirmed: true,
-            })),
-            steps: {
-                ...data.steps,
-                share: {
-                    state: "pending",
-                    reason: "confirmed",
-                    waitingFor: { kind: "pending" },
-                    actions: [],
-                },
-            },
-        });
+    const cancelIntent = async (folderId: string) => {
         try {
-            const response = await fetch(
-                `/api/recordings/${encodeURIComponent(itemId)}/intended-placements/confirm`,
-                { method: "POST" },
-            );
-            if (!response.ok) throw new Error(String(response.status));
-            toast.success(i18n("Sharing started."));
-            invalidate();
+            await enqueueOperation({
+                apply: (current) => {
+                    const intents = current.intents.filter(
+                        (intent) => intent.folderId !== folderId,
+                    );
+                    return {
+                        ...current,
+                        intents,
+                        steps:
+                            intents.length === 0 && current.intents.length > 0
+                                ? {
+                                      ...current.steps,
+                                      share: {
+                                          state: "skipped",
+                                          reason: "cancelled",
+                                          waitingFor: null,
+                                          actions: [],
+                                      },
+                                  }
+                                : current.steps,
+                    };
+                },
+                async write(_projection, view) {
+                    const response = await fetch(
+                        withRecordingView(
+                            `/api/recordings/${encodeURIComponent(itemId)}/intended-placements/${encodeURIComponent(folderId)}`,
+                            view,
+                        ),
+                        { method: "DELETE" },
+                    );
+                    if (!response.ok) throw new Error(String(response.status));
+                    return itemOperationResult(response);
+                },
+            });
             onChanged?.();
         } catch {
-            setData(previous);
+            toast.error(
+                i18n(
+                    "The intended Organization placement could not be cancelled.",
+                ),
+            );
+        }
+    };
+
+    const shareNow = async () => {
+        try {
+            await enqueueOperation({
+                pendingIntents: true,
+                apply: (current) =>
+                    current.intents.length === 0
+                        ? current
+                        : {
+                              ...current,
+                              intents: current.intents.map((intent) => ({
+                                  ...intent,
+                                  confirmationRequired: false,
+                                  confirmed: true,
+                              })),
+                              steps: {
+                                  ...current.steps,
+                                  share: {
+                                      state: "pending",
+                                      reason: "confirmed",
+                                      waitingFor: { kind: "pending" },
+                                      actions: [],
+                                  },
+                              },
+                          },
+                async write(_projection, view) {
+                    const response = await fetch(
+                        withRecordingView(
+                            `/api/recordings/${encodeURIComponent(itemId)}/intended-placements/confirm`,
+                            view,
+                        ),
+                        { method: "POST" },
+                    );
+                    if (!response.ok) throw new Error(String(response.status));
+                    return itemOperationResult(response);
+                },
+            });
+            toast.success(i18n("Sharing started."));
+            onChanged?.();
+        } catch {
             toast.error(i18n("The item could not be shared."));
         }
-    }, [data, i18n, invalidate, itemId, onChanged, setData]);
+    };
 
-    const changeProfile = useCallback(
-        async (choice: string) => {
-            if (!data || !panelData) return;
-            const previous = data;
-            const chosen = panelData.profiles.find(
-                (profile) => profile.id === choice,
-            );
-            const manualOnly = choice === MANUAL_ONLY;
-            setData({
-                ...data,
-                legacy: false,
-                manualOnly,
-                profile: chosen
-                    ? {
-                          ...chosen,
-                          revisionId: data.profile?.revisionId ?? "pending",
-                          automatic: data.profile?.automatic ?? {
-                              transcribe: false,
-                              learn: false,
-                              summary: false,
-                          },
-                      }
-                    : data.profile,
-            });
-            const folderIds = [
-                ...data.placements.map((folder) => folder.id),
-                ...data.intents.map((intent) => intent.folderId),
-            ];
-            try {
-                const response = await fetch(
-                    `/api/recordings/${encodeURIComponent(itemId)}/categorize`,
-                    {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            folderIds,
-                            ...(manualOnly
-                                ? { manualOnly: true }
-                                : { profileId: choice }),
-                        }),
-                    },
-                );
-                if (!response.ok) throw new Error(String(response.status));
-                invalidate();
-                onChanged?.();
-            } catch {
-                setData(previous);
-                toast.error(i18n("The profile could not be changed."));
-            }
-        },
-        [data, i18n, invalidate, itemId, onChanged, panelData, setData],
-    );
-
-    const processAgain = useCallback(async () => {
-        if (!data) return;
-        const previous = data;
-        setData({
-            ...data,
-            processAgain: false,
-            processAgainReason: null,
-            steps: Object.fromEntries(
-                Object.entries(data.steps).map(([phase, step]) => [
-                    phase,
-                    step.actions.includes("processAgain")
-                        ? {
-                              ...step,
-                              state: "pending",
-                              reason: "requested",
-                              waitingFor: { kind: "pending" },
-                              actions: [],
-                          }
-                        : step,
-                ]),
-            ) as ItemProcessingPresentation["steps"],
-        });
+    const changeProfile = async (choice: string) => {
+        if (!data || !panelData) return;
+        const chosen = panelData.profiles.find(
+            (profile) => profile.id === choice,
+        );
+        const manualOnly = choice === MANUAL_ONLY;
         try {
-            const response = await fetch(
-                `/api/recordings/${encodeURIComponent(itemId)}/process-again`,
-                { method: "POST" },
-            );
-            if (!response.ok) throw new Error(String(response.status));
-            toast.success(i18n("Processing requested."));
-            invalidate();
+            await enqueueOperation({
+                pendingProfile: true,
+                apply: (current) => ({
+                    ...current,
+                    legacy: false,
+                    manualOnly,
+                    profile: previewProfile(current, chosen),
+                }),
+                async write(current, view) {
+                    const folderIds = await profileFolderIds(itemId, current);
+                    const response = await fetch(
+                        withRecordingView(
+                            `/api/recordings/${encodeURIComponent(itemId)}/categorize`,
+                            view,
+                        ),
+                        {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                folderIds,
+                                ...(manualOnly
+                                    ? { manualOnly: true }
+                                    : { profileId: choice }),
+                            }),
+                        },
+                    );
+                    if (!response.ok) throw new Error(String(response.status));
+                    return itemOperationResult(response);
+                },
+            });
             onChanged?.();
         } catch {
-            setData(previous);
+            toast.error(i18n("The profile could not be changed."));
+        }
+    };
+
+    const processAgain = async () => {
+        if (detail.pendingProcessAgain) return;
+        try {
+            await enqueueOperation(processAgainOperation(itemId));
+            toast.success(i18n("Processing requested."));
+            onChanged?.();
+        } catch {
             toast.error(i18n("The item could not be processed again."));
         }
-    }, [data, i18n, invalidate, itemId, onChanged, setData]);
+    };
 
-    const optimisticCategorize = useCallback(
-        (submission: CategorizeSubmission) => {
-            if (!data || !panelData) return () => {};
-            setPendingFilingMode(filingMode);
-            const previous = data;
-            const selected = submission.folderIds.flatMap((folderId) => {
-                const folder = panelData.folders.find(
-                    (candidate) => candidate.id === folderId,
-                );
-                return folder ? [folder] : [];
-            });
-            const chosen = submission.profileId
-                ? panelData.profiles.find(
-                      (profile) => profile.id === submission.profileId,
-                  )
-                : undefined;
-            const manualOnly = submission.manualOnly ?? false;
-            setData({
-                ...data,
-                manualOnly,
-                placements: selected.filter(
-                    (folder) => folder.scope === "personal",
-                ),
-                intents: selected
-                    .filter((folder) => folder.scope === "org")
-                    .map((folder) => ({
-                        folderId: folder.id,
-                        name: folder.name,
-                        path: folder.path,
-                        confirmationRequired: manualOnly,
-                        confirmed: false,
-                    })),
-                profile: chosen
-                    ? {
-                          ...chosen,
-                          revisionId: data.profile?.revisionId ?? "pending",
-                          automatic: data.profile?.automatic ?? {
-                              transcribe: false,
-                              learn: false,
-                              summary: false,
-                          },
-                      }
-                    : data.profile,
-                steps: {
-                    ...data.steps,
-                    categorize: {
-                        state: "done",
-                        reason: "categorized",
-                        waitingFor: null,
-                        actions: [],
-                    },
+    const submitCategorize = async (
+        submission: CategorizeSubmission,
+        write: (
+            override?: CategorizeSubmission,
+        ) => Promise<ItemOperationResult>,
+    ) => {
+        if (!panelData) return;
+        const selected = submission.folderIds.flatMap((id) => {
+            const summary = panelData.folders.find(
+                (folder) => folder.id === id,
+            );
+            if (summary) return [summary];
+            const folder = folders.find((folder) => folder.id === id);
+            return folder ? [{ ...folder, path: folder.name }] : [];
+        });
+        const target = selected.find(
+            (folder) => folder.id === submission.folderIds[0],
+        );
+        const personal = selected.filter(
+            (folder) => folder.scope === "personal",
+        );
+        const org = selected.filter((folder) => folder.scope === "org");
+        const chosen = panelData.profiles.find(
+            (profile) => profile.id === submission.profileId,
+        );
+        const profileOnly = filingMode === "profile";
+        const at = new Date().toISOString();
+        const keptOrganizationFolder = (id: string) =>
+            org.some((folder) => folder.id === id) ||
+            folders.some(
+                (folder) =>
+                    folder.id === id &&
+                    folder.scope === "org" &&
+                    folder.parentId === null,
+            );
+
+        setPendingFilingMode(filingMode);
+        try {
+            await enqueueOperation({
+                folders: profileOnly
+                    ? undefined
+                    : {
+                          pendingIds: submission.folderIds,
+                          addedIds: [
+                              ...personal,
+                              ...org.filter(
+                                  (folder) =>
+                                      folder.restricted || folder.restricting,
+                              ),
+                          ].map((folder) => folder.id),
+                          apply: (ids) => [
+                              ...new Set([
+                                  ...ids.filter(keptOrganizationFolder),
+                                  ...personal.map((folder) => folder.id),
+                              ]),
+                          ],
+                      },
+                pendingProfile: true,
+                apply: (current) => {
+                    const manualOnly =
+                        submission.manualOnly ??
+                        (submission.profileId ? false : current.manualOnly);
+                    return {
+                        ...current,
+                        manualOnly,
+                        placements: profileOnly
+                            ? current.placements
+                            : [
+                                  ...current.placements.filter(
+                                      (folder) =>
+                                          folder.scope === "org" &&
+                                          (folder.parentId === null ||
+                                              keptOrganizationFolder(
+                                                  folder.id,
+                                              )),
+                                  ),
+                                  ...personal,
+                              ],
+                        intents: profileOnly
+                            ? current.intents
+                            : org
+                                  .filter(
+                                      (folder) =>
+                                          !current.placements.some(
+                                              (placement) =>
+                                                  placement.id === folder.id,
+                                          ),
+                                  )
+                                  .map((folder) => ({
+                                      folderId: folder.id,
+                                      name: folder.name,
+                                      path: folder.path,
+                                      confirmationRequired: manualOnly,
+                                      confirmed: false,
+                                  })),
+                        profile: previewProfile(current, chosen),
+                        steps: {
+                            ...current.steps,
+                            categorize: {
+                                state: "done",
+                                reason: "categorized",
+                                waitingFor: null,
+                                actions: [],
+                            },
+                        },
+                        phases: {
+                            ...current.phases,
+                            categorize: {
+                                state: "done",
+                                reason: "categorized",
+                                generation:
+                                    current.phases.categorize?.generation ?? 0,
+                                at,
+                            },
+                        },
+                    };
                 },
-                phases: {
-                    ...data.phases,
-                    categorize: {
-                        state: "done",
-                        reason: "categorized",
-                        generation: data.phases.categorize?.generation ?? 0,
-                        at: new Date().toISOString(),
-                    },
+                async write(current) {
+                    if (profileOnly) {
+                        const folderIds = await profileFolderIds(
+                            itemId,
+                            current,
+                        );
+                        return write({ ...submission, folderIds });
+                    }
+                    if (
+                        current &&
+                        target?.scope === "org" &&
+                        !target.restricted &&
+                        !target.restricting
+                    ) {
+                        const retained = current.placements
+                            .filter(
+                                (folder) =>
+                                    folder.scope === "org" && folder.restricted,
+                            )
+                            .map((folder) => folder.id);
+                        return write({
+                            ...submission,
+                            folderIds: [target.id, ...retained],
+                        });
+                    }
+                    return write();
                 },
             });
-            return () => {
-                setData(previous);
-                setPendingFilingMode(null);
-            };
-        },
-        [data, panelData, setData, filingMode],
-    );
+        } finally {
+            setPendingFilingMode(null);
+        }
+    };
 
     const focusFilingControl = useCallback(() => {
         const profile = filingRef.current?.querySelector<HTMLElement>(
@@ -730,42 +849,15 @@ export function ItemWorkflow({
         }
     };
 
-    const addToFolder = async (targetItemId: string, folderId: string) => {
-        await onAddToFolder(targetItemId, folderId);
-        invalidate();
-    };
-    const removeFromFolder = async (
-        targetItemId: string,
-        folderId: string,
-        withdraw?: boolean,
-    ) => {
-        await onRemoveFromFolder(targetItemId, folderId, withdraw);
-        invalidate();
-    };
-    const moveBetweenFolders = onMoveBetweenFolders
-        ? async (
-              targetItemId: string,
-              fromFolderId: string,
-              toFolderId: string,
-          ) => {
-              await onMoveBetweenFolders(
-                  targetItemId,
-                  fromFolderId,
-                  toFolderId,
-              );
-              invalidate();
-          }
-        : undefined;
-
     const folderProps = {
         canCurate,
         onFolderCreated,
         folders,
         folderAssignments,
         onSelectFolder,
-        onAddToFolder: addToFolder,
-        onRemoveFromFolder: removeFromFolder,
-        onMoveBetweenFolders: moveBetweenFolders,
+        onAddToFolder,
+        onRemoveFromFolder,
+        onMoveBetweenFolders,
     };
 
     const failedLearnRunId =
@@ -836,7 +928,7 @@ export function ItemWorkflow({
                     </button>
                 </output>
             )}
-            {canEdit && filingMode ? (
+            {canEdit && filingMode && (
                 <div ref={filingRef}>
                     {panelData?.itemId === itemId ? (
                         <CategorizePanel
@@ -846,17 +938,13 @@ export function ItemWorkflow({
                             reason={profileReason}
                             onFolderCreated={onFolderCreated}
                             onTranscribe={() => onTranscribe?.(false)}
-                            onOptimisticCategorize={optimisticCategorize}
+                            onSubmit={submitCategorize}
                             onStale={() => {
                                 loadPanel(true);
                                 invalidate();
                                 onChanged?.();
                             }}
-                            onCategorized={() => {
-                                setPendingFilingMode(null);
-                                invalidate();
-                                onChanged?.();
-                            }}
+                            onCategorized={onChanged}
                         />
                     ) : (
                         <div className="flex min-h-24 items-center justify-center rounded-lg border text-sm text-muted-foreground">
@@ -865,7 +953,10 @@ export function ItemWorkflow({
                         </div>
                     )}
                 </div>
-            ) : (
+            )}
+            {(!canEdit ||
+                !filingMode ||
+                (pendingFilingMode && detail.pendingFolderIds.size > 0)) && (
                 <ProcessingFolderRow
                     itemId={itemId}
                     kind={kind}

@@ -9,7 +9,12 @@ import {
     useMemo,
     useRef,
     useState,
+    useSyncExternalStore,
 } from "react";
+import {
+    ItemOperationQueue,
+    readItemProcessing,
+} from "@/components/items/item-operation-queue";
 import { onTasksChanged } from "@/components/tasks/task-api";
 import {
     ITEM_PROCESSING_REVALIDATION_MS,
@@ -18,7 +23,7 @@ import {
 } from "@/lib/pipeline/item-processing-events";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import { deriveWorkflowStatus } from "@/lib/pipeline/workflow-status";
-import { type RecordingView, withRecordingView } from "@/lib/sharing/view";
+import type { RecordingView } from "@/lib/sharing/view";
 
 type Projection = ItemProcessingPresentation;
 type ItemDetailStatus = "loading" | "ready" | "unavailable" | "error";
@@ -27,7 +32,6 @@ interface ProjectionState {
     itemId: string;
     sharedOnOpen: boolean;
     projection: Projection | null;
-    optimistic: Projection | null;
     status: ItemDetailStatus;
     failures: number;
 }
@@ -48,10 +52,12 @@ interface ItemDetailProviderProps {
     enabled?: boolean;
     initialShared?: boolean;
     initialData?: Projection | null;
+    operationQueue?: ItemOperationQueue;
     children: ReactNode;
 }
 
 interface ItemDetail {
+    itemId: string;
     projection: Projection | null;
     data: Projection | null;
     status: ItemDetailStatus;
@@ -61,14 +67,17 @@ interface ItemDetail {
     workflow: ReturnType<typeof deriveWorkflowStatus> | null;
     stale: boolean;
     refresh: () => Promise<void>;
-    setData: (next: Projection | null) => void;
+    enqueueOperation: ItemOperationQueue["enqueueOperation"];
+    pendingFolderIds: ReadonlySet<string>;
+    pendingRemovedFolderIds: ReadonlySet<string>;
+    pendingProfile: boolean;
+    pendingIntents: boolean;
+    pendingProcessAgain: boolean;
+    previewFolderIds: (ids: string[]) => string[];
+    folderIdsForGate: (ids: string[]) => string[];
 }
 
 const ItemDetailContext = createContext<ItemDetail | null>(null);
-
-function isUnavailable(response: Response) {
-    return [401, 403, 404].includes(response.status);
-}
 
 /** Own the processing projection and its polling, keyed by itemId. */
 export function ItemDetailProvider({
@@ -79,14 +88,22 @@ export function ItemDetailProvider({
     enabled = true,
     initialShared = false,
     initialData,
+    operationQueue,
     children,
 }: ItemDetailProviderProps) {
+    const localQueue = useMemo(() => new ItemOperationQueue(itemId), [itemId]);
+    const queue = operationQueue ?? localQueue;
+    const pending = useSyncExternalStore(
+        queue.subscribe,
+        queue.getSnapshot,
+        queue.getSnapshot,
+    );
+    const cached = view !== "received" ? queue.getProjection() : null;
     const newItemState: ProjectionState = {
         itemId,
         sharedOnOpen: initialShared,
-        projection: null,
-        optimistic: null,
-        status: "loading",
+        projection: cached,
+        status: cached ? "ready" : "loading",
         failures: 0,
     };
     const [state, setState] = useState(newItemState);
@@ -101,7 +118,7 @@ export function ItemDetailProvider({
     useLayoutEffect(() => {
         let scope: Scope | undefined;
         let scopeRevision = 0;
-        let projection: Projection | null = null;
+        let projection = queue.getProjection();
         let status: ItemDetailStatus = "loading";
         let disposed = false;
         let inFlight: Promise<void> | null = null;
@@ -115,7 +132,6 @@ export function ItemDetailProvider({
             delay: number;
         } | null = null;
 
-        const path = `/api/${kind === "mail" ? "mail" : "recordings"}/${encodeURIComponent(itemId)}?processing=1`;
         const visible = () => document.visibilityState === "visible";
         const canRead = () =>
             !disposed &&
@@ -132,7 +148,6 @@ export function ItemDetailProvider({
                     ? {
                           ...current,
                           projection: next,
-                          optimistic: null,
                           status: "ready",
                           failures: 0,
                       }
@@ -162,36 +177,6 @@ export function ItemDetailProvider({
             }, delay);
         }
 
-        async function read({ view, isOwn }: Scope, signal: AbortSignal) {
-            let response = await fetch(withRecordingView(path, view), {
-                signal,
-            });
-            signal.throwIfAborted();
-            if (
-                isUnavailable(response) &&
-                view === "org" &&
-                (isOwn || projection?.access?.role === "owner")
-            ) {
-                if (!visible()) return undefined;
-                response = await fetch(path, { signal });
-                signal.throwIfAborted();
-            }
-            if (isUnavailable(response)) return null;
-            if (!response.ok) throw new Error(String(response.status));
-            const { processing } = (await response.json()) as {
-                processing?: Projection | null;
-            };
-            if (
-                !processing ||
-                processing.itemId !== itemId ||
-                !Number.isFinite(processing.nextCheckInMs) ||
-                processing.nextCheckInMs < 0
-            ) {
-                throw new Error("Invalid processing response");
-            }
-            return processing;
-        }
-
         function refresh(afterPending = false): Promise<void> {
             if (!scope || !canRead()) return Promise.resolve();
             if (inFlight) {
@@ -201,6 +186,9 @@ export function ItemDetailProvider({
             window.clearTimeout(timer);
             const revision = scopeRevision;
             const startedSeries = series;
+            const awaiting = queue
+                .getSnapshot()
+                .filter((entry) => entry.awaitingRead);
             const stillCurrent = () => !disposed && revision === scopeRevision;
 
             const controller = new AbortController();
@@ -211,21 +199,33 @@ export function ItemDetailProvider({
                 () => controller.abort(),
                 20_000,
             );
-            const response = new Promise<Awaited<ReturnType<typeof read>>>(
-                (resolve, reject) => {
-                    const onAbort = () => reject(signal.reason);
-                    signal.addEventListener("abort", onAbort, { once: true });
-                    void read(requestScope, signal)
-                        .then(resolve, reject)
-                        .finally(() =>
-                            signal.removeEventListener("abort", onAbort),
-                        );
-                },
-            );
+            const response = new Promise<
+                Awaited<ReturnType<typeof readItemProcessing>>
+            >((resolve, reject) => {
+                const onAbort = () => reject(signal.reason);
+                signal.addEventListener("abort", onAbort, { once: true });
+                void readItemProcessing(
+                    itemId,
+                    {
+                        kind,
+                        view: requestScope.view,
+                        isOwn:
+                            requestScope.isOwn ||
+                            projection?.access?.role === "owner",
+                    },
+                    signal,
+                    visible,
+                )
+                    .then(resolve, reject)
+                    .finally(() =>
+                        signal.removeEventListener("abort", onAbort),
+                    );
+            });
             inFlight = response
                 .then((next) => {
                     if (!stillCurrent() || next === undefined) return;
                     if (!next) {
+                        queue.acceptRead(null, awaiting);
                         status = "unavailable";
                         if (series === startedSeries) series = null;
                         setState((current) =>
@@ -247,6 +247,7 @@ export function ItemDetailProvider({
                         }
                     }
                     accept(next);
+                    queue.acceptRead(next, awaiting);
                 })
                 .catch(() => {
                     if (!stillCurrent()) return;
@@ -285,6 +286,22 @@ export function ItemDetailProvider({
             void refresh(true);
         }
 
+        const disconnect = queue.connect({
+            scope: () => ({
+                kind,
+                view: scope?.view ?? "private",
+                isOwn: scope?.isOwn ?? false,
+            }),
+            canLoadProjection: () => Boolean(canRead()),
+            accept(next) {
+                // A read that began before this answer can describe the pre-write state.
+                scopeRevision++;
+                activeRead?.abort();
+                if (next) accept(next);
+                else status = "unavailable";
+                schedule();
+            },
+        });
         controls.current = {
             refresh,
             configure(next) {
@@ -304,6 +321,7 @@ export function ItemDetailProvider({
                     next.initialData !== previous?.initialData
                 ) {
                     accept(next.initialData);
+                    queue.acceptRead(next.initialData, []);
                 }
                 const recent = previous
                     ? null
@@ -324,7 +342,10 @@ export function ItemDetailProvider({
         const onFocus = () => void refresh();
         const onVisibility = () => {
             if (visible()) void refresh();
-            else window.clearTimeout(timer);
+            else {
+                window.clearTimeout(timer);
+                queue.revalidateWithoutDetail();
+            }
         };
         window.addEventListener("focus", onFocus);
         document.addEventListener("visibilitychange", onVisibility);
@@ -340,8 +361,9 @@ export function ItemDetailProvider({
             document.removeEventListener("visibilitychange", onVisibility);
             unsubscribe();
             unsubscribeTasks();
+            disconnect();
         };
-    }, [itemId, kind]);
+    }, [itemId, kind, queue]);
 
     useLayoutEffect(() => {
         controls.current?.configure({
@@ -351,27 +373,23 @@ export function ItemDetailProvider({
             enabled,
             initialData,
         });
-    }, [enabled, initialData, isOwn, itemId, view]);
+        queue.revalidateWithoutDetail();
+    }, [enabled, initialData, isOwn, itemId, queue, view]);
 
     const refresh = useCallback(
         () => controls.current?.refresh() ?? Promise.resolve(),
         [],
     );
-    const setData = useCallback(
-        (optimistic: Projection | null) => {
-            setState((current) =>
-                current.itemId === itemId
-                    ? { ...current, optimistic }
-                    : current,
-            );
-        },
-        [itemId],
-    );
-    const { projection, optimistic, status, failures, sharedOnOpen } =
-        currentState;
-    const data = optimistic ?? projection;
-    const value = useMemo<ItemDetail>(
-        () => ({
+    const { projection, status, failures, sharedOnOpen } = currentState;
+    const value = useMemo<ItemDetail>(() => {
+        const operations = pending.map((entry) => entry.operation);
+        const data = operations.reduce(
+            (current, operation) =>
+                current && operation.apply ? operation.apply(current) : current,
+            projection,
+        );
+        return {
+            itemId,
             projection,
             data,
             status,
@@ -383,19 +401,43 @@ export function ItemDetailProvider({
             workflow: data ? deriveWorkflowStatus(data, kind) : null,
             stale: failures >= 2,
             refresh,
-            setData,
-        }),
-        [
-            data,
-            failures,
-            kind,
-            projection,
-            refresh,
-            setData,
-            sharedOnOpen,
-            status,
-        ],
-    );
+            enqueueOperation: queue.enqueueOperation,
+            pendingFolderIds: new Set(
+                operations.flatMap(({ folders }) => folders?.pendingIds ?? []),
+            ),
+            pendingRemovedFolderIds: new Set(
+                pending.flatMap(({ operation, awaitingRead }) =>
+                    awaitingRead ? [] : (operation.folders?.removedIds ?? []),
+                ),
+            ),
+            pendingProfile: operations.some(
+                (operation) => operation.pendingProfile,
+            ),
+            pendingIntents: operations.some(
+                (operation) => operation.pendingIntents,
+            ),
+            pendingProcessAgain: operations.some(
+                (operation) => operation.pendingProcessAgain,
+            ),
+            folderIdsForGate: (ids) => queue.folderIdsForGate(ids),
+            previewFolderIds: (ids) =>
+                operations.reduce(
+                    (current, { folders }) =>
+                        folders?.apply(current) ?? current,
+                    ids,
+                ),
+        };
+    }, [
+        failures,
+        itemId,
+        kind,
+        pending,
+        projection,
+        queue,
+        refresh,
+        sharedOnOpen,
+        status,
+    ]);
 
     return (
         <ItemDetailContext.Provider value={value}>

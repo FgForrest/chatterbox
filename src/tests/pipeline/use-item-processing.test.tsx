@@ -183,9 +183,11 @@ describe("server-driven processing refresh", () => {
             kind: "audio",
             initialData: initial,
         });
-        act(() => {
-            result.current.setData({ ...initial, processAgain: true });
-            invalidateItemProcessing(initial.itemId);
+        await act(async () => {
+            await result.current.enqueueOperation({
+                apply: (data) => ({ ...data, processAgain: true }),
+                write: async () => ({}),
+            });
         });
         expect(fetchMock).toHaveBeenCalledTimes(1);
         expect(result.current.data?.processAgain).toBe(true);
