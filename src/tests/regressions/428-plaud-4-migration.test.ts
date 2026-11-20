@@ -550,7 +550,7 @@ describe("PlaudClient on a 4.0-migrated account", () => {
         await expect(client.getRecordings(0, 1)).rejects.toMatchObject({
             code: ErrorCode.PLAUD_INVALID_TOKEN,
         });
-        expect(attempts).toBe(2);
+        expect(attempts).toBe(3);
     });
 
     it("rejects moving to Trash when migration is discovered or already known", async () => {

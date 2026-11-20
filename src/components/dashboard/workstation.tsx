@@ -146,6 +146,8 @@ interface WorkstationProps {
      * live sync result takes over once a sync runs. Server-supplied.
      */
     plaudNeedsReconnect: boolean;
+    plaudSessionExpiresAt?: string | null;
+    plaudConnectionUpdatedAt?: string | null;
     isHosted: boolean;
     /** The instance receives mail and the viewer may have addresses. */
     mailEnabled?: boolean;
@@ -169,6 +171,8 @@ export function Workstation({
     transcriptVariants,
     initialSettings,
     plaudNeedsReconnect,
+    plaudSessionExpiresAt = null,
+    plaudConnectionUpdatedAt = null,
     isHosted,
     mailEnabled = false,
     exportProviders,
@@ -276,6 +280,7 @@ export function Workstation({
         lastSyncResult,
         manualSync,
         handleReconnected,
+        plaudReconnectRevision,
     } = useAppChrome();
     const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
     const [filenameOverrides, setFilenameOverrides] = useState<
@@ -1203,12 +1208,19 @@ export function Workstation({
         null,
     );
     const prevPlaudNeedsReconnect = useRef(plaudNeedsReconnect);
+    const prevPlaudReconnectRevision = useRef(plaudReconnectRevision);
     useEffect(() => {
         if (plaudNeedsReconnect !== prevPlaudNeedsReconnect.current) {
             prevPlaudNeedsReconnect.current = plaudNeedsReconnect;
             setReconnectOverride(null);
         }
     }, [plaudNeedsReconnect]);
+    useEffect(() => {
+        if (plaudReconnectRevision !== prevPlaudReconnectRevision.current) {
+            prevPlaudReconnectRevision.current = plaudReconnectRevision;
+            setReconnectOverride(false);
+        }
+    }, [plaudReconnectRevision]);
     useEffect(() => {
         if (typeof lastSyncResult?.needsReconnect === "boolean") {
             setReconnectOverride(lastSyncResult.needsReconnect);
@@ -2209,6 +2221,8 @@ export function Workstation({
                     />
                     <PlaudReconnectBanner
                         show={showReconnect}
+                        sessionExpiresAt={plaudSessionExpiresAt}
+                        connectionUpdatedAt={plaudConnectionUpdatedAt}
                         onReconnected={handleReconnected}
                     />
                     <div

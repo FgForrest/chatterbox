@@ -22,6 +22,10 @@ import {
     vi,
 } from "vitest";
 
+vi.mock("next-intl/server", () => ({
+    getExtracted: async () => (message: string) => message,
+}));
+
 vi.mock("@/lib/org/config", () => ({
     isOrgScopeVisible: () => false,
     isOrgScopeEnabled: () => false,
@@ -68,9 +72,7 @@ vi.mock("@/lib/auth", () => ({
 // throws AppError on failure). Forward the existing
 // auth.api.getSession mock through it so test setups keep working
 // without each test having to add suspension fixtures.
-vi.mock("@/lib/auth-server", async () => {
-    const { auth } = await import("@/lib/auth");
-    const { AppError, ErrorCode } = await import("@/lib/errors");
+vi.mock("@/lib/auth-server", () => {
     return {
         requireApiSession: async (request: Request) => {
             const session = await auth.api.getSession({
@@ -91,7 +93,7 @@ vi.mock("@/lib/auth-server", async () => {
 import { POST } from "@/app/api/plaud/auth/connect-token/route";
 import { db } from "@/db";
 import { auth } from "@/lib/auth";
-import { ErrorCode } from "@/lib/errors";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { decodeAccessTokenExpiry, plaudVerifyOtp } from "@/lib/plaud/auth";
 
 const originalFetch = global.fetch;

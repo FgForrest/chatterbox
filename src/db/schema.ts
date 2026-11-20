@@ -416,15 +416,18 @@ export const plaudConnections = pgTable(
         userId: text("user_id")
             .notNull()
             .references(() => users.id, { onDelete: "cascade" }),
-        // Encrypted bearer token (long-lived ≈300 days per Plaud's JWT claims)
+        // Encrypted Plaud user token.
         bearerToken: text("bearer_token").notNull(),
+        refreshToken: text("refresh_token"),
+        accessExpiresAt: timestamp("access_expires_at"),
+        sessionExpiresAt: timestamp("session_expires_at"),
         // Regional API server base URL (e.g. https://api-euc1.plaud.ai for EU users)
         apiBase: text("api_base").notNull().default("https://api.plaud.ai"),
         // Email of the linked Plaud account (captured during OTP flow). Null for
         // legacy connections created via the bearer-token paste flow.
         plaudEmail: text("plaud_email"),
         // Plaud workspace ID (e.g. ws_xxxxxxxxxxxx) used to mint short-lived
-        // workspace tokens (WT) from the long-lived user token (UT). The WT is
+        // workspace tokens (WT) from the user token (UT). The WT is
         // required by recording endpoints (/file/simple/web, /device/list, ...)
         // on regional servers; without it those endpoints return empty lists.
         // Null for connections created before this column existed; resolved and

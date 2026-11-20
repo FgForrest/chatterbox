@@ -18,8 +18,8 @@ in from Chatterbox directly:
 3. Paste it into Chatterbox.
 
 The code is forwarded to Plaud's servers and **never stored locally**.
-After login, the returned access token is encrypted with AES-256-GCM
-before it hits the database — see
+After login, the access and refresh tokens are encrypted with AES-256-GCM
+before they reach the database. See
 [Encryption at rest](../reference/encryption-at-rest) for what that
 covers.
 
@@ -43,13 +43,13 @@ There are two workarounds.
 
 ### Easy path: the connector extension
 
-Install the [connector browser extension](https://github.com/riffado/connector/releases/latest)
-browser extension (AGPL-3.0) — grab the latest release from GitHub and
-load it as an unpacked extension. With the extension installed, the
+Download the [connector browser extension](https://github.com/riffado/connector/releases/latest)
+(AGPL-3.0) from GitHub and load it as an unpacked extension. The
 connect screen surfaces a **Sign in with Plaud** button. You sign in to
 `web.plaud.ai` the way you normally do; the extension forwards the
-resulting access token to your Chatterbox instance. No copy-pasting, no
-devtools.
+access token to your Chatterbox instance. Connector 0.2.4 or newer also forwards
+a refresh token, which keeps you connected for up to 30 days. Older versions
+connect for about 24 hours.
 
 ### Manual fallback: paste the token
 
@@ -57,28 +57,25 @@ If you can't or won't install the extension:
 
 1. Open [web.plaud.ai](https://web.plaud.ai) in a tab and sign in with
    Google or Apple as usual.
-2. Open browser devtools (F12 / Cmd+Option+I) and find **Application →
-   Local Storage → https://web.plaud.ai** (called **Storage** in some
-   browsers).
-3. Copy the value of `pld_tokenstr`. This is your long-lived user token.
-   Do not copy the `Authorization` header from `/device/list` or
-   `/file/simple/web`: those requests use short-lived workspace tokens.
-4. In Chatterbox, switch to the **Paste token** tab, select your Plaud
-   account region (Global, EU, or APAC), and paste the value.
+2. Open DevTools (F12 or Cmd+Option+I) and go to **Application → Cookies → https://web.plaud.ai**.
+3. Copy the value of the `pld_ut` cookie. A newly issued cookie is valid for 24 hours.
+   Requests to `/device/list` and `/file/simple/web` use workspace tokens.
+4. Open the **Network** tab and reload the page. Check the API hostname to find your region.
+   `api.plaud.ai` is Global, `api-euc1.plaud.ai` is EU, and `api-apse1.plaud.ai` is Asia Pacific.
+5. In Chatterbox, open **Paste token**, select the region, and paste the cookie value.
 
 The pasted token is encrypted at rest the same way as a code-flow token.
 
 ## What about refresh tokens?
 
-Plaud's API does not issue refresh tokens. The OTP login response
-contains only an access token, which is a long-lived JWT (roughly 300
-days observed). When it expires, the dashboard surfaces a reconnect
-banner and you repeat whichever flow above you used originally. There is
-no background refresh to fail silently.
+Email-code sign-ins have a 30-day access token and a 30-day refresh token.
+When a refresh token is available, Chatterbox renews access in the background
+until the original sign-in expires. Settings shows when the connection ends.
+The dashboard warns you three days before that date and asks you to reconnect
+when the sign-in ends. Older access tokens keep working until their own expiry.
 
 ## Switching accounts
 
 You can disconnect or switch the connected Plaud account at any time
-from **Settings → Plaud account**. The encrypted bearer token is
-deleted; previously synced recordings stay where they are (you own that
-data on your own storage).
+from **Settings → Plaud account**. Disconnecting deletes the saved tokens.
+Previously synced recordings stay in your storage.

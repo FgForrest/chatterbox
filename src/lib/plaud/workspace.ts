@@ -28,6 +28,7 @@ function safePlaudUrl(apiBase: string, path: string): URL {
 export async function listPlaudWorkspaces(
     userToken: string,
     apiBase: string,
+    strict = false,
 ): Promise<PlaudWorkspaceListResponse> {
     const url = safePlaudUrl(
         apiBase,
@@ -43,6 +44,16 @@ export async function listPlaudWorkspaces(
     });
 
     if (!res.ok) {
+        if (strict && (res.status === 401 || res.status === 429)) {
+            throw new AppError(
+                res.status === 401
+                    ? ErrorCode.PLAUD_INVALID_TOKEN
+                    : ErrorCode.PLAUD_RATE_LIMITED,
+                "Failed to list Plaud workspaces",
+                res.status,
+                { plaudStatus: res.status },
+            );
+        }
         throw new AppError(
             res.status >= 500
                 ? ErrorCode.PLAUD_UPSTREAM_ERROR
@@ -86,6 +97,7 @@ export async function mintPlaudWorkspaceToken(
     userToken: string,
     workspaceId: string,
     apiBase: string,
+    strict = false,
 ): Promise<string> {
     const url = safePlaudUrl(
         apiBase,
@@ -112,6 +124,9 @@ export async function mintPlaudWorkspaceToken(
             statusCode = 401;
             message =
                 "Plaud rejected the access token. Reconnect your Plaud account.";
+        } else if (strict && status === 429) {
+            code = ErrorCode.PLAUD_RATE_LIMITED;
+            statusCode = 429;
         } else if (status >= 500) {
             code = ErrorCode.PLAUD_UPSTREAM_ERROR;
             statusCode = 502;
@@ -121,7 +136,7 @@ export async function mintPlaudWorkspaceToken(
         }
         throw new WorkspaceTokenError(message, {
             httpStatus: status,
-            stale: status === 401 ? false : stale,
+            stale: status !== 401 && !(strict && status === 429) && stale,
             code,
             statusCode,
         });
@@ -172,6 +187,7 @@ export async function resolveWorkspaceToken(
     userToken: string,
     apiBase: string,
     cachedWorkspaceId: string | null | undefined,
+    strict = false,
 ): Promise<{ workspaceToken: string; workspaceId: string }> {
     if (cachedWorkspaceId) {
         try {
@@ -179,6 +195,7 @@ export async function resolveWorkspaceToken(
                 userToken,
                 cachedWorkspaceId,
                 apiBase,
+                strict,
             );
             return { workspaceToken, workspaceId: cachedWorkspaceId };
         } catch (err) {
@@ -188,12 +205,13 @@ export async function resolveWorkspaceToken(
         }
     }
 
-    const list = await listPlaudWorkspaces(userToken, apiBase);
+    const list = await listPlaudWorkspaces(userToken, apiBase, strict);
     const workspaceId = pickPersonalWorkspaceId(list);
     const workspaceToken = await mintPlaudWorkspaceToken(
         userToken,
         workspaceId,
         apiBase,
+        strict,
     );
     return { workspaceToken, workspaceId };
 }

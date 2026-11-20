@@ -45,6 +45,7 @@ export const DEFAULT_PLAUD_API_BASE = PLAUD_SERVERS[DEFAULT_SERVER_KEY].apiBase;
 const V4_PAGE_SIZE = 50;
 const V4_MAX_PAGES = 400;
 const MAX_RETRIES = 3;
+const MAX_AUTH_RETRIES = 3;
 const INITIAL_RETRY_DELAY = 1000;
 
 function sleep(ms: number): Promise<void> {
@@ -52,14 +53,6 @@ function sleep(ms: number): Promise<void> {
 }
 
 function plaudHttpError(status: number, msg: string): AppError {
-    if (status === 401) {
-        return new AppError(
-            ErrorCode.PLAUD_INVALID_TOKEN,
-            "Plaud rejected the access token. Reconnect your Plaud account.",
-            401,
-            { plaudStatus: status, plaudMessage: msg },
-        );
-    }
     if (status >= 500) {
         return new AppError(
             ErrorCode.PLAUD_UPSTREAM_ERROR,
@@ -73,13 +66,76 @@ function plaudHttpError(status: number, msg: string): AppError {
     });
 }
 
+/** Carries the rejected token's database identity outside the error payload. */
+export class PlaudTokenRejection extends AppError {
+    readonly #bearerCiphertext: string | undefined;
+
+    constructor(bearerCiphertext: string | undefined, error?: AppError) {
+        super(
+            ErrorCode.PLAUD_INVALID_TOKEN,
+            error?.message ??
+                "Plaud rejected the access token. Reconnect your Plaud account.",
+            401,
+            error?.details ?? { plaudStatus: 401 },
+        );
+        this.#bearerCiphertext = bearerCiphertext;
+    }
+
+    get bearerCiphertext(): string | undefined {
+        return this.#bearerCiphertext;
+    }
+}
+
+/**
+ * True when `err` means Plaud rejected the token outright
+ * (`PLAUD_INVALID_TOKEN`), as opposed to a rate limit, upstream or network
+ * failure that may succeed on a later attempt.
+ */
+export function isPlaudTokenRejection(
+    err: unknown,
+): err is AppError & { code: ErrorCode.PLAUD_INVALID_TOKEN } {
+    return (
+        err instanceof AppError && err.code === ErrorCode.PLAUD_INVALID_TOKEN
+    );
+}
+
+export interface PlaudClientOptions {
+    /** Encrypted user token from the connection row, used only for guarded writes. */
+    bearerCiphertext?: string;
+    /** Supplies and persists a fresh user token for 401 recovery. */
+    refreshUserToken?: () => Promise<{
+        accessToken: string;
+        bearerCiphertext: string;
+    }>;
+}
+
+interface PlaudAuthorization {
+    bearer: string;
+    bearerCiphertext: string | undefined;
+    workspace: boolean;
+    reminted: boolean;
+    refreshGeneration: number;
+}
+
+interface PlaudAuthorizationRetry {
+    authorization: PlaudAuthorization;
+    refreshed: boolean;
+    attempts: number;
+}
+
 export class PlaudClient {
-    private readonly userToken: string;
+    private userToken: {
+        accessToken: string;
+        bearerCiphertext: string | undefined;
+    };
+    private readonly refreshUserToken?: PlaudClientOptions["refreshUserToken"];
     private readonly apiBase: string;
-    private workspaceToken?: string;
     private resolvedWorkspaceId?: string;
-    private workspaceFetchInFlight?: Promise<void>;
-    private workspaceFallbackToUt = false;
+    private authorization?: PlaudAuthorization;
+    private authorizationInFlight?: Promise<PlaudAuthorization>;
+    private lastSuccessfulBearer?: string;
+    private refreshGeneration = 0;
+    private refreshRejected = false;
     private v4Mode = false;
     private v4List?: Promise<PlaudRecording[]>;
     private readonly v4SortedLists = new Map<string, PlaudRecording[]>();
@@ -92,8 +148,13 @@ export class PlaudClient {
         userToken: string,
         apiBase: string = DEFAULT_PLAUD_API_BASE,
         workspaceId?: string | null,
+        options: PlaudClientOptions = {},
     ) {
-        this.userToken = userToken;
+        this.userToken = {
+            accessToken: userToken,
+            bearerCiphertext: options.bearerCiphertext,
+        };
+        this.refreshUserToken = options.refreshUserToken;
         this.apiBase = apiBase;
         this.resolvedWorkspaceId = workspaceId ?? undefined;
     }
@@ -103,51 +164,133 @@ export class PlaudClient {
     }
 
     get usingUserTokenFallback(): boolean {
-        return this.workspaceFallbackToUt;
+        return this.authorization?.workspace === false;
     }
 
     get usingPlaudV4(): boolean {
         return this.v4Mode;
     }
 
-    private async ensureWorkspaceToken(): Promise<void> {
-        if (this.workspaceToken || this.workspaceFallbackToUt) return;
-        if (!this.workspaceFetchInFlight) {
-            this.workspaceFetchInFlight = this.fetchWorkspaceToken();
-        }
+    get lastSuccessfulBearerCiphertext(): string | undefined {
+        return this.lastSuccessfulBearer;
+    }
+
+    private async mintAuthorization(
+        mode: "initial" | "remint" | "refreshed",
+    ): Promise<PlaudAuthorization> {
+        const { accessToken, bearerCiphertext } = this.userToken;
+        let workspaceToken: string | undefined;
         try {
-            await this.workspaceFetchInFlight;
+            const workspace = await resolveWorkspaceToken(
+                accessToken,
+                this.apiBase,
+                this.resolvedWorkspaceId,
+                mode !== "initial",
+            );
+            workspaceToken = workspace.workspaceToken;
+            this.resolvedWorkspaceId = workspace.workspaceId;
+        } catch (error) {
+            if (mode !== "initial") {
+                if (isPlaudTokenRejection(error))
+                    throw new PlaudTokenRejection(bearerCiphertext);
+                throw error instanceof AppError
+                    ? error
+                    : new AppError(
+                          ErrorCode.PLAUD_UPSTREAM_ERROR,
+                          "Failed to communicate with Plaud. Please try again later.",
+                          502,
+                      );
+            }
+            console.warn(
+                "[plaud] workspace token mint failed, falling back to user token",
+            );
+        }
+
+        return {
+            bearer: workspaceToken ?? accessToken,
+            bearerCiphertext,
+            workspace: workspaceToken !== undefined,
+            reminted: mode === "remint",
+            refreshGeneration: this.refreshGeneration,
+        };
+    }
+
+    private async updateAuthorization(
+        load: () => Promise<PlaudAuthorization>,
+    ): Promise<PlaudAuthorization> {
+        if (this.authorizationInFlight) return this.authorizationInFlight;
+        this.authorizationInFlight = load();
+        try {
+            this.authorization = await this.authorizationInFlight;
+            return this.authorization;
         } finally {
-            this.workspaceFetchInFlight = undefined;
+            this.authorizationInFlight = undefined;
         }
     }
 
-    private async fetchWorkspaceToken(): Promise<void> {
-        try {
-            const { workspaceToken, workspaceId } = await resolveWorkspaceToken(
-                this.userToken,
-                this.apiBase,
-                this.resolvedWorkspaceId,
-            );
-            this.workspaceToken = workspaceToken;
-            this.resolvedWorkspaceId = workspaceId;
-        } catch (err) {
-            console.warn(
-                "[plaud] workspace token mint failed, falling back to user token:",
-                err instanceof Error ? err.message : err,
-            );
-            this.workspaceFallbackToUt = true;
+    private async getAuthorization(): Promise<PlaudAuthorization> {
+        if (this.authorizationInFlight) return this.authorizationInFlight;
+        return (
+            this.authorization ??
+            this.updateAuthorization(() =>
+                this.mintAuthorization(
+                    this.refreshGeneration === 0 ? "initial" : "refreshed",
+                ),
+            )
+        );
+    }
+
+    private async recoverAuthorization(
+        rejected: PlaudAuthorization,
+        canRemint: boolean,
+        canRefresh: boolean,
+    ): Promise<PlaudAuthorization> {
+        if (
+            this.authorizationInFlight ||
+            (this.authorization && this.authorization !== rejected) ||
+            rejected.refreshGeneration !== this.refreshGeneration
+        ) {
+            return this.getAuthorization();
         }
+
+        return this.updateAuthorization(async () => {
+            if (!canRefresh || this.refreshRejected) {
+                throw new PlaudTokenRejection(rejected.bearerCiphertext);
+            }
+            if (canRemint && rejected.workspace && !rejected.reminted) {
+                try {
+                    return await this.mintAuthorization("remint");
+                } catch (error) {
+                    if (!isPlaudTokenRejection(error)) throw error;
+                }
+            }
+
+            if (!this.refreshUserToken)
+                throw new PlaudTokenRejection(rejected.bearerCiphertext);
+            try {
+                this.userToken = await this.refreshUserToken();
+            } catch (error) {
+                if (!isPlaudTokenRejection(error)) throw error;
+                this.refreshRejected = true;
+                throw new PlaudTokenRejection(rejected.bearerCiphertext, error);
+            }
+
+            this.refreshGeneration++;
+            this.authorization = undefined;
+            return this.mintAuthorization(
+                rejected.workspace ? "refreshed" : "initial",
+            );
+        });
     }
 
     private async request<T>(
         endpoint: string,
         options?: RequestInit,
         retryCount = 0,
+        authRetry?: PlaudAuthorizationRetry,
     ): Promise<T> {
-        await this.ensureWorkspaceToken();
-
-        const bearer = this.workspaceToken ?? this.userToken;
+        const authorization =
+            authRetry?.authorization ?? (await this.getAuthorization());
         const url = `${this.apiBase}${endpoint}`;
 
         try {
@@ -155,14 +298,14 @@ export class PlaudClient {
                 ...options,
                 headers: {
                     ...options?.headers,
-                    Authorization: `Bearer ${bearer}`,
+                    Authorization: `Bearer ${authorization.bearer}`,
                     "Content-Type": "application/json",
                     "User-Agent": PLAUD_USER_AGENT,
                 },
             });
 
             if (response.status === 429) {
-                if (retryCount < MAX_RETRIES) {
+                if (!authRetry && retryCount < MAX_RETRIES) {
                     const retryAfter = response.headers.get("Retry-After");
                     const delay = retryAfter
                         ? Number.parseInt(retryAfter, 10) * 1000
@@ -181,6 +324,29 @@ export class PlaudClient {
                 );
             }
 
+            if (response.status === 401) {
+                await response.body?.cancel().catch(() => undefined);
+                const attempts = authRetry?.attempts ?? 0;
+                if (attempts >= MAX_AUTH_RETRIES) {
+                    throw new PlaudTokenRejection(
+                        authorization.bearerCiphertext,
+                    );
+                }
+                const next = await this.recoverAuthorization(
+                    authorization,
+                    authRetry === undefined,
+                    !authRetry?.refreshed,
+                );
+                return this.request<T>(endpoint, options, retryCount, {
+                    authorization: next,
+                    attempts: attempts + 1,
+                    refreshed:
+                        authRetry?.refreshed === true ||
+                        next.refreshGeneration !==
+                            authorization.refreshGeneration,
+                });
+            }
+
             if (!response.ok) {
                 const error = (await response
                     .json()
@@ -188,6 +354,7 @@ export class PlaudClient {
                 const upstreamMsg = error.msg || response.statusText;
 
                 if (
+                    !authRetry &&
                     response.status >= 500 &&
                     response.status < 600 &&
                     retryCount < MAX_RETRIES
@@ -200,9 +367,12 @@ export class PlaudClient {
                 throw plaudHttpError(response.status, upstreamMsg);
             }
 
-            return await safeParseJson<T>(response);
+            const body = await safeParseJson<T>(response);
+            this.lastSuccessfulBearer = authorization.bearerCiphertext;
+            return body;
         } catch (error) {
             if (
+                !authRetry &&
                 error instanceof TypeError &&
                 error.message.includes("fetch") &&
                 retryCount < MAX_RETRIES

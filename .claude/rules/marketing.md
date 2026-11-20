@@ -68,8 +68,10 @@ is the only device family supported today, marketing copy stays vendor-agnostic 
 Chatterbox has "marketing ahead of code" in some places. **Always cross-check landing / pricing /
 changelog claims against actual code before designing features that depend on them.** Known gaps:
 
-- Plaud refresh-token handling was removed (`0d31b39b`); Plaud issues only long-lived access tokens
-  (~300 day JWT). Do not re-add refresh-token plumbing.
+- Plaud sign-ins end after 30 days even with automatic renewal. Email-code sign-ins last 30 days.
+  The current web app token (`pld_ut`) lasts 24 hours. Connector 0.2.4+ can renew it during the
+  30-day session. Older connector versions and manual paste use the web token alone. Older
+  tokens issued before the lifetime change still expire according to their JWT claims.
 
 ## Screenshots
 

@@ -533,6 +533,12 @@ export default async function DashboardPage() {
                 isOrgAccount={viewerIsOrgAccount}
                 initialSettings={initialSettings}
                 plaudNeedsReconnect={connectionRow?.invalidatedAt != null}
+                plaudSessionExpiresAt={
+                    connectionRow?.sessionExpiresAt?.toISOString() ?? null
+                }
+                plaudConnectionUpdatedAt={
+                    connectionRow?.updatedAt?.toISOString() ?? null
+                }
                 isHosted={env.IS_HOSTED}
                 mailEnabled={mailAvailable}
                 canCurate={actor ? await actsForOrganization(actor) : false}
