@@ -18,6 +18,7 @@ import {
     mailContents,
     mailMessages,
     mailPendingShares,
+    meetingAgendas,
     processingProfileRevisions,
     processingProfiles,
     recordingFolderAssignments,
@@ -154,6 +155,7 @@ import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { changeTranscriptSpeaker } from "@/lib/knowledge/speaker-changes";
 import { llmRendering } from "@/lib/learn/llm-input";
 import { mailShareProblems } from "@/lib/mail/share-gate";
+import { isOrgScopeEnabled } from "@/lib/org/config";
 import { gatherFacts } from "@/lib/pipeline/facts";
 import { loadPrivateItemProcessing } from "@/lib/pipeline/presentation";
 import {
@@ -508,6 +510,47 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
         });
     });
 
+    it("reports a second Organization placement for a meeting as filed", async () => {
+        const id = "meeting-folder-outcomes";
+        await db()
+            .insert(chatterItems)
+            .values({
+                id,
+                userId: ALICE,
+                kind: "meeting",
+                title: encryptText("Planning meeting"),
+                occurredAt: new Date("2026-10-15T10:00:00Z"),
+            });
+        await db().insert(meetingAgendas).values({
+            userId: ALICE,
+            meetingItemId: id,
+            noTaskSource: true,
+        });
+
+        const first = await file(
+            folderRequest("POST", { folderId: orgFolderId }),
+            context(id),
+        );
+        expect(first.status).toBe(200);
+        expect(await first.json()).toMatchObject({
+            assigned: true,
+            placement: "shared",
+        });
+
+        const second = await file(
+            folderRequest("POST", { folderId: secondOrgFolderId }),
+            context(id),
+        );
+        expect(second.status).toBe(200);
+        expect(await second.json()).toMatchObject({
+            assigned: true,
+            placement: "filed",
+        });
+        expect(new Set(await assignments(id))).toEqual(
+            new Set([orgFolderId, secondOrgFolderId]),
+        );
+    });
+
     it("distinguishes an unchanged refusal, an intended filing and a withheld filing", async () => {
         const itemId = "unfinished-audio";
         await insertAudio(itemId);
@@ -846,6 +889,7 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
         const password = mockEnv.ORG_ACCOUNT_PASSWORD;
         mockEnv.ORG_ACCOUNT_PASSWORD = undefined;
         try {
+            expect(isOrgScopeEnabled()).toBe(false);
             expect(
                 (
                     await review(
@@ -854,9 +898,25 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
                     )
                 ).status,
             ).toBe(403);
-            expect(
-                (await loadPrivateItemProcessing(ALICE, id))?.versions.learn,
-            ).toEqual({});
+            for (const [viewer, view, role] of [
+                [ALICE, "private", "owner"],
+                [BOB, "org", "member"],
+                [ORG, "org", "curator"],
+            ] as const) {
+                const projection = await loadPrivateItemProcessing(
+                    ALICE,
+                    id,
+                    viewer,
+                    "en",
+                    view,
+                );
+                expect(projection?.access).toEqual({
+                    shared: true,
+                    role,
+                    contentView: "org",
+                });
+                expect(projection?.versions.learn).toEqual({});
+            }
         } finally {
             mockEnv.ORG_ACCOUNT_PASSWORD = password;
         }
@@ -950,99 +1010,6 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
             before?.versions.summaries.riffado,
         );
         expect(after?.versions.item).not.toBe(before?.versions.item);
-    });
-
-    it("measures projection wall time on small and large items", async () => {
-        const small = "projection-timing-small";
-        const large = "projection-timing-large";
-        for (const id of [small, large]) {
-            await insertAudio(id);
-            await insertTranscript(id);
-            await db()
-                .insert(aiEnhancements)
-                .values({
-                    itemId: id,
-                    userId: ALICE,
-                    provider: "sample",
-                    model: "sample",
-                    summary: encryptText("Sample summary"),
-                });
-            await db()
-                .insert(itemProcessing)
-                .values({ itemId: id, userId: ALICE, view: "private" });
-        }
-        const [transcript] = await db()
-            .select()
-            .from(transcriptions)
-            .where(eq(transcriptions.recordingId, large));
-        if (!transcript) throw new Error("Transcript missing");
-        await db()
-            .insert(recordingTasks)
-            .values(
-                Array.from({ length: 500 }, (_, index) => ({
-                    itemId: large,
-                    userId: ALICE,
-                    source: "manual" as const,
-                    status: "open" as const,
-                    position: index,
-                    text: encryptText("Check the notes"),
-                })),
-            );
-        await db()
-            .insert(summaryRemarks)
-            .values(
-                Array.from({ length: 200 }, () => ({
-                    itemId: large,
-                    userId: ALICE,
-                    authorUserId: ALICE,
-                    text: encryptText("Add a short example"),
-                })),
-            );
-        await db()
-            .insert(transcriptSpeakers)
-            .values(
-                Array.from({ length: 300 }, (_, index) => ({
-                    transcriptionId: transcript.id,
-                    userId: ALICE,
-                    label: `speaker_${index}`,
-                    status: "confirmed" as const,
-                    source: "user" as const,
-                    markedUnknown: true,
-                })),
-            );
-        await db()
-            .insert(transcriptCorrections)
-            .values(
-                Array.from({ length: 300 }, (_, index) => ({
-                    transcriptionId: transcript.id,
-                    userId: ALICE,
-                    transcriptRevision: transcript.revision,
-                    kind: "fix" as const,
-                    turnIndex: index,
-                    charStart: 0,
-                    charEnd: 4,
-                    heard: encryptText("door"),
-                    heardHmac: "0".repeat(64),
-                    replacement: encryptText("floor"),
-                })),
-            );
-        const samples: Record<string, number[]> = { [small]: [], [large]: [] };
-        for (let attempt = 0; attempt <= 10; attempt++) {
-            for (const id of [small, large]) {
-                const start = performance.now();
-                const projection = await loadPrivateItemProcessing(ALICE, id);
-                const elapsed = performance.now() - start;
-                expect(projection?.versions.item).toBeTruthy();
-                if (attempt > 0) samples[id]?.push(elapsed);
-            }
-        }
-        const median = (id: string) => {
-            const sorted = [...(samples[id] ?? [])].sort((a, b) => a - b);
-            return ((sorted[4] + sorted[5]) / 2).toFixed(2);
-        };
-        console.info(
-            `Projection wall time (median of 10) small ${median(small)} ms, large ${median(large)} ms`,
-        );
     });
 
     it("changes the versions of only the affected audio parts", async () => {

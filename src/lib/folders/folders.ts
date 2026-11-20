@@ -2033,6 +2033,11 @@ async function fileItemInOrganizationFolderInTx(
         input.itemId,
         input.orgUserId,
     );
+    const wasShared = await isRecordingShared(
+        input.itemId,
+        input.orgUserId,
+        tx,
+    );
     if (kind === "meeting") {
         await tx
             .insert(recordingFolderAssignments)
@@ -2058,13 +2063,14 @@ async function fileItemInOrganizationFolderInTx(
             input.itemId,
         );
         await notifyFolderReceiversInTx(tx, input.ownerUserId, input.itemId);
-        return { placement: pruned.has(folder.id) ? "unchanged" : "shared" };
+        return {
+            placement: pruned.has(folder.id)
+                ? "unchanged"
+                : wasShared
+                  ? "filed"
+                  : "shared",
+        };
     }
-    const wasShared = await isRecordingShared(
-        input.itemId,
-        input.orgUserId,
-        tx,
-    );
     if (
         !wasShared &&
         kind === "audio" &&
