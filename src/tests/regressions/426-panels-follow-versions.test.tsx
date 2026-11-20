@@ -373,6 +373,99 @@ it("keeps the settings default when a workflow starts after the first projection
     expect(screen.getByText("plaud transcript 1")).toBeTruthy();
 });
 
+it.each([
+    false,
+    true,
+])("follows the first higher-ranked transcript once per visit (workflow finished %s)", async (finished) => {
+    const base = projection();
+    const initial = {
+        ...base,
+        versions: { ...base.versions, transcripts: { plaud: "plaud-1" } },
+    };
+    const remote = server(undefined, initial);
+    const plaud = transcript("plaud");
+    const custom = transcript("riffado");
+    const detail = (transcripts: TranscriptOption[]) => (
+        <WorkstationDetailPane {...props} transcripts={transcripts} />
+    );
+    const view = render(detail([plaud]));
+    await screen.findByLabelText("Workflow");
+    expect(screen.getByText("plaud transcript 1")).toBeTruthy();
+
+    const updated = { ...base, legacy: finished };
+    await remote.update(updated);
+    expect(screen.getByText("plaud transcript 1")).toBeTruthy();
+    view.rerender(detail([plaud, custom]));
+    expect(screen.getByText("riffado transcript 1")).toBeTruthy();
+
+    await remote.update({ ...updated, versions: initial.versions });
+    view.rerender(detail([plaud]));
+    expect(screen.getByText("plaud transcript 1")).toBeTruthy();
+    await remote.update(updated);
+    view.rerender(detail([plaud, custom]));
+    expect(screen.getByText("plaud transcript 1")).toBeTruthy();
+});
+
+it("keeps the picked Plaud tab when Custom arrives during a workflow", async () => {
+    const base = projection();
+    const initial = {
+        ...base,
+        versions: {
+            ...base.versions,
+            transcripts: { plaud: "plaud-1", mixed: "mixed-1" },
+        },
+    };
+    const remote = server(undefined, initial);
+    const existing = [transcript("plaud"), transcript("mixed")];
+    const view = render(
+        <WorkstationDetailPane {...props} transcripts={existing} />,
+    );
+    await screen.findByLabelText("Workflow");
+    expect(screen.getByText("mixed transcript 1")).toBeTruthy();
+    fireEvent.click(screen.getByText("Plaud", { selector: "button" }));
+    expect(screen.getByText("plaud transcript 1")).toBeTruthy();
+
+    await remote.update({
+        ...base,
+        versions: {
+            ...base.versions,
+            transcripts: {
+                ...initial.versions.transcripts,
+                riffado: "riffado-1",
+            },
+        },
+    });
+    view.rerender(
+        <WorkstationDetailPane
+            {...props}
+            transcripts={[...existing, transcript("riffado")]}
+        />,
+    );
+    expect(screen.getByText("plaud transcript 1")).toBeTruthy();
+});
+
+it("keeps the Plaud setting when Custom arrives without a workflow", async () => {
+    const base = { ...projection(), legacy: true };
+    const remote = server(undefined, {
+        ...base,
+        versions: { ...base.versions, transcripts: { plaud: "plaud-1" } },
+    });
+    const view = render(
+        <WorkstationDetailPane
+            {...props}
+            transcripts={[transcript("plaud")]}
+        />,
+    );
+    await act(async () => {});
+    expect(screen.queryByLabelText("Workflow")).toBeNull();
+    expect(screen.getByText("plaud transcript 1")).toBeTruthy();
+
+    await remote.update(base);
+    view.rerender(<WorkstationDetailPane {...props} />);
+    expect(screen.queryByLabelText("Workflow")).toBeNull();
+    expect(screen.getByText("plaud transcript 1")).toBeTruthy();
+});
+
 it("switches to the transcript targeted by a workflow review", async () => {
     server();
     render(<WorkstationDetailPane {...props} />);

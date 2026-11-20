@@ -26,7 +26,10 @@ import {
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import { deriveWorkflowStatus } from "@/lib/pipeline/workflow-status";
 import type { RecordingView } from "@/lib/sharing/view";
-import { preferredTranscript } from "@/lib/transcription/preferred-source";
+import {
+    preferredTranscript,
+    TRANSCRIPT_SOURCE_ORDER,
+} from "@/lib/transcription/preferred-source";
 
 type Projection = ItemProcessingPresentation;
 type ItemDetailStatus = "loading" | "ready" | "unavailable" | "error";
@@ -571,11 +574,22 @@ export function ItemDetailProvider({
     );
 
     const visibleItemId = detailVisible ? itemId : null;
+    const sourceOrder: readonly string[] = TRANSCRIPT_SOURCE_ORDER;
+    const workflowSource = preferredTranscript(transcripts ?? [])?.source;
+    const workflowRank = sourceOrder.indexOf(workflowSource ?? "");
     const [tab, setTab] = useState<{
         itemId: string | null;
         workflowDefault?: boolean;
         source?: string;
-    }>({ itemId: visibleItemId });
+        workflowRank: number;
+        sawWorkflow: boolean;
+        canFollowArrival: boolean;
+    }>({
+        itemId: visibleItemId,
+        workflowRank,
+        sawWorkflow: false,
+        canFollowArrival: true,
+    });
     const continuing = visibleItemId !== null && tab.itemId === visibleItemId;
     const selected = continuing ? tab.source : undefined;
     const initialDefault =
@@ -590,16 +604,34 @@ export function ItemDetailProvider({
     let fallback: string | undefined;
     if (transcripts) {
         if (workflowDefault !== false) {
-            fallback = preferredTranscript(transcripts)?.source;
+            fallback = workflowSource;
         }
         fallback ??= transcripts[0]?.source;
     }
-    const shown =
-        selected && transcripts?.some(({ source }) => source === selected)
-            ? selected
-            : fallback;
+    const sawWorkflow =
+        visibleItemId !== null &&
+        (initialDefault === true || (continuing && tab.sawWorkflow));
+    const mayFollowArrival = !continuing || tab.canFollowArrival;
+    const selectedRank = sourceOrder.indexOf(selected ?? "");
+    const followsArrival =
+        continuing &&
+        mayFollowArrival &&
+        sawWorkflow &&
+        workflowRank >= 0 &&
+        workflowRank < selectedRank &&
+        (tab.workflowRank < 0 || workflowRank < tab.workflowRank);
+    const canFollowArrival = mayFollowArrival && !followsArrival;
+    let shown = fallback;
+    if (followsArrival) {
+        shown = workflowSource;
+    } else if (
+        selected &&
+        transcripts?.some(({ source }) => source === selected)
+    ) {
+        shown = selected;
+    }
     let remembered: string | undefined;
-    if (selected && pendingTranscripts.has(selected)) {
+    if (!followsArrival && selected && pendingTranscripts.has(selected)) {
         remembered = selected;
     } else if (selected !== undefined || workflowDefault !== undefined) {
         remembered = shown;
@@ -607,9 +639,19 @@ export function ItemDetailProvider({
     if (
         tab.itemId !== visibleItemId ||
         tab.workflowDefault !== workflowDefault ||
-        tab.source !== remembered
+        tab.source !== remembered ||
+        tab.workflowRank !== workflowRank ||
+        tab.sawWorkflow !== sawWorkflow ||
+        tab.canFollowArrival !== canFollowArrival
     )
-        setTab({ itemId: visibleItemId, workflowDefault, source: remembered });
+        setTab({
+            itemId: visibleItemId,
+            workflowDefault,
+            source: remembered,
+            workflowRank,
+            sawWorkflow,
+            canFollowArrival,
+        });
     const selectTranscript = useCallback(
         (source: string) => {
             if (visibleItemId !== null)
@@ -617,6 +659,7 @@ export function ItemDetailProvider({
                     ...current,
                     itemId: visibleItemId,
                     source,
+                    canFollowArrival: false,
                 }));
         },
         [visibleItemId],
