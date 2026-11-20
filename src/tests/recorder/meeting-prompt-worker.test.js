@@ -1,252 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-    completeSession,
-    getSession,
-} from "../../../extensions/recorder/lib/api.js";
-import {
-    listChunkIndices,
-    listLocalSessions,
-} from "../../../extensions/recorder/lib/chunk-store.js";
 import { MEETING_PROMPT_SCRIPT_ID } from "../../../extensions/recorder/lib/meeting-prompt.js";
 import { meetingTarget } from "../../../extensions/recorder/lib/meeting-target.js";
 import { MEETING_PROMPT_ORIGINS } from "../../../extensions/recorder/lib/platforms.js";
 import { createPromptIconBlink } from "../../../extensions/recorder/lib/prompt-icon.js";
-import { readToken } from "../../../extensions/recorder/lib/token-vault.js";
+import {
+    arm,
+    extension,
+    h,
+    meeting,
+    message,
+    mockToolbarFrames,
+    offscreen,
+    sender,
+    settle,
+    startFromPopup,
+} from "./meeting-worker-fixture.js";
 
-const h = vi.hoisted(() => {
-    const listeners = {};
-    const local = {};
-    const session = {};
-    const tabs = new Map();
-    const scripts = new Map();
-    const metas = new Map();
-    const event = (name) => ({
-        addListener: (listener) => {
-            listeners[name] = listener;
-        },
-    });
-    const area = (values) => ({
-        get: vi.fn(async () => ({ ...values })),
-        set: vi.fn(async (patch) => Object.assign(values, patch)),
-        remove: vi.fn(async (keys) => {
-            for (const key of [keys].flat()) delete values[key];
-        }),
-        setAccessLevel: vi.fn(async () => {}),
-    });
-    const data = {
-        listeners,
-        local,
-        session,
-        tabs,
-        scripts,
-        metas,
-        granted: true,
-        visible: true,
-        search: vi.fn(async () => [{ id: "new", label: "Private / Aurora" }]),
-        lookup: vi.fn(async () => []),
-        createSession: vi.fn(async () => ({
-            id: "session-1",
-            encryption: { protocol: 1, key: "secret-capture-key" },
-        })),
-    };
-    globalThis.chrome = {
-        i18n: { getMessage: (key) => key },
-        storage: {
-            local: area(local),
-            session: area(session),
-            onChanged: event("storage"),
-        },
-        runtime: {
-            id: "test",
-            getURL: (path) => `chrome-extension://test/${path}`,
-            getManifest: () => ({ version: "0.7.0" }),
-            sendMessage: vi.fn(async () => ({ ok: true })),
-            getContexts: vi.fn(async () => []),
-            openOptionsPage: vi.fn(async () => {}),
-            onMessage: event("message"),
-            onMessageExternal: event("external"),
-            onInstalled: event("installed"),
-            onStartup: event("startup"),
-        },
-        permissions: {
-            contains: vi.fn(async () => data.granted),
-            onAdded: event("added"),
-            onRemoved: event("removed"),
-        },
-        scripting: {
-            getRegisteredContentScripts: vi.fn(async () => [
-                ...scripts.values(),
-            ]),
-            registerContentScripts: vi.fn(async (entries) => {
-                for (const entry of entries) scripts.set(entry.id, entry);
-            }),
-            updateContentScripts: vi.fn(async (entries) => {
-                for (const entry of entries) scripts.set(entry.id, entry);
-            }),
-            unregisterContentScripts: vi.fn(async ({ ids }) => {
-                for (const id of ids) scripts.delete(id);
-            }),
-            executeScript: vi.fn(async () => []),
-        },
-        tabs: {
-            get: vi.fn(async (id) => tabs.get(id) ?? null),
-            query: vi.fn(async (query) =>
-                [...tabs.values()].filter(
-                    (tab) =>
-                        !query.url ||
-                        query.url.some((pattern) => {
-                            const host = new URL(pattern.replace("*.", ""))
-                                .hostname;
-                            const url = new URL(tab.url);
-                            return (
-                                url.protocol === "https:" &&
-                                (url.hostname === host ||
-                                    url.hostname.endsWith(`.${host}`))
-                            );
-                        }),
-                ),
-            ),
-            sendMessage: vi.fn(async () => ({ visible: data.visible })),
-            create: vi.fn(async () => ({})),
-            update: vi.fn(async () => ({})),
-            onUpdated: event("updated"),
-            onRemoved: event("tabRemoved"),
-        },
-        action: {
-            setPopup: vi.fn(async () => {}),
-            setIcon: vi.fn(async () => {}),
-            setBadgeText: vi.fn(async () => {}),
-            setTitle: vi.fn(async () => {}),
-            setBadgeBackgroundColor: vi.fn(async () => {}),
-            getUserSettings: vi.fn(async () => ({ isOnToolbar: true })),
-            onClicked: event("clicked"),
-            onUserSettingsChanged: event("pinChanged"),
-        },
-        commands: {
-            getAll: vi.fn(async () => [
-                { name: "toggle-recording", shortcut: "Alt+Shift+R" },
-            ]),
-            onCommand: event("command"),
-        },
-        notifications: {
-            create: vi.fn(async () => "notice"),
-            clear: vi.fn(async () => {}),
-            onClicked: event("notificationClicked"),
-            onButtonClicked: event("notificationButton"),
-        },
-        alarms: {
-            get: vi.fn(async () => null),
-            create: vi.fn(async () => {}),
-            clear: vi.fn(async () => {}),
-            onAlarm: event("alarm"),
-        },
-        windows: {
-            onRemoved: event("windowRemoved"),
-            getLastFocused: vi.fn(async () => null),
-            create: vi.fn(async () => ({ id: 77 })),
-            update: vi.fn(async () => ({})),
-        },
-        tabCapture: {
-            getMediaStreamId: vi.fn((_input, callback) => callback("stream-1")),
-        },
-        offscreen: {
-            createDocument: vi.fn(async () => {}),
-            closeDocument: vi.fn(async () => {}),
-        },
-    };
-    Object.defineProperty(globalThis, "navigator", {
-        configurable: true,
-        value: {
-            permissions: { query: vi.fn(async () => ({ state: "granted" })) },
-        },
-    });
-    return data;
-});
-vi.mock("../../../extensions/recorder/lib/token-vault.js", () => ({
-    readToken: vi.fn(async () => "private-recorder-token"),
-}));
-vi.mock("../../../extensions/recorder/lib/chunk-store.js", () => ({
-    createLocalSession: vi.fn(async (id, meta) => h.metas.set(id, meta)),
-    deleteLocalSession: vi.fn(async () => {}),
-    listChunkIndices: vi.fn(async () => []),
-    listLocalSessions: vi.fn(async () => []),
-    readChunk: vi.fn(),
-    readLocalMeta: vi.fn(async (id) => h.metas.get(id)),
-    totalBufferedBytes: vi.fn(async () => 0),
-}));
-vi.mock("../../../extensions/recorder/lib/api.js", () => ({
-    abortSession: vi.fn(async () => {}),
-    completeSession: vi.fn(),
-    createSession: h.createSession,
-    getSession: vi.fn(),
-    getRecorderFolder: h.lookup,
-    recoverSession: vi.fn(),
-    searchRecorderFolders: h.search,
-    sha256Hex: vi.fn(),
-    uploadChunk: vi.fn(),
-}));
-import "../../../extensions/recorder/service-worker.js";
-const meeting = {
-    id: 7,
-    windowId: 3,
-    url: "https://meet.google.com/abc-defg-hij",
-    audible: true,
-};
-const sender = () => ({
-    id: "test",
-    frameId: 0,
-    url: h.tabs.get(7).url,
-    tab: { id: 7 },
-});
-const extension = {
-    id: "test",
-    url: "chrome-extension://test/popup/popup.html",
-};
-const message = (input, from = sender()) =>
-    new Promise((resolve) => h.listeners.message(input, from, resolve));
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
-
-beforeEach(async () => {
-    await settle();
-    vi.clearAllMocks();
-    for (const store of [h.local, h.session])
-        for (const key of Object.keys(store)) delete store[key];
-    h.tabs.clear();
-    h.scripts.clear();
-    h.metas.clear();
-    h.granted = true;
-    h.visible = true;
-    chrome.tabs.sendMessage.mockImplementation(async () => ({
-        visible: h.visible,
-    }));
-    Object.assign(h.local, {
-        dataUseAcknowledgedAt: "2026-10-20T12:00:00Z",
-        encryptedApiKey: { ciphertext: "test" },
-        serverUrl: "https://recorder.example",
-        nudgeEnabled: true,
-        serverDefaults: {
-            encryptedRecordingProtocol: 1,
-            recordingFolderOverride: true,
-            autoRecordPlatforms: [],
-        },
-    });
-    h.tabs.set(7, { ...meeting });
-    chrome.commands.getAll.mockResolvedValue([
-        { name: "toggle-recording", shortcut: "Alt+Shift+R" },
-    ]);
-    chrome.action.getUserSettings.mockResolvedValue({ isOnToolbar: true });
-    h.createSession.mockResolvedValue({
-        id: "session-1",
-        encryption: { protocol: 1, key: "secret-capture-key" },
-    });
-});
-afterEach(settle);
-async function arm() {
-    await h.listeners.updated(7, { status: "complete" }, h.tabs.get(7));
-}
 async function start() {
     await arm();
-    h.listeners.clicked(h.tabs.get(7));
+    expect(await startFromPopup()).toMatchObject({ ok: true });
     await vi.waitFor(() =>
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
             expect.objectContaining({ target: "offscreen", type: "start" }),
@@ -257,10 +29,6 @@ async function start() {
 
 describe("meeting prompt toolbar icon", () => {
     const tabId = 7;
-    const offscreen = {
-        id: "test",
-        url: "chrome-extension://test/offscreen/offscreen.html",
-    };
     const normal = expect.objectContaining({
         tabId,
         path: expect.objectContaining({ 16: "icons/icon-16.png" }),
@@ -278,36 +46,7 @@ describe("meeting prompt toolbar icon", () => {
             text,
         });
 
-    beforeEach(() => {
-        vi.stubGlobal(
-            "OffscreenCanvas",
-            class {
-                getContext() {
-                    return {
-                        fillStyle: "#000",
-                        drawImage() {},
-                        clearRect() {},
-                        beginPath() {},
-                        roundRect() {},
-                        fill() {},
-                        getImageData(_x, _y, width) {
-                            return { width, fillStyle: this.fillStyle };
-                        },
-                    };
-                }
-            },
-        );
-        vi.stubGlobal(
-            "createImageBitmap",
-            vi.fn(async () => ({ close() {} })),
-        );
-        const fetchOriginal = globalThis.fetch;
-        vi.stubGlobal("fetch", (url, ...args) =>
-            String(url).startsWith("chrome-extension://test/icons/")
-                ? Promise.resolve(new Response("toolbar icon"))
-                : fetchOriginal(url, ...args),
-        );
-    });
+    beforeEach(mockToolbarFrames);
 
     afterEach(async () => {
         await h.listeners.updated(tabId, { status: "loading" }, meeting);
@@ -424,8 +163,8 @@ describe("meeting prompt toolbar icon", () => {
         expectBadge("REC");
 
         h.session.recordingState.uploaded = [0];
-        completeSession.mockResolvedValueOnce({ status: "completed" });
-        getSession.mockResolvedValueOnce({
+        h.completeSession.mockResolvedValueOnce({ status: "completed" });
+        h.getSession.mockResolvedValueOnce({
             status: "completed",
             recording_id: "recording-1",
         });
@@ -701,6 +440,44 @@ describe("meeting prompt toolbar icon", () => {
         expect(chrome.action.setIcon).toHaveBeenCalledTimes(frames);
     });
 
+    it("leaves a reserved blink unused when the worker restarts before the first frame", async () => {
+        h.session.armedTabs = {
+            7: { bannerPrompt: true, promptVisible: false },
+        };
+        const badge = { paintBadge: vi.fn(), restoreBadge: vi.fn() };
+        const first = createPromptIconBlink(
+            Promise.resolve({}),
+            vi.fn(),
+            badge,
+        );
+        expect(await first.reserve(tabId, () => true)).toBeTruthy();
+        expect(h.session["prompt-icon:7"]).toEqual({
+            until: expect.any(Number),
+            used: false,
+        });
+        expect(chrome.action.setIcon).not.toHaveBeenCalled();
+
+        const clearCopy = vi.fn();
+        const restarted = createPromptIconBlink(
+            Promise.resolve({ ...h.session }),
+            clearCopy,
+            badge,
+        );
+        const blink = await restarted.reserve(tabId, () => true);
+        expect(blink).toBeTruthy();
+        restarted.start(tabId, blink);
+        await vi.waitFor(() =>
+            expect(h.session["prompt-icon:7"]).toEqual({
+                until: blink.until,
+                used: true,
+            }),
+        );
+        expect(chrome.action.setIcon).toHaveBeenLastCalledWith(
+            image("#f35f6d"),
+        );
+        await restarted.stop(tabId);
+    });
+
     it("restores interrupted overrides on a new worker and does not restart a visible prompt", async () => {
         const blinkUntil = Date.now() + 10_000;
         Object.assign(h.session, {
@@ -750,13 +527,18 @@ describe("meeting-site permission lifecycle", () => {
             allFrames: false,
             persistAcrossSessions: true,
             world: "ISOLATED",
-            js: ["popup/folder-combobox-shared.js", "content-meeting.js"],
+            js: [
+                "popup/folder-combobox-shared.js",
+                "lib/recording-levels.js",
+                "content-meeting.js",
+            ],
         });
         await vi.waitFor(() =>
             expect(chrome.scripting.executeScript).toHaveBeenCalledWith({
                 target: { tabId: 7, frameIds: [0] },
                 files: [
                     "popup/folder-combobox-shared.js",
+                    "lib/recording-levels.js",
                     "content-meeting.js",
                 ],
             }),
@@ -820,8 +602,8 @@ describe("meeting-site permission lifecycle", () => {
     });
 });
 
-describe("meeting prompt and one-click recording", () => {
-    it("replaces the notification and disables the popup only after the banner acknowledges visibility", async () => {
+describe("meeting prompt and manual recording", () => {
+    it("replaces the notification and keeps the popup after the card acknowledges visibility", async () => {
         await arm();
         expect(chrome.notifications.create).not.toHaveBeenCalled();
         expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
@@ -835,7 +617,7 @@ describe("meeting prompt and one-click recording", () => {
         );
         expect(chrome.action.setPopup).toHaveBeenLastCalledWith({
             tabId: 7,
-            popup: "",
+            popup: "popup/popup.html",
         });
         expect(h.session.armedTabs[7].promptVisible).toBe(true);
     });
@@ -869,7 +651,7 @@ describe("meeting prompt and one-click recording", () => {
         expect(chrome.notifications.clear).toHaveBeenCalledWith("nudge:7");
         expect(chrome.action.setPopup).toHaveBeenLastCalledWith({
             tabId: 7,
-            popup: "",
+            popup: "popup/popup.html",
         });
     });
     it("sends unpinned instructions and the actual assigned shortcut, omitting an empty shortcut", async () => {
@@ -889,11 +671,12 @@ describe("meeting prompt and one-click recording", () => {
         );
     });
     it.each([
-        "clicked",
+        "popup",
         "command",
-    ])("starts tab capture from %s using the visible notice as consent", async (invocation) => {
+    ])("starts tab capture from %s with an acknowledgement", async (invocation) => {
         await arm();
-        if (invocation === "clicked") h.listeners.clicked(h.tabs.get(7));
+        if (invocation === "popup")
+            expect(await startFromPopup()).toMatchObject({ ok: true });
         else await h.listeners.command("toggle-recording");
         await vi.waitFor(() =>
             expect(chrome.tabCapture.getMediaStreamId).toHaveBeenCalled(),
@@ -929,7 +712,7 @@ describe("meeting prompt and one-click recording", () => {
         expect(payloads).not.toContain("private-recorder-token");
         expect(payloads).not.toContain("https://recorder.example");
     });
-    it("dismisses for this meeting and restores the popup without prompting again", async () => {
+    it("dismisses for this meeting and keeps the popup without prompting again", async () => {
         await arm();
         expect(await message({ type: "meeting-banner-dismiss" })).toEqual({
             ok: true,
@@ -975,9 +758,9 @@ describe("meeting prompt and one-click recording", () => {
         ).toBe(false);
         expect(chrome.notifications.create).not.toHaveBeenCalled();
     });
-    it("starts the existing desktop fallback from the banner with consent", async () => {
+    it("starts the existing desktop fallback from the popup with consent", async () => {
         await arm();
-        expect(await message({ type: "meeting-banner-dialog" })).toEqual({
+        expect(await startFromPopup({ forceDesktop: true })).toMatchObject({
             ok: true,
         });
         expect(chrome.windows.create).toHaveBeenCalledWith(
@@ -996,12 +779,12 @@ describe("meeting prompt and one-click recording", () => {
             ),
         ).toBe(true);
     });
-    it("restores the popup and shows the error if a one-click start fails", async () => {
+    it("keeps the popup and shows the error if a popup start fails", async () => {
         h.createSession.mockRejectedValueOnce(
             new Error("Server refused capture"),
         );
         await arm();
-        h.listeners.clicked(h.tabs.get(7));
+        expect(await startFromPopup()).toMatchObject({ ok: false });
         await vi.waitFor(() =>
             expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
                 7,
@@ -1022,19 +805,12 @@ describe("meeting prompt and one-click recording", () => {
 });
 
 describe("meeting banner errors before capture starts", () => {
-    it.each([
-        "clicked",
-        "dialog",
-    ])("shows a token-vault error from %s and restores the popup", async (control) => {
+    it("shows a token-vault error from the keyboard shortcut and keeps the popup", async () => {
         await arm();
-        readToken.mockRejectedValueOnce(
+        h.readToken.mockRejectedValueOnce(
             new Error("Reconnect the recorder key"),
         );
-        if (control === "clicked") h.listeners.clicked(h.tabs.get(7));
-        else
-            expect(
-                await message({ type: "meeting-banner-dialog" }),
-            ).toMatchObject({ ok: false });
+        await h.listeners.command("toggle-recording");
         await vi.waitFor(() =>
             expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
                 7,
@@ -1067,7 +843,6 @@ describe("meeting banner senders and recording controls", () => {
             "get-folders",
             "set-recording-folder",
             "stop-recording",
-            "meeting-banner-dialog",
             "meeting-banner-dismiss",
             "meeting-banner-ready",
         ]) {
@@ -1214,6 +989,8 @@ describe("meeting prompt lifecycle boundaries", () => {
         h.local.platformModes = { "google-meet": "auto" };
         h.local.autoModeAcknowledgedAt = "2026-10-20T12:00:00Z";
         await arm();
+        expect(h.session.armedTabs[7].bannerPrompt).toBe(false);
+        expect(h.session.armedTabs[7].promptVisible).toBe(false);
         expect(chrome.action.setPopup).toHaveBeenLastCalledWith({
             tabId: 7,
             popup: "",
@@ -1325,8 +1102,8 @@ describe("meeting banner review regressions", () => {
         await arm();
         const error = new Error("Aurora capture unavailable");
         if (failure === "capture") h.createSession.mockRejectedValueOnce(error);
-        else readToken.mockRejectedValueOnce(error);
-        h.listeners.clicked(h.tabs.get(7));
+        else h.readToken.mockRejectedValueOnce(error);
+        await h.listeners.command("toggle-recording");
         await vi.waitFor(() =>
             expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
                 7,
@@ -1431,9 +1208,9 @@ describe("meeting banner review regressions", () => {
         const error = new Error("Registration unavailable");
         const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
         chrome.scripting.registerContentScripts.mockRejectedValueOnce(error);
-        listLocalSessions.mockResolvedValueOnce(["buffer-aurora"]);
-        listChunkIndices.mockResolvedValueOnce([0]);
-        getSession.mockResolvedValueOnce({
+        h.listLocalSessions.mockResolvedValueOnce(["buffer-aurora"]);
+        h.listChunkIndices.mockResolvedValueOnce([0]);
+        h.getSession.mockResolvedValueOnce({
             status: "open",
             received_chunks: [0],
         });
@@ -1474,7 +1251,7 @@ describe("meeting banner review regressions", () => {
         expect(h.session.armedTabs[7].meetingTarget).toEqual(
             meetingTarget(h.tabs.get(7).url),
         );
-        expect(await message({ type: "meeting-banner-dialog" })).toEqual({
+        expect(await startFromPopup({ forceDesktop: true })).toMatchObject({
             ok: true,
         });
         expect(h.session.recordingState.meetingTarget).toEqual(

@@ -1126,12 +1126,13 @@ export function SummaryWidget({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
-            {remarksOpen && canCorrect && summaryLoaded && (
+            {remarksOpen && canCorrect && (
                 <SummaryRemarksDialog
                     key={itemId}
                     itemId={itemId}
                     view={view}
                     profileId={summaryProfileId}
+                    disabled={!summaryLoaded}
                     onClose={() => setRemarksOpen(false)}
                     onRun={() =>
                         void handleSummarize(undefined, {

@@ -407,6 +407,7 @@ const IDLE_STATE = Object.freeze({
     autoStarted: false,
     chunkCount: 0,
     stopped: false,
+    captureStopping: false,
     stopReason: "user",
     uploaded: [],
     blocked: false,
@@ -446,13 +447,17 @@ async function writeState(patch, owner) {
     if (owner && !sameUploadOwner(current, owner)) return;
     const next = { ...current, ...patch };
     await chrome.storage.session.set({ [STATE_KEY]: next });
+    if (current.tabId != null && (current.tabId !== next.tabId || !sameUploadOwner(current, next) ||
+        (canStreamMeetingLevels(current) && !canStreamMeetingLevels(next)))) {
+        disconnectMeetingLevels(current.tabId);
+    }
     chrome.runtime.sendMessage({ type: "state", state: next }).catch(() => {});
     await updateRecordingBadge(next);
     if ("reconcilePending" in patch && patch.reconcilePending) void ensureConnectionAlarm().catch(() => {});
     if (["state", "tabId", "stopped"].some((key) => key in patch)) void updateNextMeetingBadge().catch(() => {});
     const bannerFields = [
         "state", "tabId", "startedAt", "stopped", "folderId", "folderLabel", "folderScope",
-        "recordingFolderOverride", "error", "agendaId", "uploadNotice", "connecting",
+        "recordingFolderOverride", "error", "agendaId", "uploadNotice", "connecting", "captureStopping",
     ];
     if (Object.keys(patch).some((key) => bannerFields.includes(key))) {
         // State writes must bypass bannerUpdates so capture never waits for a queued agenda lookup.
@@ -466,6 +471,7 @@ async function resetState() {
     await stateUpdates;
     const previous = await getState();
     await chrome.storage.session.remove(STATE_KEY);
+    if (previous.tabId != null) disconnectMeetingLevels(previous.tabId);
     const next = await getState();
     chrome.runtime.sendMessage({ type: "state", state: next }).catch(() => {});
     await updateRecordingBadge(next);
@@ -563,6 +569,7 @@ async function openDesktopRecorder(input) {
         pickerRequestId: requestId,
         captureWindowId: null,
         tabId: input.tabId ?? null,
+        meetingTarget: input.target,
         platformHint: input.platformHint ?? null,
         autoStarted: input.auto ?? false,
         noticeAcknowledgedAt: input.noticeAcknowledgedAt ?? null,
@@ -658,14 +665,23 @@ function getTabMediaStreamId(tabId) {
 
 let starting = false;
 
+async function requireStartTab(tabId, target) {
+    if (tabId == null) return null;
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab) throw new Error(t("meetingTabClosed"));
+    if (target !== undefined && !sameMeetingTarget(target, tab.url)) throw new Error(t("recordingRequestExpired"));
+    return tab;
+}
+
 /**
  * @param {{tabId?: number, platformHint?: string, auto?: boolean, noticeAcknowledgedAt?: string}} input
  */
-async function startRecording(input, microphoneChecked = false) {
+async function startRecording(input, microphoneChecked = false, launchTab) {
     if (starting || bufferTransitionCount) throw new Error(t("alreadyInProgress"));
     starting = true;
     try {
-        return await startRecordingLocked(input, microphoneChecked);
+        const tab = launchTab ?? await requireStartTab(input.tabId, input.meetingTarget);
+        return await startRecordingLocked(input, microphoneChecked, meetingTarget(tab?.url));
     } catch (error) {
         if ((await getState()).state === STATE.awaitingPicker) {
             await setState({
@@ -688,11 +704,10 @@ async function startRecordingLocked({
     forceDesktop = false,
     fromPopup = false,
     agendaId,
-    bannerAgendaId,
     folderId,
     folderLabel,
     folderScope,
-}, microphoneChecked) {
+}, microphoneChecked, target) {
     const current = await getState();
     if (current.state !== STATE.idle && current.state !== STATE.error) {
         throw new Error(t("alreadyInProgress"));
@@ -710,7 +725,7 @@ async function startRecordingLocked({
         } : entry);
     }
     try {
-        await prepareRecordingAgenda(tabId, fromPopup ? agendaId : bannerAgendaId);
+        await prepareRecordingAgenda(tabId, fromPopup ? agendaId : undefined);
     } catch (error) {
         if (!isConnectionError(error)) throw error;
     }
@@ -721,15 +736,13 @@ async function startRecordingLocked({
             platformHint,
             auto,
             noticeAcknowledgedAt,
-        });
+        }, await requireStartTab(tabId, target));
     }
     if (!noticeAcknowledgedAt) throw new Error(t("participantAckRequired"));
 
     await setState({
         state: STATE.awaitingPicker,
-        meetingTarget: tabId != null
-            ? meetingTarget((await chrome.tabs.get(tabId).catch(() => null))?.url)
-            : null,
+        meetingTarget: target,
         tabId: tabId ?? null,
         platformHint: platformHint ?? null,
         error: null,
@@ -743,11 +756,12 @@ async function startRecordingLocked({
     const useTab =
         !forceDesktop && typeof tabId === "number" && (fromPopup || Boolean(platformHint));
     if (!useTab) {
-        return openDesktopRecorder({ tabId, platformHint, auto, noticeAcknowledgedAt, withoutMicrophone });
+        return openDesktopRecorder({ tabId, target, platformHint, auto, noticeAcknowledgedAt, withoutMicrophone });
     }
 
     return startCapturedRecording({
         tabId,
+        target,
         platformHint,
         auto,
         noticeAcknowledgedAt,
@@ -759,6 +773,7 @@ async function startRecordingLocked({
 
 async function startCapturedRecording({
     tabId,
+    target,
     platformHint,
     auto = false,
     noticeAcknowledgedAt,
@@ -788,7 +803,6 @@ async function startCapturedRecording({
             : CHANNEL_LAYOUT_MIXED;
 
     const sessionBody = {
-        ...sessionRoom(settings, tabId != null ? await chrome.tabs.get(tabId).catch(() => null) : null),
         clientRecordingId,
         mimeType: SESSION_MIME_TYPE,
         channelLayout,
@@ -806,8 +820,11 @@ async function startCapturedRecording({
     let folderLabel = "folderId" in selectedFolder ? selectedFolder.folderLabel ?? null : settings.folderLabel ?? null;
     let folderScope = "folderId" in selectedFolder ? selectedFolder.folderScope ?? null : settings.folderScope ?? null;
     try {
+        const tab = await requireStartTab(tabId, target);
+        const body = { ...sessionBody, ...sessionRoom(settings, tab) };
+        target ??= meetingTarget(tab?.url);
         try {
-            session = await createSession(auth, sessionBody);
+            session = await createSession(auth, body);
         } catch (error) {
             if (
                 folderId &&
@@ -818,7 +835,7 @@ async function startCapturedRecording({
                 folderLabel = null;
                 folderScope = null;
                 if (!selectedFolder.folderId) await saveSettings({ folderId, folderLabel, folderScope });
-                const fallbackBody = { ...sessionBody };
+                const fallbackBody = { ...body };
                 delete fallbackBody.folderId;
                 session = await createSession(auth, fallbackBody);
             } else {
@@ -844,6 +861,7 @@ async function startCapturedRecording({
     }
 
     try {
+        await requireStartTab(tabId, target);
         if (session.encryption?.protocol !== 1 || !session.encryption.key) {
             throw new Error(t("encryptedServerRequired"));
         }
@@ -888,9 +906,7 @@ async function startCapturedRecording({
 
         await setState({
             ...folder,
-            meetingTarget: tabId != null
-                ? meetingTarget((await chrome.tabs.get(tabId).catch(() => null))?.url)
-                : null,
+            meetingTarget: target,
             state: STATE.recording,
             connecting: false,
             sessionId: session.id,
@@ -901,6 +917,7 @@ async function startCapturedRecording({
             autoStarted: auto,
             chunkCount: 0,
             stopped: false,
+            captureStopping: false,
             stopReason: "user",
             uploaded: [],
             jobId: null,
@@ -924,11 +941,13 @@ async function startCapturedRecording({
         let response;
         if (captureMode === "tab") {
             await ensureOffscreen();
+            await requireStartTab(tabId, target);
             const streamId = await getTabMediaStreamId(tabId);
+            await requireStartTab(tabId, target);
             if (!streamId) {
                 await closeOffscreen();
                 await discardSession(session.id);
-                return openDesktopRecorder({ tabId, platformHint, auto, noticeAcknowledgedAt, withoutMicrophone });
+                return openDesktopRecorder({ tabId, target, platformHint, auto, noticeAcknowledgedAt, withoutMicrophone });
             }
             response = await messageOffscreen("start", {
                 sessionId: session.id,
@@ -945,6 +964,7 @@ async function startCapturedRecording({
             if (current.captureWindowId !== captureWindowId) {
                 throw new Error(t("couldNotCapture"));
             }
+            await requireStartTab(tabId, target);
             response = await messageDesktop("start", pickerRequestId, {
                 sessionId: session.id,
                 clientRecordingId,
@@ -966,9 +986,11 @@ async function startCapturedRecording({
         if (captureMode === "tab") await closeOffscreen().catch(() => {});
         const state = await getState();
         const ownsState = state.sessionId === session.id;
-        if (state.sessionId === session.id && (await listChunkIndices(session.id)).length === 0) {
+        if (!ownsState) {
+            await abortSession(auth, session.id).catch(() => {});
+        } else if ((await listChunkIndices(session.id)).length === 0) {
             await discardSession(session.id);
-        } else if (state.sessionId === session.id) {
+        } else {
             await setState({
                 state: STATE.error,
                 sessionId: session.id,
@@ -1008,14 +1030,24 @@ function isLiveCapture(state) {
             (state.captureMode === "desktop" && state.captureWindowId != null)));
 }
 
+const captureStops = new Map();
+
 async function stopRecording(reason = "user", expected = null) {
     const state = await getState();
     if (expected && (state.tabId !== expected.tabId || state.sessionId !== expected.sessionId)) throw new Error(t("unrecognizedSender"));
     if (!isLiveCapture(state)) return { ok: true };
+    const pending = captureStops.get(state.sessionId);
+    if (pending) return pending;
+    const work = requestCaptureStop(state, reason).finally(() => captureStops.delete(state.sessionId));
+    captureStops.set(state.sessionId, work);
+    return work;
+}
+
+async function requestCaptureStop(state, reason) {
     if (state.tabId != null) {
         await chrome.alarms.clear(`${ALARMS.quietPrefix}${state.tabId}`);
     }
-    await setState({ stopReason: reason });
+    if (!(await setState({ stopReason: reason, captureStopping: true }, state))) return { ok: true };
     const desktop = state.captureMode === "desktop";
     const response = await (desktop
         ? messageDesktop("stop", state.pickerRequestId)
@@ -1025,6 +1057,7 @@ async function stopRecording(reason = "user", expected = null) {
         await reconcileDesktopWindow();
         if (!isLiveCapture(await getState())) return { ok: true };
     }
+    await setState({ captureStopping: false }, state);
     return { ok: false, error: response?.error || t("somethingWrong") };
 }
 
@@ -1734,10 +1767,10 @@ async function handleMeetingNotification(id, button) {
         auto: entry.mode === "auto",
         noticeAcknowledgedAt: new Date().toISOString(),
         forceDesktop: true,
-    });
+    }, false, tab);
 }
 
-const MEETING_BANNER_MESSAGES = new Set(["meeting-banner-ready", "meeting-banner-dismiss", "meeting-banner-dialog"]);
+const MEETING_BANNER_MESSAGES = new Set(["meeting-banner-ready", "meeting-banner-dismiss"]);
 let armedUpdates = Promise.resolve();
 let bannerUpdates = Promise.resolve();
 const bannerSyncs = new Map();
@@ -1767,7 +1800,9 @@ function clearPromptBlinkCopy(tabId, blinkUntil) {
 }
 
 async function sendMeetingBanner(tabId, payload, isCurrent) {
-    if (payload.view !== "prompt") stopPromptIcon(tabId);
+    if (payload.view === "waiting") void promptIcon.pause(tabId);
+    else if (payload.view !== "prompt") stopPromptIcon(tabId);
+    if (payload.view !== "recording") disconnectMeetingLevels(tabId);
     try {
         const tab = await chrome.tabs.get(tabId).catch(() => null);
         if (isCurrent && !isCurrent()) return null;
@@ -1792,9 +1827,65 @@ async function validMeetingBannerSender(sender, state = null) {
         (current.tabId === tab.id && current.meetingTarget && sameMeetingTarget(current.meetingTarget, tab.url)));
 }
 
+const meetingLevelPorts = new Map();
+
+function canStreamMeetingLevels(state) {
+    return isLiveCapture(state) && !state.captureStopping;
+}
+
+function disconnectMeetingLevels(tabId) {
+    for (const [port, client] of meetingLevelPorts) {
+        if (client.tabId !== tabId) continue;
+        meetingLevelPorts.delete(port);
+        port.disconnect();
+    }
+}
+
+chrome.runtime.onConnect?.addListener((port) => {
+    if (port.name !== "meeting-levels") return;
+    const { sender } = port;
+    const client = { tabId: sender?.tab?.id, sessionId: null, sentAt: -Infinity };
+    meetingLevelPorts.set(port, client);
+    port.onDisconnect.addListener(() => meetingLevelPorts.delete(port));
+    void (async () => {
+        const state = await getState();
+        if (!sender || !canStreamMeetingLevels(state) || state.tabId !== client.tabId ||
+            !state.meetingTarget || !sameMeetingTarget(state.meetingTarget, sender.url) ||
+            !(await validMeetingBannerSender(sender, state))) return;
+        const latest = await getState();
+        if (latest.sessionId === state.sessionId && canStreamMeetingLevels(latest)) client.sessionId = state.sessionId;
+    })().finally(() => {
+        if (!client.sessionId && meetingLevelPorts.delete(port)) port.disconnect();
+    }).catch(() => {});
+});
+
+function validLevelBands(bands) {
+    return Array.isArray(bands) && bands.length === 4 && bands.every(Number.isFinite);
+}
+
+function publishMeetingLevels(state, { micBands, systemBands }) {
+    const { micDb, systemDb } = state.levels;
+    const levels = {
+        micDb,
+        systemDb,
+        ...(validLevelBands(micBands) ? { micBands } : {}),
+        ...(validLevelBands(systemBands) ? { systemBands } : {}),
+    };
+    const now = Date.now();
+    for (const [port, client] of meetingLevelPorts) {
+        if (client.tabId !== state.tabId || client.sessionId !== state.sessionId || now - client.sentAt < 125) continue;
+        try {
+            port.postMessage(levels);
+            client.sentAt = now;
+        } catch {
+            meetingLevelPorts.delete(port);
+        }
+    }
+}
+
 async function dismissMeetingBanner(tabId) {
     const entry = await updateArmedTab(tabId, (current) => current ? {
-        ...current, nudged: true, dismissed: true, bannerPrompt: false, promptVisible: false, notificationFallback: false,
+        ...current, nudged: true, dismissed: true, bannerPrompt: false, promptVisible: false, consentShown: false, notificationFallback: false,
     } : null);
     await sendMeetingBanner(tabId, { view: "hidden" });
     await chrome.notifications.clear(`${NUDGE_PREFIX}${tabId}`).catch(() => {});
@@ -1839,7 +1930,7 @@ async function renderMeetingBanner(tabId, cachedOnly, isCurrent) {
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     const settings = await getSettings();
     const connection = await readServerConnection(settings);
-    const disconnected = connection && connection.state !== "ok";
+    const disconnected = Boolean(connection && connection.state !== "ok");
     const enabled = tab && isPromptMeeting(tab.url) && settings.dataUseAcknowledgedAt &&
         await isPaired() && await hasMeetingPromptAccess();
     const binding = await joinedMeeting(tab, settings);
@@ -1852,10 +1943,11 @@ async function renderMeetingBanner(tabId, cachedOnly, isCurrent) {
     if (!isCurrent()) return;
     const ownRecording = state.tabId === tabId &&
         (!state.meetingTarget || sameMeetingTarget(state.meetingTarget, tab?.url));
-    if (enabled && ownRecording && state.state !== STATE.idle && !(state.startConnectionError && !disconnected)) {
+    if (enabled && ownRecording && state.state !== STATE.idle &&
+        !(state.startConnectionError && (!disconnected || entry?.bannerPrompt))) {
         if (state.sessionId || (state.state === STATE.error && !state.startConnectionError)) {
             await updateArmedTab(tabId, (current) => current ? {
-                ...current, bannerPrompt: false, promptVisible: false, nudged: true, dismissed: true,
+                ...current, bannerPrompt: false, promptVisible: false, consentShown: false, nudged: true, dismissed: true,
             } : null);
         }
         const recording = isLiveCapture(state);
@@ -1870,6 +1962,7 @@ async function renderMeetingBanner(tabId, cachedOnly, isCurrent) {
             sessionId: state.sessionId,
             startedAt: state.startedAt,
             stopped: state.stopped,
+            captureStopping: state.captureStopping,
             connecting: state.connecting,
             uploadNotice: state.uploadNotice,
             folderId: state.folderId,
@@ -1889,7 +1982,7 @@ async function renderMeetingBanner(tabId, cachedOnly, isCurrent) {
         await safe(chrome.action.setPopup({ tabId, popup: agendaTabs.has(tabId) || entry.mode === "auto" ? "" : POPUP_URL }));
         return;
     }
-    if (enabled && settings.nudgeEnabled && entry?.bannerPrompt &&
+    if (enabled && settings.nudgeEnabled && entry?.bannerPrompt && !hasAcknowledgedAuto(entry.mode, settings) &&
         sameMeetingTarget(entry.meetingTarget, tab.url)) {
         const pinAtLookup = pinGeneration;
         const isCurrentPrompt = () => isCurrent() && pinAtLookup === pinGeneration;
@@ -1899,16 +1992,22 @@ async function renderMeetingBanner(tabId, cachedOnly, isCurrent) {
         ]);
         if (!isCurrentPrompt()) return;
         const pinned = actionSettings.isOnToolbar !== false;
-        if (!pinned) void promptIcon.stop(tabId);
-        const blink = pinned ? await promptIcon.reserve(tabId, isCurrentPrompt) : null;
+        if (disconnected || !pinned) void promptIcon.pause(tabId);
+        const blink = pinned && !disconnected ? await promptIcon.reserve(tabId, isCurrentPrompt) : null;
+        if (!isCurrentPrompt()) return;
+        const shortcut = commands.find((command) => command.name === "toggle-recording")?.shortcut || "";
+        if (entry.consentShown && (disconnected || agendaRoute || !shortcut || entry.mode !== "prompt")) {
+            await updateArmedTab(tabId, (current) => current && isCurrentPrompt() ? { ...current, consentShown: false } : current);
+        }
         if (!isCurrentPrompt()) return;
         const response = await sendMeetingBanner(tabId, {
             view: "prompt",
             connection: connectionNotice(connection),
+            disconnected,
             agendas,
             agendaPanel: agendaRoute,
             notice: effectiveNoticeText(settings),
-            shortcut: commands.find((command) => command.name === "toggle-recording")?.shortcut || "",
+            shortcut,
             pinned,
             blinkUntil: blink?.until ?? null,
             policyRequired: entry.mode === "auto" && !settings.autoModeAcknowledgedAt,
@@ -1917,11 +2016,13 @@ async function renderMeetingBanner(tabId, cachedOnly, isCurrent) {
         const next = await updateArmedTab(tabId, (current) => current && isCurrentPrompt() ? {
             ...current,
             promptVisible: current.bannerPrompt === true && response?.visible === true,
+            consentShown: current.bannerPrompt === true && response?.visible === true && !disconnected &&
+                !agendaRoute && Boolean(shortcut) && current.mode === "prompt" && response?.consentShown === true,
             shownAgendaId: response?.visible === true && agendas.length === 1 ? agendas[0].id : undefined,
             notificationFallback: response?.visible === true ? false : current.notificationFallback,
         } : current);
         if (!isCurrentPrompt()) return;
-        await applyArmedUi(tabId, platformById(entry.platformId), entry.mode, next?.promptVisible);
+        await applyArmedUi(tabId, platformById(entry.platformId), entry.mode);
         if (!isCurrentPrompt()) return;
         if (next?.promptVisible) promptIcon.start(tabId, blink);
         else stopPromptIcon(tabId);
@@ -1935,7 +2036,7 @@ async function renderMeetingBanner(tabId, cachedOnly, isCurrent) {
     }
     await sendMeetingBanner(tabId, { view: "hidden" });
     if (entry?.promptVisible || entry?.bannerPrompt) {
-        await updateArmedTab(tabId, (current) => current ? { ...current, promptVisible: false, bannerPrompt: false } : null);
+        await updateArmedTab(tabId, (current) => current ? { ...current, promptVisible: false, bannerPrompt: false, consentShown: false } : null);
         await safe(chrome.action.setPopup({ tabId, popup: agendaTabs.has(tabId) || entry.mode === "auto" ? "" : POPUP_URL }));
     }
 }
@@ -1983,16 +2084,6 @@ async function handleMeetingBannerMessage(message, sender) {
     }
     if (!entry?.promptVisible || !entry.bannerPrompt) throw new Error(t("unrecognizedSender"));
     if (message.type === "meeting-banner-dismiss") await dismissMeetingBanner(tabId);
-    if (message.type === "meeting-banner-dialog") {
-        try {
-            await startRecording({ tabId, platformHint: entry.platformId, auto: entry.mode === "auto",
-                bannerAgendaId: entry.shownAgendaId ?? undefined,
-                forceDesktop: true, noticeAcknowledgedAt: new Date().toISOString() });
-        } catch (error) {
-            await showMeetingBannerError(tabId, sender.url, error);
-            throw error;
-        }
-    }
     return { ok: true };
 }
 
@@ -2002,7 +2093,7 @@ async function reconcileMeetingPromptAndTabs() {
     for (const id of Object.keys(armed)) {
         const tabId = Number(id);
         await updateArmedTab(tabId, (entry) => entry ? {
-            ...entry, bannerPrompt: false, promptVisible: false, nudged: entry.dismissed === true,
+            ...entry, bannerPrompt: false, promptVisible: false, consentShown: false, nudged: entry.dismissed === true,
         } : null);
         await sendMeetingBanner(tabId, { view: "hidden" });
         await safe(chrome.action.setPopup({ tabId, popup: agendaTabs.has(tabId) || armed[id].mode === "auto" ? "" : POPUP_URL }));
@@ -2032,13 +2123,13 @@ async function setArmed(armed) {
     await chrome.storage.session.set({ [ARMED_KEY]: armed });
 }
 
-async function applyArmedUi(tabId, platform, mode, promptVisible = false) {
+async function applyArmedUi(tabId, platform, mode) {
     // In auto mode the popup is disabled on this tab, so the toolbar click is
     // a direct invocation that unlocks tab capture (verified in Phase 0).
     await safe(
         chrome.action.setPopup({
             tabId,
-            popup: agendaTabs.has(tabId) || mode === "auto" || promptVisible ? "" : POPUP_URL,
+            popup: agendaTabs.has(tabId) || mode === "auto" ? "" : POPUP_URL,
         }),
     );
     await restorePromptBadge(tabId, () => !promptIcon.isBlinking(tabId));
@@ -2065,13 +2156,14 @@ async function arm(tab, platform, mode) {
             dismissed: same && existing.dismissed === true,
             bannerPrompt: same && existing.bannerPrompt === true,
             promptVisible: same && existing.promptVisible === true,
+            consentShown: same && existing.mode === mode && existing.consentShown === true,
             notificationFallback: same && existing.notificationFallback === true,
             errorDismissed: same && existing.errorDismissed === true,
             bannerError: same ? existing.bannerError ?? null : null,
             shownAgendaId: same ? existing.shownAgendaId : undefined,
         };
     });
-    await applyArmedUi(tab.id, platform, mode, entry.promptVisible);
+    await applyArmedUi(tab.id, platform, mode);
     const fresh = await chrome.tabs.get(tab.id).catch(() => null);
     if (fresh?.audible && !entry.nudged) await nudge(tab.id, platform);
     else await syncMeetingBanner(tab.id);
@@ -2087,6 +2179,10 @@ async function disarm(tabId) {
     await safe(chrome.action.setTitle({ tabId, title: DEFAULT_TITLE }));
 }
 
+function hasAcknowledgedAuto(mode, settings) {
+    return mode === "auto" && Boolean(settings.autoModeAcknowledgedAt);
+}
+
 async function nudge(tabId, platform) {
     const settings = await getSettings();
     if (!settings.nudgeEnabled) return;
@@ -2094,13 +2190,13 @@ async function nudge(tabId, platform) {
     if (!tab?.audible || detectMeetingPlatform(tab.url)?.id !== platform.id) return;
     const banner = isPromptMeeting(tab.url) && await hasMeetingPromptAccess();
     let shouldNudge = false;
-    await updateArmedTab(tabId, (entry) => {
+    const entry = await updateArmedTab(tabId, (entry) => {
         if (!entry || entry.nudged) return entry;
         shouldNudge = true;
-        return { ...entry, nudged: true, bannerPrompt: banner, promptVisible: false };
+        return { ...entry, nudged: true, bannerPrompt: banner && !hasAcknowledgedAuto(entry.mode, settings), promptVisible: false, consentShown: false };
     });
     if (!shouldNudge) return;
-    if (banner) {
+    if (entry?.bannerPrompt) {
         await injectMeetingPrompt(tabId).catch(() => {});
         await syncMeetingBanner(tabId);
         return;
@@ -2109,7 +2205,7 @@ async function nudge(tabId, platform) {
 }
 
 async function notifyMeetingNudge(tabId, platform, settings) {
-    await updateArmedTab(tabId, (entry) => entry ? {
+    const entry = await updateArmedTab(tabId, (entry) => entry ? {
         ...entry, notificationFallback: true,
     } : entry);
     const nextMeeting = (await cachedNextMeeting())?.data;
@@ -2117,9 +2213,12 @@ async function notifyMeetingNudge(tabId, platform, settings) {
     if (settings.meetingNotifications && nextMeeting && Date.parse(nextMeeting.end) > Date.now() &&
         meetingRoom(nextMeeting.joinUrl) === meetingRoom(tab?.url)) return;
     const access = await hasMeetingPromptAccess();
+    const body = entry?.mode === "auto"
+        ? (settings.autoModeAcknowledgedAt ? "meetingRecordAutoBody" : "meetingRecordPolicyBody")
+        : "meetingRecordBody";
     await notify(
         t("meetingPromptTitle", t("appName")),
-        t("meetingRecordBody", platform.name) +
+        t(body, [platform.name, t("recordTabWithConsent")]) +
             (access ? "" : `\n${t("meetingPromptNotificationHint")}`),
         {
             id: `${NUDGE_PREFIX}${tabId}`,
@@ -2178,7 +2277,11 @@ async function reevaluateAllTabs() {
 }
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-    if (changeInfo.url || changeInfo.status === "loading") stopPromptIcon(tabId, true);
+    if (changeInfo.url || changeInfo.status === "loading") {
+        stopPromptIcon(tabId, true);
+        disconnectMeetingLevels(tabId);
+        await updateArmedTab(tabId, (entry) => entry?.consentShown ? { ...entry, consentShown: false } : entry);
+    }
     if (changeInfo.url || changeInfo.status === "complete") {
         void updateNextMeetingBadge().catch(() => {});
         await resumeTypedSetupAfterLogin(tab).catch((error) =>
@@ -2215,6 +2318,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 });
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
+    disconnectMeetingLevels(tabId);
     stopPromptIcon(tabId);
     const cleared = clearJoinedMeeting(tabId);
     await agendaRoutesLoaded;
@@ -2305,9 +2409,10 @@ async function startFromInvocation(tab) {
     }
 
     const entry = (await getArmed())[tab.id];
-    const bannerConsent = entry?.mode === "prompt" && entry.promptVisible === true && entry.bannerPrompt === true &&
+    const shortcutConsent = entry?.mode === "prompt" && entry.consentShown === true &&
         sameMeetingTarget(entry.meetingTarget, tab.url) && await hasMeetingPromptAccess();
-    if (!bannerConsent && !settings.autoModeAcknowledgedAt) {
+    const autoConsent = settings.autoModeAcknowledgedAt;
+    if (!shortcutConsent && !autoConsent) {
         await notify(
             t("confirmationNeeded"),
             t("confirmationNeededBody"),
@@ -2321,11 +2426,20 @@ async function startFromInvocation(tab) {
             tabId: tab.id,
             platformHint: platform.id,
             auto: entry?.mode === "auto",
-            noticeAcknowledgedAt: bannerConsent ? new Date().toISOString() : settings.autoModeAcknowledgedAt,
-        });
+            noticeAcknowledgedAt: autoConsent || new Date().toISOString(),
+        }, false, tab);
     } catch (error) {
         if (entry?.promptVisible && entry.bannerPrompt) await showMeetingBannerError(tab.id, tab.url, error);
         await notify(t("couldNotStart"), error?.message ?? String(error));
+    }
+}
+
+async function handleToolbarClick(tab) {
+    const entry = (await getArmed())[tab.id];
+    if (entry?.mode === "auto") await startFromInvocation(tab);
+    else if (entry?.mode === "prompt" && chrome.action.openPopup) {
+        await chrome.action.setPopup({ tabId: tab.id, popup: POPUP_URL });
+        await chrome.action.openPopup({ windowId: tab.windowId });
     }
 }
 
@@ -2352,7 +2466,7 @@ chrome.action.onClicked.addListener((tab) => {
                 }
             } else {
                 await closeAgendaPanel(tab.id).catch(() => {});
-                await startFromInvocation(tab);
+                await handleToolbarClick(tab);
             }
         }).catch(() => {});
         return;
@@ -2364,7 +2478,7 @@ chrome.action.onClicked.addListener((tab) => {
         void opened.then((key) => chrome.storage.session.set({ [key]: route })).catch(() => {});
         return;
     }
-    void startFromInvocation(tab);
+    void handleToolbarClick(tab).catch(() => {});
 });
 
 chrome.commands.onCommand.addListener(async (command) => {
@@ -2520,6 +2634,7 @@ async function handleDesktopPickerMessage(message, sender) {
     }
     return startCapturedRecording({
         tabId: state.tabId,
+        target: state.meetingTarget,
         platformHint: state.platformHint,
         auto: state.autoStarted,
         noticeAcknowledgedAt: state.noticeAcknowledgedAt,
@@ -2549,12 +2664,7 @@ async function resumeRecording(message, sender) {
     const settings = await getSettings();
     if (settings.serverUrl !== request.serverUrl)
         throw new Error(t("recordingRequestExpired"));
-    if (request.input.tabId != null) {
-        const tab = await chrome.tabs.get(request.input.tabId).catch(() => null);
-        if (!tab) throw new Error(t("meetingTabClosed"));
-        if (!sameMeetingTarget(request.tabUrl, tab.url))
-            throw new Error(t("recordingRequestExpired"));
-    }
+    const tab = await requireStartTab(request.input.tabId, meetingTarget(request.tabUrl));
     if (
         !message.withoutMicrophone &&
         (await microphonePermission()) !== "granted"
@@ -2572,6 +2682,7 @@ async function resumeRecording(message, sender) {
             withoutMicrophone: message.withoutMicrophone === true,
         },
         true,
+        tab,
     );
     await chrome.storage.session.remove(START_REQUEST_KEY);
     return { ok: true, ...result };
@@ -2870,9 +2981,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             pumpUploads();
             return false;
 
-        case "levels":
-            setState({ levels: { micDb: message.micDb, systemDb: message.systemDb } });
+        case "levels": {
+            if (sender.id !== chrome.runtime.id ||
+                ![OFFSCREEN_URL, "picker/picker.html"].some((path) => isExtensionPage(sender.url, path))) return false;
+            const { micDb, systemDb, sessionId } = message;
+            if (!Number.isFinite(micDb) || !Number.isFinite(systemDb)) return false;
+            setState({ levels: { micDb, systemDb } }).then((state) => {
+                if (sessionId && state.sessionId === sessionId && canStreamMeetingLevels(state)) publishMeetingLevels(state, message);
+            }).catch(() => {});
             return false;
+        }
 
         case "recording-stopped":
             void handleRecordingStopped(message);

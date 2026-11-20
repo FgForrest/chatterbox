@@ -488,8 +488,8 @@ export function ItemDetailProvider({
                 scope = next;
                 const scopeChanged =
                     previous?.view !== next.view ||
-                    previous.isOwn !== next.isOwn ||
-                    previous.enabled !== next.enabled;
+                    previous?.isOwn !== next.isOwn ||
+                    previous?.enabled !== next.enabled;
                 if (scopeChanged) {
                     scopeRevision++;
                     activeRead?.abort();
