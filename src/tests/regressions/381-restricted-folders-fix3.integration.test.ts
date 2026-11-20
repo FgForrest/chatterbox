@@ -1329,6 +1329,10 @@ class RestrictedArchiveStorage implements StorageProvider {
         if (!data) throw new Error("not found");
         return data;
     }
+    downloadRange = vi.fn<StorageProvider["downloadRange"]>();
+    async getObjectSize(key: string): Promise<number> {
+        return (await this.downloadFile(key)).length;
+    }
     async downloadStream(key: string): Promise<Readable> {
         return Readable.from(await this.downloadFile(key));
     }

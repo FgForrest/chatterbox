@@ -11,7 +11,22 @@ import {
 } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import type { S3Config, StorageProvider } from "./types";
+import {
+    StorageObjectMissingError,
+    StorageRangeNotSatisfiableError,
+} from "./errors";
+import type {
+    ByteRange,
+    RangedDownload,
+    S3Config,
+    StorageProvider,
+} from "./types";
+
+type S3ReadError = { name?: string; $metadata?: { httpStatusCode?: number } };
+
+function isObjectMissing(error: unknown): boolean {
+    return (error as S3ReadError | null)?.name === "NoSuchKey";
+}
 
 /**
  * S3-compatible storage provider
@@ -78,6 +93,8 @@ export class S3Storage implements StorageProvider {
             }
             return Buffer.concat(chunks);
         } catch (error) {
+            if (isObjectMissing(error))
+                throw new StorageObjectMissingError(error);
             throw new Error(
                 `Failed to download file from S3: ${error instanceof Error ? error.message : String(error)}`,
             );
@@ -100,6 +117,113 @@ export class S3Storage implements StorageProvider {
             throw new Error(
                 `Failed to stream download from S3: ${error instanceof Error ? error.message : String(error)}`,
             );
+        }
+    }
+
+    async downloadRange(
+        key: string,
+        range: ByteRange,
+    ): Promise<RangedDownload> {
+        try {
+            const response = await this.client.send(
+                new GetObjectCommand({
+                    Bucket: this.bucket,
+                    Key: key,
+                    Range: `bytes=${range.start}-${range.end}`,
+                }),
+            );
+            const body = response.Body as Readable | undefined;
+            if (!body) throw new Error("Empty response body");
+
+            try {
+                const contentRange = /^bytes (\d+)-(\d+)\/(\d+)$/i.exec(
+                    response.ContentRange ?? "",
+                );
+                if (!contentRange)
+                    throw new Error("S3 returned no usable Content-Range");
+                const [, first, last, total] = contentRange;
+                const [start, end, totalSize] = [
+                    Number(first),
+                    Number(last),
+                    Number(total),
+                ];
+                if (
+                    !Number.isSafeInteger(totalSize) ||
+                    start !== range.start ||
+                    end < start ||
+                    end > range.end ||
+                    end >= totalSize
+                ) {
+                    throw new Error("S3 returned an invalid Content-Range");
+                }
+
+                const data = Buffer.alloc(end - start + 1);
+                let offset = 0;
+                for await (const chunk of body as AsyncIterable<Uint8Array>) {
+                    if (chunk.byteLength > data.length - offset) {
+                        throw new Error("S3 body exceeds Content-Range");
+                    }
+                    data.set(chunk, offset);
+                    offset += chunk.byteLength;
+                }
+                if (offset !== data.length)
+                    throw new Error("S3 body ended before Content-Range");
+                return { data, totalSize };
+            } finally {
+                body.destroy();
+            }
+        } catch (error) {
+            if (isObjectMissing(error))
+                throw new StorageObjectMissingError(error);
+            const failure = error as S3ReadError | null;
+            if (
+                failure?.name === "InvalidRange" ||
+                failure?.$metadata?.httpStatusCode === 416
+            ) {
+                throw new StorageRangeNotSatisfiableError(
+                    await this.getObjectSize(key),
+                );
+            }
+            throw error;
+        }
+    }
+
+    async getObjectSize(key: string): Promise<number> {
+        try {
+            const { ContentLength } = await this.client.send(
+                new HeadObjectCommand({ Bucket: this.bucket, Key: key }),
+            );
+            if (ContentLength === undefined) {
+                throw new Error("S3 HeadObject returned no ContentLength");
+            }
+            return ContentLength;
+        } catch (error) {
+            if (isObjectMissing(error))
+                throw new StorageObjectMissingError(error);
+            const failure = error as S3ReadError | null;
+            if (
+                failure?.name === "NoSuchBucket" ||
+                (failure?.name !== "NotFound" &&
+                    failure?.$metadata?.httpStatusCode !== 404)
+            ) {
+                throw error;
+            }
+
+            try {
+                const { Body } = await this.client.send(
+                    new GetObjectCommand({
+                        Bucket: this.bucket,
+                        Key: key,
+                        Range: "bytes=0-0",
+                    }),
+                );
+                (Body as Readable | undefined)?.destroy();
+            } catch (probeError) {
+                if (isObjectMissing(probeError))
+                    throw new StorageObjectMissingError(probeError);
+                throw probeError;
+            }
+            throw error;
         }
     }
 

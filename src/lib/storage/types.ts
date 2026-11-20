@@ -1,5 +1,17 @@
 import type { Readable } from "node:stream";
 
+/** Inclusive byte offsets for a partial object read. */
+export interface ByteRange {
+    start: number;
+    end: number;
+}
+
+/** Bytes and total object size from the same read. */
+export interface RangedDownload {
+    data: Buffer<ArrayBuffer>;
+    totalSize: number;
+}
+
 /** Storage provider interface — implemented by local FS and S3-compatible. */
 export interface StorageProvider {
     uploadFile(
@@ -15,6 +27,10 @@ export interface StorageProvider {
      * (or the returned stream emits `error`) if the key doesn't exist.
      */
     downloadStream(key: string): Promise<Readable>;
+    /** Buffers the requested bytes using the current object's size. */
+    downloadRange(key: string, range: ByteRange): Promise<RangedDownload>;
+    /** Returns the object's size in bytes. Rejects with StorageObjectMissingError for an absent key. */
+    getObjectSize(key: string): Promise<number>;
     /**
      * Streaming write. `contentLength` is a hint some backends (S3
      * multipart) can use but must not require -- callers may not know
