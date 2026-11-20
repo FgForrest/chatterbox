@@ -1,4 +1,5 @@
 import { providerFetch } from "@/lib/ai/provider-fetch";
+import { providerBaseUrl } from "@/lib/ai/validate-base-url";
 import { env } from "@/lib/env";
 import {
     renderTurnsAsText,
@@ -159,7 +160,9 @@ function isMeliaModel(modelId: string): boolean {
  * accepted with or without a trailing `/v2`.
  */
 export function resolveSpeechmaticsBase(baseUrl?: string | null): string {
-    const base = (baseUrl || DEFAULT_API_BASE).trim().replace(/\/+$/, "");
+    const base = (providerBaseUrl(baseUrl) ?? DEFAULT_API_BASE)
+        .trim()
+        .replace(/\/+$/, "");
     const root = base.replace(/\/v2$/, "");
     return `${root || DEFAULT_API_BASE}/v2`;
 }
