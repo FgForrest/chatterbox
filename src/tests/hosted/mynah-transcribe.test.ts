@@ -23,6 +23,7 @@ vi.mock("@/lib/storage/factory", () => ({
     createUserStorageProvider: vi.fn().mockResolvedValue(storageMock),
 }));
 
+import { AppError, ErrorCode } from "@/lib/errors";
 import {
     isMynahConfigured,
     MynahBudgetExhaustedError,
@@ -38,6 +39,7 @@ const input = {
 
 beforeEach(() => {
     vi.clearAllMocks();
+    envMock.MYNAH_BASE_URL = "https://mynah.test";
     storageMock.getSignedUrl.mockResolvedValue("https://signed.test/rec");
 });
 
@@ -52,6 +54,44 @@ describe("isMynahConfigured", () => {
 });
 
 describe("transcribeViaMynah", () => {
+    it("rejects non-http(s) base URLs before fetch", async () => {
+        envMock.MYNAH_BASE_URL = "file:";
+        const fetch = vi.fn();
+        vi.stubGlobal("fetch", fetch);
+
+        const error = await transcribeViaMynah(input).catch(
+            (error: unknown) => error,
+        );
+        expect(error).toBeInstanceOf(AppError);
+        expect(error).toMatchObject({
+            code: ErrorCode.INVALID_INPUT,
+            statusCode: 400,
+        });
+        expect(reserveMock).not.toHaveBeenCalled();
+        expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it("passes a configured URL with credentials to the transport", async () => {
+        envMock.MYNAH_BASE_URL = "https://user:secret@mynah.test";
+        reserveMock.mockResolvedValue({
+            userId: "u1",
+            seconds: 65,
+            reserved: true,
+        });
+        const fetch = vi
+            .fn()
+            .mockResolvedValue(Response.json({ text: "example" }));
+        vi.stubGlobal("fetch", fetch);
+
+        await expect(transcribeViaMynah(input)).resolves.toMatchObject({
+            text: "example",
+        });
+        expect(fetch).toHaveBeenCalledWith(
+            `${envMock.MYNAH_BASE_URL}/v1/audio/transcriptions`,
+            expect.anything(),
+        );
+    });
+
     it("reserves ceil(seconds), commits on success, returns parsed text", async () => {
         reserveMock.mockResolvedValue({
             userId: "u1",

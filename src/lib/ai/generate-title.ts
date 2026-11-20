@@ -8,6 +8,7 @@ import {
     chatCompletionWithUsage,
     usageAttemptFetch,
 } from "@/lib/ai/usage-attempt";
+import { providerBaseUrl } from "@/lib/ai/validate-base-url";
 import { resolveTitlePrompt } from "@/lib/profiles/prompts";
 import { resolveStepProvider } from "@/lib/profiles/providers";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
@@ -97,14 +98,14 @@ export async function generateTitleFromTranscription(
         console.warn("No AI provider found for title generation");
         return null;
     }
+    const credentials = resolved.credential;
+    const baseURL = providerBaseUrl(credentials.baseUrl);
     try {
-        const credentials = resolved.credential;
-
         // Create OpenAI client
         const openai = new OpenAI({
             fetch: usageAttemptFetch,
             apiKey: credentials.apiKey,
-            baseURL: credentials.baseUrl || undefined,
+            baseURL,
             maxRetries: resolved.organizationCredential ? 0 : undefined,
         });
 

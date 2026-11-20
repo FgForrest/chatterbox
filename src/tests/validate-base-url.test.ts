@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
     HOSTED_LOCAL_BASE_URL_MESSAGE,
+    providerBaseUrl,
     validateAiBaseUrl,
 } from "@/lib/ai/validate-base-url";
 
@@ -50,13 +51,32 @@ describe("validateAiBaseUrl", () => {
         null,
         undefined,
         "",
-        "   ",
+        " \t\n ",
     ])("allows default endpoint %j in both modes", async (url) => {
         for (const isHosted of [false, true])
             await expect(validateAiBaseUrl(url, { isHosted })).resolves.toEqual(
                 { ok: true },
             );
+        expect(providerBaseUrl(url)).toBeUndefined();
         expect(lookup).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        "  https://api.example.com/v1  ",
+        "https://api.example.com/v1\n",
+        "HTTPS://API.EXAMPLE.COM/v1",
+        "https:api.example.com/v1",
+    ])("accepts URL parser forms in both modes", async (url) => {
+        for (const isHosted of [false, true]) {
+            await expect(validateAiBaseUrl(url, { isHosted })).resolves.toEqual(
+                { ok: true },
+            );
+        }
+        expect(providerBaseUrl(url)).toBe(url);
+        expect(lookup).toHaveBeenCalledWith("api.example.com", {
+            all: true,
+            verbatim: true,
+        });
     });
 
     it.each(privateUrls)("hosted rejects %s", async (url) => {
@@ -72,7 +92,8 @@ describe("validateAiBaseUrl", () => {
     it.each([
         ...privateUrls,
         "http://ollama:11434/v1",
-        "not a url",
+        "https://api.example.com/v1",
+        "HTTP://lm-studio:1234/v1",
     ])("self-host accepts %s without DNS", async (url) => {
         await expect(
             validateAiBaseUrl(url, { isHosted: false }),
@@ -124,13 +145,31 @@ describe("validateAiBaseUrl", () => {
         });
     });
     it.each([
-        "file:///etc/passwd",
+        "file:",
+        "  file:///x",
+        "FILE:",
+        "data:text/plain,example",
         "ftp://example.com",
-        "https://user:secret@example.com/v1",
-    ])("rejects invalid provider URL %s", async (url) => {
-        await expect(
-            validateAiBaseUrl(url, { isHosted: true }),
-        ).resolves.toMatchObject({ ok: false });
+        "blob:https://example.com/example",
+        "javascript:void(0)",
+        "/v1",
+        "//api.example.com/v1",
+        "https://",
+        "https://user@example.com/v1",
+        "https://:secret@example.com/v1",
+        " https://user:secret@example.com/v1\n",
+        42,
+    ])("rejects invalid provider base URLs in both modes", async (url) => {
+        for (const isHosted of [false, true]) {
+            await expect(validateAiBaseUrl(url, { isHosted })).resolves.toEqual(
+                {
+                    ok: false,
+                    message:
+                        "Enter a valid absolute URL using HTTP or HTTPS without credentials.",
+                },
+            );
+        }
+        expect(lookup).not.toHaveBeenCalled();
     });
     it("rejects unresolved and empty DNS answers", async () => {
         vi.mocked(lookup)

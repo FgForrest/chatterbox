@@ -5,6 +5,7 @@ import {
     releaseMynahReservation,
     reserveMynah,
 } from "@/lib/hosted/billing/enforcement";
+import { requireHttpUrl } from "@/lib/net/http-url";
 import { captureServerException } from "@/lib/posthog-server";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 
@@ -174,6 +175,7 @@ export async function transcribeViaMynah(
     if (!mynahBaseUrl || !mynahServiceToken) {
         throw new Error("Mynah transcription is not configured");
     }
+    requireHttpUrl(mynahBaseUrl, { field: "baseUrl", allowCredentials: true });
 
     const seconds = Math.max(1, Math.ceil(input.durationMs / 1000));
     const reservation = await reserveMynah({ userId: input.userId, seconds });
@@ -193,7 +195,7 @@ export async function transcribeViaMynah(
         // access to Mynah (direct upload) is planned separately.
         if (!isFetchableUrl(url)) {
             console.error(
-                `[mynah] storage signed URL is not publicly fetchable for user ${input.userId}; Mynah requires object storage (S3). Got: ${url.slice(0, 120)}`,
+                `[mynah] storage signed URL is not publicly fetchable for user ${input.userId}; Mynah requires object storage (S3)`,
             );
             const configError = new Error(
                 "Mynah transcription requires object storage with publicly fetchable signed URLs (S3)",
