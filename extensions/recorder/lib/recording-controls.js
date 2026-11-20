@@ -1,9 +1,11 @@
+import "./recording-levels.js";
 import { createAgendaCard } from "../lib/agenda-card.js";
 import { agendaFolder, supportsAgendas } from "../lib/agendas.js";
 import { mountConnectionNotice } from "../lib/connection-notice.js";
 import { STATE } from "../lib/constants.js";
 import { localizeDocument, t } from "../lib/i18n.js";
 import { bindMeetingPromptOffer } from "../lib/meeting-prompt-ui.js";
+import { meetingTarget } from "../lib/meeting-target.js";
 import { microphonePermission } from "../lib/microphone.js";
 import { originOf } from "../lib/pairing.js";
 import { detectMeetingPlatform } from "../lib/platforms.js";
@@ -21,6 +23,8 @@ import {
     createRecordingFolder,
 } from "../generated/folders.js";
 import { createNextMeetingCard } from "../lib/next-meeting-card.js";
+
+const { dbToWidth } = globalThis.recorderLevels;
 
 /** Mount one recording widget body in the popup or agenda panel. */
 export async function mountRecordingControls(
@@ -137,11 +141,6 @@ export async function mountRecordingControls(
         return `${m}:${s}`;
     }
 
-    function dbToWidth(db) {
-        const clamped = Math.max(-60, Math.min(0, db));
-        return `${Math.round(((clamped + 60) / 60) * 100)}%`;
-    }
-
     let popupFolderChoice;
     let agendaFolderChoice;
     const folderCombobox = createFolderField({
@@ -249,6 +248,10 @@ export async function mountRecordingControls(
     }
 
     async function startRecording(forceDesktop = false) {
+        const tabId = currentTab?.id;
+        const target = meetingTarget(currentTab?.url);
+        const platformHint = currentPlatform?.id;
+        const noticeAcknowledgedAt = new Date().toISOString();
         const choice =
             variant === "panel" ? agendaChoice() : (agendaCard?.choice() ?? {});
         const button = el(forceDesktop ? "start-desktop" : "start");
@@ -265,9 +268,10 @@ export async function mountRecordingControls(
                 type: "start-recording",
                 payload: {
                     forceDesktop,
-                    tabId: currentTab?.id,
-                    platformHint: currentPlatform?.id ?? undefined,
-                    noticeAcknowledgedAt: new Date().toISOString(),
+                    tabId,
+                    ...(target ? { meetingTarget: target } : {}),
+                    platformHint,
+                    noticeAcknowledgedAt,
                     ...choice,
                     ...(popupFolderChoice ?? {}),
                 },

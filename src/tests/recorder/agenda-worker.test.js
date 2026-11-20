@@ -286,7 +286,18 @@ async function arm() {
 }
 async function start() {
     await arm();
-    await h.listeners.command("toggle-recording");
+    expect(
+        await message(
+            {
+                type: "start-recording",
+                payload: {
+                    tabId: 7,
+                    noticeAcknowledgedAt: "2026-10-20T12:30:00Z",
+                },
+            },
+            extension,
+        ),
+    ).toMatchObject({ ok: true });
     await vi.waitFor(() =>
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
             expect.objectContaining({ target: "offscreen", type: "start" }),
@@ -310,6 +321,7 @@ describe("reviewed agenda decisions", () => {
     it("omits an unseen single time match on shortcut start and leaves the default folder unchanged", async () => {
         h.local.serverDefaults.agendas = true;
         h.local.agendaBanner = false;
+        h.local.platformModes = { "google-meet": "auto" };
         h.local.autoModeAcknowledgedAt = "2026-10-20T12:00:00Z";
         h.local.folderId = "private-default";
         h.local.folderLabel = "Private";
@@ -402,9 +414,7 @@ describe("reviewed agenda decisions", () => {
     it("requires confirmation of a match offered in the pill after start", async () => {
         h.local.serverDefaults.agendas = true;
         h.local.nudgeEnabled = false;
-        h.local.autoModeAcknowledgedAt = "now";
-        await arm();
-        await h.listeners.command("toggle-recording");
+        await start();
         expect(h.session.recordingState.agendaId).toBeNull();
         await vi.waitFor(
             () =>
