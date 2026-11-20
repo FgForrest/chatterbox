@@ -233,12 +233,11 @@ export function SpeakerTags({
         body: SpeakersResponse;
     }>();
     const { reload: load, setData: setSpeakerData } =
-        useItemPartFetch<SpeakersResponse>(
-            speakersUrl,
-            version ?? String(refreshKey ?? 0),
-            identity,
-            { paused: transcriptPending, onLoad: applyResponse },
-        );
+        useItemPartFetch<SpeakersResponse>(speakersUrl, version, identity, {
+            paused: transcriptPending,
+            fallbackRevision: refreshKey,
+            onLoad: applyResponse,
+        });
 
     function applyResponse(body: SpeakersResponse) {
         if (

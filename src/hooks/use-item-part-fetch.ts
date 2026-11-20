@@ -7,7 +7,8 @@ type FetchStatus = "loading" | "ready" | "error";
 interface PartRequest {
     identity: string;
     url: string | null;
-    version: string | undefined;
+    revision: number;
+    refreshKey: string | number | undefined;
     paused: boolean;
 }
 
@@ -21,6 +22,8 @@ interface PartState<T> {
 interface PartFetchOptions<T> {
     cachedData?: T | null;
     paused?: boolean;
+    refreshKey?: string | number;
+    fallbackRevision?: string | number;
     onLoad?: (data: T, signal: AbortSignal) => void;
 }
 
@@ -42,6 +45,49 @@ function dataFor<T>(
         : cachedData;
 }
 
+/** Adopt the first server version for this read scope without invalidating its read. */
+export function useItemPartReadRevision(
+    url: string | null,
+    identity: string,
+    version: string | undefined,
+    fallbackRevision?: string | number,
+) {
+    const [previous, setPrevious] = useState({
+        url,
+        identity,
+        version,
+        fallbackRevision,
+        revision: 0,
+    });
+    if (previous.url !== url || previous.identity !== identity) {
+        setPrevious({ url, identity, version, fallbackRevision, revision: 0 });
+        return 0;
+    }
+
+    const knownVersion = version ?? previous.version;
+    const fallback =
+        knownVersion === undefined
+            ? fallbackRevision
+            : previous.fallbackRevision;
+    if (
+        knownVersion === previous.version &&
+        fallback === previous.fallbackRevision
+    )
+        return previous.revision;
+
+    const adoptVersion =
+        previous.version === undefined && knownVersion !== undefined;
+    const revision = adoptVersion ? previous.revision : previous.revision + 1;
+    setPrevious({
+        url,
+        identity,
+        version: knownVersion,
+        fallbackRevision: fallback,
+        revision,
+    });
+    return revision;
+}
+
 /** Refetch an item part by URL and version, retaining data for the same identity. */
 export function useItemPartFetch<T>(
     url: string | null,
@@ -50,9 +96,16 @@ export function useItemPartFetch<T>(
     options?: PartFetchOptions<T>,
 ) {
     const paused = options?.paused ?? false;
+    const refreshKey = options?.refreshKey;
+    const revision = useItemPartReadRevision(
+        url,
+        identity,
+        version,
+        options?.fallbackRevision,
+    );
     const request = useMemo(
-        () => ({ identity, url, version, paused }),
-        [identity, url, version, paused],
+        () => ({ identity, url, revision, refreshKey, paused }),
+        [identity, url, revision, refreshKey, paused],
     );
     const [state, setState] = useState<PartState<T>>({
         request,

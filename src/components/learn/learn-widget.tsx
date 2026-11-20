@@ -85,6 +85,7 @@ import { HeadingCount } from "@/components/ui/heading-count";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { useDeferredReviewCommit } from "@/hooks/use-deferred-review-commit";
+import { useItemPartReadRevision } from "@/hooks/use-item-part-fetch";
 import { useSkipFailedLearn } from "@/hooks/use-skip-failed-learn";
 import { followJob } from "@/lib/jobs/client";
 import {
@@ -350,8 +351,10 @@ export function LearnWidget({
     } | null>(null);
     const reviewRunId = useRef<string | null>(null);
     const latestRead = useRef(0);
-    const currentUrl = useRef(url);
-    currentUrl.current = url;
+    const reviewUrl = url("review");
+    const revision = useItemPartReadRevision(reviewUrl, identity, version);
+    const currentUrl = useRef(reviewUrl);
+    currentUrl.current = reviewUrl;
     const load = useCallback(
         async (
             signal?: AbortSignal,
@@ -359,7 +362,7 @@ export function LearnWidget({
         ): Promise<ReviewState | null> => {
             if (
                 pendingTranscript.current ||
-                currentUrl.current !== url ||
+                currentUrl.current !== reviewUrl ||
                 currentIdentity.current !== identity
             )
                 return null;
@@ -368,7 +371,7 @@ export function LearnWidget({
                 !signal?.aborted &&
                 !pendingTranscript.current &&
                 latestRead.current === read &&
-                currentUrl.current === url &&
+                currentUrl.current === reviewUrl &&
                 currentIdentity.current === identity;
             try {
                 while (current()) {
@@ -378,7 +381,7 @@ export function LearnWidget({
                     }
                     const epoch = draftEpoch.current;
                     const response = await fetch(
-                        url("review"),
+                        reviewUrl,
                         signal ? { signal } : undefined,
                     );
                     if (!response.ok || !current()) return null;
@@ -439,16 +442,16 @@ export function LearnWidget({
             }
             return null;
         },
-        [identity, recordingId, setState, url],
+        [identity, recordingId, reviewUrl, setState],
     );
 
     useEffect(() => {
-        void version;
+        void revision;
         if (transcriptPending) return;
         const controller = new AbortController();
         void load(controller.signal);
         return () => controller.abort();
-    }, [load, transcriptPending, version]);
+    }, [load, transcriptPending, revision]);
 
     const learningElsewhere =
         !detail &&

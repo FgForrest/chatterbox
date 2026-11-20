@@ -180,7 +180,10 @@ function summaryResponse(text = summary, revision = 0) {
     });
 }
 
-function openMail(initial = projection()) {
+function openMail(
+    initial = projection(),
+    initialProjection?: Promise<Response>,
+) {
     window.history.replaceState(
         { mobileView: "detail" },
         "",
@@ -222,8 +225,12 @@ function openMail(initial = projection()) {
                 writes.push({ folderId, reply });
                 return reply.promise;
             }
-            if (path.searchParams.has("processing"))
-                return Response.json({ processing });
+            if (path.searchParams.has("processing")) {
+                const response =
+                    initialProjection ?? Response.json({ processing });
+                initialProjection = undefined;
+                return response;
+            }
             if (path.searchParams.has("content")) {
                 if (!holdContent) return Response.json(mailDetail);
                 const reply = Promise.withResolvers<Response>();
@@ -318,6 +325,7 @@ function openMail(initial = projection()) {
     );
     return {
         writes,
+        reads,
         organizationReads: () =>
             reads.filter((url) => url.includes("view=org")),
         summaryReads,
@@ -348,6 +356,26 @@ afterEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
     window.history.replaceState(null, "", "/");
+});
+
+it("reads mail tasks once on a cold open and once after their version changes", async () => {
+    const projectionRead = Promise.withResolvers<Response>();
+    const initial = projection();
+    const app = openMail(initial, projectionRead.promise);
+    const tasksUrl = `/api/recordings/${mail.id}/tasks`;
+    const taskReads = () => app.reads.filter((url) => url === tasksUrl);
+    await waitFor(() => expect(taskReads()).toHaveLength(1));
+
+    await act(async () =>
+        projectionRead.resolve(Response.json({ processing: initial })),
+    );
+    expect(taskReads()).toHaveLength(1);
+    app.setProcessing({
+        ...initial,
+        versions: { ...initial.versions, item: "2", tasks: "tasks-2" },
+    });
+    await act(async () => invalidateItemProcessing(mail.id));
+    expect(taskReads()).toHaveLength(2);
 });
 
 it("keeps the private summary visible and shows Saving while an Organization filing is pending", async () => {

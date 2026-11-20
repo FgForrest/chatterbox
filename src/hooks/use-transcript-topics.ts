@@ -4,6 +4,7 @@ import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useItemPartVersion } from "@/components/items/item-detail-store";
+import { useItemPartReadRevision } from "@/hooks/use-item-part-fetch";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import { followJob } from "@/lib/jobs/client";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
@@ -58,10 +59,12 @@ export function useTranscriptTopics(
     };
     const version = useItemPartVersion("transcripts", source);
     const identity = `${recordingId}:${transcriptIdentity}`;
-    const scope = useMemo(
-        () => ({ identity, source, view }),
-        [identity, source, view],
+    const topicUrl = withRecordingView(
+        `/api/recordings/${recordingId}/topics?source=${source}`,
+        view,
     );
+    const revision = useItemPartReadRevision(topicUrl, identity, version);
+    const scope = useMemo(() => ({ identity, topicUrl }), [identity, topicUrl]);
     const currentScope = useRef(scope);
     currentScope.current = scope;
     const waitingForTranscript = useRef(paused);
@@ -108,17 +111,10 @@ export function useTranscriptTopics(
     /** Reads back the topics a completed job stored, and shows them. */
     const showStored = useCallback(
         async (
-            topicSource: TopicSource,
             signal: AbortSignal,
             announce: boolean,
         ): Promise<{ jobId: string; jobKind?: string | null } | null> => {
-            const response = await fetch(
-                withRecordingView(
-                    `/api/recordings/${recordingId}/topics?source=${topicSource}`,
-                    view,
-                ),
-                { signal },
-            );
+            const response = await fetch(topicUrl, { signal });
             if (!response.ok) {
                 toast.error(
                     await getApiErrorMessage(
@@ -146,17 +142,12 @@ export function useTranscriptTopics(
             if (announce) toast.success(messagesRef.current.detected);
             return null;
         },
-        [identity, recordingId, scope, view],
+        [identity, scope, topicUrl],
     );
 
     /** Follows a job to its end and says how it went. */
     const settle = useCallback(
-        async (
-            topicSource: TopicSource,
-            jobId: string,
-            signal: AbortSignal,
-            jobKind?: string | null,
-        ) => {
+        async (jobId: string, signal: AbortSignal, jobKind?: string | null) => {
             invalidateItemProcessing(recordingId);
             const deadline = new AbortController();
             const stop = () => deadline.abort();
@@ -186,7 +177,6 @@ export function useTranscriptTopics(
                         return;
                     }
                     const next = await showStored(
-                        topicSource,
                         signal,
                         currentJobKind !== "pipeline.advance",
                     );
@@ -203,21 +193,16 @@ export function useTranscriptTopics(
         [recordingId, showStored],
     );
 
-    // biome-ignore lint/correctness/useExhaustiveDependencies: probeRevision is an intentional re-check trigger
     useEffect(() => {
+        void revision;
+        void probeRevision;
         if (!enabled || paused || !isTopicSource(source)) return;
         const topicSource = source;
         const probe = new AbortController();
         const epoch = detectionEpoch.current;
         let following: AbortController | null = null;
         (async () => {
-            const response = await fetch(
-                withRecordingView(
-                    `/api/recordings/${recordingId}/topics?source=${topicSource}`,
-                    view,
-                ),
-                { signal: probe.signal },
-            );
+            const response = await fetch(topicUrl, { signal: probe.signal });
             if (!response.ok || probe.signal.aborted) return;
             const {
                 jobId,
@@ -243,7 +228,7 @@ export function useTranscriptTopics(
             }
             following = restart(topicSource);
             try {
-                await settle(topicSource, jobId, following.signal, jobKind);
+                await settle(jobId, following.signal, jobKind);
             } finally {
                 release(following);
             }
@@ -257,15 +242,14 @@ export function useTranscriptTopics(
             following?.abort();
         };
     }, [
-        recordingId,
         source,
         enabled,
-        view,
+        topicUrl,
         restart,
         release,
         settle,
         probeRevision,
-        version,
+        revision,
         identity,
         paused,
     ]);
@@ -279,13 +263,7 @@ export function useTranscriptTopics(
         let followed = false;
 
         try {
-            const response = await fetch(
-                withRecordingView(
-                    `/api/recordings/${recordingId}/topics?source=${topicSource}`,
-                    view,
-                ),
-                { method: "POST", signal },
-            );
+            const response = await fetch(topicUrl, { method: "POST", signal });
             if (!response.ok) {
                 toast.error(await getApiErrorMessage(response, failed));
                 return;
@@ -304,7 +282,7 @@ export function useTranscriptTopics(
             }
             // The job outlived the request; follow it until it settles.
             followed = true;
-            await settle(topicSource, body.jobId, signal);
+            await settle(body.jobId, signal);
         } catch (error) {
             if (signal.aborted) return;
             console.error("Topic detection failed:", error);
@@ -313,7 +291,16 @@ export function useTranscriptTopics(
             if (!followed) invalidateItemProcessing(recordingId);
             release(controller);
         }
-    }, [identity, recordingId, scope, source, view, restart, release, settle]);
+    }, [
+        identity,
+        recordingId,
+        scope,
+        source,
+        topicUrl,
+        restart,
+        release,
+        settle,
+    ]);
 
     return {
         topics,

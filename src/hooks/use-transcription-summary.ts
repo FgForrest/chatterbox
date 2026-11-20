@@ -232,16 +232,12 @@ export function useTranscriptionSummary({
         reading: summaryReadPending,
         reload: reloadSummary,
         setData: setReadSummary,
-    } = useItemPartFetch<SummaryData>(
-        readUrl,
-        JSON.stringify([version, summaryFetchKey]),
-        summaryIdentity,
-        {
-            cachedData: readUrl ? summaryCache.current.get(readUrl) : undefined,
-            onLoad: handleSummaryRead,
-            paused: transcriptPending,
-        },
-    );
+    } = useItemPartFetch<SummaryData>(readUrl, version, summaryIdentity, {
+        cachedData: readUrl ? summaryCache.current.get(readUrl) : undefined,
+        onLoad: handleSummaryRead,
+        paused: transcriptPending,
+        refreshKey: summaryFetchKey,
+    });
     const setSummary = useCallback(
         (
             data: SummaryData | null,
@@ -335,15 +331,17 @@ export function useTranscriptionSummary({
         followAbortRef.current = controller;
         return () => controller.abort();
     }, []);
-    const recordingChanged = recordingIdRef.current !== recordingId;
     recordingIdRef.current = recordingId;
     summarySourceRef.current = summarySource;
 
+    const previousRecordingId = useRef(recordingId);
     const transcriptionTextBySource = useRef(
         new Map<string, string | null | undefined>(),
     );
 
     useEffect(() => {
+        const recordingChanged = previousRecordingId.current !== recordingId;
+        previousRecordingId.current = recordingId;
         if (recordingChanged) {
             summaryCache.current.clear();
             setAvailableSummarySources([]);
@@ -371,13 +369,7 @@ export function useTranscriptionSummary({
         if (changed && !recordingChanged) {
             setSummaryFetchKey((key) => key + 1);
         }
-    }, [
-        recordingId,
-        recordingChanged,
-        summarySource,
-        summaryIdentity,
-        transcriptionText,
-    ]);
+    }, [recordingId, summarySource, summaryIdentity, transcriptionText]);
 
     /**
      * Adopt a summary job that is already running.

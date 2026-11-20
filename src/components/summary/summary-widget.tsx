@@ -372,7 +372,7 @@ export function SummaryWidget({
         }
         wasSummarizing.current = isSummarizing;
     }, [isSummarizing, recheckSummary]);
-    const taskState = useRecordingTasks(itemId, `${source}:${summariesMade}`);
+    const taskState = useRecordingTasks(itemId, summariesMade);
 
     const selectedProfileName = summaryProfileOptions.find(
         (profile) => profile.id === summaryProfileId,

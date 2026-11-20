@@ -448,12 +448,10 @@ export function TranscriptionPanel({
     const { data: shownCorrections } = useItemPartFetch<{
         corrections?: OverlayCorrection[];
         canUndo?: boolean;
-    }>(
-        correctionsUrl,
-        JSON.stringify([correctionsVersion, reviewsFinished, correctionsRead]),
-        `${reviewKey}:corrections`,
-        { paused: activeTranscriptPending },
-    );
+    }>(correctionsUrl, correctionsVersion, `${reviewKey}:corrections`, {
+        paused: activeTranscriptPending,
+        refreshKey: `${reviewsFinished}:${correctionsRead}`,
+    });
     const undoCorrection = useCallback(
         async (correctionId: string) => {
             const response = await fetch(
