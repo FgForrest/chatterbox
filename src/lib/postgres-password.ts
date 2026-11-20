@@ -4,6 +4,7 @@ export function usesDefaultPostgresPassword(databaseUrl?: string): boolean {
     if (!trimmedUrl) return false;
 
     try {
+        // Throws on a malformed escape anywhere in the URL, which the driver rejects too.
         decodeURI(trimmedUrl);
         const firstHostUrl = trimmedUrl.replace(
             /^(postgres(?:ql)?:\/\/[^/?#]*@[^/?#,]+),[^/?#]+/i,
