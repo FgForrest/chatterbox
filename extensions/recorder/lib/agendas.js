@@ -336,7 +336,7 @@ export async function remindAgenda(id) {
         ]),
         buttons: [
             { title: t("agendaShow") },
-            { title: t("meetingPromptDismiss") },
+            { title: t("dismiss") },
         ],
     });
 }

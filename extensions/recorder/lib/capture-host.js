@@ -89,6 +89,27 @@ function rmsToDb(analyser, buffer) {
     return Math.max(-100, 20 * Math.log10(rms));
 }
 
+const FREQUENCY_BAND_EDGES_HZ = [100, 300, 1_000, 3_000, 8_000];
+
+function createBandMeter(analyser, sampleRate) {
+    analyser.smoothingTimeConstant = 0.25;
+    const spectrum = new Float32Array(analyser.frequencyBinCount);
+    const binHz = sampleRate / analyser.fftSize;
+    const edges = FREQUENCY_BAND_EDGES_HZ.map((hz) => Math.min(spectrum.length, Math.ceil(hz / binHz)));
+    const starts = edges.slice(0, -1);
+
+    return () => {
+        analyser.getFloatFrequencyData(spectrum);
+        return starts.map((start, band) => {
+            let peak = -100;
+            for (let bin = start; bin < edges[band + 1]; bin++) {
+                peak = Math.max(peak, spectrum[bin]);
+            }
+            return peak;
+        });
+    };
+}
+
 /** Capture audio in a persistent extension document and buffer encrypted chunks. */
 export function createCaptureHost({ onLevels, onStopped } = {}) {
 /** @type {{recorder: MediaRecorder, context: AudioContext, streams: MediaStream[], sessionId: string, nextIndex: number, meterTimer: number|undefined, analysers: {mic: AnalyserNode, system: AnalyserNode}}|null} */
@@ -302,6 +323,8 @@ async function startCapture({
     // Live meters, reported a few times a second.
     const micBuffer = new Float32Array(micAnalyser.fftSize);
     const systemBuffer = new Float32Array(systemAnalyser.fftSize);
+    const measureMicBands = createBandMeter(micAnalyser, context.sampleRate);
+    const measureSystemBands = createBandMeter(systemAnalyser, context.sampleRate);
     try {
         recorder.start(CHUNK_INTERVAL_MS);
     } catch (error) {
@@ -314,6 +337,8 @@ async function startCapture({
             sessionId,
             micDb: rmsToDb(micAnalyser, micBuffer),
             systemDb: rmsToDb(systemAnalyser, systemBuffer),
+            micBands: measureMicBands(),
+            systemBands: measureSystemBands(),
         });
     }, 200);
 
