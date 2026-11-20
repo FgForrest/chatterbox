@@ -3,6 +3,8 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import "../../../extensions/recorder/lib/recording-levels.js";
+
 const source = readFileSync("extensions/recorder/content-meeting.js", "utf8");
 let root;
 let listener;
@@ -56,7 +58,7 @@ describe("agenda banner and pill", () => {
     it.each([
         true,
         false,
-    ])("explains opening the agenda panel without claiming instant capture (pinned=%s)", (pinned) => {
+    ])("explains opening the agenda panel and starting from its recording controls (pinned=%s)", (pinned) => {
         render("prompt", {
             pinned,
             agendaPanel: true,
@@ -66,16 +68,13 @@ describe("agenda banner and pill", () => {
         expect(root.getElementById("how").textContent).toBe(
             pinned ? "agendaPanelIcon" : "agendaPanelIconUnpinned",
         );
-        expect(root.getElementById("consent").textContent).toBe(
-            "meetingPromptConsent",
-        );
-        expect(root.querySelector("section").textContent).not.toMatch(
-            /meetingPromptStartsNow|meetingPromptMenuRecordStep/,
+        expect(root.querySelector(".prompt-main").textContent).toContain(
+            "meetingPromptPanelStep",
         );
         expect(root.querySelector("kbd")).toBeNull();
         expect(Boolean(root.querySelector(".toolbar-menu-row"))).toBe(!pinned);
     });
-    it("offers matched agendas without reading page content and opens from the button gesture", () => {
+    it("shows matched agenda text without reading page content", () => {
         document.body.textContent = "Private meeting page";
         const readPage = vi.spyOn(document, "querySelectorAll");
         render("prompt", {
@@ -85,8 +84,7 @@ describe("agenda banner and pill", () => {
         expect(root.querySelector(".agenda-line").textContent).toContain(
             "Acme review",
         );
-        root.getElementById("agenda-show").click();
-        expect(send).toHaveBeenLastCalledWith({ type: "open-agenda" });
+        expect(root.querySelector(".agenda-line button")).toBeNull();
         expect(readPage).not.toHaveBeenCalled();
     });
     it("adds an Agenda button to the recording pill and hides it without support", () => {

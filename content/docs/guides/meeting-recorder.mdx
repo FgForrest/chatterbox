@@ -77,9 +77,9 @@ so **Consent confirmed · Record** opens Chrome's sharing dialog: choose the
 meeting tab and keep **Share tab audio** on. A window or the screen carries no
 meeting audio, and the recorder window says so when the **Others** meter stays
 silent. If the microphone is not allowed yet, a small window asks for it first,
-or offers **Record without my microphone**. Clicking the toolbar icon instead
-records the meeting tab directly, without the dialog. **Not now** dismisses the
-prompt for that tab.
+or offers **Record without my microphone**. For direct tab capture, click the
+toolbar icon and choose **Consent confirmed · Record this tab** in the popup.
+**Not now** dismisses the notification for that meeting.
 
 For one-click recording, open **Options → Automatic recording**, set a platform
 to **Auto**, confirm the recording policy once and click **Save settings**.
@@ -111,17 +111,21 @@ settings.
 
 ## In-meeting prompt
 
-With **In-meeting prompt** turned on, an audible meeting shows a banner at
-the top of the meeting page instead of the system notification. Read the
-participant notice, then click the **REC?** icon to record the tab directly.
-The arrow points toward the toolbar, and the pinned icon blinks for about
-20 seconds. If you haven't pinned the icon, open the puzzle-piece menu
-and click **Chatterbox** there. Use the pin next to its name for one-click
-access next time. The banner shows your keyboard shortcut if one is assigned.
-On a tab with an agenda, the icon opens the agenda and recording controls.
+With **In-meeting prompt** turned on, an audible meeting shows a notice at
+the top of the page in place of the system notification. Read the participant
+notice, click **Chatterbox** in Chrome's toolbar, then choose
+**Consent confirmed · Record this tab** in the popup. The pinned icon blinks for
+about 20 seconds, then shows the **REC?** badge steadily. If the icon is unpinned,
+open Chrome's puzzle-piece menu and click **Chatterbox**. Use the pin next to
+its name to keep it in the toolbar. If the notice shows a keyboard shortcut,
+you can press it to confirm consent and start directly.
+
+On agenda tabs the icon opens the side panel with the same recording button.
 If automatic recording still needs your approval, the icon opens **Options**.
-**Another tab or window…** opens Chrome's picker. **Not now** and **×**
-dismiss the prompt for that meeting.
+Use **Record another screen or app** in the popup for a different audio source.
+When Chatterbox is unreachable, the notice shows the connection failure.
+The start instructions return once Chatterbox is reachable. Use **×** to dismiss
+the notice for that meeting.
 
 The prompt is optional. Turn it on from the one-time card in the popup, in
 **Options**, or on the ready screen after setup. Chrome then asks for access
@@ -131,9 +135,10 @@ number of websites. The banner reads no page content and makes no network
 requests. Turning the switch off removes that access and hides the banner.
 Slack huddles and Jitsi Meet keep the system notification.
 
-While recording, a small pill on the meeting page shows the elapsed time,
-the target folder and **Stop**. Its red dot collapses or expands the
-controls.
+The recording pill on the tab that started the recording shows the elapsed
+time, target folder, and **Stop**. Its meters show the microphone and selected
+audio source levels for the recording in progress, even if you chose another
+tab, window or screen. Click the red dot to collapse or expand the pill.
 
 ## Record a meeting
 

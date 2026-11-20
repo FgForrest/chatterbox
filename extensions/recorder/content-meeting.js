@@ -43,16 +43,9 @@
         .toolbar-menu-row { display:flex; align-items:center; gap:10px; width:min(300px,100%); margin-top:8px; padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--toolbar-menu); font-size:13px; }
         .toolbar-menu-row .logo { width:18px; height:18px; }
         .toolbar-menu-row span { flex:1; }
-        .prompt-arrow { position:fixed; inset:0; width:100%; height:100%; overflow:hidden; pointer-events:none; fill:none; stroke:var(--primary); }
-        .prompt-ring { transform-box:fill-box; transform-origin:center; opacity:0; animation:prompt-ring 1.6s ease-out infinite; }
-        .prompt-ring + .prompt-ring { animation-delay:.8s; }
-        @keyframes prompt-ring { from { transform:scale(.55); opacity:.95; } to { transform:scale(1.7); opacity:0; } }
-        @media(prefers-reduced-motion:reduce) { .prompt-ring { animation:none; opacity:.6; } .prompt-ring + .prompt-ring { display:none; } }
         h2,p { margin:0; }
         h2 { font-size:15px; font-weight:650; }
         .notice { border-left:2px solid var(--border); padding-left:8px; color:var(--muted-foreground); font-size:12.5px; }
-        .links { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:4px 16px; font-size:13px; }
-        .links #dialog { min-height:36px; padding:0 14px; }
         .prompt > .error:empty,.prompt-extra:empty { display:none; }
         .prompt-extra { display:grid; gap:12px; }
         .prompt .connection-notice { flex:none; max-width:100%; }
@@ -61,16 +54,22 @@
         button:hover { border-color:var(--primary); }
         button:disabled { cursor:wait; opacity:.65; }
         button:focus-visible,input:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
-        button.link { background:none; border:0; padding:0; color:var(--muted-foreground); text-decoration:underline; text-underline-offset:2px; font-size:13px; }
         button.close { border:0; padding:0; border-radius:6px; width:26px; height:26px; font-size:20px; color:var(--muted-foreground); }
         kbd { font:500 12px/1.5 ui-monospace,monospace; border:1px solid var(--border); border-bottom-width:2px; border-radius:5px; background:var(--muted); padding:1px 6px; white-space:nowrap; }
         .pill { display:flex; align-items:center; justify-content:center; flex-wrap:nowrap; gap:8px; border-radius:24px; padding:6px; width:fit-content; max-width:100%; min-width:0; font-size:13px; }
+        .pill-row { display:flex; align-items:center; gap:8px; min-width:0; max-width:100%; }
         .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--primary); animation:pulse 1.8s ease-in-out infinite; }
         @keyframes pulse { 50% { opacity:.4; } }
         @media(prefers-reduced-motion:reduce) { .dot { animation:none; } }
         .dot-button { display:grid; place-items:center; width:28px; height:28px; padding:0; border:0; }
         .elapsed { font-variant-numeric:tabular-nums; font-weight:650; }
         .dot-button,.label,.elapsed,#pill-agenda,.stop { flex:none; white-space:nowrap; }
+        .levels { display:flex; flex:none; align-items:center; gap:4px; color:var(--muted-foreground); }
+        .level { display:flex; align-items:center; gap:2px; }
+        .level svg { width:12px; height:12px; flex:none; }
+        .level-bars { display:flex; align-items:flex-end; gap:2px; height:14px; }
+        .level-fill { width:2.5px; height:2px; border-radius:1px; background:var(--meeting); }
+        @media(prefers-reduced-motion:no-preference) { .level-fill { transition:height 100ms linear; } }
         .pill > .error:empty { display:none; }
         .pill.has-connection-notice { flex-wrap:wrap; }
         .connection-notice { flex:0 0 100%; width:100%; max-width:480px; padding:8px; font-size:12px; }
@@ -110,21 +109,16 @@
         .folder-status:empty { display:none; }
         .agenda-line { display:flex; flex-wrap:wrap; align-items:center; gap:8px; border-top:1px solid var(--border); padding-top:8px; color:var(--meeting); }
         .confirmation { padding:10px 16px; width:fit-content; }
-        @media(min-width:720px) { .prompt { transform:translateX(-24px); } }
-        @media(max-width:440px) { .prompt { gap:10px; padding:12px; } .pill { flex-wrap:wrap; } .folder-target { max-width:130px; } .label { font-size:12px; } }
+        @media(max-width:440px) { .prompt { gap:10px; padding:12px; } .pill,.pill-row { gap:4px; } .folder-target { max-width:130px; } .label { min-width:0; flex:0 1 auto; overflow:hidden; text-overflow:ellipsis; font-size:12px; } .stop { padding-inline:8px; } }
     `;
     const surface = document.createElement("section");
     surface.setAttribute("role", "dialog");
     surface.setAttribute("aria-label", t("meetingPromptTitle", t("appName")));
     surface.lang = chrome.i18n.getUILanguage();
-    const arrowLine = svgNode("path", { "stroke-width": 6, "stroke-linecap": "round", "stroke-linejoin": "round" });
-    const rings = [0, 1].map(() => svgNode("circle", { class: "prompt-ring", cy: 0, r: 30, "stroke-width": 3 }));
-    const arrow = svgNode("svg", { class: "prompt-arrow", "aria-hidden": "true", hidden: "" }, [arrowLine, ...rings]);
-    root.append(style, arrow, surface);
+    root.append(style, surface);
     let currentView = "hidden";
     let renderVersion = 0;
     let currentState = null;
-    let promptPinned = true;
     let promptBlinkUntil = null;
     let blinkCopyTimer;
     let timer;
@@ -133,6 +127,10 @@
     let collapsed = false;
     let folderOpen = false;
     let recordingFolder;
+    let levelPort;
+    let levelTimer;
+    let levelRetryTimer;
+    let levelRetryDelay = 1000;
     const folderMetadata = new Map();
     const el = (id) => root.getElementById(id);
 
@@ -148,15 +146,14 @@
     function clearBlinkCopy(blinkUntil) {
         if (promptBlinkUntil === null || (blinkUntil != null && blinkUntil !== promptBlinkUntil)) return;
         cancelBlinkCopyTimer();
-        text("how", t("meetingPromptHowPinnedBadge", t("appName")));
+        text("how", t("meetingPromptHowPinnedBadge", [t("appNameGenitive", t("appName")), t("recordTabWithConsent")]));
     }
 
     function hide() {
         clearInterval(timer);
         clearTimeout(hideTimer);
         cancelBlinkCopyTimer();
-        arrow.setAttribute("hidden", "");
-        window.removeEventListener("resize", updatePromptArrow);
+        closeLevels();
         host.remove();
         currentView = "hidden";
     }
@@ -191,31 +188,6 @@
         for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, value);
         element.append(...children);
         return element;
-    }
-
-    function promptArrowTarget(width, outerWidth, pinned, cardRight) {
-        // Chrome exposes no toolbar layout, so these offsets approximate the icon and puzzle button positions.
-        const toolbarOffset = pinned ? 150 : 110;
-        const x = outerWidth - width > 40 ? width : width - toolbarOffset;
-        return width >= 720 && x - cardRight >= 42 ? x : null;
-    }
-
-    function updatePromptArrow() {
-        const card = surface.getBoundingClientRect();
-        const width = window.innerWidth;
-        const target = promptArrowTarget(width, window.outerWidth, promptPinned, card.right);
-        const startY = card.top + Math.min(66, card.height / 2);
-        const tipX = Math.min(target ?? 0, width - 14);
-        if (currentView !== "prompt" || target === null || startY >= window.innerHeight) {
-            arrow.setAttribute("hidden", "");
-            return;
-        }
-        const startX = card.right + 2;
-        const span = tipX - startX;
-        arrowLine.setAttribute("d",
-            `M${startX} ${startY} C${startX + span * .55} ${startY}, ${tipX - 12} ${startY - 10}, ${tipX - 2} 32 M${tipX - 18} 44 L${tipX} 14 L${tipX + 10} 44`);
-        for (const ring of rings) ring.setAttribute("cx", target);
-        arrow.removeAttribute("hidden");
     }
 
     function button(id, className, children = [], attributes = {}) {
@@ -266,7 +238,7 @@
         el("folder-remove").hidden = readOnly || !selected;
         el("folder-remove").setAttribute("aria-label", t("folderRemove", name));
         el("folder-fixed").textContent = t("folderFixedAtStart");
-        el("folder-fixed").hidden = !readOnly;
+        el("folder-fixed").hidden = !readOnly || collapsed;
         if (readOnly) folderOpen = false;
     }
 
@@ -290,14 +262,18 @@
             promptBlinkUntil = blinkUntil;
             blinkCopyTimer = setTimeout(() => clearBlinkCopy(blinkUntil), remaining);
         }
-        const how = node("p", { id: "how" }, [t(promptHowKey({ pinned, agendaPanel, policyRequired, blinking }), app)]);
-        const shortcutHint = (key) => direct && shortcut
-            ? [" ", t(key), " ", node("kbd", {}, [shortcut]), "."]
+        const appName = pinned ? t("appNameGenitive", app) : app;
+        const record = t("recordTabWithConsent");
+        const how = node("p", { id: "how" }, [
+            t(promptHowKey({ pinned, agendaPanel, policyRequired, blinking }), [appName, record]),
+        ]);
+        const shortcutHint = direct && shortcut
+            ? [t("meetingPromptShortcut"), " ", node("kbd", {}, [shortcut]), "."]
             : [];
         if (pinned) {
             let detail = [];
-            if (direct) detail = [t("meetingPromptStartsNow"), ...shortcutHint("meetingPromptPinnedShortcut")];
-            else if (agendaPanel) detail = [t("agendaPanelCloseHint")];
+            if (direct) detail = shortcutHint;
+            else if (agendaPanel) detail = [t("meetingPromptPanelStep", record), " ", t("agendaPanelCloseHint")];
             return node("div", { class: "prompt-main pinned" }, [
                 node("div", { class: "toolbar-icon", "aria-hidden": "true" }, [
                     logo(), node("span", { class: "toolbar-badge" }, ["REC?"]),
@@ -318,10 +294,12 @@
             how,
             node("ol", { class: "toolbar-steps" }, [
                 node("li", {}, [t("meetingPromptPuzzleStep")]),
-                node("li", {}, [t(direct ? "meetingPromptMenuRecordStep" : "meetingPromptMenuClickStep", app), menuRow]),
+                node("li", {}, [t("meetingPromptMenuClickStep", app), menuRow]),
+                ...(direct || agendaPanel ? [node("li", {}, [t(direct ? "meetingPromptPopupStep" : "meetingPromptPanelStep", record)])] : []),
             ]),
             node("p", { class: "prompt-detail" }, [
-                t("meetingPromptPinTip", app), ...shortcutHint("meetingPromptUnpinnedShortcut"),
+                t("meetingPromptPinTip", app),
+                ...(shortcutHint.length ? [node("br"), ...shortcutHint] : []),
             ]),
         ]);
     }
@@ -341,7 +319,7 @@
         }
     }
 
-    function renderConnection(copy, parent) {
+    function renderConnection(copy, parent, isPrompt) {
         surface.classList.toggle("has-connection-notice", Boolean(copy));
         const existing = el("meeting-connection");
         if (!copy) {
@@ -350,79 +328,145 @@
         }
         if (existing?.dataset.copy === JSON.stringify(copy)) return;
         existing?.remove();
-        const retry = button("connection-retry", "", [t("connectionRetry")]);
-        retry.addEventListener("click", async () => {
-            retry.disabled = true;
-            try {
-                const response = await send({ type: "recorder-connection-retry" });
-                if (response?.error && !el("meeting-connection")) showError(new Error(response.error));
-            }
-            catch (error) { showError(error); }
-            finally { retry.disabled = false; }
-        });
         const box = node("div", { id: "meeting-connection", class: "connection-notice" }, [
             node("div", { role: "status" }, [
                 node("strong", {}, [copy.message]),
                 node("p", {}, [copy.detail]),
                 ...(copy.context ? [node("p", {}, [copy.context])] : []),
             ]),
-            retry,
         ]);
+        if (!isPrompt) {
+            const retry = button("connection-retry", "", [t("connectionRetry")]);
+            retry.addEventListener("click", async () => {
+                retry.disabled = true;
+                try {
+                    const response = await send({ type: "recorder-connection-retry" });
+                    if (response?.error && !el("meeting-connection")) showError(new Error(response.error));
+                }
+                catch (error) { showError(error); }
+                finally { retry.disabled = false; }
+            });
+            box.append(retry);
+        }
         box.dataset.copy = JSON.stringify(copy);
         parent.append(box);
     }
 
     function renderPrompt(message) {
         const app = t("appName");
-        promptPinned = message.pinned;
-        surface.className = `surface prompt${promptPinned ? "" : " unpinned"}`;
+        surface.className = `surface prompt${message.pinned ? "" : " unpinned"}`;
         surface.replaceChildren(
             node("header", { class: "prompt-header" }, [
                 logo(), node("h2", { id: "title" }, [t("meetingPromptTitle", app)]),
                 button("close", "close", ["×"], { "aria-label": t("meetingPromptClose") }),
             ]),
-            renderPromptMain(message),
+            ...(!message.disconnected ? [renderPromptMain(message)] : []),
             node("p", { class: "notice" }, [
                 node("span", { id: "notice-label" }, [t("meetingPromptNoticeLabel")]), " ",
-                node("span", { id: "notice" }, [message.notice ?? ""]), " ",
-                node("span", { id: "consent" }, [t("meetingPromptConsent")]),
+                node("span", { id: "notice" }, [message.notice ?? ""]),
             ]),
             node("div", { id: "prompt-extra", class: "prompt-extra" }),
             node("p", { id: "action-error", class: "error", role: "status" }),
-            node("div", { class: "links" }, [
-                button("not-now", "link", [t("notNow")]),
-                button("dialog", "", [t("meetingPromptDialog")]),
-            ]),
         );
         if (message.agendas?.length) {
-            const line = node("div", { class: "agenda-line" }, [
-                node("span", {}, [t("agendaTitle"), ": ", message.agendas.length === 1 ? message.agendas[0].title : t("agendaMultiple", String(message.agendas.length))]),
-                button("agenda-show", "", [t("agendaShow")]),
-            ]);
-            el("prompt-extra").append(line);
-            el("agenda-show").addEventListener("click", () => {
-                void send({ type: "open-agenda" }).catch(showError);
-            });
+            el("prompt-extra").append(node("p", { class: "agenda-line" }, [
+                t("agendaTitle"), ": ", message.agendas.length === 1
+                    ? message.agendas[0].title
+                    : t("agendaMultiple", String(message.agendas.length)),
+            ]));
         }
-        el("not-now").addEventListener("click", dismiss);
         el("close").addEventListener("click", dismiss);
-        el("dialog").addEventListener("click", async () => {
-            el("dialog").disabled = true;
-            try {
-                const response = await send({ type: "meeting-banner-dialog" });
-                if (!response?.ok)
-                    throw new Error(response?.error || t("couldNotStart"));
-            } catch (error) {
-                if (currentView === "prompt") {
-                    showError(error);
-                    el("dialog").disabled = false;
-                }
+    }
+
+    function levelMeter(id, name, path) {
+        return node("span", { id, class: "level", role: "img", "aria-label": name, title: name }, [
+            svgNode("svg", {
+                viewBox: "0 0 24 24", fill: "none", stroke: "currentColor",
+                "stroke-width": 2, "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true",
+            }, [svgNode("path", { d: path })]),
+            node("span", { id: `${id}-bars`, class: "level-bars", "aria-hidden": "true" },
+                Array.from({ length: 4 }, () => node("span", { class: "level-fill" }))),
+        ]);
+    }
+
+    function paintLevel(id, db, bands) {
+        const { dbToFraction } = globalThis.recorderLevels;
+        const bars = el(id).children;
+        for (let index = 0; index < bars.length; index++) {
+            bars[index].style.height = `${Math.round(2 + 12 * dbToFraction(bands?.[index] ?? db))}px`;
+        }
+    }
+
+    function paintLevels({ micDb, systemDb, micBands, systemBands }) {
+        paintLevel("mic-level-bars", micDb, micBands);
+        paintLevel("system-level-bars", systemDb, systemBands);
+    }
+
+    function clearLevels() {
+        clearTimeout(levelTimer);
+        if (el("mic-level")) paintLevels({ micDb: -100, systemDb: -100 });
+    }
+
+    function closeLevels() {
+        clearTimeout(levelRetryTimer);
+        levelRetryTimer = undefined;
+        levelRetryDelay = 1000;
+        const port = levelPort;
+        levelPort = null;
+        port?.disconnect();
+        clearLevels();
+    }
+
+    function canSubscribeToLevels() {
+        return currentView === "recording" && host.isConnected && !collapsed && !document.hidden &&
+            !currentState.captureStopping && !el("stop").disabled && Boolean(chrome.runtime?.id);
+    }
+
+    function retryLevels() {
+        if (!canSubscribeToLevels()) return;
+        levelRetryTimer = setTimeout(() => {
+            levelRetryTimer = undefined;
+            updateLevels();
+        }, levelRetryDelay);
+        levelRetryDelay = Math.min(levelRetryDelay * 2, 5000);
+    }
+
+    function updateLevels() {
+        if (!canSubscribeToLevels()) {
+            if (levelPort || levelRetryTimer != null) closeLevels();
+            return;
+        }
+        if (levelPort || levelRetryTimer != null || !chrome.runtime.connect) return;
+        let port;
+        try {
+            port = chrome.runtime.connect({ name: "meeting-levels" });
+        } catch {
+            retryLevels();
+            return;
+        }
+        levelPort = port;
+        port.onDisconnect.addListener(() => {
+            if (levelPort !== port) return;
+            levelPort = null;
+            clearLevels();
+            retryLevels();
+        });
+        port.onMessage.addListener((levels) => {
+            if (levelPort !== port) return;
+            if (!host.isConnected) {
+                closeLevels();
+                return;
             }
+            levelRetryDelay = 1000;
+            paintLevels(levels);
+            clearTimeout(levelTimer);
+            levelTimer = setTimeout(clearLevels, 500);
         });
     }
 
     function updateCollapsed() {
         el("pill-details").hidden = collapsed;
+        el("folder-fixed").hidden = collapsed || currentState.recordingFolderOverride === true;
         el("dot-toggle").setAttribute(
             "aria-label",
             t(collapsed ? "meetingPromptExpand" : "meetingPromptCollapse"),
@@ -430,6 +474,7 @@
         el("dot-toggle").setAttribute("aria-expanded", String(!collapsed));
         el("pill-folder").hidden = collapsed || !folderOpen;
         el("folder-toggle").setAttribute("aria-expanded", String(!collapsed && folderOpen));
+        updateLevels();
     }
 
     function renderRecording(state, connection) {
@@ -439,18 +484,24 @@
             folderOpen = false;
             surface.className = "surface pill";
             surface.replaceChildren(
-                button("dot-toggle", "dot-button", [node("span", { class: "dot", "aria-hidden": "true" })]),
-                node("span", { id: "pill-details", style: "display:contents" }, [
-                    node("span", { id: "recording-label", class: "label" }),
-                    node("span", { id: "elapsed", class: "elapsed" }),
-                    node("span", { id: "folder-target", class: "folder-target" }, [
-                        button("folder-toggle", "folder-button", [], { "aria-controls": "pill-folder", "aria-expanded": "false", "aria-haspopup": "listbox" }),
-                        button("folder-remove", "folder-remove", [folderIcon("x")]),
+                node("div", { class: "pill-row" }, [
+                    button("dot-toggle", "dot-button", [node("span", { class: "dot", "aria-hidden": "true" })]),
+                    node("span", { id: "pill-details", style: "display:contents" }, [
+                        node("span", { id: "recording-label", class: "label" }),
+                        node("span", { id: "elapsed", class: "elapsed" }),
+                        node("span", { id: "folder-target", class: "folder-target" }, [
+                            button("folder-toggle", "folder-button", [], { "aria-controls": "pill-folder", "aria-expanded": "false", "aria-haspopup": "listbox" }),
+                            button("folder-remove", "folder-remove", [folderIcon("x")]),
+                        ]),
+                        button("pill-agenda", "", [t("agendaTitle")], { hidden: "" }),
+                        node("span", { class: "levels" }, [
+                            levelMeter("mic-level", t("meetingMicLevel"), "M9 6a3 3 0 0 1 6 0v6a3 3 0 0 1-6 0ZM5 10v2a7 7 0 0 0 14 0v-2M12 19v3"),
+                            levelMeter("system-level", t("meetingAudioLevel"), "M11 5 6 9H3v6h3l5 4ZM15 9a4 4 0 0 1 0 6m3-9a8 8 0 0 1 0 12"),
+                        ]),
+                        button("stop", "stop"),
                     ]),
-                    node("span", { id: "folder-fixed", class: "hint folder-fixed", hidden: "" }),
-                    button("pill-agenda", "", [t("agendaTitle")], { hidden: "" }),
-                    button("stop", "stop"),
                 ]),
+                node("span", { id: "folder-fixed", class: "hint folder-fixed", hidden: "" }),
                 node("div", { id: "pill-folder", class: "field", hidden: "" }),
                 node("p", { id: "action-error", class: "error", role: "status" }),
             );
@@ -502,6 +553,7 @@
             });
             el("stop").addEventListener("click", async () => {
                 el("stop").disabled = true;
+                closeLevels();
                 try {
                     const response = await send({
                         type: "stop-recording",
@@ -513,6 +565,7 @@
                     if (currentView === "recording") {
                         showError(error);
                         el("stop").disabled = false;
+                        updateLevels();
                     }
                 }
             });
@@ -563,7 +616,10 @@
         const label = viewLabel(message);
         surface.setAttribute("aria-label", label);
         currentState = message.state ?? null;
-        if (message.view !== "recording") clearInterval(timer);
+        if (message.view !== "recording") {
+            clearInterval(timer);
+            closeLevels();
+        }
         if (message.view === "prompt") renderPrompt(message);
         else if (message.view === "recording") renderRecording(message.state, message.connection);
         else {
@@ -591,7 +647,7 @@
             if (isError) {
                 const close = document.createElement("button");
                 close.type = "button";
-                close.textContent = t("meetingPromptDismiss");
+                close.textContent = t("dismiss");
                 close.addEventListener("click", dismiss);
                 surface.append(close);
             }
@@ -600,19 +656,18 @@
                 hideTimer = setTimeout(hide, 3500);
             }
         }
-        renderConnection(message.connection, message.view === "prompt" ? el("prompt-extra") : surface);
+        const isPrompt = message.view === "prompt";
+        const connection = isPrompt && message.disconnected
+            ? { ...message.connection, context: t("meetingPromptReachable", t("appName")) }
+            : message.connection;
+        renderConnection(connection, isPrompt ? el("prompt-extra") : surface, isPrompt);
         currentView = message.view;
         if (!host.isConnected) {
             document.getElementById("recorder-meeting-banner")?.remove();
             document.documentElement.append(host);
         }
-        if (currentView === "prompt") {
-            window.addEventListener("resize", updatePromptArrow);
-            updatePromptArrow();
-        } else {
-            arrow.setAttribute("hidden", "");
-            window.removeEventListener("resize", updatePromptArrow);
-        }
+        updateLevels();
+
     }
 
     for (const type of ["keyup", "keypress", "beforeinput", "input"]) {
@@ -639,7 +694,8 @@
         }
         if (message?.type !== "meeting-banner") return false;
         render(message);
-        respond({ visible: host.isConnected && currentView === "prompt" });
+        const visible = host.isConnected && currentView === "prompt";
+        respond({ visible, consentShown: visible && root.querySelector(".prompt-main kbd") !== null });
         return false;
     });
     function refresh() {
@@ -654,10 +710,12 @@
             .catch(hideIfCurrent);
     }
     globalThis.recorderMeetingBanner = { refresh };
+    window.addEventListener("pagehide", closeLevels);
     window.addEventListener("pageshow", (event) => {
         if (event.isTrusted === false) return;
         refresh();
     });
+    document.addEventListener("visibilitychange", updateLevels);
     window.addEventListener("online", () => {
         if (host.isConnected && el("meeting-connection")) void send({ type: "recorder-connection-retry" }).catch(() => {});
     });
