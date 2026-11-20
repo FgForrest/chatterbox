@@ -63,6 +63,34 @@ app, except `API_TOKEN_HASH_SECRET` and the build-time ones. A Compose file
 of your own passes only what its `environment:` lists, so copy new entries
 from the release's file when you upgrade.
 
+## Bundled Postgres
+
+The bundled `docker-compose.yml` publishes Postgres on the Docker host's
+loopback address, `127.0.0.1:5432`. The app connects over the Compose network at
+`db:5432`. Clients on another machine need an SSH tunnel to the Docker host
+or a different port binding. To change the binding, edit `db.ports` in the
+base file or replace it in an override file with `ports: !override` (Docker
+Compose 2.24.4 or later). A plain `ports` list can merge with the base list
+and leave overlapping bindings.
+
+Compose builds the app's `DATABASE_URL` from `POSTGRES_PASSWORD`, which
+defaults to `postgres`. Postgres uses this variable to set the role password
+when it first initializes the database. The app logs a startup warning when
+its connection URL uses the default password.
+
+To rotate the password on an existing installation, generate a hexadecimal
+password with `openssl rand -hex 24`. Compose inserts the password into
+`DATABASE_URL` without URL encoding.
+
+1. Open `psql` with `docker compose exec db psql -U postgres`. Run
+   `\password postgres` and enter the new password when prompted. This changes
+   the role password in place and keeps the plaintext out of command history
+   and server logs.
+2. Save the same value as `POSTGRES_PASSWORD` in `.env`.
+3. Recreate the app container with `docker compose up -d --no-deps --force-recreate app`.
+
+Keep the existing database volume. Deleting it to recreate it erases the data.
+
 ## Storage
 
 | Variable                | Default     | Effect                                                              |

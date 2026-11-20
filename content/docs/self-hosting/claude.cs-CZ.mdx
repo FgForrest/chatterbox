@@ -176,12 +176,11 @@ Zveřejněte MCP koncový bod, a nic jiného, pro adresy Anthropicu:
 
 - Veřejný DNS záznam pro host z `APP_URL`. Lidé uvnitř dál chodí do
   aplikace Klepna přes vnitřní síť (split-horizon DNS).
-- Zablokujte přímý přístup z internetu na porty aplikace a databáze.
-  Přibalený `docker-compose.yml` zveřejňuje porty 3000 a 5432 na všech
-  rozhraních hostitele; cloudovým firewallem nebo pravidly firewallu pro
-  Docker je omezte na proxy a vnitřní síť. Přímé spojení na port 3000
-  obchází pravidla proxy pro cesty, IP adresy, označovací hlavičku i
-  omezení počtu požadavků.
+- Zablokujte přímý přístup z internetu na port 3000 pomocí cloudového firewallu
+  nebo pravidel firewallu pro Docker. Přímé spojení obchází pravidla proxy pro
+  cesty, IP adresy, označovací hlavičku i omezení počtu požadavků. Databázový
+  port ponechte mimo veřejná rozhraní. Přiložený `docker-compose.yml`
+  zpřístupňuje Postgres na `127.0.0.1:5432`.
 - Veřejně důvěryhodný certifikát na portu 443. Za seznamem povolených adres použijte
   ověřovací výzvu DNS-01. Žádné přesměrování na jiný host.
 - Jen z `160.79.104.0/21` a jen dvě přesné cesty: `/api/mcp` a
