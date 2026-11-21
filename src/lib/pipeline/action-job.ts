@@ -108,6 +108,7 @@ export const pipelineActionJobHandler: JobHandler<ActionPayload> = {
                 outcome: {
                     kind: "skipped",
                     reason: "outdated",
+                    plaudAction: true,
                     ...(payload.action.hasUnnormalizedItems && {
                         usesNormalizedPlaudItems: true,
                     }),

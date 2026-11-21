@@ -46,6 +46,7 @@ export interface PhaseStepRecord {
     state?: PhaseState;
     reason?: string;
     sourceFingerprint?: string;
+    sourceRevision?: string;
     inputFingerprint?: string | null;
 }
 
@@ -167,6 +168,7 @@ export interface PipelineFacts {
     learnCorrectionInFlight?: boolean;
     plaudTasks?: {
         fingerprint: string;
+        sourceRevision: string;
         hasUnnormalizedItems?: boolean;
     };
     storedTopics?: readonly ContentRevisionInput[];

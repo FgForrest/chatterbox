@@ -1122,7 +1122,7 @@ describe("planAdvance audio", () => {
                 tasksEnabled: true,
             },
             stepAvailability: { summary: "no_provider" },
-            plaudTasks: { fingerprint: "plaud-v1" },
+            plaudTasks: { fingerprint: "plaud-v1", sourceRevision: "import:0" },
         });
 
         const actions = planAdvance(facts).actions;
@@ -1161,7 +1161,10 @@ describe("planAdvance audio", () => {
                 (action) => action.type === "applyPlaudTasks",
             ),
         ).toBe(false);
-        applied.plaudTasks = { fingerprint: "plaud-v2" };
+        applied.plaudTasks = {
+            fingerprint: "plaud-v2",
+            sourceRevision: "import:1",
+        };
         const changed = planAdvance(applied).actions.find(
             (action) => action.type === "applyPlaudTasks",
         );
@@ -1177,7 +1180,10 @@ describe("planAdvance audio", () => {
                     tasksEnabled: false,
                 },
                 stepAvailability: { summary: "no_provider" },
-                plaudTasks: { fingerprint: "plaud-v1" },
+                plaudTasks: {
+                    fingerprint: "plaud-v1",
+                    sourceRevision: "import:0",
+                },
             }),
         ).actions;
 
@@ -1212,7 +1218,10 @@ describe("planAdvance audio", () => {
                     tasksEnabled: true,
                 },
                 stepAvailability: { summary: "no_provider" },
-                plaudTasks: { fingerprint: "plaud-v1" },
+                plaudTasks: {
+                    fingerprint: "plaud-v1",
+                    sourceRevision: "import:0",
+                },
             }),
         ).actions;
 

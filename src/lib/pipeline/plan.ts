@@ -243,10 +243,22 @@ function plaudTasksPending(
         return false;
     }
     const step = facts.phases.summary?.steps?.summary;
+    const outcome = step?.outcome;
+    const plaudTerminal =
+        ((step?.state === "failed" && outcome?.kind === "failed") ||
+            (step?.state === "skipped" &&
+                step.reason === "outdated" &&
+                outcome?.kind === "skipped")) &&
+        outcome.plaudAction === true;
+    const sameFingerprint = step?.sourceFingerprint === source.fingerprint;
     if (
-        minimumGeneration === undefined &&
-        step?.sourceFingerprint === source.fingerprint
-    ) {
+        sameFingerprint &&
+        plaudTerminal &&
+        step.sourceRevision !== source.sourceRevision
+    )
+        return true;
+
+    if (minimumGeneration === undefined && sameFingerprint) {
         return (
             step.state === "skipped" &&
             (step.reason === "source_changed" ||
@@ -263,8 +275,8 @@ function plaudTasksPending(
             input,
             minimumGeneration,
         ) ||
-        step?.reason !== "plaud_tasks" ||
-        step.sourceFingerprint !== source.fingerprint
+        !sameFingerprint ||
+        (step.reason !== "plaud_tasks" && !plaudTerminal)
     );
 }
 
@@ -273,8 +285,9 @@ function plaudTasksAction(
     input: ContentRevisionInput,
     steps: NonNullable<PhaseRecord["steps"]>,
 ): PipelineAction {
-    const sourceFingerprint = facts.plaudTasks?.fingerprint;
-    if (!sourceFingerprint) throw new Error("Plaud task source is missing");
+    const source = facts.plaudTasks;
+    if (!source?.fingerprint) throw new Error("Plaud task source is missing");
+    const { fingerprint: sourceFingerprint, sourceRevision } = source;
     const keepMatchingProposals =
         !facts.phases.summary?.steps?.summary?.sourceFingerprint &&
         !facts.summary.refreshRequested &&
@@ -291,6 +304,7 @@ function plaudTasksAction(
         state: "done",
         reason: "plaud_tasks",
         sourceFingerprint,
+        sourceRevision,
     };
     const currentSteps = Object.values(steps).filter(
         (candidate) =>
@@ -319,7 +333,7 @@ function plaudTasksAction(
             staleFingerprint: facts.phases.summary?.staleFingerprint,
             profileRevisionId: facts.profile?.revisionId,
         },
-        ...(facts.plaudTasks?.hasUnnormalizedItems && {
+        ...(source.hasUnnormalizedItems && {
             hasUnnormalizedItems: true,
         }),
     };

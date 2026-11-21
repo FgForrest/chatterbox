@@ -51,6 +51,7 @@ export interface PlaudTaskSource {
     actionItems: string[];
     hasUnnormalizedItems: boolean;
     transcriptionId: string | null;
+    sourceRevision: string;
 }
 
 /** Trim imported Plaud action items and discard blank or non-string entries. */
@@ -69,6 +70,8 @@ export async function readPlaudTaskSource(
 ): Promise<PlaudTaskSource | null> {
     const [row] = await db
         .select({
+            id: aiEnhancements.id,
+            revision: aiEnhancements.revision,
             summary: aiEnhancements.summary,
             actionItems: aiEnhancements.actionItems,
             transcriptionId: aiEnhancements.transcriptionId,
@@ -93,6 +96,7 @@ export async function readPlaudTaskSource(
             (rawItems.length !== actionItems.length ||
                 actionItems.some((item, index) => item !== rawItems[index])),
         transcriptionId: row.transcriptionId,
+        sourceRevision: `${row.id}:${row.revision}`,
     };
 }
 

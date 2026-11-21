@@ -98,6 +98,7 @@ async function readPlaudTasks(
     }
     return {
         fingerprint: plaudActionItemsFingerprint(source.actionItems),
+        sourceRevision: source.sourceRevision,
         hasUnnormalizedItems: source.hasUnnormalizedItems,
     };
 }
