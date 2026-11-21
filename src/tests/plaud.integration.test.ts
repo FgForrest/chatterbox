@@ -1,11 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { sniffAudio } from "@/lib/audio/sniff";
 import {
+    decodeAccessTokenExpiry,
+    plaudRefreshUserToken,
+} from "@/lib/plaud/auth";
+import {
     isReady,
     parseTranscript,
     selectContentItems,
 } from "@/lib/plaud/content";
-import { isValidPlaudApiUrl } from "@/lib/plaud/servers";
+import { plaudFetch } from "@/lib/plaud/fetch";
+import { isValidPlaudApiUrl, PLAUD_USER_AGENT } from "@/lib/plaud/servers";
 import {
     audioExtension,
     buildRecordingStagingPath,
@@ -19,9 +24,10 @@ const mockEnv = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 
-import { PlaudClient } from "../lib/plaud/client";
+import { DEFAULT_PLAUD_API_BASE, PlaudClient } from "../lib/plaud/client";
 
 const bearerToken = process.env.PLAUD_BEARER_TOKEN;
+const refreshToken = process.env.PLAUD_REFRESH_TOKEN;
 const apiBase = process.env.PLAUD_API_BASE;
 const hasToken = typeof bearerToken === "string" && bearerToken.length > 0;
 
@@ -40,6 +46,41 @@ async function readPlaud<T>(read: () => Promise<T>): Promise<T> {
         throw new Error("A read-only Plaud API request failed");
     }
 }
+
+// This check consumes PLAUD_REFRESH_TOKEN through rotation. Start each run with a fresh email-code login.
+it.skipIf(!refreshToken)(
+    "refreshes Plaud access without extending the sign-in",
+    async () => {
+        if (!refreshToken) throw new Error("PLAUD_REFRESH_TOKEN is required");
+        const base = apiBase ?? DEFAULT_PLAUD_API_BASE;
+        const previousEnd = decodeAccessTokenExpiry(refreshToken)?.getTime();
+        if (previousEnd === undefined) {
+            throw new Error("The refresh token has no readable session expiry");
+        }
+        const tokens = await readPlaud(() =>
+            plaudRefreshUserToken(refreshToken, base),
+        );
+        const nextEnd = tokens.sessionExpiresAt?.getTime();
+        if (nextEnd === undefined) {
+            throw new Error("Plaud did not return a readable session expiry");
+        }
+        expect(nextEnd).toBeLessThanOrEqual(previousEnd);
+
+        const response = await readPlaud(() =>
+            plaudFetch(`${base}/device/list`, {
+                headers: {
+                    Authorization: `Bearer ${tokens.accessToken}`,
+                    "User-Agent": PLAUD_USER_AGENT,
+                },
+            }),
+        );
+        expect(response.ok).toBe(true);
+        const body = await readPlaud(
+            async () => (await response.json()) as { status?: number },
+        );
+        expect(body.status).toBe(0);
+    },
+);
 
 describeIntegration("PlaudClient (integration)", () => {
     let client: PlaudClient;

@@ -5,6 +5,7 @@ import { plaudConnections, plaudDevices } from "@/db/schema";
 import { requireApiSession } from "@/lib/auth-server";
 import { apiHandler } from "@/lib/errors";
 import { serverKeyFromApiBase } from "@/lib/plaud/servers";
+import { getPlaudTokenExpiries } from "@/lib/plaud/stored-expiries";
 
 export const GET = apiHandler(async (request: Request) => {
     const session = await requireApiSession(request);
@@ -20,15 +21,21 @@ export const GET = apiHandler(async (request: Request) => {
     }
 
     const server = serverKeyFromApiBase(connection.apiBase);
+    const expiries = getPlaudTokenExpiries(connection);
+    const needsReconnect = connection.invalidatedAt != null;
+    const autoRenews =
+        connection.refreshToken != null &&
+        !needsReconnect &&
+        (expiries.sessionExpiresAt == null ||
+            expiries.sessionExpiresAt.getTime() > Date.now());
 
     return NextResponse.json({
         connected: true,
         server,
         plaudEmail: connection.plaudEmail ?? null,
-        // True once Plaud has rejected the stored token during a sync; the UI
-        // uses this to prompt a reconnect. Cleared on the next good sync or
-        // on reconnect.
-        needsReconnect: connection.invalidatedAt != null,
+        needsReconnect,
+        ...expiries,
+        autoRenews,
         createdAt: connection.createdAt,
         updatedAt: connection.updatedAt,
         // Include the raw URL so the UI can populate the custom field

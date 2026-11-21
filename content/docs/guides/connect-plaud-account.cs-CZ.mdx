@@ -1,6 +1,6 @@
 ---
 title: Připojení vašeho Plaud účtu
-description: Přihlášení do Plaud z Klepna, včetně postupu pro Google/Apple.
+description: Přihlášení do Plaud z Klepny, včetně postupu pro Google/Apple.
 ---
 
 Klepna se přihlašuje přímo do Plaud — stejným způsobem jako oficiální aplikace Plaud. Žádné automatické získávání údajů z obrazovky, žádný bezhlavý prohlížeč, žádný reverzně inženýrovaný provoz mobilní aplikace. Způsob přihlášení závisí na tom, jak jste si původně vytvořili svůj Plaud účet.
@@ -9,15 +9,14 @@ Klepna se přihlašuje přímo do Plaud — stejným způsobem jako oficiální 
 
 ## Přihlášení pomocí e-mailu a kódu (výchozí cesta)
 
-Pokud jste si účet Plaud zaregistrovali pomocí e-mailové adresy a hesla, můžete se z Klepna přihlásit přímo:
+Pokud jste si účet Plaud zaregistrovali pomocí e-mailové adresy a hesla, můžete se z Klepny přihlásit přímo:
 
 1. Zadejte e-mailovou adresu, kterou používáte na [plaud.ai](https://plaud.ai).
 2. Plaud vám e-mailem zašle 6místný ověřovací kód.
-3. Vložte jej do Klepna.
+3. Vložte jej do Klepny.
 
-Kód je předán serverům Plaud a **nikdy není uložen lokálně**. Po přihlášení je vrácený přístupový token šifrován pomocí AES-256-GCM, než se uloží do databáze — více viz
-[Šifrování uložených dat](../reference/encryption-at-rest)
-pro podrobnosti.
+Kód je předán serverům Plaud a **nikdy není uložen lokálně**. Přístupový i obnovovací token se před uložením do databáze šifrují pomocí AES-256-GCM. Podrobnosti najdete v části
+[Šifrování uložených dat](../reference/encryption-at-rest).
 
 Region účtu Plaud (globální, EU, Asie a Pacifik) je detekován automaticky: pokud globální koncový bod odpoví `status: -302` a regionálním hostitelem API v `data.domains.api`, Klepna následuje přesměrování a uloží region účtu spolu s tokenem.
 
@@ -28,14 +27,13 @@ Region účtu Plaud (globální, EU, Asie a Pacifik) je detekován automaticky: 
 Pokud jste na Plaud původně zvolili **Pokračovat přes Google** nebo **Pokračovat přes Apple**, tok e-mailu a kódu *zdánlivě* uspěje, ale synchronizace nevrátí žádné nahrávky. Důvodem je, že identita e-mailu/hesla a identita Google/Apple jsou na straně Plaud dva různé účty, i pokud sdílí e-mailovou adresu
 ([#65](https://github.com/riffado/riffado/issues/65)).
 
-Skutečné „Přihlášení pomocí Google/Apple“ přímo v Klepna je technicky zablokováno kvůli „authorized-origins“ politice Google na OAuth klientovi Plaud. Existují dvě možná řešení.
+Skutečné „Přihlášení pomocí Google/Apple“ přímo v Klepně je technicky zablokováno kvůli „authorized-origins“ politice Google na OAuth klientovi Plaud. Existují dvě možná řešení.
 
 <span id="easy-path-the-connector-extension" />
 
 ### Jednodušší cesta: rozšíření konektoru
 
-Nainstalujte si [rozšíření prohlížeče](https://github.com/riffado/connector/releases/latest)
-prohlížečové rozšíření (AGPL-3.0) — stáhněte si aktuální verzi z GitHubu a načtěte ji jako rozbalené rozšíření. S nainstalovaným rozšířením se na přihlašovací obrazovce zobrazí tlačítko **Přihlásit se do Plaud**. Přihlásíte se do `web.plaud.ai` obvyklým způsobem; rozšíření předá výsledný přístupový token vaší instanci Klepna. Žádné kopírování a vkládání, žádné vývojářské nástroje.
+Stáhněte si z GitHubu [rozšíření prohlížeče](https://github.com/riffado/connector/releases/latest) (AGPL-3.0) a načtěte je jako rozbalené rozšíření. Na přihlašovací obrazovce se zobrazí tlačítko **Přihlásit se do Plaud**. Přihlaste se na `web.plaud.ai` obvyklým způsobem. Rozšíření předá přístupový token Klepně. Konektor od verze 0.2.4 předává i obnovovací token, takže připojení vydrží až 30 dní. Se starší verzí vydrží přibližně 24 hodin.
 
 <span id="manual-fallback-paste-the-token" />
 
@@ -44,20 +42,21 @@ prohlížečové rozšíření (AGPL-3.0) — stáhněte si aktuální verzi z G
 Pokud rozšíření nemůžete nebo nechcete instalovat:
 
 1. Otevřete [web.plaud.ai](https://web.plaud.ai) v nové záložce a přihlaste se přes Google nebo Apple jako obvykle.
-2. Otevřete vývojářské nástroje prohlížeče (F12 / Cmd+Option+I) a přejděte na **Application → Local Storage → https://web.plaud.ai** (v některých prohlížečích **Storage**).
-3. Zkopírujte hodnotu `pld_tokenstr`. Jde o dlouhodobě platný uživatelský token. Nekopírujte hlavičku `Authorization` z požadavků `/device/list` ani `/file/simple/web`: ty používají krátkodobé tokeny pracovního prostoru.
-4. V Klepna přepněte na kartu **Vložit token**, vyberte region svého účtu Plaud (globální, EU nebo APAC) a vložte hodnotu.
+2. Otevřete vývojářské nástroje (F12 nebo Cmd+Option+I) a přejděte na **Application → Cookies → https://web.plaud.ai**.
+3. Zkopírujte hodnotu souboru cookie `pld_ut`. Nově vydaný token platí 24 hodin. Požadavky na `/device/list` a `/file/simple/web` používají tokeny pracovního prostoru.
+4. Otevřete kartu **Network** a obnovte stránku. Podle názvu serveru API určete region. `api.plaud.ai` je globální server, `api-euc1.plaud.ai` je pro EU a `api-apse1.plaud.ai` pro Asii a Pacifik.
+5. V Klepně otevřete kartu **Vložit token**, vyberte region a vložte zkopírovanou hodnotu.
 
-Vložený token je uložen a šifrován stejně jako token získaný běžným způsobem přes kód.
+Vložený token se ukládá šifrovaně stejně jako token získaný při přihlášení e-mailovým kódem.
 
 <span id="what-about-refresh-tokens" />
 
 ## A co obnovovací tokeny?
 
-API Plaud nevydává obnovovací tokeny. Odpověď na OTP přihlášení obsahuje pouze přístupový token, což je dlouhodobě platný JWT token (pozorovaná platnost cca 300 dní). Po vypršení platnosti se v přehledu zobrazí pruh s výzvou k opětovnému připojení a celý výše uvedený postup zopakujete. Žádné tiché obnovení tokenu na pozadí zde neprobíhá.
+Při přihlášení e-mailovým kódem platí přístupový i obnovovací token 30 dní. S obnovovacím tokenem Klepna na pozadí obnovuje přístup až do konce původního přihlášení. Datum konce připojení najdete v nastavení. Přehled vás upozorní tři dny předem a po skončení přihlášení vás vyzve k opětovnému připojení. Starší přístupové tokeny fungují do vypršení své vlastní platnosti.
 
 <span id="switching-accounts" />
 
 ## Přepínání účtů
 
-Kdykoli můžete odpojit nebo přepnout připojený účet Plaud v **Nastavení → Účet Plaud**. Zašifrovaný bearer token bude smazán; dříve synchronizované nahrávky zůstanou zachovány (tato data vlastníte na svém úložišti).
+Kdykoli můžete odpojit nebo přepnout připojený účet Plaud v **Nastavení → Účet Plaud**. Při odpojení se uložené tokeny smažou a dříve synchronizované nahrávky zůstanou zachovány (tato data vlastníte na svém úložišti).

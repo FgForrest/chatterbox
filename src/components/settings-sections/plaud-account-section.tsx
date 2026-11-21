@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle2, Link2Off, Mic, RefreshCw } from "lucide-react";
-import { useExtracted } from "next-intl";
+import { useExtracted, useLocale } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { PlaudConnectTabs } from "@/components/plaud-connect-tabs";
@@ -17,7 +17,9 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { useDateTimeFormatter } from "@/hooks/use-date-time-formatter";
 import { getApiErrorMessage } from "@/lib/api-errors";
+import { plaudConnectionBannerState } from "@/lib/plaud/connection-expiry";
 import { PLAUD_SERVERS, type PlaudServerKey } from "@/lib/plaud/servers";
 
 interface ConnectionInfo {
@@ -25,6 +27,7 @@ interface ConnectionInfo {
     server?: PlaudServerKey;
     plaudEmail?: string | null;
     needsReconnect?: boolean;
+    sessionExpiresAt?: string | null;
     createdAt?: string;
     updatedAt?: string;
     apiBase?: string;
@@ -51,6 +54,8 @@ export function PlaudAccountSection({
     onReconnected,
 }: PlaudAccountSectionProps = {}) {
     const i18n = useExtracted();
+    const locale = useLocale();
+    const formatDateTime = useDateTimeFormatter();
     const name = useProductName();
     const localizedRegionLabel = (
         server: PlaudServerKey | undefined,
@@ -168,6 +173,18 @@ export function PlaudAccountSection({
         );
     }
 
+    const sessionEnd = info?.sessionExpiresAt
+        ? new Date(info.sessionExpiresAt)
+        : null;
+    const connectionState = plaudConnectionBannerState({
+        needsReconnect: info?.needsReconnect === true,
+        sessionExpiresAt: sessionEnd,
+        now: Date.now(),
+    });
+    const endsOn =
+        sessionEnd && !Number.isNaN(sessionEnd.getTime())
+            ? formatDateTime(sessionEnd, "absolute", locale)
+            : null;
     const currentEmail = info?.plaudEmail ?? null;
     const currentEmailDisplay = currentEmail ?? "the current account";
 
@@ -223,10 +240,25 @@ export function PlaudAccountSection({
                                         </>
                                     )}
                                 </p>
+                                {connectionState === null && endsOn && (
+                                    <p className="text-sm text-muted-foreground">
+                                        {i18n("Connected until {date}", {
+                                            date: endsOn,
+                                        })}
+                                    </p>
+                                )}
                             </div>
                         </div>
 
-                        {info.needsReconnect && (
+                        {connectionState === "ending-soon" && endsOn && (
+                            <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-500">
+                                {i18n("Your Plaud connection ends on {date}", {
+                                    date: endsOn,
+                                })}
+                            </p>
+                        )}
+
+                        {connectionState === "reconnect" && (
                             <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-500">
                                 {i18n(
                                     "Plaud stopped accepting this sign-in, so syncing is paused. Reconnect to resume — your recordings stay put.",
@@ -235,7 +267,7 @@ export function PlaudAccountSection({
                         )}
 
                         <div className="flex flex-wrap gap-2">
-                            {info.needsReconnect && (
+                            {connectionState !== null && (
                                 <Button
                                     onClick={() => setReconnectDialogOpen(true)}
                                 >

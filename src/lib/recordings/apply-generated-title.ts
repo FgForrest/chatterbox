@@ -113,11 +113,12 @@ export async function applyGeneratedTitle(input: {
                 .limit(1);
 
             if (connection) {
-                const plaudClient = await createPlaudClient(
-                    connection.bearerToken,
-                    connection.apiBase,
-                    connection.workspaceId,
-                );
+                let bearerToken = connection.bearerToken;
+                const plaudClient = await createPlaudClient(connection, {
+                    onTokensStored: (stored) => {
+                        bearerToken = stored;
+                    },
+                });
                 // A person may have renamed it since the title was stored.
                 // Their title stays here, so Plaud must not get this one.
                 if (await titleStillGenerated(userId, recordingId)) {
@@ -146,6 +147,7 @@ export async function applyGeneratedTitle(input: {
                             and(
                                 eq(plaudConnections.id, connection.id),
                                 eq(plaudConnections.userId, userId),
+                                eq(plaudConnections.bearerToken, bearerToken),
                             ),
                         );
                 }

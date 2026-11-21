@@ -5,6 +5,7 @@
  * carry `needsReconnect: true`, instead of the old behavior where the 401
  * was swallowed into a generic "Sync failed" string with no signal.
  */
+import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 vi.mock("@/lib/env", () => ({
@@ -66,7 +67,8 @@ vi.mock("@/lib/webhooks/emit", () => ({
 }));
 
 import { db } from "@/db";
-import { AppError, ErrorCode } from "@/lib/errors";
+import { ErrorCode } from "@/lib/errors";
+import { PlaudTokenRejection } from "@/lib/plaud/client";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import { syncRecordingsForUser } from "@/lib/sync/sync-recordings";
 
@@ -112,8 +114,11 @@ describe("#225 Plaud token invalidation on 401", () => {
     it("flags needsReconnect and stamps invalidatedAt on PLAUD_INVALID_TOKEN", async () => {
         mockConnectionSelects();
 
+        const where = vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([{ id: "conn-1" }]),
+        });
         const setSpy = vi.fn().mockReturnValue({
-            where: vi.fn().mockResolvedValue(undefined),
+            where,
         });
         (db.update as Mock).mockReturnValue({ set: setSpy });
 
@@ -121,11 +126,7 @@ describe("#225 Plaud token invalidation on 401", () => {
             getRecordings: vi
                 .fn()
                 .mockRejectedValue(
-                    new AppError(
-                        ErrorCode.PLAUD_INVALID_TOKEN,
-                        "Plaud rejected the access token.",
-                        401,
-                    ),
+                    new PlaudTokenRejection("rejected-request-ciphertext"),
                 ),
             downloadRecording: vi.fn(),
             workspaceId: null,
@@ -139,11 +140,48 @@ describe("#225 Plaud token invalidation on 401", () => {
         expect(setSpy).toHaveBeenCalledWith(
             expect.objectContaining({ invalidatedAt: expect.any(Date) }),
         );
+        expect(
+            new PgDialect().sqlToQuery(where.mock.calls[0][0]).params,
+        ).toEqual(["conn-1", mockUserId, "rejected-request-ciphertext"]);
         // Old generic "Sync failed" string is not the surfaced error.
         expect(result.errors.some((e) => /reconnect/i.test(e))).toBe(true);
         expect(result.errors.some((e) => e.startsWith("Sync failed"))).toBe(
             false,
         );
+    });
+
+    it.each([
+        false,
+        true,
+    ])("distinguishes a CAS miss from an invalidation write error (write failed: %s)", async (writeFailed) => {
+        mockConnectionSelects();
+        const returning = vi.fn();
+        if (writeFailed)
+            returning.mockRejectedValue(new Error("database unavailable"));
+        else returning.mockResolvedValue([]);
+        (db.update as Mock).mockReturnValue({
+            set: vi.fn().mockReturnValue({
+                where: vi.fn().mockReturnValue({ returning }),
+            }),
+        });
+        (createPlaudClient as Mock).mockRejectedValue(
+            new PlaudTokenRejection("encrypted-token"),
+        );
+
+        const result = await syncRecordingsForUser(mockUserId);
+
+        expect(returning).toHaveBeenCalledOnce();
+        expect(result.needsReconnect).toBe(false);
+        expect(result.errorCode).toBe(
+            writeFailed
+                ? ErrorCode.INTERNAL_ERROR
+                : ErrorCode.PLAUD_UPSTREAM_ERROR,
+        );
+        expect(result.errors).toEqual([
+            writeFailed
+                ? "Sync failed: Failed to mark Plaud connection as invalidated."
+                : "The Plaud connection changed during this sync. Please try again.",
+        ]);
     });
 
     it("does not flag needsReconnect on a non-auth failure", async () => {

@@ -100,7 +100,7 @@ Send a one-time verification code to the user's Plaud email. Handles regional re
 
 #### POST `/plaud/auth/verify`
 
-Verify the OTP code, obtain a long-lived access token from Plaud, and store the encrypted connection.
+Verify the OTP code and store the encrypted Plaud access and refresh tokens. Both tokens from an email-code sign-in last 30 days.
 
 **Body:**
 ```json
@@ -120,9 +120,24 @@ Verify the OTP code, obtain a long-lived access token from Plaud, and store the 
 }
 ```
 
+#### POST `/plaud/auth/connect-token`
+
+Connect using the Plaud web app's `pld_ut` cookie, which lasts up to 24 hours.
+Connector 0.2.4 or newer can also send an optional `refreshToken` from `pld_urt` to renew access until the original 30-day session ends.
+An invalid refresh token is dropped. The access token can still connect, and the response includes a `warning`.
+
+**Body:**
+```json
+{
+  "accessToken": "eyJhbGc...",
+  "apiBase": "https://api-euc1.plaud.ai",
+  "source": "paste"
+}
+```
+
 #### GET `/plaud/connection`
 
-Get current Plaud connection status.
+Get current Plaud connection status. Expiries may be null. `autoRenews` indicates a refresh token is available and the connection has neither ended nor been flagged for reconnect.
 
 **Response:**
 ```json
@@ -130,6 +145,10 @@ Get current Plaud connection status.
   "connected": true,
   "server": "eu",
   "plaudEmail": "user@example.com",
+  "needsReconnect": false,
+  "accessExpiresAt": "2025-01-23T12:00:00.000Z",
+  "sessionExpiresAt": "2025-02-21T12:00:00.000Z",
+  "autoRenews": true,
   "createdAt": "2025-01-22T12:00:00.000Z",
   "updatedAt": "2025-01-22T12:00:00.000Z"
 }

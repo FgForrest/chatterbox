@@ -1,17 +1,50 @@
 import { NextResponse } from "next/server";
+import { getExtracted } from "next-intl/server";
 import { requireApiSession } from "@/lib/auth-server";
-import { deploymentProductName } from "@/lib/deployment-brand";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
-import { defaultLocale } from "@/lib/i18n/config";
 import { assertNotOrgAccount } from "@/lib/org/config";
 import {
+    buildPlaudTokenSet,
     decodeAccessTokenExpiry,
+    decodeJwtClaims,
     fetchPlaudUserMeEmail,
     isPlaudWorkspaceToken,
 } from "@/lib/plaud/auth";
 import { DEFAULT_PLAUD_API_BASE } from "@/lib/plaud/client";
 import { persistPlaudConnection } from "@/lib/plaud/persist-connection";
 import { isValidPlaudApiUrl } from "@/lib/plaud/servers";
+
+const MAX_REFRESH_TOKEN_LENGTH = 8192;
+const JWT_SHAPE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$/;
+const SHORT_LIVED_TOKEN_MS = 2 * 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+
+function parseRefreshToken(raw: unknown, accessToken: string): string | null {
+    if (raw === undefined || raw === null) return null;
+    if (typeof raw !== "string") return null;
+    const token = raw.replace(/^Bearer\s+/i, "");
+    if (!token) return null;
+    const claims =
+        token.length <= MAX_REFRESH_TOKEN_LENGTH && JWT_SHAPE.test(token)
+            ? decodeJwtClaims(token)
+            : null;
+    if (!claims || isPlaudWorkspaceToken(token)) return null;
+
+    const refreshSub = typeof claims.sub === "string" ? claims.sub : "";
+    const accessSub = decodeJwtClaims(accessToken)?.sub;
+    if (
+        !refreshSub ||
+        typeof accessSub !== "string" ||
+        !accessSub ||
+        refreshSub !== accessSub
+    ) {
+        return null;
+    }
+
+    const exp = decodeAccessTokenExpiry(token);
+    if (exp && exp.getTime() <= Date.now()) return null;
+    return token;
+}
 
 /**
  * POST /api/plaud/auth/connect-token
@@ -23,10 +56,9 @@ import { isValidPlaudApiUrl } from "@/lib/plaud/servers";
  * for Plaud via Google or Apple, the OTP flow returns a token for an empty
  * shadow account and your real recordings never appear.
  *
- * The user pastes the bearer token they grab from a logged-in `web.plaud.ai`
- * session (devtools → Network → Authorization header on any /api*.plaud.ai
- * request, minus the "Bearer " prefix). We decode `exp` for a UX hint, run
- * the same workspace + /device/list validation as the OTP path, and store.
+ * Accepts the Plaud web session cookie `pld_ut` and an optional refresh token
+ * from connector 0.2.4+. An invalid refresh token is dropped with a warning.
+ * The access token is still validated against Plaud before storing the connection.
  *
  * Source: https://github.com/riffado/riffado/blob/main/src/app/api/plaud/auth/connect-token/route.ts
  */
@@ -36,6 +68,7 @@ export const POST = apiHandler(async (request: Request) => {
 
     const body = (await request.json().catch(() => null)) as {
         accessToken?: unknown;
+        refreshToken?: unknown;
         apiBase?: unknown;
         source?: unknown;
     } | null;
@@ -62,24 +95,24 @@ export const POST = apiHandler(async (request: Request) => {
     // Cheap shape check: Plaud user tokens are JWTs (3 base64url segments).
     // Catches accidentally-pasted nonsense before we round-trip Plaud.
     if (accessToken.split(".").length !== 3) {
+        const i18n = await getExtracted();
         throw new AppError(
             ErrorCode.INVALID_INPUT,
-            "That doesn't look like a Plaud access token. Copy the value of the Authorization header on a request to api*.plaud.ai (without the leading 'Bearer ').",
+            i18n(
+                "That doesn't look like a Plaud access token. Copy the pld_ut cookie from web.plaud.ai (DevTools → Application → Cookies).",
+            ),
             400,
             { field: "accessToken" },
         );
     }
 
-    // Reject a workspace token (WT). web.plaud.ai uses the short-lived (~24h)
-    // WT on the data requests users inspect (/device/list, /file/simple/web),
-    // so SSO users paste it by mistake. A WT validates against /device/list
-    // (so the connect would *appear* to succeed) but cannot mint a fresh WT,
-    // so the connection dies within a day. Catch it here with actionable copy
-    // instead of letting it rot. (issue #203)
     if (isPlaudWorkspaceToken(accessToken)) {
+        const i18n = await getExtracted();
         throw new AppError(
             ErrorCode.PLAUD_WORKSPACE_TOKEN_PASTED,
-            `That's a workspace token, which expires in about 24 hours. ${deploymentProductName(defaultLocale)} needs your long-lived account token. Easiest fix: use the connector extension. To paste manually, grab the value of localStorage 'pld_tokenstr' on web.plaud.ai (Application → Local Storage), not the Authorization header from a /device/list request.`,
+            i18n(
+                "That's a workspace token. Use Sign in with Plaud or copy the pld_ut cookie from web.plaud.ai (DevTools → Application → Cookies).",
+            ),
             400,
             { field: "accessToken" },
         );
@@ -90,7 +123,7 @@ export const POST = apiHandler(async (request: Request) => {
     // If `exp` is in the past we still bail, since /device/list will
     // 401 and the resulting message is less useful than this one.
     const exp = decodeAccessTokenExpiry(accessToken);
-    if (exp && exp.getTime() < Date.now()) {
+    if (exp && exp.getTime() <= Date.now()) {
         throw new AppError(
             ErrorCode.PLAUD_INVALID_TOKEN,
             "This Plaud access token has already expired. Sign in to web.plaud.ai again and copy a fresh one.",
@@ -119,21 +152,51 @@ export const POST = apiHandler(async (request: Request) => {
     // plaud_connections.plaud_email is nullable.
     const plaudEmail = await fetchPlaudUserMeEmail(accessToken, apiBaseRaw);
 
-    const rawSource = typeof body.source === "string" ? body.source : "unknown";
     const method =
-        rawSource === "connector" || rawSource === "paste"
-            ? rawSource
+        body.source === "connector" || body.source === "paste"
+            ? body.source
             : "unknown";
-    // Deliberately omit `plaudEmail` from the log line — it's PII and
-    // not needed for diagnosing connect failures (source + apiBase
-    // already disambiguate the path).
-    console.log(
-        `[plaud/connect-token] persisting connection (source=${rawSource}, apiBase=${apiBaseRaw})`,
-    );
+    const suppliedRefreshToken =
+        typeof body.refreshToken === "string"
+            ? body.refreshToken.trim() || null
+            : body.refreshToken;
+    const refreshToken = parseRefreshToken(suppliedRefreshToken, accessToken);
+    const tokens = buildPlaudTokenSet({ accessToken, refreshToken });
+
+    const refreshTokenDropped = suppliedRefreshToken != null && !refreshToken;
+    const remaining = tokens.accessExpiresAt
+        ? tokens.accessExpiresAt.getTime() - Date.now()
+        : Infinity;
+    const shortLived = !refreshToken && remaining < SHORT_LIVED_TOKEN_MS;
+    let warning: string | undefined;
+    if (refreshTokenDropped || shortLived) {
+        const i18n = await getExtracted();
+        const warnings: string[] = [];
+        if (refreshTokenDropped) {
+            warnings.push(
+                i18n(
+                    "The refresh token could not be used. This connection will end when the access token expires.",
+                ),
+            );
+        }
+        if (shortLived) {
+            const hours = Math.max(1, Math.ceil(remaining / HOUR_MS));
+            warnings.push(
+                i18n(
+                    "This Plaud sign-in expires in {hours, plural, one {# hour} other {# hours}}.",
+                    { hours },
+                ),
+                i18n(
+                    "Connector 0.2.4 or newer keeps you connected for up to 30 days. You can also use an email code if you sign into Plaud with email and password.",
+                ),
+            );
+        }
+        warning = warnings.join(" ");
+    }
 
     const { devices } = await persistPlaudConnection({
         userId: session.user.id,
-        accessToken,
+        tokens,
         apiBase: apiBaseRaw,
         plaudEmail,
         method,
@@ -142,5 +205,6 @@ export const POST = apiHandler(async (request: Request) => {
     return NextResponse.json({
         success: true,
         devices,
+        ...(warning ? { warning } : {}),
     });
 });

@@ -26,6 +26,7 @@ import { audioReplacedInTx } from "@/lib/knowledge/transcript-rewrite";
 import { sendNewRecordingBarkNotification } from "@/lib/notifications/bark";
 import { sendNewRecordingEmail } from "@/lib/notifications/email";
 import { requestArrivalInTx } from "@/lib/pipeline/arrival";
+import { PlaudTokenRejection } from "@/lib/plaud/client";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import {
     findInlineContent,
@@ -35,6 +36,7 @@ import {
     segmentsToTurns,
     selectContentItems,
 } from "@/lib/plaud/content";
+import { markPlaudConnectionInvalidated } from "@/lib/plaud/persist-connection";
 import {
     captureServerEvent,
     captureServerException,
@@ -890,6 +892,7 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
         updatedRecordings: 0,
         errors: [],
     };
+    let connectionId: string | undefined;
 
     try {
         const [connection] = await db
@@ -947,11 +950,13 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
             barkPushUrl: settings?.barkPushUrl || null,
         };
 
-        const plaudClient = await createPlaudClient(
-            connection.bearerToken,
-            connection.apiBase,
-            connection.workspaceId,
-        );
+        connectionId = connection.id;
+        let refreshRejection: PlaudTokenRejection | undefined;
+        const plaudClient = await createPlaudClient(connection, {
+            onRefreshRejected: (error) => {
+                refreshRejection = error;
+            },
+        });
         const storage = await createUserStorageProvider(userId);
         const allNewRecordingNames: string[] = [];
         const importCandidates: ImportCandidate[] = [];
@@ -1014,6 +1019,7 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
                 importCandidates.push(...batchResult.importCandidates);
                 if (batchResult.connectionError)
                     throw batchResult.connectionError;
+                if (refreshRejection) throw refreshRejection;
             }
 
             // Once over the storage cap, every further new recording is a
@@ -1066,9 +1072,6 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
             .update(plaudConnections)
             .set({
                 lastSync: new Date(),
-                // A successful sync proves the token works again, so clear any
-                // prior invalidation (self-heals transient 401s).
-                invalidatedAt: null,
                 ...(workspaceIdChanged
                     ? { workspaceId: resolvedWorkspaceId }
                     : {}),
@@ -1127,6 +1130,25 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
                 plaudClient,
                 result,
             );
+            if (refreshRejection) throw refreshRejection;
+        }
+
+        const successfulBearerCiphertext =
+            plaudClient.lastSuccessfulBearerCiphertext;
+        if (successfulBearerCiphertext) {
+            await db
+                .update(plaudConnections)
+                .set({ invalidatedAt: null })
+                .where(
+                    and(
+                        eq(plaudConnections.id, connection.id),
+                        eq(plaudConnections.userId, userId),
+                        eq(
+                            plaudConnections.bearerToken,
+                            successfulBearerCiphertext,
+                        ),
+                    ),
+                );
         }
 
         return result;
@@ -1136,29 +1158,43 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
         const errorMessage =
             error instanceof Error ? error.message : String(error);
 
-        // A 401 from Plaud means the stored token is no longer accepted
-        // (expired ~300-day UT, a mistakenly-pasted 24h workspace token that
-        // has now died, or a revoked token). Mark the connection so the
-        // dashboard can prompt a reconnect instead of silently failing every
-        // sync. The row and synced recordings are preserved.
         if (
             error instanceof AppError &&
-            error.code === ErrorCode.PLAUD_INVALID_TOKEN
+            error.code === ErrorCode.PLAUD_INVALID_TOKEN &&
+            connectionId
         ) {
-            result.needsReconnect = true;
+            result.needsReconnect = false;
+            if (
+                !(
+                    error instanceof PlaudTokenRejection &&
+                    error.bearerCiphertext
+                )
+            ) {
+                result.errorCode = ErrorCode.PLAUD_UPSTREAM_ERROR;
+                result.errors.push(`Sync failed: ${errorMessage}`);
+                return result;
+            }
             try {
-                await db
-                    .update(plaudConnections)
-                    .set({ invalidatedAt: new Date() })
-                    .where(eq(plaudConnections.userId, userId));
-            } catch (stampError) {
-                console.error(
-                    "Failed to mark Plaud connection as invalidated:",
-                    stampError,
+                result.needsReconnect = await markPlaudConnectionInvalidated({
+                    userId,
+                    connectionId,
+                    bearerToken: error.bearerCiphertext,
+                });
+            } catch {
+                console.error("Failed to mark Plaud connection as invalidated");
+                result.errorCode = ErrorCode.INTERNAL_ERROR;
+                result.errors.push(
+                    "Sync failed: Failed to mark Plaud connection as invalidated.",
                 );
+                return result;
+            }
+            if (!result.needsReconnect) {
+                result.errorCode = ErrorCode.PLAUD_UPSTREAM_ERROR;
             }
             result.errors.push(
-                "Plaud rejected the stored token. Reconnect your Plaud account.",
+                result.needsReconnect === false
+                    ? "The Plaud connection changed during this sync. Please try again."
+                    : "Plaud rejected the stored token. Reconnect your Plaud account.",
             );
             return result;
         }

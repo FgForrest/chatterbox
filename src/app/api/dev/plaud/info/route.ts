@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { plaudConnections } from "@/db/schema";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import type { PlaudClient } from "@/lib/plaud/client";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import { isPlaudProxyConfigured } from "@/lib/plaud/proxy";
 import { serverKeyFromApiBase } from "@/lib/plaud/servers";
@@ -30,13 +31,8 @@ export const GET = apiHandler(async (request: Request) => {
         return NextResponse.json({ connected: false });
     }
 
-    const client = await createPlaudClient(
-        connection.bearerToken,
-        connection.apiBase,
-        connection.workspaceId,
-    );
-
     const startedAt = Date.now();
+    let client: PlaudClient | null = null;
     let reachable = false;
     let deviceCount: number | null = null;
     let activeRecordingCount: number | null = null;
@@ -44,6 +40,7 @@ export const GET = apiHandler(async (request: Request) => {
     let errorMessage: string | null = null;
 
     try {
+        client = await createPlaudClient(connection);
         const [devices, active] = await Promise.all([
             client.listDevices(),
             client.getRecordings(0, 1, 0),
@@ -73,17 +70,15 @@ export const GET = apiHandler(async (request: Request) => {
             apiBase: connection.apiBase,
             server: serverKeyFromApiBase(connection.apiBase),
             plaudEmail: connection.plaudEmail,
-            workspaceId: client.workspaceId ?? connection.workspaceId,
+            workspaceId: client?.workspaceId ?? connection.workspaceId,
             workspaceIdSource:
-                client.workspaceId &&
+                client?.workspaceId &&
                 client.workspaceId !== connection.workspaceId
                     ? "resolved"
                     : connection.workspaceId
                       ? "cache"
-                      : client.workspaceId
-                        ? "resolved"
-                        : "unresolved",
-            workspaceTokenFallback: client.usingUserTokenFallback,
+                      : "unresolved",
+            workspaceTokenFallback: client?.usingUserTokenFallback ?? false,
             createdAt: connection.createdAt,
             updatedAt: connection.updatedAt,
         },
