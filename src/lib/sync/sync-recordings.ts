@@ -18,7 +18,7 @@ import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { encryptText } from "@/lib/encryption/fields";
 import { isHostedLockedOut } from "@/lib/entitlements";
 import { env } from "@/lib/env";
-import { AppError, ErrorCode } from "@/lib/errors";
+import { AppError, ErrorCode, mapErrorToAppError } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { enforceStorageCap } from "@/lib/hosted/billing/storage-cap";
 import { type AppLocale, normalizeLocale } from "@/lib/i18n/config";
@@ -734,9 +734,19 @@ async function processRecording(
         ) {
             throw error;
         }
+        console.error(
+            `[sync] Failed to sync Plaud recording ${plaudRecording.id}:`,
+            error,
+        );
+        const mapped = mapErrorToAppError(error);
+        const message =
+            mapped.code === ErrorCode.PLAUD_API_ERROR ||
+            mapped.code === ErrorCode.PLAUD_WORKSPACE_UNAVAILABLE
+                ? "Plaud could not complete the request."
+                : mapped.message;
         return {
             status: "error",
-            error: `Failed to sync ${plaudRecording.filename}: ${error}`,
+            error: `Failed to sync ${plaudRecording.filename}: ${message}`,
         };
     } finally {
         capState.pendingBytes -= reservedBytes;
