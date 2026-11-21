@@ -12,6 +12,7 @@ import {
 import {
     claimDueJobs,
     completeJob,
+    enqueueJob,
     prepareClaimedPipelineJob,
 } from "@/db/queries/async-jobs";
 import {
@@ -19,6 +20,7 @@ import {
     aiUsageEvents,
     apiCredentials,
     asyncJobs,
+    chatterItems,
     itemProcessing,
     processingProfileRevisions,
     processingProfiles,
@@ -37,14 +39,18 @@ import {
 } from "@/lib/encryption/fields";
 import type { JobHandler } from "@/lib/jobs/types";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
+import { releaseAutoLearnHold } from "@/lib/learn/auto-learn";
 import { pipelineActionJobHandler } from "@/lib/pipeline/action-job";
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
 import { gatherFacts } from "@/lib/pipeline/facts";
 import {
     PIPELINE_ADVANCE_JOB_KIND,
     requestAdvance,
+    requestAdvanceInTx,
 } from "@/lib/pipeline/trigger";
 import { defaultProfileSettings } from "@/lib/profiles/settings";
+import { authorizeSummaryReplacementInTx } from "@/lib/summary/replacement";
+import { summaryJobHandler } from "@/lib/summary/summary-job-handler";
 import { plaudActionItemsFingerprint } from "@/lib/tasks/plaud-proposals";
 import { taskFingerprint } from "@/lib/tasks/proposals";
 import { upsertEnhancement } from "@/lib/transcription/persist";
@@ -462,6 +468,19 @@ const dbUrl = getTestDatabaseUrl();
             expect(await summaryPhase()).toEqual(phase);
         }
 
+        async function expectSourceChanged(jobId: string, items: string[]) {
+            const outcome = { kind: "skipped", reason: "source_changed" };
+            const job = (await workJobs()).find(({ id }) => id === jobId);
+            expect.soft(job?.status).toBe("completed");
+            expect.soft(job?.result).toEqual({ outcome });
+            expect.soft((await summaryPhase())?.steps?.summary).toMatchObject({
+                state: "skipped",
+                reason: "source_changed",
+                outcome,
+                sourceFingerprint: plaudActionItemsFingerprint(items),
+            });
+        }
+
         it.each([
             ["a first Summary", false],
             ["a legacy done Summary without steps", true],
@@ -551,6 +570,131 @@ const dbUrl = getTestDatabaseUrl();
             await expectQuietAdvance();
             await expectQuietAdvance();
             expect(await tasks()).toEqual([]);
+        });
+
+        it("retries cleanup when an interrupted empty import returns", async () => {
+            await seed();
+            await importSummary([OFFER]);
+            await applyImport([OFFER]);
+            const original = await tasks();
+
+            await importSummary([]);
+            await runNext(pipelineAdvanceJobHandler);
+            await importSummary([ROOM]);
+            const skipped = await runNext(pipelineActionJobHandler);
+            await expectSourceChanged(skipped, []);
+            expect(await tasks()).toEqual(original);
+
+            await importSummary([]);
+            await applyImport([]);
+            expect(await tasks()).toEqual([]);
+            await expectQuietAdvance();
+        });
+
+        it("retries padded recovery when the original import returns", async () => {
+            await seed("stuck");
+            await importSummary(PADDED_ITEMS);
+            await runNext(pipelineAdvanceJobHandler);
+            await importSummary(["Temporarily changed task"]);
+            const skipped = await runNext(pipelineActionJobHandler);
+            await expectSourceChanged(skipped, [OFFER, ROOM]);
+            expect(await tasks()).toEqual([]);
+
+            await importSummary(PADDED_ITEMS);
+            await applyImport([OFFER, ROOM]);
+            expect((await tasks()).map(({ text }) => text)).toEqual([
+                OFFER,
+                ROOM,
+            ]);
+            await expectQuietAdvance();
+        });
+
+        it("applies the Plaud fallback after Learn releases a held refresh without a provider", async () => {
+            await seed();
+            await importSummary([OFFER]);
+            await applyImport([OFFER]);
+            const generation = await db().transaction(async (tx) => {
+                const advance = await requestAdvanceInTx(tx, {
+                    itemId: ITEM,
+                    userId: OWNER,
+                    view: "private",
+                    reason: "summary",
+                });
+                if (!advance) throw new Error("Missing pipeline advance");
+                await authorizeSummaryReplacementInTx(tx, {
+                    itemId: ITEM,
+                    userId: OWNER,
+                    generation: advance.requestedGeneration,
+                });
+                await tx
+                    .update(chatterItems)
+                    .set({ summaryDueAt: new Date("2099-01-01T00:00:00Z") })
+                    .where(
+                        and(
+                            eq(chatterItems.id, ITEM),
+                            eq(chatterItems.userId, OWNER),
+                        ),
+                    );
+                return advance.requestedGeneration;
+            });
+            await enqueueJob({
+                userId: OWNER,
+                kind: summaryJobHandler.kind,
+                subjectId: ITEM,
+                payload: { recordingId: ITEM, trigger: "auto" },
+                pipeline: {
+                    itemId: ITEM,
+                    userId: OWNER,
+                    phase: "summary",
+                    step: "summary",
+                },
+            });
+            const held = await runNext(summaryJobHandler);
+            expect(
+                (await workJobs()).find(({ id }) => id === held)?.result,
+            ).toMatchObject({
+                outcome: { kind: "skipped", reason: "held" },
+            });
+            expect((await summaryPhase())?.steps?.summary).toMatchObject({
+                generation,
+                state: "skipped",
+                reason: "held",
+                sourceFingerprint: plaudActionItemsFingerprint([OFFER]),
+            });
+
+            await expect(releaseAutoLearnHold(ITEM)).resolves.toBe(true);
+            const facts = await gatherFacts(ITEM, "private", OWNER);
+            expect(facts.summaryDueAt).toBeNull();
+            expect(facts.summary.refreshRequested).toBe(true);
+            expect(facts.stepAvailability?.summary).toBe("no_provider");
+            await applyImport([OFFER]);
+            expect((await tasks()).map(({ text }) => text)).toEqual([OFFER]);
+            await expectQuietAdvance();
+        });
+
+        it("treats an encrypted non-array import as an empty list", async () => {
+            await seed();
+            await importSummary([OFFER]);
+            await applyImport([OFFER]);
+            await db()
+                .update(aiEnhancements)
+                .set({ actionItems: encryptJsonField({ unexpected: OFFER }) })
+                .where(
+                    and(
+                        eq(aiEnhancements.itemId, ITEM),
+                        eq(aiEnhancements.userId, OWNER),
+                        eq(aiEnhancements.source, "plaud"),
+                    ),
+                );
+            await requestAdvance({
+                itemId: ITEM,
+                userId: OWNER,
+                view: "private",
+                reason: "summary",
+            });
+            await applyImport([]);
+            expect(await tasks()).toEqual([]);
+            await expectQuietAdvance();
         });
 
         it.each([

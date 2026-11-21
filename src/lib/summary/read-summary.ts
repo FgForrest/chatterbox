@@ -54,8 +54,9 @@ export interface PlaudTaskSource {
 }
 
 /** Trim imported Plaud action items and discard blank or non-string entries. */
-export function normalizePlaudActionItems(raw: readonly unknown[]): string[] {
-    return raw.flatMap((item) => {
+export function normalizePlaudActionItems(raw: unknown): string[] {
+    if (!Array.isArray(raw)) return [];
+    return raw.flatMap((item: unknown) => {
         const text = typeof item === "string" ? item.trim() : "";
         return text ? [text] : [];
     });
@@ -82,14 +83,15 @@ export async function readPlaudTaskSource(
         )
         .limit(1);
     if (!row) return null;
-    const rawItems = decryptJsonField<unknown[]>(row.actionItems) ?? [];
+    const rawItems = decryptJsonField<unknown>(row.actionItems);
     const actionItems = normalizePlaudActionItems(rawItems);
     return {
         summary: decryptText(row.summary) ?? "",
         actionItems,
         hasUnnormalizedItems:
-            rawItems.length !== actionItems.length ||
-            actionItems.some((item, index) => item !== rawItems[index]),
+            Array.isArray(rawItems) &&
+            (rawItems.length !== actionItems.length ||
+                actionItems.some((item, index) => item !== rawItems[index])),
         transcriptionId: row.transcriptionId,
     };
 }

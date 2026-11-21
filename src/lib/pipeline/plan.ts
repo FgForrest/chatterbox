@@ -243,24 +243,28 @@ function plaudTasksPending(
         return false;
     }
     const step = facts.phases.summary?.steps?.summary;
-    if (step?.sourceFingerprint !== source.fingerprint) return true;
     if (
-        source.hasUnnormalizedItems &&
-        step.state === "skipped" &&
-        step.reason === "outdated" &&
-        step.outcome?.kind === "skipped" &&
-        !step.outcome.usesNormalizedPlaudItems
-    )
-        return true;
+        minimumGeneration === undefined &&
+        step?.sourceFingerprint === source.fingerprint
+    ) {
+        return (
+            step.state === "skipped" &&
+            (step.reason === "source_changed" ||
+                (source.hasUnnormalizedItems === true &&
+                    step.reason === "outdated" &&
+                    step.outcome?.kind === "skipped" &&
+                    !step.outcome.usesNormalizedPlaudItems))
+        );
+    }
     return (
-        minimumGeneration !== undefined &&
-        (!stepRequested(
+        !stepRequested(
             facts.phases.summary,
             "summary",
             input,
             minimumGeneration,
         ) ||
-            (step.state !== "skipped" && step.reason !== "plaud_tasks"))
+        step?.reason !== "plaud_tasks" ||
+        step.sourceFingerprint !== source.fingerprint
     );
 }
 
