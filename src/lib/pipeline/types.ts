@@ -231,6 +231,7 @@ export type PipelineAction =
     | {
           type: "applyPlaudTasks";
           sourceFingerprint: string;
+          keepMatchingProposals?: true;
           content: ContentRevisionInput;
           record: PhaseRecord;
           hasUnnormalizedItems?: true;

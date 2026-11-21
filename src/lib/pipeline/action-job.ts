@@ -96,6 +96,7 @@ export const pipelineActionJobHandler: JobHandler<ActionPayload> = {
                 expectedFingerprint: payload.action.sourceFingerprint,
                 record: payload.action.record,
                 settle: false,
+                keepMatchingProposals: payload.action.keepMatchingProposals,
             });
             return {
                 outcome: applied

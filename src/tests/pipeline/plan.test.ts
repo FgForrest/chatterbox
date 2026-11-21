@@ -1129,6 +1129,7 @@ describe("planAdvance audio", () => {
         expect(actions[0]).toEqual({
             type: "applyPlaudTasks",
             sourceFingerprint: "plaud-v1",
+            keepMatchingProposals: true,
             content: {
                 contentId: "transcription-1",
                 contentSourceId: "riffado",
@@ -1161,11 +1162,11 @@ describe("planAdvance audio", () => {
             ),
         ).toBe(false);
         applied.plaudTasks = { fingerprint: "plaud-v2" };
-        expect(
-            planAdvance(applied).actions.some(
-                (action) => action.type === "applyPlaudTasks",
-            ),
-        ).toBe(true);
+        const changed = planAdvance(applied).actions.find(
+            (action) => action.type === "applyPlaudTasks",
+        );
+        expect(changed).toMatchObject({ sourceFingerprint: "plaud-v2" });
+        expect(changed).not.toHaveProperty("keepMatchingProposals");
     });
 
     it("writes no Plaud tasks when Tasks are off", () => {
