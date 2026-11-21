@@ -1,3 +1,5 @@
+import { usesDefaultPostgresPassword } from "./lib/postgres-password";
+
 type WebhookWorkerModule = {
     startWebhookWorker: () => void;
 };
@@ -66,6 +68,7 @@ type EnvModule = {
     env: {
         IS_HOSTED: boolean;
         RATE_LIMIT_TRUST_PROXY_HEADERS?: boolean;
+        DATABASE_URL?: string;
     };
 };
 
@@ -95,6 +98,12 @@ export async function register() {
     // runtime -- including edge, where this hook must no-op -- before the
     // guard above. Loading it here keeps validation inside the nodejs branch.
     const { env } = require("./lib/env") as EnvModule;
+
+    if (usesDefaultPostgresPassword(env.DATABASE_URL)) {
+        console.warn(
+            "[db] WARNING: DATABASE_URL uses the default Postgres password. Rotate the database role password in place and update the app's connection settings. For the bundled database, set POSTGRES_PASSWORD in .env and recreate the app container.",
+        );
+    }
 
     // Per-IP auth rate limiting needs a trustworthy client IP. When proxy
     // headers aren't trusted, `getClientIp` returns "unknown" and the per-IP

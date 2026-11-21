@@ -7,17 +7,17 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      # Default preserved for backward compat with existing self-host
-      # deploys. New installs set a random POSTGRES_PASSWORD in .env
-      # before the first start (`openssl rand -hex 24`). Existing operators
-      # can rotate by setting POSTGRES_PASSWORD in .env, recreating the
-      # `db` volume, and restoring from a backup.
+      # Keep the postgres default for existing volumes. Postgres uses this
+      # value to set the role password only when initializing the database.
+      # Rotate in place with \password postgres and a hex password (openssl rand -hex 24).
+      # See /docs/self-hosting/environment-variables#bundled-postgres for the steps.
+      # Keep the db volume to preserve its data.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: riffado
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s

@@ -69,6 +69,35 @@ stránky kromě `API_TOKEN_HASH_SECRET` a těch, které se čtou při sestavení
 Vlastní soubor Compose předává jen to, co uvádí jeho `environment:`, proto při
 aktualizaci zkopírujte nové položky ze souboru z vydání.
 
+<span id="bundled-postgres" />
+
+## Přibalený Postgres
+
+Přiložený `docker-compose.yml` zpřístupňuje Postgres na lokální adrese hostitele
+Dockeru `127.0.0.1:5432`. Aplikace se připojuje přes síť Compose na `db:5432`.
+Klienti na jiném počítači potřebují tunel SSH na hostitele Dockeru nebo jiné
+mapování portu. Mapování změňte přímo v `db.ports` v základním souboru nebo
+nahraďte seznam v souboru s přepsáním pomocí `ports: !override` (Docker Compose
+2.24.4 nebo novější). Běžný seznam `ports` se může sloučit s původním seznamem,
+takže se mapování mohou překrývat.
+
+Compose sestaví `DATABASE_URL` pro aplikaci z proměnné `POSTGRES_PASSWORD`, jejíž
+výchozí hodnota je `postgres`. Postgres z této proměnné nastaví heslo role při
+prvotní inicializaci databáze. Pokud připojovací URL obsahuje výchozí heslo,
+aplikace při spuštění zapíše varování do logu.
+
+Pro změnu hesla ve stávající instalaci vygenerujte hexadecimální heslo příkazem
+`openssl rand -hex 24`. Compose vloží heslo do `DATABASE_URL` bez kódování pro URL.
+
+1. Spusťte `psql` příkazem `docker compose exec db psql -U postgres`. Zadejte
+   `\password postgres` a na výzvu zadejte nové heslo. Příkaz změní heslo
+   stávající role bez uložení hesla v čitelné podobě do historie příkazů
+   nebo logů serveru.
+2. Stejnou hodnotu uložte do `.env` jako `POSTGRES_PASSWORD`.
+3. Vytvořte znovu kontejner aplikace příkazem `docker compose up -d --no-deps --force-recreate app`.
+
+Ponechte stávající databázový svazek. Jeho smazáním byste přišli o data.
+
 <span id="storage" />
 
 ## Úložiště
