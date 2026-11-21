@@ -1,7 +1,7 @@
 ---
 title: Hand-edited summaries survive automatic processing and owner remarks replay on later runs
 date: 2026-10-28
-updated: 2026-10-28 22:54
+updated: 2026-11-20 19:49
 status: accepted
 kind: feature
 issues: [299]
@@ -136,7 +136,8 @@ persistence paths ran, and the demo provider configuration was restored afterwar
 
 - [Preferred transcript selection](2026-10-22-summary-reads-the-preferred-transcript.md) is
   superseded only for automatic replacement of a hand-edited summary when preferred content
-  changes. The `riffado`, `mixed`, `plaud` input order and all other rules remain in force.
+  changes. The `riffado`, `plaud` input order (`mixed` was removed in #446) and all other rules
+  remain in force.
 
 ## Timeline
 

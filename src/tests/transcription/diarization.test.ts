@@ -35,9 +35,6 @@ describe("mayBeDiarized", () => {
 
     it("accepts Plaud-imported transcripts, which arrive as speaker segments", () => {
         expect(mayBeDiarized({ source: "plaud", model: "plaud" })).toBe(true);
-        expect(mayBeDiarized({ source: "mixed", model: "whisper-1" })).toBe(
-            true,
-        );
     });
 
     it("rejects the providers prompted for no speaker labels", () => {

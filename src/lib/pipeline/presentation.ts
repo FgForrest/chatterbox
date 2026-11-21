@@ -73,7 +73,10 @@ import { assertMayChange } from "@/lib/sharing/writer";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
 import { waitingTaskDecisions } from "@/lib/tasks/waiting-review";
 import { TOPICS_JOB_KIND } from "@/lib/topics/topics-job";
-import { preferredTranscript } from "@/lib/transcription/preferred-source";
+import {
+    preferredTranscript,
+    TRANSCRIPT_SOURCE_ORDER,
+} from "@/lib/transcription/preferred-source";
 import { TRANSCRIPTION_JOB_KIND } from "@/lib/transcription/transcription-job";
 import type { FolderKind } from "@/types/folder";
 
@@ -712,9 +715,7 @@ export async function loadPrivateItemProcessing(
                           eq(transcriptions.recordingId, itemId),
                           eq(transcriptions.userId, ownerUserId),
                           inArray(transcriptions.source, [
-                              "riffado",
-                              "mixed",
-                              "plaud",
+                              ...TRANSCRIPT_SOURCE_ORDER,
                           ]),
                       ),
                   )
@@ -1069,8 +1070,7 @@ export async function loadPrivateItemProcessing(
             return undefined;
         const source = row.inputs.contentSourceId;
         if (source === "mail") return content;
-        if (source !== "riffado" && source !== "mixed" && source !== "plaud")
-            return undefined;
+        if (source !== "riffado" && source !== "plaud") return undefined;
         if (row.editedAt) return preferredContent;
         return transcripts.find((transcript) => transcript.source === source);
     };

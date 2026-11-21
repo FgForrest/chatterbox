@@ -311,19 +311,11 @@ it("reads each recording part once on a cold open and once when its version chan
     expect(requests().map((calls) => calls.length)).toEqual(parts.map(() => 2));
 });
 
-it.each([
-    "riffado",
-    "mixed",
-] as const)("defaults to the workflow's %s transcript with Plaud first in the props", async (source) => {
+it("defaults to Custom during a workflow with Plaud first in the props", async () => {
     server();
-    render(
-        <WorkstationDetailPane
-            {...props}
-            transcripts={[transcript("plaud"), transcript(source)]}
-        />,
-    );
+    render(<WorkstationDetailPane {...props} />);
     await screen.findByLabelText("Workflow");
-    expect(screen.getByText(`${source} transcript 1`)).toBeTruthy();
+    expect(screen.getByText("riffado transcript 1")).toBeTruthy();
 });
 
 it("shows the workflow default throughout a cold open with Plaud preferred", async () => {
@@ -406,41 +398,27 @@ it.each([
     expect(screen.getByText("plaud transcript 1")).toBeTruthy();
 });
 
-it("keeps the picked Plaud tab when Custom arrives during a workflow", async () => {
+it("keeps the picked Plaud tab when Custom disappears and returns during a workflow", async () => {
     const base = projection();
-    const initial = {
-        ...base,
-        versions: {
-            ...base.versions,
-            transcripts: { plaud: "plaud-1", mixed: "mixed-1" },
-        },
-    };
-    const remote = server(undefined, initial);
-    const existing = [transcript("plaud"), transcript("mixed")];
-    const view = render(
-        <WorkstationDetailPane {...props} transcripts={existing} />,
-    );
+    const remote = server(undefined, base);
+    const view = render(<WorkstationDetailPane {...props} />);
     await screen.findByLabelText("Workflow");
-    expect(screen.getByText("mixed transcript 1")).toBeTruthy();
+    expect(screen.getByText("riffado transcript 1")).toBeTruthy();
     fireEvent.click(screen.getByText("Plaud", { selector: "button" }));
     expect(screen.getByText("plaud transcript 1")).toBeTruthy();
 
     await remote.update({
         ...base,
-        versions: {
-            ...base.versions,
-            transcripts: {
-                ...initial.versions.transcripts,
-                riffado: "riffado-1",
-            },
-        },
+        versions: { ...base.versions, transcripts: { plaud: "plaud-1" } },
     });
     view.rerender(
         <WorkstationDetailPane
             {...props}
-            transcripts={[...existing, transcript("riffado")]}
+            transcripts={[transcript("plaud")]}
         />,
     );
+    await remote.update(base);
+    view.rerender(<WorkstationDetailPane {...props} />);
     expect(screen.getByText("plaud transcript 1")).toBeTruthy();
 });
 
@@ -476,7 +454,7 @@ it("switches to the transcript targeted by a workflow review", async () => {
     expect(screen.getByText("riffado transcript 1")).toBeTruthy();
 });
 
-it("opens the Plaud Learn review while Mix is the workflow summary input", async () => {
+it("opens the Plaud Learn review while Custom is the preferred transcript", async () => {
     const base = projection();
     server(
         (url) =>
@@ -498,14 +476,9 @@ it("opens the Plaud Learn review while Mix is the workflow summary input", async
             },
         },
     );
-    render(
-        <WorkstationDetailPane
-            {...props}
-            transcripts={[transcript("plaud"), transcript("mixed")]}
-        />,
-    );
+    render(<WorkstationDetailPane {...props} />);
     const workflow = within(await screen.findByLabelText("Workflow"));
-    expect(screen.getByText("mixed transcript 1")).toBeTruthy();
+    expect(screen.getByText("riffado transcript 1")).toBeTruthy();
     fireEvent.click(workflow.getByRole("button", { name: /review/i }));
     expect(screen.getByText("plaud transcript 1")).toBeTruthy();
     expect(await screen.findByText(/Plaud proposal/)).toBeTruthy();

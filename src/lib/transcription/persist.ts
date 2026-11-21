@@ -52,11 +52,10 @@ import type { TranscriptTurn } from "@/lib/transcription/turns";
  * Provenance of a transcript row, orthogonal to `transcriptionType`:
  *   - 'riffado' = produced by the user's own provider (server/browser)
  *   - 'plaud'   = imported from Plaud's native transcription
- *   - 'mixed'   = user-edited combination of the above
  * A recording can hold at most one row per source (enforced by the
  * `(recordingId, userId, source)` unique), so the sources coexist. See #204.
  */
-export type TranscriptSource = "riffado" | "plaud" | "mixed";
+export type TranscriptSource = "riffado" | "plaud";
 
 /** Summary pipeline provenance. One row per source can coexist. */
 export type EnhancementSource = "riffado" | "plaud";

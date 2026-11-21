@@ -267,10 +267,7 @@ describe("independent transcript and summary pipelines", () => {
         });
     });
 
-    it.each([
-        "plaud",
-        "mixed",
-    ])("summarizes a %s-only transcript from the custom view", (source) => {
+    it("summarizes a Plaud-only transcript from the custom view", () => {
         render(
             <TranscriptionPanel
                 recording={{
@@ -281,14 +278,14 @@ describe("independent transcript and summary pipelines", () => {
                     startTime: new Date(0).toISOString(),
                     deviceSn: "mira-device",
                 }}
-                transcripts={[{ source, text: "Mira's planning transcript" }]}
+                transcripts={[
+                    { source: "plaud", text: "Mira's planning transcript" },
+                ]}
                 isTranscribing={false}
                 onTranscribe={vi.fn()}
             />,
         );
-        if (source === "plaud") {
-            fireEvent.click(screen.getByRole("button", { name: "Custom" }));
-        }
+        fireEvent.click(screen.getByRole("button", { name: "Custom" }));
         expect(summaryOptions.at(-1)).toMatchObject({
             summarySource: "riffado",
             transcriptionText: "Mira's planning transcript",

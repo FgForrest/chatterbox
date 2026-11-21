@@ -57,7 +57,7 @@ import { dropTasksWithoutSummaryInTx } from "@/lib/tasks/store";
 export type LocalEraseScope = "audio" | "transcript" | "summary";
 export type GeneratedArtifactKind = "transcript" | "summary";
 
-const SIDECAR_SOURCES = [undefined, "plaud", "riffado", "mixed"] as const;
+const SIDECAR_SOURCES = [undefined, "plaud", "riffado"] as const;
 
 export function storageKeysForErase(
     audioPath: string,

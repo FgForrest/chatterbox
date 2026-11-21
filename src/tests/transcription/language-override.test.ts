@@ -16,6 +16,29 @@ vi.mock("@/lib/posthog-server", () => ({ captureServerException: vi.fn() }));
 import { parseTranscriptionJobPayload } from "@/lib/transcription/transcription-job";
 import { transcriptionJobHandler } from "@/lib/transcription/transcription-job-handler";
 
+it("runs a queued transcription with retired attribution metadata", async () => {
+    const payload = parseTranscriptionJobPayload({
+        recordingId: "invented-rec",
+        trigger: "manual",
+        force: true,
+        attributionSource: "mixed",
+    });
+    await transcriptionJobHandler.run({
+        payload,
+        userId: "invented-owner",
+        jobId: "invented-job",
+        attempt: 1,
+        maxAttempts: 3,
+        signal: new AbortController().signal,
+        reportProgress: () => {},
+    });
+    expect(transcribe).toHaveBeenCalledWith(
+        "invented-owner",
+        "invented-rec",
+        expect.objectContaining({ attributionSource: undefined, force: true }),
+    );
+});
+
 describe("one-run transcription language override", () => {
     it("survives persisted payload validation and reaches the provider runner", async () => {
         const payload = parseTranscriptionJobPayload({

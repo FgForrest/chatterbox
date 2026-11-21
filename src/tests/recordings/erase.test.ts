@@ -91,7 +91,6 @@ describe("recording artifact erasure", () => {
             "users/u/Meeting.transcript.md",
             "users/u/Meeting.plaud.transcript.md",
             "users/u/Meeting.custom.transcript.md",
-            "users/u/Meeting.mixed.transcript.md",
         ]);
     });
 
@@ -104,7 +103,7 @@ describe("recording artifact erasure", () => {
             "all",
         );
 
-        expect(deleteFile).toHaveBeenCalledTimes(9);
+        expect(deleteFile).toHaveBeenCalledTimes(7);
         expect(deleteFile).toHaveBeenCalledWith("users/u/Meeting.ogg");
         expect(deleteFile).toHaveBeenCalledWith(
             "users/u/Meeting.plaud.summary.md",
@@ -127,7 +126,7 @@ describe("recording artifact erasure", () => {
                 "summary",
             ),
         ).resolves.toBeUndefined();
-        expect(deleteFile).toHaveBeenCalledTimes(4);
+        expect(deleteFile).toHaveBeenCalledTimes(3);
     });
 
     it("surfaces real storage failures so cleanup can be retried", async () => {

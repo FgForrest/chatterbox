@@ -43,15 +43,10 @@ export function useShareProblemMessage() {
                               "{count, plural, one {# speaker is} other {# speakers are}} still unnamed in the Plaud transcript.",
                               { count },
                           )
-                        : problem.source === "mixed"
-                          ? i18n(
-                                "{count, plural, one {# speaker is} other {# speakers are}} still unnamed in the Mix transcript.",
-                                { count },
-                            )
-                          : i18n(
-                                "{count, plural, one {# speaker is} other {# speakers are}} still unnamed in the Custom transcript.",
-                                { count },
-                            );
+                        : i18n(
+                              "{count, plural, one {# speaker is} other {# speakers are}} still unnamed in the Custom transcript.",
+                              { count },
+                          );
                 }
                 default:
                     return null;

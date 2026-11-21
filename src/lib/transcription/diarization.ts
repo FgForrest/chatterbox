@@ -51,7 +51,7 @@ const TURN_PATTERN = new RegExp(
  * `parseSpeakerTurns`, which answers the second question.
  */
 export function mayBeDiarized({ source, model }: DiarizationSource): boolean {
-    if (source === "plaud" || source === "mixed") return true;
+    if (source === "plaud") return true;
     return (model ?? "").toLowerCase().includes("diarize");
 }
 
