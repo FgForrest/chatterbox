@@ -47,6 +47,7 @@ export type ProcessingInput = Omit<
 >;
 
 export interface ProcessingPermissions {
+    hasEligibleTranscript?: boolean;
     advancePending?: boolean;
     canChange: boolean;
     canFile: boolean;
@@ -256,7 +257,9 @@ export function projectProcessing(
         if (
             !isActive(step) &&
             (!record || step.state === "pending") &&
-            outputExists(data, phase)
+            (phase === "transcribe"
+                ? (permissions.hasEligibleTranscript ?? data.outputs.transcript)
+                : outputExists(data, phase))
         ) {
             step.state = "done";
             step.reason = "content-available";

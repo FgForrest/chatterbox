@@ -69,6 +69,7 @@ function panelElement(
     readOnly = false,
     isTranscribing = false,
     deviceSn = "local",
+    source: "riffado" | "plaud" = "riffado",
 ) {
     return (
         <PlaybackProvider
@@ -85,7 +86,7 @@ function panelElement(
                 }}
                 transcripts={[
                     {
-                        source: "riffado",
+                        source,
                         text: turns
                             .map((turn) => `${turn.speaker}: ${turn.text}`)
                             .join("\n"),
@@ -293,6 +294,25 @@ describe("transcript card behavior", () => {
         ).toBeNull();
         view.rerender(panelElement());
         expectCollapsed();
+    });
+
+    it("keeps the stored Plaud text readable during automatic transcription (#458)", () => {
+        const panel = render(
+            panelElement(false, false, false, "SN-1", "plaud"),
+        );
+        const box = screen.getByRole("region", { name: "Transcript content" });
+        panel.rerender(panelElement(false, false, true, "SN-1", "plaud"));
+        expect(
+            screen.getByText("Transcribing audio…").closest("[hidden]"),
+        ).toBeNull();
+        expect(screen.getByRole("region", { name: "Transcript content" })).toBe(
+            box,
+        );
+        expect(box.textContent).toContain("Opening.");
+        panel.rerender(panelElement(false, false, false, "SN-1", "plaud"));
+        expect(screen.getByRole("region", { name: "Transcript content" })).toBe(
+            box,
+        );
     });
 
     it("runs re-detection after expanding the card", async () => {

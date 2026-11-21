@@ -116,6 +116,11 @@ export type PipelineProfileResolution =
     | "choose"
     | "waiting_for_curator";
 
+export interface PlaudTranscriptInput extends ContentRevisionInput {
+    timed: boolean;
+    lacksConfirmableSpeakers: () => boolean;
+}
+
 export interface PipelineFacts {
     item: {
         exists: boolean;
@@ -133,12 +138,13 @@ export interface PipelineFacts {
     trimContent?: (ContentRevisionInput & { timed: boolean }) | null;
     transcription?: {
         riffado: (ContentRevisionInput & { timed: boolean }) | null;
-        plaud: (ContentRevisionInput & { timed: boolean }) | null;
+        plaud: PlaudTranscriptInput | null;
         jobActive: boolean;
         contentReaped?: boolean;
         audioReaped?: boolean;
         cut?: boolean;
-        shared?: boolean;
+        sharedReadOnly?: boolean;
+        hasPriorOutput?: boolean;
         failed?: {
             errorCode: string;
             completedAt: string;

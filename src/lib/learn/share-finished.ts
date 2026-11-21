@@ -29,7 +29,13 @@ import {
     dropUnusedAdoptionsInTx,
 } from "@/lib/knowledge/vocabulary";
 import { cancelPrivateCorrectionsAtShareInTx } from "@/lib/learn/sharing";
+import { effectiveManualOnly } from "@/lib/pipeline/effective-profile";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
+import {
+    plaudTranscriptInput,
+    plaudTranscriptTurns,
+} from "@/lib/pipeline/transcript-facts";
+import { canUsePlaudTranscript } from "@/lib/pipeline/transcript-policy";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { resolveChannelDefaultProfile } from "@/lib/profiles/resolve-for-placement";
 import { parseProfileSettings } from "@/lib/profiles/settings";
@@ -179,6 +185,7 @@ export async function publishFinishedPrivateLearnInTx(
                 id: transcriptions.id,
                 revision: transcriptions.revision,
                 source: transcriptions.source,
+                turns: plaudTranscriptTurns,
             })
             .from(transcriptions)
             .where(
@@ -238,10 +245,21 @@ export async function publishFinishedPrivateLearnInTx(
                 : fallback
                   ? parseProfileSettings("audio", fallback.settings)
                   : null;
-            if (settings?.steps.transcribe.plaudTranscript === "use") {
-                content = transcripts.find(
-                    (transcript) => transcript.source === "plaud",
-                );
+            const plaud = transcripts.find(
+                (transcript) => transcript.source === "plaud",
+            );
+            const phases = processing?.phases ?? {};
+            if (
+                plaud &&
+                canUsePlaudTranscript({
+                    transcript: plaudTranscriptInput(plaud),
+                    policy: settings?.steps.transcribe,
+                    phases,
+                    manualOnly: effectiveManualOnly(processing),
+                    hasPriorOutput: true,
+                })
+            ) {
+                content = plaud;
             }
         }
     }
