@@ -67,13 +67,20 @@ async function fetchAttempt(
     return response;
 }
 
+/** SDK transport over `transport` that records each failed HTTP attempt, including SDK retries. */
+export function createUsageAttemptFetch(
+    transport: typeof globalThis.fetch,
+): typeof globalThis.fetch {
+    return Object.assign(
+        (input: RequestInfo | URL, init?: RequestInit) =>
+            fetchAttempt(transport, input, init),
+        // Without it the SDK probes upload support with a `data:` request, which providerFetch refuses.
+        { Response },
+    );
+}
+
 /** SDK transport that records each failed HTTP attempt, including SDK retries. */
-export const usageAttemptFetch: typeof globalThis.fetch = Object.assign(
-    (input: RequestInfo | URL, init?: RequestInit) =>
-        fetchAttempt(providerFetch, input, init),
-    // Without it the SDK probes upload support with a `data:` request, which providerFetch refuses.
-    { Response },
-);
+export const usageAttemptFetch = createUsageAttemptFetch(providerFetch);
 
 /** Track HTTP attempts through a caller's existing transport without changing its routing policy. */
 export function createUsageFetch(
