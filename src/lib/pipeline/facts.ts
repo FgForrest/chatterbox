@@ -228,6 +228,7 @@ export async function gatherFacts(
                       id: transcriptions.id,
                       revision: transcriptions.revision,
                       turns: transcriptions.turns,
+                      hasTopics: sql<boolean>`${transcriptions.topics} is not null`,
                   })
                   .from(transcriptions)
                   .where(
@@ -243,7 +244,9 @@ export async function gatherFacts(
                           ? {
                                 id: row.id,
                                 revision: row.revision,
+                                source: "plaud",
                                 timed: row.turns !== null,
+                                hasTopics: row.hasTopics,
                             }
                           : null,
                   )
@@ -738,6 +741,22 @@ export async function gatherFacts(
           ? { ...content, source: "mail" }
           : null;
     const learnContent = preferredContent;
+    const storedTopics = [
+        trimTranscript?.source !== "plaud" && trimTranscript?.topics != null
+            ? trimTranscript
+            : null,
+        plaudTranscript?.hasTopics ? plaudTranscript : null,
+    ].flatMap((transcript) =>
+        transcript
+            ? [
+                  {
+                      contentId: transcript.id,
+                      contentSourceId: transcript.source,
+                      contentRevision: transcript.revision,
+                  },
+              ]
+            : [],
+    );
     const summaryExists = summary !== undefined;
     const staleFingerprint = summary
         ? await staleReadingFingerprint(summary)
@@ -875,6 +894,7 @@ export async function gatherFacts(
                       ),
                   }
                 : undefined,
+        storedTopics,
         mail: item.kind === "mail" && mail ? { ...mail, shared } : null,
         summary: {
             source: summary?.source,

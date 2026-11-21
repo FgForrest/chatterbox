@@ -142,6 +142,7 @@ export function markPhasesOutdatedForInputs(
     at: string,
     summaryStale: boolean,
     staleFingerprint = "stale",
+    preserveTopics = false,
 ): InputOutdatedResult {
     const next = { ...phases };
     const changed: PhaseName[] = [];
@@ -185,6 +186,8 @@ export function markPhasesOutdatedForInputs(
         );
         if (summaryReason === "learn_changed") {
             next.summary.staleFingerprint = staleFingerprint;
+            if (preserveTopics && summary.steps?.topics && next.summary.steps)
+                next.summary.steps.topics = summary.steps.topics;
         } else {
             delete next.summary.staleFingerprint;
         }
