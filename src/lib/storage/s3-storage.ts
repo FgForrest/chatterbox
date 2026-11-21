@@ -33,7 +33,12 @@ type S3ReadError = {
     ActualObjectSize?: string;
 };
 
-class S3ReadMetadataError extends Error {}
+class S3ReadMetadataError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "S3ReadMetadataError";
+    }
+}
 
 const MAX_OFFSET = BigInt(Number.MAX_SAFE_INTEGER);
 
