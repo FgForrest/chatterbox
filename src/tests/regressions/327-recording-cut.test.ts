@@ -331,6 +331,7 @@ it.each([
                 contentSourceId: "plaud",
                 contentRevision: 1,
                 timed: true,
+                lacksConfirmableSpeakers: () => false,
             },
             jobActive: false,
             cut: true,

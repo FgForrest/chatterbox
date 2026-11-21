@@ -1281,7 +1281,9 @@ function TranscribeSettings({
                         })
                     }
                 >
-                    <option value="use">{i18n("Use when available")}</option>
+                    <option value="use">
+                        {i18n("Prefer Plaud with speaker labels")}
+                    </option>
                     <option value="also_transcribe">
                         {i18n("Also transcribe with my provider")}
                     </option>

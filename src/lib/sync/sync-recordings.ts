@@ -42,6 +42,7 @@ import {
     captureServerException,
 } from "@/lib/posthog-server";
 import { buildRecordingStagingPath } from "@/lib/recordings/filename";
+import { importedDetectedLanguage } from "@/lib/recordings/language";
 import { enqueueStorageReconciliationJob } from "@/lib/recordings/storage-reconciliation-job";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import {
@@ -1258,7 +1259,9 @@ async function importPlaudContent(
                         userId: context.userId,
                         recordingId: candidate.recordingId,
                         text: parsed.text,
-                        detectedLanguage: parsed.language,
+                        detectedLanguage:
+                            importedDetectedLanguage(parsed.language) ??
+                            importedDetectedLanguage(transcript.language),
                         source: "plaud",
                         provider: "plaud",
                         model: "plaud-native",
@@ -1345,8 +1348,14 @@ async function importPlaudContent(
                     "Plaud content import stopped: access token expired",
                 );
             } else {
+                const classifier =
+                    error instanceof AppError
+                        ? error.code
+                        : error instanceof Error
+                          ? error.constructor.name || error.name || "unknown"
+                          : "unknown";
                 result.errors.push(
-                    `Plaud content import failed for ${candidate.plaudFileId}: ${error}`,
+                    `Plaud content import failed for ${candidate.plaudFileId} (${classifier})`,
                 );
             }
         }

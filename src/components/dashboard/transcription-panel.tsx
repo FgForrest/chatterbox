@@ -1135,7 +1135,10 @@ export function TranscriptionPanel({
                         {activeTranscript?.text && (
                             <div
                                 className="space-y-4"
-                                hidden={transcriptionRunning}
+                                hidden={
+                                    transcriptionRunning &&
+                                    activeTranscript.source !== "plaud"
+                                }
                             >
                                 <section
                                     ref={transcriptSectionRef}

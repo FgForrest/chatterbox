@@ -230,6 +230,9 @@ export function plaudV4DetailToLegacy(
             data_type: dataType,
             task_status: o.task_status,
             data_link: o.content_url,
+            ...(dataType === "transaction" && typeof o.language === "string"
+                ? { language: o.language }
+                : {}),
         });
     }
     return {

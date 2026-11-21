@@ -1,9 +1,13 @@
-import { placementKeepsCompletedTranscript } from "@/lib/pipeline/effective-profile";
 import {
     markPhasesOutdatedForInputs,
     processAgainPending,
 } from "@/lib/pipeline/outdated";
 import { automaticTitleSettled } from "@/lib/pipeline/title-step";
+import {
+    currentTranscriptionPhase,
+    minimumProcessingGeneration,
+    pipelineContent,
+} from "@/lib/pipeline/transcript-policy";
 import type {
     ContentRevisionInput,
     PhaseRecord,
@@ -1043,14 +1047,7 @@ function planProcessing(facts: PipelineFacts): PipelinePlan {
         return { actions };
     }
 
-    const minimumGeneration =
-        categorize?.reason === "process_again"
-            ? categorize.generation
-            : facts.legacyContinuation &&
-                facts.phases.learn?.state === "done" &&
-                facts.phases.learn.reason === "released"
-              ? facts.phases.learn.generation
-              : undefined;
+    const minimumGeneration = minimumProcessingGeneration(facts);
     const summaryMinimumGeneration = facts.summary.refreshRequested
         ? categorize?.summaryRefresh?.generation
         : minimumGeneration;
@@ -1070,20 +1067,7 @@ function planProcessing(facts: PipelineFacts): PipelinePlan {
     }
 
     const profileTranscription = facts.profile?.transcribe;
-    const riffadoTranscript = facts.transcription?.riffado ?? facts.content;
-    const plaudTranscript = facts.transcription?.plaud ?? null;
-    const content =
-        facts.item.kind === "audio"
-            ? (riffadoTranscript ??
-              (profileTranscription?.plaudTranscript === "use" ||
-              placementKeepsCompletedTranscript(
-                  facts.phases,
-                  plaudTranscript,
-                  minimumGeneration,
-              )
-                  ? plaudTranscript
-                  : null))
-            : facts.content;
+    const content = pipelineContent(facts);
 
     const transcribeSkipReason = facts.transcription?.contentReaped
         ? "content_reaped"
@@ -1141,14 +1125,14 @@ function planProcessing(facts: PipelineFacts): PipelinePlan {
         if (facts.item.kind === "audio") {
             if (transcribeSkipReason) return { actions };
             if (profileTranscription?.automatic) {
-                const transcribe = facts.phases.transcribe;
+                const transcribe = currentTranscriptionPhase(facts.phases);
                 const failed = facts.transcription?.failed;
-                const completedAfterRun =
+                if (
                     failed &&
                     transcribe?.state === "running" &&
                     transcribe.reason === "automatic" &&
-                    Date.parse(failed.completedAt) >= Date.parse(transcribe.at);
-                if (completedAfterRun) {
+                    Date.parse(failed.completedAt) >= Date.parse(transcribe.at)
+                ) {
                     actions.push(
                         automaticTranscribePhase(
                             facts,
@@ -1159,6 +1143,7 @@ function planProcessing(facts: PipelineFacts): PipelinePlan {
                 } else if (transcribe?.state === "failed") {
                     return { actions };
                 } else if (!facts.transcription?.jobActive) {
+                    if (facts.transcription?.sharedReadOnly) return { actions };
                     actions.push({ type: "queueTranscription" });
                     actions.push(
                         automaticTranscribePhase(facts, "running", "automatic"),

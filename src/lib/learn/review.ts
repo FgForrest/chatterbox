@@ -134,6 +134,7 @@ import { assertOwnScopeWritable, getOrgUserId } from "@/lib/org/config";
 import { gatherFacts } from "@/lib/pipeline/facts";
 import { planAdvance } from "@/lib/pipeline/plan";
 import { markLearnReleasedInTx, updatePhaseInTx } from "@/lib/pipeline/state";
+import { pipelineContent } from "@/lib/pipeline/transcript-policy";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import {
     loadItemProfileRevision,
@@ -2472,12 +2473,7 @@ export async function learnQuickFinishPolicy(
         "private",
         access.ownerUserId,
     );
-    const content =
-        facts.content ??
-        (facts.profile?.transcribe?.plaudTranscript === "use"
-            ? facts.transcription?.plaud
-            : null);
-    const input = facts.phases.learn?.inputs ?? content;
+    const input = facts.phases.learn?.inputs ?? pipelineContent(facts);
     const generation = facts.generation + 1;
     const automaticSummary = planAdvance({
         ...facts,

@@ -28,6 +28,12 @@ import {
 } from "@/lib/pipeline/effective-profile";
 import { legacyPhases } from "@/lib/pipeline/legacy";
 import { readProcessing } from "@/lib/pipeline/state";
+import {
+    audioHasPriorOutput,
+    plaudTranscriptInput,
+    readFailedAutomaticTranscription,
+    sharedTranscriptionReadOnly,
+} from "@/lib/pipeline/transcript-facts";
 import { PIPELINE_ADVANCE_JOB_KIND } from "@/lib/pipeline/trigger";
 import type { PipelineFacts, PipelineView } from "@/lib/pipeline/types";
 import {
@@ -123,6 +129,7 @@ export async function gatherFacts(
                 deletedAt: chatterItems.deletedAt,
                 contentReapedAt: chatterItems.contentReapedAt,
                 summaryDueAt: chatterItems.summaryDueAt,
+                hasPriorOutput: audioHasPriorOutput(db, userId, itemId),
             })
             .from(chatterItems)
             .where(
@@ -265,7 +272,7 @@ export async function gatherFacts(
                                 id: row.id,
                                 revision: row.revision,
                                 source: "plaud",
-                                timed: row.turns !== null,
+                                input: plaudTranscriptInput(row),
                                 hasTopics: row.hasTopics,
                             }
                           : null,
@@ -287,7 +294,7 @@ export async function gatherFacts(
         taskDecisions,
         plaudTranscript,
         [transcriptionJob],
-        [failedTranscriptionJob],
+        failedTranscription,
         [recording],
         [openLearnRun],
         recentLearnRuns,
@@ -362,7 +369,7 @@ export async function gatherFacts(
                 ),
             )
             .orderBy(desc(asyncJobs.completedAt), desc(asyncJobs.createdAt)),
-        readShared(itemId, userId),
+        item.kind === "mail" ? readShared(itemId, userId) : false,
         db
             .select({ folderId: recordingFolderAssignments.folderId })
             .from(recordingFolderAssignments)
@@ -409,30 +416,8 @@ export async function gatherFacts(
                   .limit(1)
             : Promise.resolve([]),
         item.kind === "audio"
-            ? db
-                  .select({
-                      errorCode: asyncJobs.errorCode,
-                      completedAt: asyncJobs.completedAt,
-                  })
-                  .from(asyncJobs)
-                  .where(
-                      and(
-                          eq(asyncJobs.userId, userId),
-                          eq(asyncJobs.kind, TRANSCRIPTION_JOB_KIND),
-                          eq(
-                              asyncJobs.subjectId,
-                              recordingJobSubject(itemId, view),
-                          ),
-                          eq(asyncJobs.status, "failed"),
-                          sql`${asyncJobs.payload} ->> 'trigger' <> 'manual'`,
-                      ),
-                  )
-                  .orderBy(
-                      desc(asyncJobs.completedAt),
-                      desc(asyncJobs.createdAt),
-                  )
-                  .limit(1)
-            : Promise.resolve([]),
+            ? readFailedAutomaticTranscription(db, itemId, view, userId)
+            : Promise.resolve(undefined),
         item.kind === "audio"
             ? db
                   .select({
@@ -844,30 +829,16 @@ export async function gatherFacts(
                                 timed: content.timed,
                             }
                           : null,
-                      plaud: plaudTranscript
-                          ? {
-                                contentId: plaudTranscript.id,
-                                contentSourceId: "plaud",
-                                contentRevision: plaudTranscript.revision,
-                                timed: plaudTranscript.timed,
-                            }
-                          : null,
+                      plaud: plaudTranscript?.input ?? null,
                       jobActive: transcriptionJob !== undefined,
                       contentReaped: item.contentReapedAt !== null,
                       audioReaped: recording?.audioReapedAt != null,
                       cut: recording?.cutAt != null,
-                      shared,
-                      ...(failedTranscriptionJob?.completedAt
-                          ? {
-                                failed: {
-                                    errorCode:
-                                        failedTranscriptionJob.errorCode ??
-                                        "TRANSCRIPTION_FAILED",
-                                    completedAt:
-                                        failedTranscriptionJob.completedAt.toISOString(),
-                                },
-                            }
-                          : {}),
+                      sharedReadOnly: sharedTranscriptionReadOnly(
+                          contentView === "org",
+                      ),
+                      hasPriorOutput: item.hasPriorOutput,
+                      failed: failedTranscription,
                   }
                 : undefined,
         summaryDueAt: item.summaryDueAt?.toISOString() ?? null,

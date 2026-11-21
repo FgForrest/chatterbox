@@ -70,6 +70,7 @@ export interface PlaudV4FileObject {
     content_id?: string;
     content_url?: string | null; // presigned
     mime_type?: string;
+    language?: string | null;
     object_size?: number;
     task_status?: number | null; // 1 = ready
 }
@@ -195,6 +196,7 @@ export interface PlaudContentItem {
     data_type?: string; // 'transaction' | 'auto_sum_note' | 'sum_multi_note' | 'outline' | ...
     data_title?: string;
     data_tab_name?: string;
+    language?: string;
     task_status?: number; // 1 = ready
     data_link?: string; // presigned URL; body may be gzip-compressed JSON
 }

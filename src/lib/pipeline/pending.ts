@@ -1,13 +1,24 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { chatterItems, itemProcessing, transcriptions } from "@/db/schema";
+import {
+    chatterItems,
+    itemProcessing,
+    recordings,
+    transcriptions,
+} from "@/db/schema";
+import { recordingSharedCondition } from "@/lib/knowledge/org-people";
 import { effectiveManualOnly } from "@/lib/pipeline/effective-profile";
+import {
+    audioHasPriorOutput,
+    plaudTranscriptInput,
+    sharedTranscriptionReadOnly,
+} from "@/lib/pipeline/transcript-facts";
+import { canUsePlaudTranscript } from "@/lib/pipeline/transcript-policy";
 import {
     AssignedProfileUnavailableError,
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
 import { trimHolds } from "@/lib/recordings/trim-proposal";
-import { preferredTranscript } from "@/lib/transcription/preferred-source";
 
 export type PipelineQueueStep = "summary" | "topics";
 
@@ -20,10 +31,18 @@ export async function pipelineMayQueue(
     const [item] = await db
         .select({
             summaryDueAt: chatterItems.summaryDueAt,
+            audioReapedAt: recordings.audioReapedAt,
+            contentReapedAt: chatterItems.contentReapedAt,
+            shared: sql<boolean>`${recordingSharedCondition(chatterItems.id)}`,
+            hasPriorOutput: audioHasPriorOutput(db, userId, itemId),
             manualOnly: itemProcessing.manualOnly,
             phases: itemProcessing.phases,
         })
         .from(chatterItems)
+        .leftJoin(
+            recordings,
+            and(eq(recordings.id, itemId), eq(recordings.userId, userId)),
+        )
         .leftJoin(
             itemProcessing,
             and(
@@ -51,22 +70,23 @@ export async function pipelineMayQueue(
         },
     );
     if (!profile) return false;
-    if (step === "summary") {
-        return profile.settings.steps.summary.automatic;
-    }
-    if (
-        !("topics" in profile.settings.steps) ||
-        !profile.settings.steps.topics.automatic
-    ) {
+    const steps = profile.settings.steps;
+    if (step === "summary" && !steps.summary.automatic) return false;
+    if (step === "topics" && (!("topics" in steps) || !steps.topics.automatic))
         return false;
-    }
+    if (!("transcribe" in steps)) return step === "summary";
 
-    const usesPlaudTranscript =
-        "transcribe" in profile.settings.steps &&
-        profile.settings.steps.transcribe.plaudTranscript === "use";
-    const sources = usesPlaudTranscript ? ["riffado", "plaud"] : ["riffado"];
+    const policy = steps.transcribe;
+    if (step === "summary" && policy.plaudTranscript !== "use") return true;
+    const sources =
+        policy.plaudTranscript === "use" ? ["riffado", "plaud"] : ["riffado"];
     const transcripts = await db
-        .select({ source: transcriptions.source, turns: transcriptions.turns })
+        .select({
+            id: transcriptions.id,
+            revision: transcriptions.revision,
+            source: transcriptions.source,
+            turns: transcriptions.turns,
+        })
         .from(transcriptions)
         .where(
             and(
@@ -76,6 +96,23 @@ export async function pipelineMayQueue(
             ),
         )
         .limit(sources.length);
-    const transcript = preferredTranscript(transcripts);
-    return transcript !== undefined && transcript.turns !== null;
+    const own = transcripts.find(
+        (transcript) => transcript.source === "riffado",
+    );
+    if (own) return step === "summary" || own.turns !== null;
+    const plaud = transcripts.find(
+        (transcript) => transcript.source === "plaud",
+    );
+    if (!plaud) return step === "summary";
+    if (step === "topics" && plaud.turns === null) return false;
+    return canUsePlaudTranscript({
+        transcript: plaudTranscriptInput(plaud),
+        policy,
+        phases: item.phases ?? {},
+        transcriptionBlocked:
+            item.audioReapedAt != null ||
+            item.contentReapedAt != null ||
+            sharedTranscriptionReadOnly(item.shared),
+        hasPriorOutput: item.hasPriorOutput,
+    });
 }

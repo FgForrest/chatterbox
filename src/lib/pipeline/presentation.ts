@@ -57,9 +57,17 @@ import {
     type ProcessingStep,
     projectProcessing,
 } from "@/lib/pipeline/processing-status";
+import {
+    audioHasPriorOutput,
+    plaudTranscriptInput,
+    plaudTranscriptTurns,
+    sharedTranscriptionReadOnly,
+} from "@/lib/pipeline/transcript-facts";
+import { canUsePlaudTranscript } from "@/lib/pipeline/transcript-policy";
 import type {
     PhaseName,
     PipelinePhases,
+    PipelineProfileFacts,
     SummaryStepName,
 } from "@/lib/pipeline/types";
 import { profileHistoryName } from "@/lib/profiles/history-name";
@@ -441,6 +449,9 @@ export async function loadPrivateItemProcessing(
             kind: chatterItems.kind,
             shared: sql<boolean>`${shared}`,
             summaryDueAt: chatterItems.summaryDueAt,
+            audioReapedAt: recordings.audioReapedAt,
+            contentReapedAt: chatterItems.contentReapedAt,
+            hasPriorOutput: audioHasPriorOutput(db, ownerUserId, itemId),
             title: itemTitleVersion(),
             titleEditedAt: chatterItems.titleEditedAt,
             confirmedLanguage: recordings.confirmedLanguage,
@@ -708,6 +719,7 @@ export async function loadPrivateItemProcessing(
                       revision: transcriptions.revision,
                       source: transcriptions.source,
                       topics: transcriptTopicsVersion(),
+                      turns: plaudTranscriptTurns,
                   })
                   .from(transcriptions)
                   .where(
@@ -868,10 +880,12 @@ export async function loadPrivateItemProcessing(
         topics: boolean;
         tasksEnabled: boolean;
     } | null = null;
+    let transcriptionPolicy: PipelineProfileFacts["transcribe"];
     if (!legacy && item.profileSettings) {
         const storedSettings = JSON.parse(decryptText(item.profileSettings));
         if (item.kind === "audio") {
             const settings = parseProfileSettings("audio", storedSettings);
+            transcriptionPolicy = settings.steps.transcribe;
             automatic = {
                 transcribe: settings.steps.transcribe.automatic,
                 learn: settings.steps.learn.automatic,
@@ -1062,6 +1076,21 @@ export async function loadPrivateItemProcessing(
         if (run) learn[source] = learnRunVersion(run);
     }
     const preferredContent = preferredTranscript(transcripts);
+    const hasPipelineTranscript =
+        preferredContent?.source === "plaud" &&
+        transcriptionPolicy?.plaudTranscript === "use"
+            ? canUsePlaudTranscript({
+                  transcript: plaudTranscriptInput(preferredContent),
+                  policy: transcriptionPolicy,
+                  phases,
+                  manualOnly: effectiveManualOnly(item),
+                  transcriptionBlocked:
+                      item.audioReapedAt != null ||
+                      item.contentReapedAt != null ||
+                      sharedTranscriptionReadOnly(item.shared),
+                  hasPriorOutput: item.hasPriorOutput,
+              })
+            : preferredContent !== undefined;
     const olderContentInputOf = (row: (typeof summaries)[number]) => {
         if (
             typeof row.inputs?.contentId !== "string" ||
@@ -1214,6 +1243,7 @@ export async function loadPrivateItemProcessing(
         failures: processingFailures(phases),
     };
     const projected = projectProcessing(presentation, processingJobs, {
+        hasEligibleTranscript: hasPipelineTranscript,
         advancePending:
             (item.processedGeneration ?? 0) < (item.requestedGeneration ?? 0),
         canChange:
