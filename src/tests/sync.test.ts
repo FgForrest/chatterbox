@@ -90,6 +90,7 @@ import { db } from "@/db";
 import { chatterItems } from "@/db/schema";
 import { generateIngestWaveform } from "@/lib/audio/ingest-waveform";
 import { decryptText } from "@/lib/encryption/fields";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { requestArrivalInTx } from "@/lib/pipeline/arrival";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import { captureServerException } from "@/lib/posthog-server";
@@ -661,14 +662,26 @@ describe("Sync", () => {
             expect(result.errors.length).toBeGreaterThan(0);
         });
 
-        it("never sends a Plaud filename to PostHog exception telemetry on a per-recording sync failure", async () => {
-            // Regression: `processRecording`'s catch block embeds the
-            // Plaud filename in its user-facing error string ("Failed to
-            // sync <filename>: ...") so the owning user's own dashboard
-            // stays legible. That string must never be joined into what
-            // gets sent to PostHog -- recording names are client-matter
-            // content, not safe third-party telemetry.
+        it.each([
+            { code: undefined, message: "An unexpected error occurred" },
+            {
+                code: ErrorCode.PLAUD_API_ERROR,
+                message: "Plaud could not complete the request.",
+            },
+            {
+                code: ErrorCode.PLAUD_WORKSPACE_UNAVAILABLE,
+                message: "Plaud could not complete the request.",
+            },
+        ])("reports a safe per-recording sync failure for $code", async ({
+            code,
+            message,
+        }) => {
             const sensitiveFilename = "Confidential Client Deposition.mp3";
+            const signature = "test-secret-signature";
+            const rawMessage = `Download failed for https://example.com/audio?X-Amz-Signature=${signature}`;
+            const downloadError = code
+                ? new AppError(code, rawMessage, 400)
+                : new Error(rawMessage);
 
             const mockConnection = {
                 id: "conn-1",
@@ -702,13 +715,14 @@ describe("Sync", () => {
                 getRecordings: vi.fn().mockResolvedValue({
                     data_file_list: mockPlaudRecordings,
                 }),
-                // Failure happens here, before any DB write -- lands
-                // straight in processRecording's catch block.
-                downloadRecording: vi
-                    .fn()
-                    .mockRejectedValue(new Error("network error")),
+                downloadRecording: vi.fn().mockRejectedValue(downloadError),
             };
             (createPlaudClient as Mock).mockResolvedValue(mockPlaudClient);
+            (db.update as Mock).mockReturnValue({
+                set: vi.fn().mockReturnValue({
+                    where: vi.fn().mockResolvedValue(undefined),
+                }),
+            });
 
             (db.select as Mock)
                 .mockReturnValueOnce({
@@ -742,16 +756,24 @@ describe("Sync", () => {
                     existingRecordingLookup(mockExistingRecording),
                 );
 
-            const result = await syncRecordingsForUser(mockUserId);
+            const consoleError = vi
+                .spyOn(console, "error")
+                .mockImplementation(() => undefined);
+            try {
+                const result = await syncRecordingsForUser(mockUserId);
 
-            // The client-facing result is still allowed to carry the
-            // filename -- it's the user's own recording, shown back to
-            // them in their own dashboard.
-            expect(
-                result.errors.some((e) => e.includes(sensitiveFilename)),
-            ).toBe(true);
+                expect(result.errors).toEqual([
+                    `Failed to sync ${sensitiveFilename}: ${message}`,
+                ]);
+                expect(result.errors.join(" ")).not.toContain(signature);
+                expect(consoleError).toHaveBeenCalledExactlyOnceWith(
+                    "[sync] Failed to sync Plaud recording plaud-1:",
+                    downloadError,
+                );
+            } finally {
+                consoleError.mockRestore();
+            }
 
-            // What went to PostHog must not.
             expect(captureServerException).toHaveBeenCalledTimes(1);
             const [capturedError] = (captureServerException as Mock).mock
                 .calls[0] as [Error, Record<string, unknown>];
