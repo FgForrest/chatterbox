@@ -127,6 +127,25 @@ function statementAt(itemOccurredAt: Date, evidence: ProposedEvidence): Date {
         : itemOccurredAt;
 }
 
+/** Select insertable tasks in import order, taking the first of each fingerprint. */
+export function newTaskProposals(
+    tasks: readonly ProposedTask[],
+    known: ReadonlySet<string>,
+    rejected: ReadonlySet<string>,
+): ProposedTask[] {
+    const selected = new Set<string>();
+    return tasks.filter(({ fingerprint }) => {
+        if (
+            known.has(fingerprint) ||
+            rejected.has(fingerprint) ||
+            selected.has(fingerprint)
+        )
+            return false;
+        selected.add(fingerprint);
+        return true;
+    });
+}
+
 /**
  * Store a summary's proposals in its transaction. Untouched proposals are
  * replaced; reviewed tasks and remembered rejections survive.
@@ -368,10 +387,7 @@ export async function writeTaskProposalsInTx(
 
     const rows: (typeof recordingTasks.$inferInsert)[] = [];
     const rowStatements: Date[] = [];
-    for (const task of proposals.tasks) {
-        const { fingerprint } = task;
-        if (rejected.has(fingerprint) || known.has(fingerprint)) continue;
-        known.add(fingerprint);
+    for (const task of newTaskProposals(proposals.tasks, known, rejected)) {
         position += 1;
         rowStatements.push(statementAt(item.occurredAt, task));
         rows.push({

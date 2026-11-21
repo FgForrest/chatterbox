@@ -267,6 +267,10 @@ function plaudTasksAction(
 ): PipelineAction {
     const sourceFingerprint = facts.plaudTasks?.fingerprint;
     if (!sourceFingerprint) throw new Error("Plaud task source is missing");
+    const keepMatchingProposals =
+        !facts.phases.summary?.steps?.summary?.sourceFingerprint &&
+        !facts.summary.refreshRequested &&
+        !processAgainPending(facts.phases);
     const content = {
         contentId: input.contentId,
         contentSourceId: input.contentSourceId,
@@ -295,6 +299,7 @@ function plaudTasksAction(
     return {
         type: "applyPlaudTasks",
         sourceFingerprint,
+        ...(keepMatchingProposals && { keepMatchingProposals: true }),
         content,
         record: {
             state: done ? "done" : "pending",
