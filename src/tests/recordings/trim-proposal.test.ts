@@ -303,7 +303,7 @@ describe("trim pipeline gate", () => {
             "markPhase",
             "queueTrim",
         ]));
-    it("accepts a Plaud transcript when the recipe accepts existing text", () => {
+    it("accepts a labelled Plaud transcript when the recipe uses Plaud", () => {
         const f = facts();
         f.content = null;
         f.profile = {
@@ -326,7 +326,7 @@ describe("trim pipeline gate", () => {
         };
         f.transcription = {
             riffado: null,
-            plaud: f.trimContent,
+            plaud: { ...f.trimContent, lacksConfirmableSpeakers: () => false },
             jobActive: false,
         };
         expect(planAdvance(f).actions).toContainEqual({

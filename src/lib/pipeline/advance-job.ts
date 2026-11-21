@@ -7,6 +7,7 @@ import { gatherFacts } from "@/lib/pipeline/facts";
 import type { PipelineJobResult } from "@/lib/pipeline/outcome";
 import { isProviderBlockedReason, planAdvance } from "@/lib/pipeline/plan";
 import { sweepAutomaticTranscriptionRetries } from "@/lib/pipeline/sweep";
+import { pipelineContent } from "@/lib/pipeline/transcript-policy";
 import {
     PIPELINE_ADVANCE_JOB_KIND,
     requestAdvanceInTx,
@@ -39,6 +40,7 @@ async function advancePipeline(
             transcribe?.state === "failed" &&
             transcribe.automatic &&
             isProviderBlockedReason(transcribe.reason) &&
+            pipelineContent(facts)?.contentSourceId !== "plaud" &&
             (await sweepAutomaticTranscriptionRetries(1, {
                 userId,
                 itemId: payload.itemId,

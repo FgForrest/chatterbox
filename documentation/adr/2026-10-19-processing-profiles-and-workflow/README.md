@@ -1,14 +1,14 @@
 ---
 title: Items are filed before anything is processed, and a processing profile is a recipe with one automatic switch per step
 date: 2026-10-19
-updated: 2026-11-20 13:28
+updated: 2026-11-21 15:50
 status: superseded
 kind: feature
 issues: []
 prs: [134, 135, 138, 139, 140, 141, 145, 156, 159]
 areas: [src/lib/pipeline, src/lib/profiles, src/components/pipeline, src/lib/tasks, src/lib/recordings/title-after-summary.ts, src/lib/folders/permissions.ts, src/db/schema.ts]
 supersedes: [2026-10-07-tasks-from-summaries, 2026-09-23-shared-organization-scope, 2026-10-18-inbound-mail]
-superseded-by: [2026-10-19-provider-defaults-and-no-fallback, 2026-10-21-tasks-accepted-automatically, 2026-10-22-owner-reviews-tasks-sharing-ungated, 2026-10-22-pipeline-steps-settle-their-jobs, 2026-11-08-ai-trim-proposal-before-learn, 2026-11-18-owner-review-before-share, 2026-11-20-one-store-per-open-item]
+superseded-by: [2026-10-19-provider-defaults-and-no-fallback, 2026-10-21-tasks-accepted-automatically, 2026-10-22-owner-reviews-tasks-sharing-ungated, 2026-10-22-pipeline-steps-settle-their-jobs, 2026-11-08-ai-trim-proposal-before-learn, 2026-11-18-owner-review-before-share, 2026-11-20-one-store-per-open-item, 2026-11-21-speakerless-plaud-transcript-queues-own]
 relates: [2026-09-13-durable-job-queue, 2026-10-02-almanac-guided-transcript-correction, 2026-10-14-identity-provider-authorization, 2026-10-22-summary-reads-the-preferred-transcript]
 ---
 
@@ -25,6 +25,10 @@ recording and mail filed in the same folders. The item detail became a wizard: a
 strip under the title, categorization as its first inline step, and widgets that open as the
 workflow reaches them. The campaign ran from a proposal on 2026-10-14 to the last fixes after first
 real use, merged on 2026-10-19.
+
+**Superseded in part** by [the speaker-less Plaud transcript decision](../2026-11-21-speakerless-plaud-transcript-queues-own.md). The `use`
+selection now tests whether a fresh recording can run automatic transcription
+when its Plaud turns lack confirmable speakers. The other workflow rules still apply.
 
 **Superseded in part** by [owner review before sharing](../2026-11-18-owner-review-before-share.md). The first recording share waits for the owner’s current Learn review, automatic summary and task decisions where applicable. The mail Learn hold still expires after 72 hours and mail has no share gate. The other pipeline decisions still hold.
 

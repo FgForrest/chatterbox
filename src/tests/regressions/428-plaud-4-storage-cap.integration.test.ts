@@ -510,7 +510,7 @@ describeWithDatabase("#428 Plaud 4.0 sync and storage cap (PostgreSQL)", () => {
         const result = await syncRecordingsForUser(USER);
         expect(result.newRecordings).toBe(5);
         expect(result.errors).toEqual([
-            expect.stringContaining("Temporary quota lookup failure"),
+            "Failed to sync Draft review: An unexpected error occurred",
         ]);
         expect(capCheck.mock.calls[0][0].additionalBytes).toBe(small.length);
         expect(capCheck.mock.calls[1][0].additionalBytes).toBe(small.length);
@@ -826,7 +826,9 @@ describeWithDatabase("#428 Plaud 4.0 sync and storage cap (PostgreSQL)", () => {
         expect(response.status).toBe(200);
         expect(await response.json()).toMatchObject({
             success: true,
-            errors: [expect.stringContaining("One upload failed")],
+            errors: [
+                "Failed to sync Draft review: An unexpected error occurred",
+            ],
         });
     });
 

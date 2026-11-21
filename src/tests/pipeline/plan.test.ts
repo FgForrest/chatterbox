@@ -835,7 +835,7 @@ describe("planAdvance audio", () => {
         ]);
     });
 
-    it("continues automatic transcription on a shared recording", () => {
+    it("continues automatic transcription when sharing permits writes", () => {
         const facts = audioFacts({
             content: null,
             phases: { transcribe: undefined },
@@ -843,7 +843,7 @@ describe("planAdvance audio", () => {
                 riffado: null,
                 plaud: null,
                 jobActive: false,
-                shared: true,
+                sharedReadOnly: false,
             },
             profile: {
                 ...DEFAULT_PROFILE,
@@ -1021,9 +1021,10 @@ describe("planAdvance audio", () => {
             contentSourceId: "plaud" as const,
             contentRevision: 1,
             timed: true,
+            lacksConfirmableSpeakers: () => false,
         };
         const facts = audioFacts({
-            content: plaudTranscript === "use" ? plaud : null,
+            content: null,
             phases: { transcribe: undefined, learn: undefined },
             transcription: {
                 riffado: null,
@@ -1323,7 +1324,6 @@ describe("planAdvance audio", () => {
             riffado: facts.content,
             plaud: null,
             jobActive: false,
-            shared: true,
         };
         expect(planAdvance(settled).actions).toEqual([]);
         expect(summary.state).toBe("done");

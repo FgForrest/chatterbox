@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/db", () => ({ db: { select: mocks.select } }));
+vi.mock("@/lib/env", () => ({ env: {} }));
 vi.mock("@/lib/profiles/resolve", () => ({
     AssignedProfileUnavailableError: mocks.AssignedProfileUnavailableError,
     resolveItemProfile: mocks.resolveItemProfile,
@@ -21,6 +22,7 @@ function profile(step: PipelineQueueStep, automatic: boolean) {
     return {
         settings: {
             steps: {
+                transcribe: { automatic: true, plaudTranscript: "use" },
                 summary: {
                     automatic: step === "summary" ? automatic : true,
                 },

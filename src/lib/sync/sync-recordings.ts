@@ -18,7 +18,7 @@ import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { encryptText } from "@/lib/encryption/fields";
 import { isHostedLockedOut } from "@/lib/entitlements";
 import { env } from "@/lib/env";
-import { AppError, ErrorCode } from "@/lib/errors";
+import { AppError, ErrorCode, mapErrorToAppError } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { enforceStorageCap } from "@/lib/hosted/billing/storage-cap";
 import { type AppLocale, normalizeLocale } from "@/lib/i18n/config";
@@ -42,6 +42,7 @@ import {
     captureServerException,
 } from "@/lib/posthog-server";
 import { buildRecordingStagingPath } from "@/lib/recordings/filename";
+import { importedDetectedLanguage } from "@/lib/recordings/language";
 import { enqueueStorageReconciliationJob } from "@/lib/recordings/storage-reconciliation-job";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import {
@@ -734,9 +735,19 @@ async function processRecording(
         ) {
             throw error;
         }
+        console.error(
+            `[sync] Failed to sync Plaud recording ${plaudRecording.id}:`,
+            error,
+        );
+        const mapped = mapErrorToAppError(error);
+        const message =
+            mapped.code === ErrorCode.PLAUD_API_ERROR ||
+            mapped.code === ErrorCode.PLAUD_WORKSPACE_UNAVAILABLE
+                ? "Plaud could not complete the request."
+                : mapped.message;
         return {
             status: "error",
-            error: `Failed to sync ${plaudRecording.filename}: ${error}`,
+            error: `Failed to sync ${plaudRecording.filename}: ${message}`,
         };
     } finally {
         capState.pendingBytes -= reservedBytes;
@@ -1258,7 +1269,9 @@ async function importPlaudContent(
                         userId: context.userId,
                         recordingId: candidate.recordingId,
                         text: parsed.text,
-                        detectedLanguage: parsed.language,
+                        detectedLanguage:
+                            importedDetectedLanguage(parsed.language) ??
+                            importedDetectedLanguage(transcript.language),
                         source: "plaud",
                         provider: "plaud",
                         model: "plaud-native",
@@ -1345,8 +1358,14 @@ async function importPlaudContent(
                     "Plaud content import stopped: access token expired",
                 );
             } else {
+                const classifier =
+                    error instanceof AppError
+                        ? error.code
+                        : error instanceof Error
+                          ? error.constructor.name || error.name || "unknown"
+                          : "unknown";
                 result.errors.push(
-                    `Plaud content import failed for ${candidate.plaudFileId}: ${error}`,
+                    `Plaud content import failed for ${candidate.plaudFileId} (${classifier})`,
                 );
             }
         }
