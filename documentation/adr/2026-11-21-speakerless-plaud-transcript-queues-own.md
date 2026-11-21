@@ -5,7 +5,7 @@ updated: 2026-11-21 18:22
 status: accepted
 kind: fix
 issues: [458]
-prs: []
+prs: [459]
 areas: [src/lib/pipeline, src/lib/learn, src/lib/plaud, src/lib/sync]
 supersedes: [2026-10-19-processing-profiles-and-workflow, 2026-10-22-summary-reads-the-preferred-transcript]
 superseded-by: []
@@ -109,4 +109,4 @@ eligibility. Both deployment modes use the existing records.
 
 ## Timeline
 
-- **2026-11-21** Verified the Plaud 4.0 and pre-migration payload shapes and implemented the guarded selection rule.
+- **2026-11-21** Verified the Plaud 4.0 and pre-migration payload shapes and implemented the guarded selection rule in PR #459.
