@@ -931,7 +931,7 @@ suite("confirmed language with PostgreSQL", () => {
             uploadFile: vi.fn(),
             downloadFile: vi.fn(),
             downloadStream: vi.fn(),
-            downloadRange: vi.fn(),
+            openRead: vi.fn(),
             getObjectSize: vi.fn(),
             deleteFile: vi.fn(),
             getSignedUrl: vi.fn(),

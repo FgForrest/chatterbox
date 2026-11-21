@@ -2228,7 +2228,7 @@ class ArchiveStorage implements StorageProvider {
     async downloadStream(): Promise<Readable> {
         throw new Error("not found");
     }
-    downloadRange = vi.fn<StorageProvider["downloadRange"]>();
+    openRead = vi.fn<StorageProvider["openRead"]>();
     async getObjectSize(): Promise<number> {
         throw new Error("not found");
     }

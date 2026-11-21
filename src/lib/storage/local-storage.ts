@@ -13,11 +13,12 @@ import { dirname, join, relative, resolve } from "node:path";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { env } from "../env";
-import {
-    StorageObjectMissingError,
-    StorageRangeNotSatisfiableError,
-} from "./errors";
-import type { ByteRange, RangedDownload, StorageProvider } from "./types";
+import { resolveByteRange } from "./byte-range";
+import { StorageObjectChangedError, StorageObjectMissingError } from "./errors";
+import { createReadBody } from "./read-body";
+import type { RequestedByteRange, StorageProvider, StorageRead } from "./types";
+
+const READ_CHUNK_SIZE = 64 * 1024;
 
 function readError(error: unknown): unknown {
     return (error as NodeJS.ErrnoException | null)?.code === "ENOENT"
@@ -125,54 +126,76 @@ export class LocalStorage implements StorageProvider {
         return createReadStream(filePath);
     }
 
-    async downloadRange(
+    async openRead(
         key: string,
-        range: ByteRange,
-    ): Promise<RangedDownload> {
+        requested: RequestedByteRange | null,
+        signal?: AbortSignal,
+    ): Promise<StorageRead> {
+        signal?.throwIfAborted();
         const filePath = this.getFilePath(key);
         try {
             const file = await open(filePath, "r");
             try {
-                const stats = await file.stat();
+                signal?.throwIfAborted();
+                const stats = await file.stat({ bigint: true });
+                signal?.throwIfAborted();
                 if (!stats.isFile())
                     throw new Error("Storage path is not a file");
-                const { size } = stats;
-                if (range.start >= size) {
-                    throw new StorageRangeNotSatisfiableError(size);
-                }
-
-                const length = Math.min(range.end, size - 1) - range.start + 1;
-                const data = Buffer.alloc(length);
-                let offset = 0;
-                while (offset < length) {
-                    const { bytesRead } = await file.read(
-                        data,
-                        offset,
-                        length - offset,
-                        range.start + offset,
+                const totalSize = Number(stats.size);
+                if (!Number.isSafeInteger(totalSize))
+                    throw new Error(
+                        "Storage object exceeds the supported size",
                     );
-                    if (bytesRead === 0) break;
-                    offset += bytesRead;
-                }
-                const totalSize =
-                    offset === length ? size : (await file.stat()).size;
-                const bytesRead = Math.min(offset, totalSize - range.start);
-                if (bytesRead <= 0) {
-                    throw new StorageRangeNotSatisfiableError(totalSize);
-                }
-                return { data: data.subarray(0, bytesRead), totalSize };
-            } finally {
+                const range = resolveByteRange(requested, totalSize);
+                let position = range?.start ?? 0;
+                const end = (range?.end ?? totalSize - 1) + 1;
+                const body = createReadBody(
+                    {
+                        async read() {
+                            const data = Buffer.allocUnsafe(
+                                Math.min(READ_CHUNK_SIZE, end - position),
+                            );
+                            const { bytesRead } = await file.read(
+                                data,
+                                0,
+                                data.length,
+                                position,
+                            );
+                            signal?.throwIfAborted();
+                            const current = await file.stat({ bigint: true });
+                            if (
+                                current.size !== stats.size ||
+                                current.mtimeNs !== stats.mtimeNs ||
+                                current.ctimeNs !== stats.ctimeNs
+                            ) {
+                                throw new StorageObjectChangedError();
+                            }
+                            position += bytesRead;
+                            return bytesRead === 0
+                                ? null
+                                : data.subarray(0, bytesRead);
+                        },
+                        close: () => file.close(),
+                    },
+                    end - position,
+                    signal,
+                );
+                return { body, totalSize, range };
+            } catch (error) {
                 await file.close();
+                throw error;
             }
         } catch (error) {
             throw readError(error);
         }
     }
 
-    async getObjectSize(key: string): Promise<number> {
+    async getObjectSize(key: string, signal?: AbortSignal): Promise<number> {
+        signal?.throwIfAborted();
         const filePath = this.getFilePath(key);
         try {
             const file = await stat(filePath);
+            signal?.throwIfAborted();
             if (!file.isFile()) throw new Error("Storage path is not a file");
             return file.size;
         } catch (error) {

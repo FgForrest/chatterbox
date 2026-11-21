@@ -52,7 +52,11 @@ vi.mock("@/lib/encryption/fields", () => ({
 
 vi.mock("@/lib/storage/factory", () => ({
     createUserStorageProvider: vi.fn().mockResolvedValue({
-        downloadFile: vi.fn().mockResolvedValue(Buffer.from("audio-bytes")),
+        openRead: vi.fn(() => ({
+            body: new Response(audioBytes).body,
+            totalSize: audioBytes.length,
+            range: null,
+        })),
     }),
 }));
 
@@ -117,7 +121,11 @@ describe("GET /api/recordings/[id]/audio?download=1", () => {
             user: { id: "user-1" },
         });
         (createUserStorageProvider as Mock).mockResolvedValue({
-            downloadFile: vi.fn().mockResolvedValue(audioBytes),
+            openRead: vi.fn(() => ({
+                body: new Response(audioBytes).body,
+                totalSize: audioBytes.length,
+                range: null,
+            })),
         });
     });
 
