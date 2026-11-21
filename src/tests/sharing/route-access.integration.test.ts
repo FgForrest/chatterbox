@@ -85,6 +85,11 @@ vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
 vi.mock("@/lib/storage/factory", () => ({
     createUserStorageProvider: vi.fn().mockResolvedValue({
         downloadFile: vi.fn().mockResolvedValue(Buffer.from("audio-bytes")),
+        openRead: vi.fn(() => ({
+            body: new Response("audio-bytes").body,
+            totalSize: 11,
+            range: null,
+        })),
         deleteFile: vi.fn().mockResolvedValue(undefined),
     }),
 }));

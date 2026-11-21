@@ -95,7 +95,7 @@ async function archiveProviders(
         uploadFile: async (key) => key,
         downloadFile: async () => Buffer.alloc(0),
         downloadStream: async () => Readable.from([]),
-        downloadRange: vi.fn(),
+        openRead: vi.fn(),
         getObjectSize: async () => 0,
         uploadStream: async (key, stream) => {
             const chunks: Buffer[] = [];

@@ -406,7 +406,7 @@ class FakeStorage implements StorageProvider {
         if (!buf) throw new Error("not found");
         return buf;
     }
-    downloadRange = vi.fn<StorageProvider["downloadRange"]>();
+    openRead = vi.fn<StorageProvider["openRead"]>();
     async getObjectSize(key: string): Promise<number> {
         return (await this.downloadFile(key)).length;
     }

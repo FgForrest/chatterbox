@@ -742,7 +742,8 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
             },
             downloadFile: (key) => source.downloadFile(key),
             downloadStream: (key) => source.downloadStream(key),
-            downloadRange: (key, range) => source.downloadRange(key, range),
+            openRead: (key, range, signal) =>
+                source.openRead(key, range, signal),
             getObjectSize: (key) => source.getObjectSize(key),
             exists: (key) => source.exists(key),
             getSignedUrl: (key, expires) => source.getSignedUrl(key, expires),

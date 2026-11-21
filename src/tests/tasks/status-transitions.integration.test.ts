@@ -478,7 +478,7 @@ describe.skipIf(!url)("task status history (PostgreSQL)", () => {
             downloadStream: async () => {
                 throw new Error("No file");
             },
-            downloadRange: vi.fn(),
+            openRead: vi.fn(),
             getObjectSize: async () => {
                 throw new Error("No file");
             },

@@ -544,7 +544,7 @@ describe.skipIf(!url)("#253 task desk with accepted person shares", () => {
             uploadFile: async () => "",
             downloadFile: async () => Buffer.alloc(0),
             downloadStream: async () => Readable.from([]),
-            downloadRange: vi.fn(),
+            openRead: vi.fn(),
             getObjectSize: async () => 0,
             uploadStream: async (_, stream) => {
                 const parts: Buffer[] = [];
