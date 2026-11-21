@@ -42,6 +42,7 @@ export type StepOutcome =
           reason: string;
           /** The Plaud action ran with normalized action-item comparison. */
           usesNormalizedPlaudItems?: true;
+          plaudAction?: true;
       }
     | {
           kind: "waiting";
@@ -49,7 +50,7 @@ export type StepOutcome =
           reason?: string;
           problems?: ShareGateProblem[];
       }
-    | { kind: "failed"; code: string; retryable: boolean };
+    | { kind: "failed"; code: string; retryable: boolean; plaudAction?: true };
 
 export type PipelineJobResult = Record<string, unknown> & {
     outcome: StepOutcome;

@@ -76,6 +76,17 @@ export interface ClaimedAsyncJob {
     claimToken: string;
 }
 
+function isPlaudTasksJob(job: Pick<AsyncJobRow, "kind" | "payload">): boolean {
+    const action = job.payload.action;
+    return (
+        job.kind === "pipeline.action" &&
+        typeof action === "object" &&
+        action !== null &&
+        "type" in action &&
+        action.type === "applyPlaudTasks"
+    );
+}
+
 /**
  * A queued job that finishes between a conflicting insert and the read that
  * follows it leaves nothing to return; the next insert then succeeds. More
@@ -724,14 +735,7 @@ export async function prepareClaimedPipelineJob(
                 userId: job.userId,
                 phase: "learn",
             };
-        if (
-            job.kind === "pipeline.action" &&
-            typeof job.payload.itemId === "string" &&
-            typeof job.payload.action === "object" &&
-            job.payload.action !== null &&
-            "type" in job.payload.action &&
-            job.payload.action.type === "applyPlaudTasks"
-        )
+        if (isPlaudTasksJob(job) && typeof job.payload.itemId === "string")
             pipeline = {
                 itemId: job.payload.itemId,
                 userId: job.userId,
@@ -1059,6 +1063,8 @@ export async function settleTerminalJobInTx(
                     result: input.result ?? null,
                     errorCode: null,
                 });
+    if (outcome.kind === "failed" && !outcome.retryable && isPlaudTasksJob(job))
+        outcome = { ...outcome, plaudAction: true };
     if (
         outcome.kind === "waiting" &&
         outcome.waitingFor.kind === "learnReview" &&
