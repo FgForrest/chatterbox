@@ -362,7 +362,15 @@ export async function skipFailedLearn(
  * The run a review is about: the latest in the recording's view, on the
  * transcript of `source` when one is given (each transcript has its own).
  */
-async function latestRun(access: RecordingViewContext, source?: ReviewSource) {
+function latestRun(access: RecordingViewContext, source?: ReviewSource) {
+    return findLatestReviewRun(access, source, true);
+}
+
+async function findLatestReviewRun(
+    access: RecordingViewContext,
+    source: ReviewSource | undefined,
+    currentRevision: boolean,
+) {
     if (access.kind === "mail") {
         const [run] = await db
             .select()
@@ -372,10 +380,13 @@ async function latestRun(access: RecordingViewContext, source?: ReviewSource) {
                     eq(learnRuns.itemId, access.recordingId),
                     eq(learnRuns.userId, access.ownerUserId),
                     eq(learnRuns.view, access.view),
+                    access.view === "org" && access.orgUserId
+                        ? eq(learnRuns.scopeUserId, access.orgUserId)
+                        : undefined,
                     isNull(learnRuns.transcriptionId),
                 ),
             )
-            .orderBy(desc(learnRuns.createdAt))
+            .orderBy(desc(learnRuns.createdAt), desc(learnRuns.id))
             .limit(1);
         return run ?? null;
     }
@@ -391,6 +402,14 @@ async function latestRun(access: RecordingViewContext, source?: ReviewSource) {
                 eq(learnRuns.itemId, access.recordingId),
                 eq(learnRuns.userId, access.ownerUserId),
                 eq(learnRuns.view, access.view),
+                access.view === "org" && access.orgUserId
+                    ? eq(learnRuns.scopeUserId, access.orgUserId)
+                    : undefined,
+                eq(transcriptions.recordingId, access.recordingId),
+                eq(transcriptions.userId, access.ownerUserId),
+                currentRevision
+                    ? eq(learnRuns.transcriptRevision, transcriptions.revision)
+                    : undefined,
                 source ? eq(transcriptions.source, source) : undefined,
             ),
         )
@@ -969,8 +988,15 @@ export async function finishReview(
             403,
         );
     const orgUserId = await sharingOrgUserId();
-    const latest = await latestRun(access, source);
-    if (!latest || (runId && latest.id !== runId)) throw reviewNotFound();
+    const current = await latestRun(access, source);
+    const latest =
+        current ?? (await findLatestReviewRun(access, source, false));
+    if (
+        !latest ||
+        (runId && latest.id !== runId) ||
+        (!current && latest.status !== "ready")
+    )
+        throw reviewNotFound();
     if (quick && latest.status === "finished")
         return {
             status: "finished",

@@ -13,6 +13,7 @@ import {
     apiCredentials,
     asyncJobs,
     chatterItems,
+    folderDefaultProfiles,
     folderShares,
     itemProcessing,
     learnReviewItems,
@@ -33,7 +34,11 @@ import {
     users,
 } from "@/db/schema";
 import { encrypt } from "@/lib/encryption";
-import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import {
+    decryptText,
+    encryptJsonField,
+    encryptText,
+} from "@/lib/encryption/fields";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { localActor } from "@/tests/helpers/session-actor";
 import { insertRecordings } from "@/tests/integration/items";
@@ -142,7 +147,7 @@ import {
 } from "@/lib/tasks/plaud-proposals";
 import { taskFingerprint } from "@/lib/tasks/proposals";
 import { writeTaskProposalsInTx } from "@/lib/tasks/store";
-import { listRecordingTasks } from "@/lib/tasks/tasks";
+import { listRecordingTasks, skipTaskReview } from "@/lib/tasks/tasks";
 import {
     upsertEnhancement,
     upsertTranscription,
@@ -557,10 +562,20 @@ async function mutate(
                         }),
                     ]),
                 );
+                if (view === "received")
+                    expect(
+                        await loadPrivateItemProcessing(
+                            OWNER,
+                            ITEM,
+                            userId,
+                            "en",
+                            "received",
+                        ),
+                    ).toBeNull();
                 const processing = await loadPrivateItemProcessing(
                     OWNER,
                     ITEM,
-                    userId,
+                    view === "received" ? OWNER : userId,
                     "en",
                     view === "org" ? "org" : "private",
                 );
@@ -1719,6 +1734,212 @@ async function mutate(
                 await assertVisible(MEMBER, "org");
             }, 15_000);
 
+            async function addAlternateProfile() {
+                const [revision] = await db()
+                    .select()
+                    .from(processingProfileRevisions)
+                    .where(
+                        eq(processingProfileRevisions.id, "profile-revision"),
+                    );
+                await db()
+                    .insert(processingProfiles)
+                    .values({
+                        id: "alternate-profile",
+                        currentRevisionId: "alternate-revision",
+                        ownerUserId: OWNER,
+                        scope: "personal",
+                        channel: kind,
+                        name: encryptText("Alternate notes"),
+                        isDefault: false,
+                        createdBy: OWNER,
+                        updatedBy: OWNER,
+                    });
+                await db().insert(processingProfileRevisions).values({
+                    id: "alternate-revision",
+                    profileId: "alternate-profile",
+                    createdBy: OWNER,
+                    settings: revision.settings,
+                });
+            }
+
+            async function proposedTasks() {
+                const tasks = await db()
+                    .select({
+                        id: recordingTasks.id,
+                        text: recordingTasks.text,
+                    })
+                    .from(recordingTasks)
+                    .where(
+                        and(
+                            eq(recordingTasks.itemId, ITEM),
+                            eq(recordingTasks.userId, OWNER),
+                            eq(recordingTasks.status, "proposed"),
+                        ),
+                    )
+                    .orderBy(recordingTasks.id);
+                return tasks.map(({ id, text }) => ({
+                    id,
+                    text: decryptText(text),
+                }));
+            }
+
+            async function bindOrganizationFolderDefault() {
+                await db()
+                    .update(processingProfiles)
+                    .set({ isDefault: false })
+                    .where(eq(processingProfiles.id, "org-profile"));
+                await db().insert(folderDefaultProfiles).values({
+                    folderId: "org-a",
+                    channel: kind,
+                    profileId: "org-profile",
+                });
+            }
+
+            function stubReplacementWithProposal() {
+                modelHooks.reply.mockReturnValue({
+                    summary: "Replacement summary",
+                    keyPoints: [],
+                    actionItems: [
+                        {
+                            text: "Plan the next release",
+                            speaker: null,
+                            assignee: null,
+                            due: null,
+                            quote: "Plan the next release.",
+                            candidates: null,
+                        },
+                    ],
+                    taskUpdates: [],
+                });
+            }
+
+            it.runIf(kind === "audio").each([
+                ["filing only", null],
+                [
+                    "withdrawing from the Organization",
+                    { organization: true, withdraw: true },
+                ],
+                [
+                    "removing the last Organization folder",
+                    { folderId: "org-a", withdraw: true },
+                ],
+            ] as const)(
+                "keeps the summary and proposals after %s with a different Organization folder default",
+                async (_name, removal) => {
+                    await bindOrganizationFolderDefault();
+                    const rendering = await pendingRendering();
+                    await db()
+                        .update(aiEnhancements)
+                        .set({ inputFingerprint: rendering?.fingerprint })
+                        .where(eq(aiEnhancements.id, "saved-summary"));
+                    await pendingTask();
+                    const proposals = await proposedTasks();
+                    expect(proposals).toHaveLength(1);
+                    await skipTaskReview(reviewer, ITEM);
+                    expect(
+                        (await gatherFacts(ITEM, "private", OWNER)).profile
+                            ?.revisionId,
+                    ).toBe("profile-revision");
+
+                    await mutate(file, "POST", { folderId: "org-a" });
+                    await advance();
+                    await advance();
+                    expect(
+                        await loadPrivateItemProcessing(OWNER, ITEM),
+                    ).toMatchObject({
+                        profile: { id: "org-profile" },
+                    });
+                    await assertVisible(MEMBER, "org");
+                    if (removal) {
+                        await mutate(unfile, "DELETE", removal);
+                        await advance();
+                        await advance();
+                        expect(
+                            await loadPrivateItemProcessing(OWNER, ITEM),
+                        ).toMatchObject({
+                            profile: { id: "profile" },
+                        });
+                        expect(
+                            (
+                                await getSummary(
+                                    request(
+                                        "summary",
+                                        "GET",
+                                        undefined,
+                                        MEMBER,
+                                        "org",
+                                    ),
+                                    context(),
+                                )
+                            ).status,
+                        ).toBe(404);
+                    }
+
+                    await assertVisible();
+                    expect(await proposedTasks()).toEqual(proposals);
+                    expect(modelHooks.reply).not.toHaveBeenCalled();
+                    expect(
+                        await loadPrivateItemProcessing(OWNER, ITEM),
+                    ).toMatchObject({
+                        processAgain: false,
+                        processAgainReason: null,
+                    });
+                },
+                15_000,
+            );
+
+            it.runIf(kind === "audio")(
+                "replaces the summary and proposals when the picked profile is run with Process again",
+                async () => {
+                    await addAlternateProfile();
+                    await pendingTask();
+                    const proposals = await proposedTasks();
+                    expect(proposals).toHaveLength(1);
+                    stubReplacementWithProposal();
+
+                    await mutate(
+                        categorize,
+                        "POST",
+                        {
+                            folderIds: ["private-a"],
+                            profileId: "alternate-profile",
+                        },
+                        "categorize",
+                    );
+                    await advance();
+                    await assertVisible();
+                    expect(await proposedTasks()).toEqual(proposals);
+                    expect(
+                        await loadPrivateItemProcessing(OWNER, ITEM),
+                    ).toMatchObject({
+                        profile: { id: "alternate-profile" },
+                        processAgain: true,
+                        processAgainReason: "profile_changed",
+                    });
+                    await expect(
+                        mayAutomaticallyReplaceSummary(OWNER, ITEM),
+                    ).resolves.toBe(true);
+
+                    await mutate(processAgain, "POST", {}, "process-again");
+                    await runAutomaticSummary();
+
+                    const response = await getSummary(
+                        request("summary"),
+                        context(),
+                    );
+                    expect(await response.json()).toMatchObject({
+                        summary: "Replacement summary",
+                        revision: 1,
+                    });
+                    expect(await proposedTasks()).toEqual([
+                        expect.objectContaining({
+                            text: "Plan the next release",
+                        }),
+                    ]);
+                },
+                15_000,
+            );
+
             it.runIf(kind === "audio")(
                 "keeps an imported Plaud summary visible when filed",
                 async () => {
@@ -1753,28 +1974,16 @@ async function mutate(
                 15_000,
             );
 
-            it.runIf(kind === "audio").each(["plaud", "mixed"] as const)(
-                "keeps completed %s inputs when the Organization profile prefers re-transcription",
-                async (source) => {
+            it.runIf(kind === "audio")(
+                "keeps completed Plaud inputs when the Organization profile prefers re-transcription",
+                async () => {
                     await db()
                         .update(transcriptions)
-                        .set({ source })
+                        .set({ source: "plaud" })
                         .where(eq(transcriptions.id, CONTENT));
-                    if (source === "mixed")
-                        await db()
-                            .insert(transcriptions)
-                            .values({
-                                id: "underlying-plaud",
-                                recordingId: ITEM,
-                                userId: OWNER,
-                                source: "plaud",
-                                provider: "test",
-                                model: "test",
-                                text: encryptText("Earlier Plaud text"),
-                            });
                     const inputs = {
                         contentId: CONTENT,
-                        contentSourceId: source,
+                        contentSourceId: "plaud",
                         contentRevision: 0,
                     };
                     await db()
@@ -1973,7 +2182,7 @@ async function mutate(
                             expectedFingerprint: fingerprint,
                             record,
                         }),
-                    ).resolves.toBe(false);
+                    ).resolves.toBe("refused");
                     expect(
                         await db()
                             .select()
@@ -2024,7 +2233,7 @@ async function mutate(
                             expectedFingerprint: fingerprint,
                             record,
                         }),
-                    ).resolves.toBe(true);
+                    ).resolves.toBe("applied");
                     const tasks = await db()
                         .select()
                         .from(recordingTasks)
@@ -2079,7 +2288,7 @@ async function mutate(
                             expectedFingerprint: fingerprint,
                             record,
                         }),
-                    ).resolves.toBe(false);
+                    ).resolves.toBe("refused");
                     expect(
                         planAdvance(
                             await gatherFacts(ITEM, "private", OWNER),

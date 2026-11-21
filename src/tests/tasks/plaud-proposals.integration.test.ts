@@ -200,7 +200,7 @@ describeWithDatabase("Plaud summary task proposals", () => {
                 expectedFingerprint: firstFingerprint,
                 record: phaseRecord(firstFingerprint),
             }),
-        ).toBe(true);
+        ).toBe("applied");
 
         const first = await db()
             .select()
@@ -348,7 +348,7 @@ describeWithDatabase("Plaud summary task proposals", () => {
                 expectedFingerprint: fingerprint,
                 record: phaseRecord(fingerprint),
             }),
-        ).toBe(true);
+        ).toBe("applied");
 
         const tasks = await db().select().from(recordingTasks);
         expect(tasks).toHaveLength(1);
@@ -488,7 +488,7 @@ describeWithDatabase("Plaud summary task proposals", () => {
                 ]),
                 record: phaseRecord("stale source"),
             }),
-        ).toBe(false);
+        ).toBe("source_changed");
 
         expect(await db().select().from(recordingTasks)).toHaveLength(0);
         const [processing] = await db()

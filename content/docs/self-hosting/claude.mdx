@@ -161,11 +161,11 @@ Publish the MCP endpoint, and nothing else, to Anthropic's addresses:
 
 - A public DNS record for the `APP_URL` host. People inside keep reaching
   Chatterbox over the internal network (split-horizon DNS).
-- Block direct internet access to the app and database ports. The bundled
-  `docker-compose.yml` publishes ports 3000 and 5432 on all host interfaces;
-  use a cloud firewall or Docker-aware host firewall to restrict them to
-  the proxy and internal network. A direct connection to port 3000 bypasses
-  the proxy's path, IP, marker-header, and rate-limit rules.
+- Block direct internet access to port 3000 with a cloud firewall or a
+  Docker-aware host firewall. A direct connection bypasses the proxy's path,
+  IP, marker-header, and rate-limit rules. Keep the database port off public
+  interfaces. The bundled `docker-compose.yml` publishes Postgres on
+  `127.0.0.1:5432`.
 - A publicly trusted certificate on port 443. Behind an allowlist, use the
   DNS-01 challenge. No redirect to another host.
 - From `160.79.104.0/21` only, two exact paths:

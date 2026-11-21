@@ -10,9 +10,9 @@ import {
 } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ItemWorkflow } from "@/components/pipeline/item-workflow";
 import type { CategorizationPanelPresentation } from "@/lib/pipeline/categorization-presentation";
 import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
+import { ItemWorkflowWithDetail as ItemWorkflow } from "@/tests/pipeline/item-detail-test-harness";
 import { processingFixture } from "@/tests/pipeline/processing-fixture";
 import type { RecordingFolder } from "@/types/folder";
 

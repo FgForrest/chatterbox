@@ -57,7 +57,7 @@ import { dropTasksWithoutSummaryInTx } from "@/lib/tasks/store";
 export type LocalEraseScope = "audio" | "transcript" | "summary";
 export type GeneratedArtifactKind = "transcript" | "summary";
 
-const SIDECAR_SOURCES = [undefined, "plaud", "riffado", "mixed"] as const;
+const SIDECAR_SOURCES = [undefined, "plaud", "riffado"] as const;
 
 export function storageKeysForErase(
     audioPath: string,
@@ -799,7 +799,12 @@ async function loadRemoteRecording(userId: string, recordingId: string) {
             .limit(1),
         db
             .select({
+                id: plaudConnections.id,
+                userId: plaudConnections.userId,
                 bearerToken: plaudConnections.bearerToken,
+                refreshToken: plaudConnections.refreshToken,
+                accessExpiresAt: plaudConnections.accessExpiresAt,
+                sessionExpiresAt: plaudConnections.sessionExpiresAt,
                 apiBase: plaudConnections.apiBase,
                 workspaceId: plaudConnections.workspaceId,
             })
@@ -839,11 +844,7 @@ export async function movePlaudRecordingToTrash(
         userId,
         recordingId,
     );
-    const client = await createPlaudClient(
-        connection.bearerToken,
-        connection.apiBase,
-        connection.workspaceId,
-    );
+    const client = await createPlaudClient(connection);
     const result = await client.moveFileToTrash(recording.plaudFileId);
     if (result.status !== 0) {
         throw new AppError(
@@ -886,11 +887,7 @@ export async function restoreAudioFromPlaud(
         actorUserId: userId,
     });
     if (refusal) throw writerRefusalError(refusal);
-    const client = await createPlaudClient(
-        connection.bearerToken,
-        connection.apiBase,
-        connection.workspaceId,
-    );
+    const client = await createPlaudClient(connection);
     const audio = await client.downloadRecording(recording.plaudFileId, false);
     const sniffed = sniffAudio(audio);
     const storage = await createUserStorageProvider(userId);

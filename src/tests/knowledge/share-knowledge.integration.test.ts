@@ -1052,6 +1052,10 @@ class ArchiveStorage implements StorageProvider {
     async downloadStream(): Promise<Readable> {
         throw new Error("not found");
     }
+    openRead = vi.fn<StorageProvider["openRead"]>();
+    async getObjectSize(): Promise<number> {
+        throw new Error("not found");
+    }
     async uploadStream(key: string, stream: Readable): Promise<string> {
         const chunks: Buffer[] = [];
         for await (const chunk of stream) {

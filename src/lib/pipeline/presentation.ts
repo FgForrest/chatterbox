@@ -1,15 +1,14 @@
-import {
-    and,
-    count,
-    desc,
-    eq,
-    inArray,
-    isNotNull,
-    isNull,
-    ne,
-    sql,
-} from "drizzle-orm";
+import { createHash } from "node:crypto";
+import { and, count, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
+import {
+    itemTaskRowsVersion,
+    itemTitleVersion,
+    loadTranscriptOverlayVersions,
+    summaryRemarksVersion,
+    transcriptPartVersion,
+    transcriptTopicsVersion,
+} from "@/db/queries/item-content-versions";
 import { loadPipelineProcessingJobs } from "@/db/queries/pipeline-processing";
 import {
     placementVisibleCondition,
@@ -30,13 +29,19 @@ import {
     processingProfiles,
     recordingFolderAssignments,
     recordingFolders,
+    recordings,
     transcriptions,
     users,
 } from "@/db/schema";
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
+import { AppError } from "@/lib/errors";
 import { folderDisplayName, folderDisplayPath } from "@/lib/folders/labels";
-import { type AppLocale, normalizeLocale } from "@/lib/i18n/config";
+import {
+    type AppLocale,
+    localeFromAcceptLanguage,
+    normalizeLocale,
+} from "@/lib/i18n/config";
 import { translatedSourceMessage } from "@/lib/i18n/messages";
 import { learnRunCurrentScope } from "@/lib/learn/learn-open";
 import { needsLearnReview } from "@/lib/learn/review-policy";
@@ -59,13 +64,19 @@ import type {
 } from "@/lib/pipeline/types";
 import { profileHistoryName } from "@/lib/profiles/history-name";
 import { parseProfileSettings } from "@/lib/profiles/settings";
+import { resolveRecordingLanguageProfile } from "@/lib/recordings/language-metadata";
 import type { StoredTrimProposal } from "@/lib/recordings/trim-proposal";
-import { isRecordingShared } from "@/lib/sharing/shared";
-import { recordingJobSubject } from "@/lib/sharing/view";
+import { requestedRecordingView } from "@/lib/sharing/access";
+import { isRecordingShared, sharedItemCondition } from "@/lib/sharing/shared";
+import { type RecordingView, recordingJobSubject } from "@/lib/sharing/view";
+import { assertMayChange } from "@/lib/sharing/writer";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
 import { waitingTaskDecisions } from "@/lib/tasks/waiting-review";
 import { TOPICS_JOB_KIND } from "@/lib/topics/topics-job";
-import { preferredTranscript } from "@/lib/transcription/preferred-source";
+import {
+    preferredTranscript,
+    TRANSCRIPT_SOURCE_ORDER,
+} from "@/lib/transcription/preferred-source";
 import { TRANSCRIPTION_JOB_KIND } from "@/lib/transcription/transcription-job";
 import type { FolderKind } from "@/types/folder";
 
@@ -95,6 +106,8 @@ export interface ProcessingPhaseFailure {
 }
 
 export interface ItemProcessingPresentation {
+    access?: ItemProcessingAccess;
+    versions?: ItemProcessingVersions;
     trimProposal?: StoredTrimProposal | null;
     itemId: string;
     kind: "audio" | "mail";
@@ -153,6 +166,75 @@ export interface ItemProcessingPresentation {
     };
     startedBy?: ProcessingRequestOrigin;
     failures: ProcessingPhaseFailure[];
+}
+
+interface ItemProcessingAccess {
+    shared: boolean;
+    role: "owner" | "curator" | "member";
+    contentView: "private" | "org";
+}
+
+interface ItemProcessingVersions {
+    item: string;
+    folders: string;
+    tasks: string;
+    title: string;
+    content?: string;
+    transcripts: Record<string, string>;
+    summaries: Record<string, string>;
+    learn: Record<string, string>;
+    corrections: Record<string, string>;
+    speakers: Record<string, string>;
+    language?: string;
+}
+
+type LoadedItemProcessing = ItemProcessingPresentation & {
+    access: ItemProcessingAccess;
+    versions: ItemProcessingVersions;
+};
+
+function version(...values: unknown[]): string {
+    return createHash("sha256").update(JSON.stringify(values)).digest("hex");
+}
+
+function learnRunVersion(run: {
+    id: string;
+    status: string;
+    updatedAt: Date;
+    transcriptRevision: number | null;
+}): string {
+    return version(run.id, run.status, run.updatedAt, run.transcriptRevision);
+}
+
+function viewerRole(
+    isOwner: boolean,
+    viewerUserId: string,
+    orgUserId: string | null,
+): ItemProcessingAccess["role"] {
+    if (isOwner) return "owner";
+    if (viewerUserId === orgUserId) return "curator";
+    return "member";
+}
+
+function canReadLearnReview(
+    ownerUserId: string,
+    viewerUserId: string,
+    orgUserId: string | null,
+    shared: boolean,
+    view: "private" | "org",
+    curates: boolean,
+) {
+    try {
+        assertMayChange(
+            { ownerUserId, orgUserId, shared, view },
+            viewerUserId,
+            curates,
+        );
+        return true;
+    } catch (error) {
+        if (error instanceof AppError && error.statusCode === 403) return false;
+        throw error;
+    }
 }
 
 interface StoredFolder {
@@ -341,14 +423,33 @@ export async function loadPrivateItemProcessing(
     itemId: string,
     viewerUserId = ownerUserId,
     fallbackLocale: AppLocale = "en",
-    view: "private" | "org" = "private",
-): Promise<ItemProcessingPresentation | null> {
+    view: RecordingView = "private",
+    allowPrivateFallback = false,
+): Promise<LoadedItemProcessing | null> {
+    const isOwner = viewerUserId === ownerUserId;
+    if (view === "received") {
+        if (!allowPrivateFallback || !isOwner) return null;
+        view = "private";
+    }
+    if (view === "private" && !isOwner) return null;
+    const orgUserId = await getOrgUserId();
+    const shared = orgUserId ? sharedItemCondition(orgUserId) : sql`false`;
+    const contentScope = sql`case when ${shared} then 'org' else 'private' end`;
     const driver = pipelineDriver(ownerUserId);
     const [item] = await db
         .select({
             kind: chatterItems.kind,
+            shared: sql<boolean>`${shared}`,
             summaryDueAt: chatterItems.summaryDueAt,
+            title: itemTitleVersion(),
+            titleEditedAt: chatterItems.titleEditedAt,
+            confirmedLanguage: recordings.confirmedLanguage,
+            taskRowsVersion: itemTaskRowsVersion(isOwner, contentScope),
             processingItemId: itemProcessing.itemId,
+            requestedGeneration: itemProcessing.requestedGeneration,
+            processedGeneration: itemProcessing.processedGeneration,
+            taskReviewChangedAt: itemProcessing.taskReviewChangedAt,
+            taskReviewSkippedAt: itemProcessing.taskReviewSkippedAt,
             manualOnly: itemProcessing.manualOnly,
             phases: itemProcessing.phases,
             profileId: processingProfiles.id,
@@ -360,6 +461,13 @@ export async function loadPrivateItemProcessing(
             profileSettings: processingProfileRevisions.settings,
         })
         .from(chatterItems)
+        .leftJoin(
+            recordings,
+            and(
+                eq(recordings.id, chatterItems.id),
+                eq(recordings.userId, ownerUserId),
+            ),
+        )
         .leftJoin(users, eq(users.id, viewerUserId))
         .leftJoin(
             itemProcessing,
@@ -391,21 +499,36 @@ export async function loadPrivateItemProcessing(
                 eq(chatterItems.id, itemId),
                 eq(chatterItems.userId, ownerUserId),
                 isNull(chatterItems.deletedAt),
+                view === "org" && !(allowPrivateFallback && isOwner)
+                    ? shared
+                    : undefined,
             ),
         )
         .limit(1);
     if (!item || item.kind === "meeting") return null;
+    if (!item.shared) view = "private";
+    const contentView = item.shared ? "org" : view;
+    const canReadRemarks =
+        isOwner &&
+        viewerUserId !== orgUserId &&
+        (!item.shared || isOrgScopeEnabled());
 
-    const orgUserId = await getOrgUserId();
     const restrictedViewer = {
         userId: viewerUserId,
         isCurator: await userCuratesOrganizationNow(viewerUserId),
     };
+    const canReadLearn = canReadLearnReview(
+        ownerUserId,
+        viewerUserId,
+        orgUserId,
+        item.shared,
+        contentView,
+        restrictedViewer.isCurator,
+    );
     const [
         placementRows,
         intentRows,
         processingJobs,
-        curates,
         recentTranscriptionJobs,
         recentTopicsJobs,
         recentSummaryJobs,
@@ -415,6 +538,8 @@ export async function loadPrivateItemProcessing(
         mailContent,
         summaries,
         learnRunRows,
+        [taskReviewMarkers],
+        languageProfile,
     ] = await Promise.all([
         db
             .select({
@@ -423,6 +548,7 @@ export async function loadPrivateItemProcessing(
                 parentId: recordingFolders.parentId,
                 name: recordingFolders.name,
                 kind: recordingFolders.kind,
+                withheld: recordingFolderAssignments.withheld,
                 restricted: sql<boolean>`${recordingFolders.restrictedAt} is not null or ${recordingFolders.restrictingAt} is not null`,
                 access: sql<boolean>`${placementVisibleCondition(restrictedViewer)}`,
             })
@@ -435,7 +561,12 @@ export async function loadPrivateItemProcessing(
                 and(
                     viewerUserId === ownerUserId
                         ? undefined
-                        : placementVisibleCondition(restrictedViewer),
+                        : and(
+                              placementVisibleCondition(restrictedViewer),
+                              orgUserId
+                                  ? eq(recordingFolders.userId, orgUserId)
+                                  : sql`false`,
+                          ),
                     eq(recordingFolderAssignments.itemId, itemId),
                     eq(recordingFolderAssignments.userId, ownerUserId),
                 ),
@@ -465,9 +596,6 @@ export async function loadPrivateItemProcessing(
                 ),
             ),
         loadPipelineProcessingJobs(ownerUserId, itemId, item.phases ?? {}),
-        viewerUserId === ownerUserId
-            ? Promise.resolve(false)
-            : userCuratesOrganizationNow(viewerUserId),
         db
             .select({
                 kind: asyncJobs.kind,
@@ -542,6 +670,7 @@ export async function loadPrivateItemProcessing(
                     eq(learnRuns.itemId, itemId),
                     eq(learnRuns.userId, ownerUserId),
                     learnRunCurrentScope(orgUserId),
+                    eq(learnRuns.view, contentView),
                     eq(learnRuns.status, "ready"),
                     eq(learnReviewItems.userId, learnRuns.scopeUserId),
                     ne(learnReviewItems.kind, "known_fact"),
@@ -566,6 +695,7 @@ export async function loadPrivateItemProcessing(
                     eq(learnRuns.itemId, itemId),
                     eq(learnRuns.userId, ownerUserId),
                     learnRunCurrentScope(orgUserId),
+                    eq(learnRuns.view, contentView),
                     eq(learnRuns.status, "ready"),
                     eq(learnReviewItems.userId, learnRuns.scopeUserId),
                     eq(learnReviewItems.kind, "speaker"),
@@ -577,6 +707,7 @@ export async function loadPrivateItemProcessing(
                       id: transcriptions.id,
                       revision: transcriptions.revision,
                       source: transcriptions.source,
+                      topics: transcriptTopicsVersion(),
                   })
                   .from(transcriptions)
                   .where(
@@ -584,9 +715,7 @@ export async function loadPrivateItemProcessing(
                           eq(transcriptions.recordingId, itemId),
                           eq(transcriptions.userId, ownerUserId),
                           inArray(transcriptions.source, [
-                              "riffado",
-                              "mixed",
-                              "plaud",
+                              ...TRANSCRIPT_SOURCE_ORDER,
                           ]),
                       ),
                   )
@@ -612,15 +741,22 @@ export async function loadPrivateItemProcessing(
                 source: aiEnhancements.source,
                 transcriptionId: aiEnhancements.transcriptionId,
                 inputs: aiEnhancements.inputs,
+                hasSummary: sql<boolean>`${aiEnhancements.summary} is not null`,
+                revision: aiEnhancements.revision,
+                editedAt: aiEnhancements.editedAt,
+                inputFingerprint: aiEnhancements.inputFingerprint,
+                remarks: canReadRemarks
+                    ? summaryRemarksVersion()
+                    : sql<null>`null`,
             })
             .from(aiEnhancements)
             .where(
                 and(
                     eq(aiEnhancements.itemId, itemId),
                     eq(aiEnhancements.userId, ownerUserId),
-                    isNotNull(aiEnhancements.summary),
                 ),
-            ),
+            )
+            .orderBy(aiEnhancements.source),
         db
             .select({
                 id: learnRuns.id,
@@ -639,20 +775,68 @@ export async function loadPrivateItemProcessing(
                     eq(learnRuns.itemId, itemId),
                     eq(learnRuns.userId, ownerUserId),
                     learnRunCurrentScope(orgUserId),
+                    eq(learnRuns.view, contentView),
                 ),
             )
             .orderBy(desc(learnRuns.createdAt), desc(learnRuns.id)),
+        isOwner && driver.view !== contentView
+            ? db
+                  .select({
+                      changed: itemProcessing.taskReviewChangedAt,
+                      skipped: itemProcessing.taskReviewSkippedAt,
+                  })
+                  .from(itemProcessing)
+                  .where(
+                      and(
+                          eq(itemProcessing.itemId, itemId),
+                          eq(itemProcessing.userId, ownerUserId),
+                          eq(itemProcessing.view, contentView),
+                      ),
+                  )
+                  .limit(1)
+            : Promise.resolve(
+                  isOwner
+                      ? [
+                            {
+                                changed: item.taskReviewChangedAt,
+                                skipped: item.taskReviewSkippedAt,
+                            },
+                        ]
+                      : [],
+              ),
+        item.kind === "audio"
+            ? resolveRecordingLanguageProfile(
+                  itemId,
+                  contentView,
+                  ownerUserId,
+                  viewerUserId,
+              )
+            : Promise.resolve(null),
     ]);
     const canReviewTasks = viewerUserId === ownerUserId;
-    const taskReviewWaiting = canReviewTasks
-        ? await countItemTaskReviewWaiting(itemId, ownerUserId, orgUserId)
-        : 0;
-    const folderSummaries = await folderPaths(
-        ownerUserId,
-        orgUserId,
-        [...placementRows, ...intentRows],
-        normalizeLocale(item.viewerLocale) ?? fallbackLocale,
-    );
+    const [taskReviewWaiting, folderSummaries, overlays] = await Promise.all([
+        canReviewTasks && !taskReviewMarkers?.skipped
+            ? waitingTaskDecisions(
+                  db,
+                  itemId,
+                  ownerUserId,
+                  contentView,
+                  true,
+              ).then(({ total }) => total)
+            : 0,
+        folderPaths(
+            ownerUserId,
+            orgUserId,
+            [...placementRows, ...intentRows],
+            normalizeLocale(item.viewerLocale) ?? fallbackLocale,
+        ),
+        loadTranscriptOverlayVersions(
+            ownerUserId,
+            transcripts.map((row) => row.id),
+            item.shared,
+            isOwner || restrictedViewer.isCurator,
+        ),
+    ]);
     const placements = placementRows.flatMap((folder) => {
         const summary = folderSummaries.get(folder.id);
         return summary ? [summary] : [];
@@ -759,7 +943,7 @@ export async function loadPrivateItemProcessing(
         );
     });
     const summaryCurrent = summaries.some((summary) => {
-        if (summary.source !== "riffado") return false;
+        if (summary.source !== "riffado" || !summary.hasSummary) return false;
         const inputs = summary.inputs as {
             contentId?: unknown;
             contentRevision?: unknown;
@@ -835,10 +1019,148 @@ export async function loadPrivateItemProcessing(
             .limit(1);
         if (current) phases = { ...phases, trim: current.phases.trim };
     }
+    const learn: Record<string, string> = {};
+    const content = mailContent[0];
+    if (canReadLearn && item.kind === "mail") {
+        const run = learnRunRows.find((run) => run.transcriptionId === null);
+        if (run) learn.mail = learnRunVersion(run);
+    }
+    const transcriptVersions: Record<string, string> = {};
+    const correctionVersions: Record<string, string> = {};
+    const speakerVersions: Record<string, string> = {};
+    // Sorted so the item hash does not depend on the database's row order.
+    for (const transcript of [...transcripts].sort((a, b) =>
+        a.source.localeCompare(b.source),
+    )) {
+        const { source, id, revision, topics } = transcript;
+        transcriptVersions[source] = transcriptPartVersion(
+            id,
+            revision,
+            topics,
+        );
+        const corrections = overlays.corrections.find((row) => row.id === id);
+        correctionVersions[source] = version(
+            id,
+            revision,
+            corrections?.count ?? 0,
+            corrections?.updatedAt,
+        );
+        const speakers = overlays.speakers.find((row) => row.id === id);
+        speakerVersions[source] = version(
+            id,
+            revision,
+            speakers?.count ?? 0,
+            speakers?.updatedAt,
+        );
+        const run =
+            canReadLearn &&
+            learnRunRows.find(
+                (row) =>
+                    row.transcriptionId === id &&
+                    row.transcriptRevision === revision,
+            );
+        if (run) learn[source] = learnRunVersion(run);
+    }
+    const preferredContent = preferredTranscript(transcripts);
+    const olderContentInputOf = (row: (typeof summaries)[number]) => {
+        if (
+            typeof row.inputs?.contentId !== "string" ||
+            typeof row.inputs.contentRevision !== "number"
+        )
+            return undefined;
+        const source = row.inputs.contentSourceId;
+        if (source === "mail") return content;
+        if (source !== "riffado" && source !== "plaud") return undefined;
+        if (row.editedAt) return preferredContent;
+        return transcripts.find((transcript) => transcript.source === source);
+    };
+    const summaryVersions = Object.fromEntries(
+        summaries.map((row) => {
+            const olderContentInput = olderContentInputOf(row);
+            const staleInput = row.inputFingerprint
+                ? transcripts.find(
+                      (transcript) => transcript.id === row.transcriptionId,
+                  )
+                : undefined;
+            return [
+                row.source,
+                version(
+                    row.id,
+                    row.revision,
+                    row.editedAt,
+                    row.source === "riffado" ? row.remarks : null,
+                    olderContentInput?.id,
+                    olderContentInput?.revision,
+                    staleInput && correctionVersions[staleInput.source],
+                ),
+            ];
+        }),
+    );
+    const partVersions = {
+        folders: version(
+            [...placementRows]
+                .sort((a, b) => a.id.localeCompare(b.id))
+                .map(({ id, parentId, withheld, restricted, access }) => [
+                    id,
+                    parentId,
+                    withheld,
+                    restricted,
+                    access,
+                ]),
+            [...intentRows]
+                .sort((a, b) => a.id.localeCompare(b.id))
+                .map(({ id, confirmedAt }) => [
+                    id,
+                    confirmedAt,
+                    effectiveManualOnly(item),
+                ]),
+        ),
+        tasks: version(
+            taskReviewWaiting,
+            taskReviewMarkers?.changed ?? null,
+            taskReviewMarkers?.skipped ?? null,
+            item.taskRowsVersion,
+        ),
+        title: item.title,
+        ...(content ? { content: version(content.id, content.revision) } : {}),
+        transcripts: transcriptVersions,
+        summaries: summaryVersions,
+        learn,
+        corrections: correctionVersions,
+        speakers: speakerVersions,
+        ...(item.kind === "audio"
+            ? {
+                  language: version(
+                      item.confirmedLanguage,
+                      item.title,
+                      item.titleEditedAt,
+                      summaries.map(({ id, revision, editedAt }) => [
+                          id,
+                          revision,
+                          editedAt,
+                      ]),
+                      languageProfile?.revisionId,
+                  ),
+              }
+            : {}),
+    };
     const presentation: Omit<
-        ItemProcessingPresentation,
+        LoadedItemProcessing,
         "steps" | "nextCheckAt" | "nextCheckInMs"
     > = {
+        access: {
+            role: viewerRole(isOwner, viewerUserId, orgUserId),
+            shared: item.shared === true,
+            contentView,
+        },
+        versions: {
+            ...partVersions,
+            item: version(
+                partVersions,
+                item.requestedGeneration ?? 0,
+                item.processedGeneration ?? 0,
+            ),
+        },
         ...(ownerTrim ? { trimProposal } : {}),
         itemId,
         kind: item.kind,
@@ -850,7 +1172,7 @@ export async function loadPrivateItemProcessing(
         intents,
         outputs: {
             transcript: transcripts.length > 0,
-            summary: summaries.length > 0,
+            summary: summaries.some(({ hasSummary }) => hasSummary),
             learn: learnDone,
         },
         processAgain,
@@ -891,13 +1213,49 @@ export async function loadPrivateItemProcessing(
         ),
         failures: processingFailures(phases),
     };
-    return projectProcessing(presentation, processingJobs, {
+    const projected = projectProcessing(presentation, processingJobs, {
+        advancePending:
+            (item.processedGeneration ?? 0) < (item.requestedGeneration ?? 0),
         canChange:
-            (viewerUserId === ownerUserId || curates) &&
+            (isOwner || restrictedViewer.isCurator) &&
             (!placementRows.some((folder) => folder.userId === orgUserId) ||
                 isOrgScopeEnabled()),
         canFile: viewerUserId === ownerUserId && view === "private",
         canProcessAgain: viewerUserId === ownerUserId,
         reviewUntil: item.summaryDueAt?.toISOString(),
     });
+    return {
+        ...projected,
+        access: presentation.access,
+        versions: presentation.versions,
+    };
+}
+
+/** Load the committed state in the requested view, with the owner's private fallback. */
+export async function loadFolderWriteProcessing(
+    request: Request,
+    ownerUserId: string,
+    itemId: string,
+    viewerUserId: string,
+) {
+    try {
+        return {
+            processing: await loadPrivateItemProcessing(
+                ownerUserId,
+                itemId,
+                viewerUserId,
+                localeFromAcceptLanguage(
+                    request.headers.get("accept-language"),
+                ),
+                requestedRecordingView(request),
+                true,
+            ),
+        };
+    } catch (error) {
+        console.error(
+            "[processing] Could not load the projection after a folder write",
+            error instanceof AppError ? error.code : undefined,
+        );
+        return { processingStale: true as const };
+    }
 }

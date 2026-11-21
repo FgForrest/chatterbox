@@ -406,6 +406,10 @@ class FakeStorage implements StorageProvider {
         if (!buf) throw new Error("not found");
         return buf;
     }
+    openRead = vi.fn<StorageProvider["openRead"]>();
+    async getObjectSize(key: string): Promise<number> {
+        return (await this.downloadFile(key)).length;
+    }
     async downloadStream(key: string): Promise<Readable> {
         if (this.stuckPaths.has(key)) return new StuckReadable();
         const buf = this.files.get(key);

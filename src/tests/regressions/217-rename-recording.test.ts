@@ -373,7 +373,7 @@ describe("PATCH /api/recordings/[id]", () => {
         );
 
         expect(response.status).toBe(200);
-        expect(storage.copyFile).toHaveBeenCalledTimes(9);
+        expect(storage.copyFile).toHaveBeenCalledTimes(7);
         expect(storage.copyFile).toHaveBeenCalledWith(
             "user-1/legacy.mp3",
             "user-1/New_title.mp3",
@@ -386,7 +386,7 @@ describe("PATCH /api/recordings/[id]", () => {
             "user-1/legacy.summary.md",
             "user-1/New_title.summary.md",
         );
-        expect(storage.deleteFile).toHaveBeenCalledTimes(9);
+        expect(storage.deleteFile).toHaveBeenCalledTimes(7);
     });
 
     it("does not remove a legacy source shared by another recording", async () => {
@@ -404,7 +404,7 @@ describe("PATCH /api/recordings/[id]", () => {
         );
 
         expect(response.status).toBe(200);
-        expect(storage.copyFile).toHaveBeenCalledTimes(9);
+        expect(storage.copyFile).toHaveBeenCalledTimes(7);
         expect(storage.deleteFile).not.toHaveBeenCalled();
     });
 

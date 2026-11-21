@@ -5,13 +5,17 @@ import { db } from "@/db";
 import { recordingItemJoin } from "@/db/items";
 import { recordingHasAgenda } from "@/db/queries/agenda-presence";
 import {
+    itemTitleVersion,
+    transcriptPartVersion,
+    transcriptTopicsVersion,
+} from "@/db/queries/item-content-versions";
+import {
     listOutgoingSharedItemIds,
     receivedItemCondition,
 } from "@/db/queries/item-shares";
 import {
     aiEnhancements,
     chatterItems,
-    itemShares,
     recordings,
     transcriptions,
     users,
@@ -25,8 +29,11 @@ import { decryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { exportProvidersAvailability } from "@/lib/folder-exports/configurations";
 import { listMyRestrictedAccessInvitations } from "@/lib/folders/access-requests";
+import {
+    dashboardFolderOrganization,
+    listDashboardReceivedShares,
+} from "@/lib/folders/dashboard-organization";
 import { listFolderOrganization } from "@/lib/folders/folders";
-import { organizationForDeployment } from "@/lib/folders/hierarchy";
 import { confirmedOverlays } from "@/lib/learn/llm-input";
 import { recordingsNeedingReview } from "@/lib/learn/pending";
 import { type OverlayCorrection, readTextOf } from "@/lib/learn/render";
@@ -63,12 +70,14 @@ type TranscriptRow = {
     model: string | null;
     turns: unknown;
     topics: unknown;
+    topicsVersion: string | null;
 };
 
 type TranscriptVariant = {
     source: string;
     text: string;
     version: { transcriptionId: string; revision: number };
+    contentVersion: string;
     language?: string;
     provider?: string;
     model?: string;
@@ -99,6 +108,11 @@ function buildTranscriptVariants(
                 transcriptionId: transcript.id,
                 revision: transcript.revision,
             },
+            contentVersion: transcriptPartVersion(
+                transcript.id,
+                transcript.revision,
+                transcript.topicsVersion,
+            ),
             language: transcript.detectedLanguage || undefined,
             provider: transcript.provider ?? undefined,
             model: transcript.model ?? undefined,
@@ -147,6 +161,7 @@ async function loadOrganizationLibrary(
             hasAgenda: recordingHasAgenda(),
             userId: recordings.userId,
             filename: chatterItems.title,
+            titleVersion: itemTitleVersion(),
             duration: recordings.duration,
             startTime: chatterItems.occurredAt,
             filesize: recordings.filesize,
@@ -173,7 +188,10 @@ async function loadOrganizationLibrary(
         .orderBy(desc(chatterItems.occurredAt));
     const [transcriptRows, summaryRows] = await Promise.all([
         db
-            .select({ transcription: transcriptions })
+            .select({
+                transcription: transcriptions,
+                topicsVersion: transcriptTopicsVersion(),
+            })
             .from(transcriptions)
             .innerJoin(
                 recordings,
@@ -194,7 +212,12 @@ async function loadOrganizationLibrary(
                         : sharedRecordingCondition(orgUserId),
                 ),
             )
-            .then((found) => found.map((row) => row.transcription)),
+            .then((found) =>
+                found.map(({ transcription, topicsVersion }) => ({
+                    ...transcription,
+                    topicsVersion,
+                })),
+            ),
         db
             .select({ recordingId: aiEnhancements.itemId })
             .from(aiEnhancements)
@@ -298,6 +321,7 @@ export default async function DashboardPage() {
                 id: recordings.id,
                 hasAgenda: recordingHasAgenda(),
                 filename: chatterItems.title,
+                titleVersion: itemTitleVersion(),
                 duration: recordings.duration,
                 startTime: chatterItems.occurredAt,
                 filesize: recordings.filesize,
@@ -339,6 +363,7 @@ export default async function DashboardPage() {
                 // from the text because only these carry timings.
                 turns: transcriptions.turns,
                 topics: transcriptions.topics,
+                topicsVersion: transcriptTopicsVersion(),
             })
             .from(transcriptions)
             .where(eq(transcriptions.userId, session.user.id)),
@@ -447,20 +472,7 @@ export default async function DashboardPage() {
                         listMyRestrictedAccessInvitations(session.user.id),
                     ]).then((lists) => lists.flat())
                   : Promise.resolve([]),
-              db
-                  .select({
-                      id: itemShares.id,
-                      itemId: itemShares.itemId,
-                      version: itemShares.version,
-                      filingFolderId: itemShares.filingFolderId,
-                  })
-                  .from(itemShares)
-                  .where(
-                      and(
-                          eq(itemShares.receiverUserId, session.user.id),
-                          eq(itemShares.state, "accepted"),
-                      ),
-                  ),
+              listDashboardReceivedShares(session.user.id),
           ])
         : ([null, [], []] as const);
     const receivedByItem = new Map(
@@ -500,13 +512,6 @@ export default async function DashboardPage() {
     // `src/lib/settings/initial-settings.ts`; adding a new preference
     // there is the only place callers need to touch.
     const initialSettings = initialSettingsFromRow(settingsRow);
-    const visibleFolderOrganization = organizationForDeployment(
-        folderOrganization,
-        {
-            isHosted: env.IS_HOSTED,
-            selfHostMode: env.SELF_HOST_MODE,
-        },
-    );
     const mailAvailable = isMailEnabled() && !viewerIsOrgAccount;
 
     return (
@@ -533,27 +538,21 @@ export default async function DashboardPage() {
                 isOrgAccount={viewerIsOrgAccount}
                 initialSettings={initialSettings}
                 plaudNeedsReconnect={connectionRow?.invalidatedAt != null}
+                plaudSessionExpiresAt={
+                    connectionRow?.sessionExpiresAt?.toISOString() ?? null
+                }
+                plaudConnectionUpdatedAt={
+                    connectionRow?.updatedAt?.toISOString() ?? null
+                }
                 isHosted={env.IS_HOSTED}
                 mailEnabled={mailAvailable}
                 canCurate={actor ? await actsForOrganization(actor) : false}
                 exportProviders={exportProvidersAvailability()}
                 initialInvitations={[...invitations]}
-                initialFolderOrganization={{
-                    ...visibleFolderOrganization,
-                    assignments: [
-                        ...visibleFolderOrganization.assignments,
-                        ...receivedShares.flatMap((share) =>
-                            share.filingFolderId
-                                ? [
-                                      {
-                                          recordingId: share.itemId,
-                                          folderId: share.filingFolderId,
-                                      },
-                                  ]
-                                : [],
-                        ),
-                    ],
-                }}
+                initialFolderOrganization={dashboardFolderOrganization(
+                    folderOrganization,
+                    receivedShares,
+                )}
             />
         </PersonSharingProvider>
     );

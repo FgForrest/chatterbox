@@ -2,7 +2,7 @@ import { MEETING_PROMPT_ORIGINS, detectMeetingPlatform } from "./platforms.js";
 
 export const MEETING_PROMPT_SCRIPT_ID = "recorder-meeting-prompt";
 export const MEETING_PROMPT_DISMISSED = "meetingPromptOfferDismissed";
-const FILES = ["popup/folder-combobox-shared.js", "content-meeting.js"];
+const FILES = ["popup/folder-combobox-shared.js", "lib/recording-levels.js", "content-meeting.js"];
 
 /** Whether all meeting sites have the optional access used by the banner. */
 export function hasMeetingPromptAccess() {

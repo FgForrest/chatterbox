@@ -739,21 +739,11 @@ describe.skipIf(!adminUrl)("recording cut routes and transaction", () => {
             text: encryptText(renderTurnsAsText([raw])),
             turns: encryptJsonField([raw]),
         });
-        await db.insert(transcriptions).values({
-            id: "mixed",
-            userId: "owner",
-            recordingId: "recording",
-            source: "mixed",
-            provider: "test",
-            model: "test",
-            text: encryptText(renderTurnsAsText([raw])),
-            turns: encryptJsonField([raw]),
-        });
         await db
             .update(transcriptions)
             .set({ transcriptionType: "browser" })
             .where(eq(transcriptions.id, "riffado"));
-        for (const source of ["plaud", "riffado", "mixed"]) {
+        for (const source of ["plaud", "riffado"]) {
             for (const scope of ["owner", "org"]) {
                 await db.insert(transcriptCorrections).values(
                     starts.map(({ at }, index) => ({
@@ -802,7 +792,7 @@ describe.skipIf(!adminUrl)("recording cut routes and transaction", () => {
             ),
         );
         const rows = await db.select().from(transcriptions);
-        expect(rows).toHaveLength(3);
+        expect(rows).toHaveLength(2);
         for (const row of rows) {
             expect(decryptText(row.text)).toBe("S1: Name kept.");
             expect(decryptJsonField<TranscriptTurn[]>(row.turns)).toEqual([
@@ -818,7 +808,7 @@ describe.skipIf(!adminUrl)("recording cut routes and transaction", () => {
             expect(row.topics).toBeNull();
         }
         const anchors = await db.select().from(transcriptCorrections);
-        expect(anchors).toHaveLength(6);
+        expect(anchors).toHaveLength(4);
         for (const anchor of anchors) {
             expect(anchor.id).toMatch(/-1$/);
             expect(anchor).toMatchObject({
@@ -1182,7 +1172,7 @@ describe.skipIf(!adminUrl)("recording cut routes and transaction", () => {
             reportProgress: vi.fn(),
         });
         expect(mocks.storage.downloadFile).not.toHaveBeenCalled();
-        expect(mocks.storage.deleteFile).toHaveBeenCalledTimes(8);
+        expect(mocks.storage.deleteFile).toHaveBeenCalledTimes(6);
         expect(
             decryptText(
                 (await database.db.select().from(chatterItems))[0].title,

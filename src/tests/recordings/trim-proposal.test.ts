@@ -303,7 +303,7 @@ describe("trim pipeline gate", () => {
             "markPhase",
             "queueTrim",
         ]));
-    it("accepts a mixed preferred transcript when the recipe accepts existing text", () => {
+    it("accepts a Plaud transcript when the recipe accepts existing text", () => {
         const f = facts();
         f.content = null;
         f.profile = {
@@ -319,10 +319,15 @@ describe("trim pipeline gate", () => {
             trim: { automatic: true },
         };
         f.trimContent = {
-            contentId: "mixed-transcript",
-            contentSourceId: "mixed",
+            contentId: "plaud-transcript",
+            contentSourceId: "plaud",
             contentRevision: 1,
             timed: true,
+        };
+        f.transcription = {
+            riffado: null,
+            plaud: f.trimContent,
+            jobActive: false,
         };
         expect(planAdvance(f).actions).toContainEqual({
             type: "queueTrim",

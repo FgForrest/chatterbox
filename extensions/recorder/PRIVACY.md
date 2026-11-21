@@ -25,11 +25,19 @@ warning **Read and change your data on a number of websites**, rather than a
 per-site list. It displays UI only in supported meeting rooms.
 It reads no page content, makes no network requests, and sends no page content
 anywhere. It communicates only with this extension's
-background worker for recording controls and folder selection. Folder searches
-use your existing paired server; no recorder key is exposed to the meeting
-page. Turning the switch off removes access to those meeting sites, unregisters
+background worker for recording controls and folder selection. While the recording pill is
+expanded and the tab that started the recording is visible, the worker sends
+its isolated script the overall level and four frequency-band levels for the
+microphone and selected audio source of the recording in progress. The pill
+shows those levels even if you selected another tab, window or screen. The
+script receives no audio samples
+and sends no levels to the meeting site or the paired server. Folder searches
+use your existing paired server; no recorder key is exposed to the meeting page. Turning the switch off removes access to those meeting sites, unregisters
 the script and hides its UI. Without this optional access, the existing system
-notification remains available. On agenda tabs the icon toggles the panel; its recording button acknowledges the participant notice. On other tabs the existing invocation behavior remains. Acknowledgement does not obtain other participants' consent.
+notification remains available. On agenda tabs the icon toggles the side panel. For a manual recording, the
+popup or side panel's record button acknowledges the participant notice.
+The notice also shows any assigned shortcut for confirming consent and starting
+directly. You are responsible for obtaining any required participant consent.
 
 The meeting page can observe keystrokes typed into the pill's folder search through its capture-phase keyboard listeners.
 

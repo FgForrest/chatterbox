@@ -73,6 +73,7 @@ function useChromeState(config: AppChromeConfig) {
     const [paletteOpen, setPaletteOpen] = useState(false);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const [providers, setProviders] = useState<Provider[]>([]);
+    const [plaudReconnectRevision, setPlaudReconnectRevision] = useState(0);
     const uploadButtonRef = useRef<HTMLButtonElement>(null);
     const { theme, setTheme } = useTheme(initialSettings.theme);
     useGoogleConnectOutcome();
@@ -108,6 +109,7 @@ function useChromeState(config: AppChromeConfig) {
         onError: (error) => toast.error(error),
     });
     const handleReconnected = useCallback(() => {
+        setPlaudReconnectRevision((revision) => revision + 1);
         refresh();
         void sync.manualSync();
     }, [refresh, sync.manualSync]);
@@ -189,6 +191,7 @@ function useChromeState(config: AppChromeConfig) {
         providers,
         uploadButtonRef,
         handleReconnected,
+        plaudReconnectRevision,
     };
 }
 

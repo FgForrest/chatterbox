@@ -21,6 +21,7 @@ import {
     chatCompletionWithUsage,
     usageAttemptFetch,
 } from "@/lib/ai/usage-attempt";
+import { providerBaseUrl } from "@/lib/ai/validate-base-url";
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { decryptJsonField, encryptJsonField } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -356,7 +357,7 @@ export async function generateTopicsForTranscript(
     const openai = new OpenAI({
         fetch: usageAttemptFetch,
         apiKey: credentials.apiKey,
-        baseURL: credentials.baseUrl || undefined,
+        baseURL: providerBaseUrl(credentials.baseUrl),
         maxRetries: resolved.organizationCredential ? 0 : undefined,
     });
     const topicsPerWindow: TranscriptTopic[][] = [];

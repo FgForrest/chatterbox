@@ -50,12 +50,10 @@ export function AgendaFolderTags({
                 version: 0,
             })),
     ];
-    const confirmFiling = useConfirmOrganizationFiling(
-        available,
-        detail.folders.map((folder) => ({
-            recordingId: itemId,
-            folderId: navigationId(folder.id),
-        })),
+    const confirmFiling = useConfirmOrganizationFiling(available, (id) =>
+        id === itemId
+            ? detail.folders.map((folder) => navigationId(folder.id))
+            : [],
     );
     const path = `/api/recordings/${encodeURIComponent(itemId)}/folders`;
     const change = async (

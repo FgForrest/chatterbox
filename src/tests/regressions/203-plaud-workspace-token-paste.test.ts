@@ -2,19 +2,9 @@
  * Regression test for issue #203:
  *   "[Bug]: Plaud no longer has long-lived bearer tokens available"
  *
- * Root cause (verified from a HAR of an Apple-SSO web.plaud.ai session):
- * Plaud issues two JWTs. The long-lived user token (UT, ~300 days) still
- * exists and rides on identity endpoints (/user/me, /team-app/workspaces/list).
- * A short-lived workspace token (WT, ~24h, carries `ut_ref`/`wid`/`wtype`
- * claims) rides on the data endpoints users inspect (/device/list,
- * /file/simple/web). SSO users paste the WT by mistake; it validates against
- * /device/list so the connect *looks* fine, then dies within a day because a
- * WT cannot mint a fresh WT.
- *
- * The fix detects a pasted WT and rejects it with actionable copy. This file
- * pins both the pure detector (`isPlaudWorkspaceToken`) and the
- * /api/plaud/auth/connect-token guard so we don't silently regress back to
- * accepting 24h tokens.
+ * The web app stores the user token as the pld_ut cookie. Data endpoints
+ * use workspace tokens, which cannot mint replacement workspace tokens.
+ * The paste route must reject those tokens with cookie instructions.
  */
 
 import {
@@ -26,6 +16,10 @@ import {
     type Mock,
     vi,
 } from "vitest";
+
+vi.mock("next-intl/server", () => ({
+    getExtracted: async () => (message: string) => message,
+}));
 
 vi.mock("@/lib/org/config", () => ({
     isOrgScopeVisible: () => false,
@@ -59,9 +53,7 @@ vi.mock("@/lib/auth", () => ({
     auth: { api: { getSession: vi.fn() } },
 }));
 
-vi.mock("@/lib/auth-server", async () => {
-    const { auth } = await import("@/lib/auth");
-    const { AppError, ErrorCode } = await import("@/lib/errors");
+vi.mock("@/lib/auth-server", () => {
     return {
         requireApiSession: async (request: Request) => {
             const session = await auth.api.getSession({
@@ -81,7 +73,7 @@ vi.mock("@/lib/auth-server", async () => {
 
 import { POST } from "@/app/api/plaud/auth/connect-token/route";
 import { auth } from "@/lib/auth";
-import { ErrorCode } from "@/lib/errors";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { decodeJwtClaims, isPlaudWorkspaceToken } from "@/lib/plaud/auth";
 
 const originalFetch = global.fetch;
@@ -203,7 +195,7 @@ describe("POST /api/plaud/auth/connect-token (workspace-token guard)", () => {
         const body = await res.json();
         expect(body.code).toBe(ErrorCode.PLAUD_WORKSPACE_TOKEN_PASTED);
         expect(body.error).toMatch(/workspace token/i);
-        expect(body.error).toMatch(/pld_tokenstr/);
+        expect(body.error).toMatch(/pld_ut/);
         // No Plaud round-trip — the guard short-circuits.
         expect(mockFetch).not.toHaveBeenCalled();
     });

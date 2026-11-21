@@ -1,14 +1,14 @@
 ---
 title: Point the meeting prompt at the toolbar and blink the pinned recorder icon
 date: 2026-11-19
-updated: 2026-11-19 21:36
-status: accepted
+updated: 2026-11-20 09:52
+status: superseded
 kind: fix
 issues: [421]
 prs: [424]
 areas: [extensions/recorder/content-meeting.js, extensions/recorder/service-worker.js, extensions/recorder/lib/prompt-icon.js]
 supersedes: []
-superseded-by: []
+superseded-by: [2026-11-20-recorder-meeting-card-is-a-notice]
 relates: [2026-10-22-meeting-recorder-banner]
 ---
 
@@ -17,6 +17,9 @@ relates: [2026-10-22-meeting-recorder-banner]
 The in-meeting card uses an arrow and a ring to guide users toward the toolbar. When the icon is
 pinned, a short blink marks its actual position. When it is unpinned, the card illustrates the
 extensions menu and the arrow points toward its puzzle button.
+
+**Superseded in part** by [The meeting card is a notice](2026-11-20-recorder-meeting-card-is-a-notice.md).
+The new decision removes the arrow and rings and changes the manual recording route. The 20-second blink, its badge alternation and pin guidance still hold.
 
 ## Why
 

@@ -230,7 +230,7 @@ it.each([
     );
     if (kind === "mail")
         expect(fetchMock).toHaveBeenCalledWith(
-            "/api/mail/item?view=received",
+            "/api/mail/item?content=1&view=received",
             expect.anything(),
         );
 });

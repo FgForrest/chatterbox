@@ -1122,13 +1122,14 @@ describe("planAdvance audio", () => {
                 tasksEnabled: true,
             },
             stepAvailability: { summary: "no_provider" },
-            plaudTasks: { fingerprint: "plaud-v1" },
+            plaudTasks: { fingerprint: "plaud-v1", sourceRevision: "import:0" },
         });
 
         const actions = planAdvance(facts).actions;
         expect(actions[0]).toEqual({
             type: "applyPlaudTasks",
             sourceFingerprint: "plaud-v1",
+            keepMatchingProposals: true,
             content: {
                 contentId: "transcription-1",
                 contentSourceId: "riffado",
@@ -1160,12 +1161,15 @@ describe("planAdvance audio", () => {
                 (action) => action.type === "applyPlaudTasks",
             ),
         ).toBe(false);
-        applied.plaudTasks = { fingerprint: "plaud-v2" };
-        expect(
-            planAdvance(applied).actions.some(
-                (action) => action.type === "applyPlaudTasks",
-            ),
-        ).toBe(true);
+        applied.plaudTasks = {
+            fingerprint: "plaud-v2",
+            sourceRevision: "import:1",
+        };
+        const changed = planAdvance(applied).actions.find(
+            (action) => action.type === "applyPlaudTasks",
+        );
+        expect(changed).toMatchObject({ sourceFingerprint: "plaud-v2" });
+        expect(changed).not.toHaveProperty("keepMatchingProposals");
     });
 
     it("writes no Plaud tasks when Tasks are off", () => {
@@ -1176,7 +1180,10 @@ describe("planAdvance audio", () => {
                     tasksEnabled: false,
                 },
                 stepAvailability: { summary: "no_provider" },
-                plaudTasks: { fingerprint: "plaud-v1" },
+                plaudTasks: {
+                    fingerprint: "plaud-v1",
+                    sourceRevision: "import:0",
+                },
             }),
         ).actions;
 
@@ -1211,7 +1218,10 @@ describe("planAdvance audio", () => {
                     tasksEnabled: true,
                 },
                 stepAvailability: { summary: "no_provider" },
-                plaudTasks: { fingerprint: "plaud-v1" },
+                plaudTasks: {
+                    fingerprint: "plaud-v1",
+                    sourceRevision: "import:0",
+                },
             }),
         ).actions;
 

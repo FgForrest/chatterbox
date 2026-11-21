@@ -49,7 +49,18 @@ export interface StoredSummary {
 export interface PlaudTaskSource {
     summary: string;
     actionItems: string[];
+    hasUnnormalizedItems: boolean;
     transcriptionId: string | null;
+    sourceRevision: string;
+}
+
+/** Trim imported Plaud action items and discard blank or non-string entries. */
+export function normalizePlaudActionItems(raw: unknown): string[] {
+    if (!Array.isArray(raw)) return [];
+    return raw.flatMap((item: unknown) => {
+        const text = typeof item === "string" ? item.trim() : "";
+        return text ? [text] : [];
+    });
 }
 
 /** Read the Plaud summary fields used by Summary-step task processing. */
@@ -59,6 +70,8 @@ export async function readPlaudTaskSource(
 ): Promise<PlaudTaskSource | null> {
     const [row] = await db
         .select({
+            id: aiEnhancements.id,
+            revision: aiEnhancements.revision,
             summary: aiEnhancements.summary,
             actionItems: aiEnhancements.actionItems,
             transcriptionId: aiEnhancements.transcriptionId,
@@ -73,13 +86,17 @@ export async function readPlaudTaskSource(
         )
         .limit(1);
     if (!row) return null;
-    const actionItems = decryptJsonField<unknown[]>(row.actionItems) ?? [];
+    const rawItems = decryptJsonField<unknown>(row.actionItems);
+    const actionItems = normalizePlaudActionItems(rawItems);
     return {
         summary: decryptText(row.summary) ?? "",
-        actionItems: actionItems.flatMap((item) =>
-            typeof item === "string" && item.trim() ? [item.trim()] : [],
-        ),
+        actionItems,
+        hasUnnormalizedItems:
+            Array.isArray(rawItems) &&
+            (rawItems.length !== actionItems.length ||
+                actionItems.some((item, index) => item !== rawItems[index])),
         transcriptionId: row.transcriptionId,
+        sourceRevision: `${row.id}:${row.revision}`,
     };
 }
 

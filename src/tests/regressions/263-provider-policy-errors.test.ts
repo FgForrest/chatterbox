@@ -19,33 +19,70 @@ vi.mock("@/lib/ai/usage-cost", () => ({ recordChatCompletionUsage: vi.fn() }));
 vi.mock("@/lib/posthog-server", () => ({ captureServerException: vi.fn() }));
 
 import { HOSTED_LOCAL_BASE_URL_MESSAGE } from "@/lib/ai/validate-base-url";
+import { env } from "@/lib/env";
 import { AppError, ErrorCode, mapErrorToAppError } from "@/lib/errors";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import { learnChatClients } from "@/lib/learn/chat-clients";
 import { runSummary, summaryModelFor } from "@/lib/summary/summary-model";
 
-beforeEach(() => {
-    vi.useFakeTimers();
-    vi.clearAllMocks();
-    lookup.mockResolvedValue([{ address: "10.0.0.1", family: 4 }]);
-    reserveCall.mockResolvedValue(undefined);
+function mockProvider(baseUrl: string) {
     resolveStepProvider.mockResolvedValue({
         kind: "credential",
         credential: {
             id: "test-credential",
             provider: "Custom",
             apiKey: "test-key",
-            baseUrl: "https://api.example.com/v1",
+            baseUrl,
             defaultModel: "example-model",
         },
         payerUserId: "test-owner",
         reserveCall,
         organizationCredential: false,
     });
+}
+
+beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    env.IS_HOSTED = true;
+    lookup.mockResolvedValue([{ address: "10.0.0.1", family: 4 }]);
+    reserveCall.mockResolvedValue(undefined);
+    mockProvider("https://api.example.com/v1");
 });
 
 afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
+});
+
+it.each([
+    ["summary", () => summaryModelFor("test-owner")],
+    [
+        "Learn",
+        () =>
+            learnChatClients({
+                actorUserId: "test-owner",
+                recordingId: "test-recording",
+                ownerUserId: "test-owner",
+                operation: "learn",
+                schemaName: "example",
+                signal: new AbortController().signal,
+            }),
+    ],
+] as const)("%s rejects non-http(s) base URLs before fetch", async (_name, resolve) => {
+    env.IS_HOSTED = false;
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    mockProvider("file:");
+
+    const error = await resolve().catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(AppError);
+    expect(error).toMatchObject({
+        code: ErrorCode.INVALID_INPUT,
+        statusCode: 400,
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(reserveCall).not.toHaveBeenCalled();
 });
 
 describe("hosted provider refusals through the real OpenAI SDK", () => {

@@ -1,4 +1,5 @@
 import { env } from "@/lib/env";
+import { requireHttpUrl } from "@/lib/net/http-url";
 
 interface BarkNotificationOptions {
     title?: string;
@@ -53,6 +54,7 @@ export async function sendBarkNotification(
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
+        requireHttpUrl(pushUrl, { allowCredentials: true });
         const response = await fetch(pushUrl, {
             method: "POST",
             headers: {

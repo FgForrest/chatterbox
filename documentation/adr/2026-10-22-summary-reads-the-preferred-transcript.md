@@ -1,7 +1,7 @@
 ---
 title: Summaries and titles read the same transcript the pipeline chose, own first, then the user's edit, then Plaud's
 date: 2026-10-22
-updated: 2026-11-08 19:20
+updated: 2026-11-20 19:49
 status: superseded
 kind: fix
 issues: []
@@ -24,6 +24,8 @@ transcription available"). Decided on 2026-10-22 and merged the same day as PR #
 **Superseded in part** by [summary edits and persistent remarks](2026-10-28-summary-edits-and-persistent-remarks.md):
 new preferred content no longer automatically replaces a hand-edited generated summary. Its
 older-input note remains visible. The preferred transcript order and all other rules still hold.
+The edited source (`mixed`) was never written and was removed in #446; the order is now own, then
+Plaud.
 
 ## Why
 
@@ -113,3 +115,4 @@ As merged in PR #243:
   data; fix built.
 - **2026-10-22**: reconstructed from session history, memories and PR descriptions.
 - **2026-10-22**: merged as PR #243.
+- **2026-11-20**: the never-written `mixed` source removed from the order (#446).

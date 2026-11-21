@@ -1,6 +1,6 @@
 import { fetchWithoutIdleTimeout } from "@/lib/ai/provider-fetch";
 import { withResponseUsage } from "@/lib/ai/usage-values";
-import { env } from "@/lib/env";
+import { fetchTranscription } from "@/lib/transcription/fetch";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const ERROR_DETAIL_MAX_CHARS = 200;
@@ -148,7 +148,7 @@ export async function geminiTranscribe({
         : TRANSCRIBE_INSTRUCTION;
 
     return attempt(async () => {
-        const response = await fetchWithoutIdleTimeout(
+        const response = await fetchTranscription(
             `${API_BASE}/${resource}:generateContent`,
             {
                 method: "POST",
@@ -172,8 +172,8 @@ export async function geminiTranscribe({
                         },
                     ],
                 }),
-                signal: AbortSignal.timeout(env.WHISPER_REQUEST_TIMEOUT_MS),
             },
+            fetchWithoutIdleTimeout,
         );
 
         if (!response.ok) {

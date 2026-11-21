@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { plaudConnections } from "@/db/schema";
 import { generateTitleFromTranscription } from "@/lib/ai/generate-title";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import {
@@ -112,18 +113,27 @@ export async function applyGeneratedTitle(input: {
                 .limit(1);
 
             if (connection) {
-                const plaudClient = await createPlaudClient(
-                    connection.bearerToken,
-                    connection.apiBase,
-                    connection.workspaceId,
-                );
+                let bearerToken = connection.bearerToken;
+                const plaudClient = await createPlaudClient(connection, {
+                    onTokensStored: (stored) => {
+                        bearerToken = stored;
+                    },
+                });
                 // A person may have renamed it since the title was stored.
                 // Their title stays here, so Plaud must not get this one.
                 if (await titleStillGenerated(userId, recordingId)) {
-                    await plaudClient.updateFilename(
+                    const response = await plaudClient.updateFilename(
                         plaudFileId,
                         generatedTitle,
                     );
+                    if (response.status !== 0) {
+                        throw new AppError(
+                            ErrorCode.PLAUD_API_ERROR,
+                            "Plaud rejected the rename.",
+                            400,
+                            { plaudStatus: response.status },
+                        );
+                    }
                 }
                 // Backfill workspaceId if newly resolved. Always scope
                 // user-owned UPDATEs by userId even when filtering by id
@@ -137,12 +147,18 @@ export async function applyGeneratedTitle(input: {
                             and(
                                 eq(plaudConnections.id, connection.id),
                                 eq(plaudConnections.userId, userId),
+                                eq(plaudConnections.bearerToken, bearerToken),
                             ),
                         );
                 }
             }
         } catch (error) {
-            console.error("Failed to sync title to Plaud:", error);
+            console.error(
+                "Failed to sync title to Plaud",
+                error instanceof AppError
+                    ? error.code
+                    : ErrorCode.INTERNAL_ERROR,
+            );
         }
     }
     return true;

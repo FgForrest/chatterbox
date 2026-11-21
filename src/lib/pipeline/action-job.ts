@@ -89,18 +89,30 @@ export const pipelineActionJobHandler: JobHandler<ActionPayload> = {
         payload,
     }): Promise<PipelineJobResult> {
         if (payload.action.type === "applyPlaudTasks") {
-            const applied = await applyPlaudActionItemProposals({
+            const result = await applyPlaudActionItemProposals({
                 itemId: payload.itemId,
                 userId,
                 view: "private",
                 expectedFingerprint: payload.action.sourceFingerprint,
                 record: payload.action.record,
                 settle: false,
+                keepMatchingProposals: payload.action.keepMatchingProposals,
             });
+            if (result === "applied")
+                return { outcome: { kind: "done", reason: "plaud_tasks" } };
+            if (result === "source_changed")
+                return {
+                    outcome: { kind: "skipped", reason: "source_changed" },
+                };
             return {
-                outcome: applied
-                    ? { kind: "done", reason: "plaud_tasks" }
-                    : { kind: "skipped", reason: "outdated" },
+                outcome: {
+                    kind: "skipped",
+                    reason: "outdated",
+                    plaudAction: true,
+                    ...(payload.action.hasUnnormalizedItems && {
+                        usesNormalizedPlaudItems: true,
+                    }),
+                },
             };
         }
         if (!claimToken)

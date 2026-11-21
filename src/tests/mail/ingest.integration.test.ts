@@ -648,7 +648,7 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
                 recordingId: itemId,
                 folderId: orgWeeklyFolderId,
             }),
-        ).resolves.toBeUndefined();
+        ).resolves.toBe("shared");
         expect(await assigned()).toEqual(
             [weeklyFolderId, orgWeeklyFolderId].sort(),
         );
@@ -742,6 +742,9 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
             },
             downloadFile: (key) => source.downloadFile(key),
             downloadStream: (key) => source.downloadStream(key),
+            openRead: (key, range, signal) =>
+                source.openRead(key, range, signal),
+            getObjectSize: (key) => source.getObjectSize(key),
             exists: (key) => source.exists(key),
             getSignedUrl: (key, expires) => source.getSignedUrl(key, expires),
             deleteFile: (key) => source.deleteFile(key),

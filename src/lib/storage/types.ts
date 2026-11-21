@@ -1,5 +1,24 @@
 import type { Readable } from "node:stream";
 
+/** Inclusive byte offsets for a partial object read. */
+export interface ByteRange {
+    start: number;
+    end: number;
+}
+
+/** A single HTTP byte range before it is resolved against the object size. */
+export type RequestedByteRange =
+    | { start: bigint; end: bigint | null }
+    | { suffixLength: bigint };
+
+/** Body and metadata from one storage read. Only a full read may have an unknown size. */
+export type StorageRead = {
+    body: ReadableStream<Uint8Array>;
+} & (
+    | { totalSize: number; range: ByteRange }
+    | { totalSize: number | null; range: null }
+);
+
 /** Storage provider interface — implemented by local FS and S3-compatible. */
 export interface StorageProvider {
     uploadFile(
@@ -15,6 +34,18 @@ export interface StorageProvider {
      * (or the returned stream emits `error`) if the key doesn't exist.
      */
     downloadStream(key: string): Promise<Readable>;
+    /**
+     * Opens the current object and streams the resolved interval or the full body.
+     * Rejects with `StorageObjectMissingError`, `StorageRangeNotSatisfiableError`, or `signal.reason` on abort.
+     * The body may error with `StorageObjectChangedError` if the object changes during the read.
+     */
+    openRead(
+        key: string,
+        range: RequestedByteRange | null,
+        signal?: AbortSignal,
+    ): Promise<StorageRead>;
+    /** Returns the object's size in bytes. Rejects with StorageObjectMissingError for an absent key. */
+    getObjectSize(key: string, signal?: AbortSignal): Promise<number>;
     /**
      * Streaming write. `contentLength` is a hint some backends (S3
      * multipart) can use but must not require -- callers may not know

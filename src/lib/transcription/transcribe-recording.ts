@@ -16,11 +16,12 @@ import {
     getTranscriptionStyle,
 } from "@/lib/ai/provider-presets";
 import {
+    createUsageAttemptFetch,
     createUsageFetch,
-    usageAttemptFetch,
     withUsageFailure,
 } from "@/lib/ai/usage-attempt";
 import { recordAiUsage } from "@/lib/ai/usage-cost";
+import { providerBaseUrl } from "@/lib/ai/validate-base-url";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { isHostedLockedOut } from "@/lib/entitlements";
 import { env } from "@/lib/env";
@@ -48,6 +49,7 @@ import {
     agendaSpellingTerms,
     loadRecordingAgenda,
 } from "@/lib/meetings/pipeline-context";
+import { InvalidHttpUrlError } from "@/lib/net/http-url";
 import { isOrgScopeEnabled } from "@/lib/org/config";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import {
@@ -84,6 +86,7 @@ import {
     elevenLabsTakesKeyterms,
     elevenLabsTranscribe,
 } from "@/lib/transcription/elevenlabs-transcribe";
+import { fetchTranscription } from "@/lib/transcription/fetch";
 import {
     buildTranscriptionParams,
     getResponseFormat,
@@ -91,7 +94,10 @@ import {
 } from "@/lib/transcription/format";
 import { geminiTranscribe } from "@/lib/transcription/gemini-transcribe";
 import { mergeMeetingTerms } from "@/lib/transcription/meeting-terms";
-import { upsertTranscription } from "@/lib/transcription/persist";
+import {
+    type TranscriptSource,
+    upsertTranscription,
+} from "@/lib/transcription/persist";
 import {
     speechmaticsTakesVocabulary,
     speechmaticsTranscribe,
@@ -422,7 +428,7 @@ export interface TranscribeOptions {
     /** Override the language for one explicitly requested re-transcription. */
     language?: string;
     /** Transcript source whose confirmed speaker assignments may be carried forward. */
-    attributionSource?: "riffado" | "plaud" | "mixed";
+    attributionSource?: TranscriptSource;
     /**
      * Re-run the provider call even when a transcript already exists.
      * Used by the manual "Re-transcribe" button so a user clicking it
@@ -828,6 +834,13 @@ async function transcribeRecordingInner(
             persistModel = result.model;
         } else if (credentials) {
             const apiKey = credentials.apiKey;
+            const transcriptionStyle = getTranscriptionStyle(
+                credentials.provider,
+            );
+            const baseUrl =
+                transcriptionStyle === "gemini"
+                    ? undefined
+                    : providerBaseUrl(credentials.baseUrl);
 
             const storage = await createUserStorageProvider(ctx.ownerUserId);
             const audioBuffer = await storage.downloadFile(
@@ -870,10 +883,6 @@ async function transcribeRecordingInner(
             // - "chat": OpenAI-compatible chat completions with input_audio
             //   (OpenRouter today; #122 -- /v1/audio/transcriptions 404s there)
             // - "whisper": OpenAI-compatible /v1/audio/transcriptions
-            const transcriptionStyle = getTranscriptionStyle(
-                credentials.provider,
-            );
-
             if (transcriptionStyle === "gemini") {
                 await reserveCall();
                 const result = await geminiTranscribe({
@@ -903,7 +912,7 @@ async function transcribeRecordingInner(
                         model,
                         file: audioFile,
                         language: defaultLanguage,
-                        baseUrl: credentials.baseUrl,
+                        baseUrl,
                         keyterms,
                     }),
                 );
@@ -927,7 +936,7 @@ async function transcribeRecordingInner(
                         model,
                         file: audioFile,
                         language: defaultLanguage,
-                        baseUrl: credentials.baseUrl,
+                        baseUrl,
                         vocabulary,
                     }),
                 );
@@ -939,11 +948,11 @@ async function transcribeRecordingInner(
                 turns = result.turns;
             } else {
                 const openai = new OpenAI({
-                    fetch: usageAttemptFetch,
+                    fetch: createUsageAttemptFetch(fetchTranscription),
                     apiKey,
-                    baseURL: credentials.baseUrl || undefined,
+                    baseURL: baseUrl,
                     timeout: env.WHISPER_REQUEST_TIMEOUT_MS,
-                    maxRetries: resolved.organizationCredential ? 0 : undefined,
+                    maxRetries: 0,
                 });
 
                 if (transcriptionStyle === "chat") {
@@ -1097,8 +1106,7 @@ async function transcribeRecordingInner(
         if (
             !existingTranscription &&
             opts.force &&
-            opts.attributionSource &&
-            opts.attributionSource !== "riffado" &&
+            opts.attributionSource === "plaud" &&
             nextSpeakerCount > 0
         ) {
             await copyMatchingSpeakerAttributions({
@@ -1161,6 +1169,14 @@ async function transcribeRecordingInner(
             detectedLanguage,
         };
     } catch (error) {
+        if (error instanceof InvalidHttpUrlError) {
+            if (!orgView) {
+                await emitEvent("transcription.failed", userId, recordingId, {
+                    error: error.message,
+                });
+            }
+            throw error;
+        }
         console.error("Error transcribing recording:", error);
         if (isMynahBudgetExhausted(error)) {
             if (!orgView) {

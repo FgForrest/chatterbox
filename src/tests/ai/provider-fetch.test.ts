@@ -18,11 +18,18 @@ vi.mock("@/lib/env", () => ({
 vi.mock("@/lib/posthog-server", () => ({ captureServerException: vi.fn() }));
 
 import { providerFetch } from "@/lib/ai/provider-fetch";
-import { validateAiBaseUrl } from "@/lib/ai/validate-base-url";
+import { providerBaseUrl, validateAiBaseUrl } from "@/lib/ai/validate-base-url";
 import { env } from "@/lib/env";
-import { ErrorCode, mapErrorToAppError } from "@/lib/errors";
+import { AppError, ErrorCode, mapErrorToAppError } from "@/lib/errors";
 import { isRetryableError } from "@/lib/jobs/retryable";
-import { elevenLabsTranscribe } from "@/lib/transcription/elevenlabs-transcribe";
+import {
+    elevenLabsTranscribe,
+    resolveElevenLabsUrl,
+} from "@/lib/transcription/elevenlabs-transcribe";
+import {
+    resolveSpeechmaticsBase,
+    speechmaticsTranscribe,
+} from "@/lib/transcription/speechmatics-transcribe";
 
 let status: number;
 let responseBody: Buffer;
@@ -74,7 +81,10 @@ beforeEach(() => {
             },
         );
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+});
 
 describe("hosted provider fetch", () => {
     const requestPaths = {
@@ -90,18 +100,21 @@ describe("hosted provider fetch", () => {
 
     describe.each(
         Object.entries(requestPaths),
-    )("%s error classification", (_name, run) => {
+    )("%s error classification", (name, run) => {
         it.each([
             "EAI_AGAIN",
             "ENOTFOUND",
             "empty answer",
-        ])("retries DNS failures (%s)", async (code) => {
+        ])("preserves the final DNS failure (%s)", async (code) => {
+            vi.useFakeTimers();
             if (code === "empty answer") lookup.mockResolvedValue([]);
             else
                 lookup.mockRejectedValue(
                     Object.assign(new Error("DNS failed"), { code }),
                 );
-            const error: unknown = await run().catch((error: unknown) => error);
+            const result = run().catch((error: unknown) => error);
+            await vi.runAllTimersAsync();
+            const error: unknown = await result;
             expect(mapErrorToAppError(error)).toMatchObject({
                 code: ErrorCode.SERVICE_UNAVAILABLE,
                 statusCode: 503,
@@ -109,6 +122,9 @@ describe("hosted provider fetch", () => {
             });
             expect(isRetryableError(error)).toBe(true);
             expect(transport).not.toHaveBeenCalled();
+            expect(lookup).toHaveBeenCalledTimes(
+                name === "elevenLabs" && code !== "EAI_AGAIN" ? 3 : 1,
+            );
         });
 
         it("does not retry private DNS answers", async () => {
@@ -138,13 +154,26 @@ describe("hosted provider fetch", () => {
         "http://10.0.0.1/v1/models",
         "http://[fd00:ec2::254]/v2/jobs",
         "http://api.internal/models",
-        "file:///etc/passwd",
-        "https://user:secret@api.example.com/v1",
+        "file:",
     ])("blocks %s before HTTP", async (url) => {
         await expect(providerFetch(url)).rejects.toMatchObject({
             statusCode: 400,
         });
         expect(transport).not.toHaveBeenCalled();
+    });
+
+    it("rejects credentials on the hosted transport before DNS or HTTP", async () => {
+        const fetch = vi.fn();
+        vi.stubGlobal("fetch", fetch);
+        await expect(
+            providerFetch(" HTTPS://user:secret@api.example.com/v1\n"),
+        ).rejects.toMatchObject({
+            code: ErrorCode.INVALID_INPUT,
+            statusCode: 400,
+        });
+        expect(lookup).not.toHaveBeenCalled();
+        expect(transport).not.toHaveBeenCalled();
+        expect(fetch).not.toHaveBeenCalled();
     });
 
     it("pins all checked addresses while retaining hostname and TLS authority", async () => {
@@ -224,6 +253,23 @@ describe("hosted provider fetch", () => {
             "/v1/chat/completions",
             "/v1/embeddings",
         ]);
+    });
+
+    it.each([
+        " HTTPS://api.example.com/v1/models ",
+        "https://api.example.com/v1/models\n",
+        "https:api.example.com/v1/models",
+    ])("accepts URL parser forms through the hosted transport", async (url) => {
+        await expect(providerFetch(url)).resolves.toMatchObject({
+            url: "https://api.example.com/v1/models",
+        });
+        expect(transport).toHaveBeenCalledWith(
+            expect.objectContaining({
+                hostname: "api.example.com",
+                path: "/v1/models",
+            }),
+            expect.any(Function),
+        );
     });
 
     it("serializes multipart uploads and preserves the boundary", async () => {
@@ -326,11 +372,66 @@ describe("hosted provider fetch", () => {
 
 describe("self-host provider fetch", () => {
     it.each([
+        "file:",
+        "  file:///x",
+        "FILE:",
+        new URL("file:"),
+        new Request("file:"),
+        "data:text/plain,example",
+        "ftp://example.com",
+        "blob:https://example.com/example",
+        "javascript:void(0)",
+        " /v1/models",
+    ])("rejects invalid request URLs before fetch", async (target) => {
+        env.IS_HOSTED = false;
+        const fetch = vi.fn();
+        vi.stubGlobal("fetch", fetch);
+
+        const error = await providerFetch(target).catch(
+            (error: unknown) => error,
+        );
+        expect(error).toBeInstanceOf(AppError);
+        expect(error).toMatchObject({
+            code: ErrorCode.INVALID_INPUT,
+            statusCode: 400,
+            details: { field: "baseUrl" },
+        });
+        expect(fetch).not.toHaveBeenCalled();
+        expect(lookup).not.toHaveBeenCalled();
+        expect(transport).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ["ElevenLabs", elevenLabsTranscribe, "scribe_v2"],
+        ["Speechmatics", speechmaticsTranscribe, "enhanced"],
+    ] as const)("%s rejects non-http(s) base URLs before fetch", async (_name, transcribe, model) => {
+        env.IS_HOSTED = false;
+        const fetch = vi.fn();
+        vi.stubGlobal("fetch", fetch);
+        const error = await transcribe({
+            apiKey: "test-key",
+            model,
+            file: new File(["audio"], "sample.wav"),
+            baseUrl: "file:",
+        }).catch((error: unknown) => error);
+        expect(error).toBeInstanceOf(AppError);
+        expect(error).toMatchObject({
+            code: ErrorCode.INVALID_INPUT,
+            statusCode: 400,
+        });
+        expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it.each([
         "http://ollama:11434/v1/models",
         "http://192.168.1.10:1234/v1/models",
         "http://169.254.169.254",
         "http://[fd00:ec2::254]",
         "http://api.internal",
+        "  http://ollama:11434/v1/models  ",
+        "http://ollama:11434/v1/models\n",
+        "HTTP://OLLAMA:11434/v1/models",
+        "http:ollama:11434/v1/models",
     ])("passes %s to native fetch without DNS or pinning", async (url) => {
         env.IS_HOSTED = false;
         const response = new Response("local response");
@@ -341,5 +442,56 @@ describe("self-host provider fetch", () => {
         expect(fetch).toHaveBeenCalledWith(url, { ...options, timeout: false });
         expect(lookup).not.toHaveBeenCalled();
         expect(transport).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        {
+            form: "surrounding whitespace",
+            baseUrl: " HTTPS://api.example.com/v1\n",
+            requestUrl: "https://api.example.com/v1/chat/completions",
+        },
+        {
+            form: "credentials",
+            baseUrl: " https://user:secret@api.example.com/v1\n",
+            requestUrl:
+                "https://user:secret@api.example.com/v1/chat/completions",
+        },
+    ])("uses a stored SDK base URL with $form", async ({
+        baseUrl,
+        requestUrl,
+    }) => {
+        env.IS_HOSTED = false;
+        const fetch = vi.fn().mockResolvedValue(Response.json({ choices: [] }));
+        vi.stubGlobal("fetch", fetch);
+        const client = new OpenAI({
+            apiKey: "test-key",
+            baseURL: providerBaseUrl(baseUrl),
+            fetch: providerFetch,
+            maxRetries: 0,
+        });
+
+        await client.chat.completions.create({
+            model: "example",
+            messages: [],
+        });
+
+        expect(fetch).toHaveBeenCalledWith(requestUrl, expect.anything());
+        expect(lookup).not.toHaveBeenCalled();
+        expect(transport).not.toHaveBeenCalled();
+    });
+});
+
+describe("native transcription endpoint construction", () => {
+    it.each([
+        [resolveElevenLabsUrl, "v1", "/v1/speech-to-text"],
+        [resolveSpeechmaticsBase, "v2", "/v2"],
+    ] as const)("trims the base URL before appending the API path", (resolve, version, path) => {
+        expect(resolve(` https://api.example.com/${version}/ \n`)).toBe(
+            `https://api.example.com${path}`,
+        );
+        expect(resolve(`https://user:secret@api.example.com/${version}`)).toBe(
+            `https://user:secret@api.example.com${path}`,
+        );
+        expect(resolve(" \n ")).toBe(resolve(undefined));
     });
 });

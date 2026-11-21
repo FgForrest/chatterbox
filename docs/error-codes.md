@@ -87,7 +87,7 @@ rephrased between releases without notice; `code` will not.
 | Code                          | Status | `details`                          | When                                                                                                |
 | ----------------------------- | -----: | ---------------------------------- | --------------------------------------------------------------------------------------------------- |
 | `PLAUD_NOT_CONNECTED`         |   400  | —                                  | User has no stored Plaud connection. UI should route to the connect flow.                           |
-| `PLAUD_INVALID_TOKEN`         |   401  | `{ plaudStatus, plaudMessage }`    | Plaud rejected the access token (401). User must reconnect.                                         |
+| `PLAUD_INVALID_TOKEN`         |   401  | `{ plaudStatus?, reason? }`        | The Plaud sign-in expired or Plaud still rejects the connection after authentication recovery.       |
 | `PLAUD_INVALID_API_BASE`      |   400  | —                                  | SSRF guard: `apiBase` is not a `*.plaud.ai` HTTPS host.                                             |
 | `PLAUD_REGION_REDIRECT_LOOP`  |   502  | —                                  | OTP send-code redirected through more than 3 regional servers without converging.                   |
 | `PLAUD_OTP_INVALID`           |   400  | `{ plaudStatus }`                  | OTP code / token not accepted by Plaud's `/auth/otp-login`.                                         |

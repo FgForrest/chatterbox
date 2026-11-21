@@ -1,7 +1,7 @@
 "use client";
 
 import { Folder, FolderLock, Users, X } from "lucide-react";
-import type { AriaAttributes, RefObject } from "react";
+import type { AriaAttributes, ReactNode, RefObject } from "react";
 import { cn } from "@/lib/utils";
 
 /** Shared folder chip and optional unfiling action for item headers. */
@@ -16,6 +16,7 @@ export function ItemFolderChipBody({
     selectRef,
     title,
     selectDisabled,
+    saving,
     ...ariaProps
 }: {
     name: string;
@@ -28,6 +29,7 @@ export function ItemFolderChipBody({
     selectRef?: RefObject<HTMLButtonElement | null>;
     title?: string;
     selectDisabled?: boolean;
+    saving?: ReactNode;
 } & Pick<
     AriaAttributes,
     "aria-label" | "aria-expanded" | "aria-controls" | "aria-haspopup"
@@ -36,6 +38,7 @@ export function ItemFolderChipBody({
         <span
             className={cn(
                 "inline-flex h-7 items-center overflow-hidden rounded-full border text-xs",
+                saving && "opacity-60",
                 restricted
                     ? "border-restricted/20 bg-restricted/5"
                     : organization
@@ -68,6 +71,7 @@ export function ItemFolderChipBody({
                 )}
                 {name}
             </button>
+            {saving}
             {onRemove && (
                 <button
                     type="button"

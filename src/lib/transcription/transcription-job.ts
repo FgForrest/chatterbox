@@ -3,6 +3,7 @@ import { nudge } from "@/lib/jobs/nudge";
 import { InvalidJobPayloadError } from "@/lib/jobs/types";
 import { recordingLanguage } from "@/lib/recordings/language";
 import { type RecordingView, recordingJobSubject } from "@/lib/sharing/view";
+import type { TranscriptSource } from "@/lib/transcription/persist";
 
 export const TRANSCRIPTION_JOB_KIND = "transcription";
 export const TRANSCRIPTION_PRIORITY_MANUAL = 10;
@@ -15,7 +16,7 @@ export interface TranscriptionJobPayload {
     trigger: "manual" | "sync" | "upload" | "pipeline";
     providerId?: string;
     model?: string;
-    attributionSource?: "riffado" | "plaud" | "mixed";
+    attributionSource?: TranscriptSource;
     language?: string;
     force: boolean;
     /** Absent on the private view, which is every job queued before views existed. */
@@ -55,15 +56,16 @@ export function parseTranscriptionJobPayload(
             "model must be a string when present",
         );
     }
+    const attributionSource =
+        raw.attributionSource === "mixed" ? undefined : raw.attributionSource;
     if (
-        raw.attributionSource !== undefined &&
-        raw.attributionSource !== "riffado" &&
-        raw.attributionSource !== "plaud" &&
-        raw.attributionSource !== "mixed"
+        attributionSource !== undefined &&
+        attributionSource !== "riffado" &&
+        attributionSource !== "plaud"
     ) {
         throw new InvalidJobPayloadError(
             TRANSCRIPTION_JOB_KIND,
-            'attributionSource must be "riffado", "plaud", or "mixed" when present',
+            'attributionSource must be "riffado" or "plaud" when present',
         );
     }
     if (raw.force !== undefined && typeof raw.force !== "boolean") {
@@ -99,7 +101,7 @@ export function parseTranscriptionJobPayload(
         providerId: raw.providerId,
         model: raw.model,
         ...(typeof raw.language === "string" ? { language: raw.language } : {}),
-        attributionSource: raw.attributionSource,
+        attributionSource,
         force: raw.force ?? raw.trigger === "manual",
         ...(raw.view === "org" ? { view: "org" as const } : {}),
     };
@@ -112,7 +114,7 @@ export async function enqueueTranscriptionJob(input: {
     trigger: "manual" | "sync" | "upload" | "pipeline";
     providerId?: string;
     model?: string;
-    attributionSource?: "riffado" | "plaud" | "mixed";
+    attributionSource?: TranscriptSource;
     language?: string;
     force?: boolean;
     view?: RecordingView;

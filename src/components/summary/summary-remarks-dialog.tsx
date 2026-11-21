@@ -31,12 +31,14 @@ export function SummaryRemarksDialog({
     itemId,
     profileId,
     view,
+    disabled = false,
     onClose,
     onRun,
 }: {
     itemId: string;
     profileId: string;
     view?: RecordingView;
+    disabled?: boolean;
     onClose: () => void;
     onRun: () => void;
 }) {
@@ -177,7 +179,7 @@ export function SummaryRemarksDialog({
                                                 aria-label={i18n(
                                                     "Delete remark",
                                                 )}
-                                                disabled={busy}
+                                                disabled={busy || disabled}
                                                 onClick={() =>
                                                     void remove(remark.id)
                                                 }
@@ -241,6 +243,7 @@ export function SummaryRemarksDialog({
                         type="button"
                         disabled={
                             busy ||
+                            disabled ||
                             !data ||
                             !data.preview.available ||
                             (!text.trim() && !data.remarks.length)

@@ -43,6 +43,10 @@ a transcription provider.
 Keep `ENCRYPTION_KEY` safe and back it up apart from the data: without it,
 the stored recordings, transcripts and credentials cannot be read.
 
+The bundled Postgres port is published on `127.0.0.1:5432` on the Docker host.
+See [Bundled Postgres](./environment-variables#bundled-postgres) for remote
+database access and password rotation on an existing installation.
+
 ## Versions and upgrades
 
 Releases are numbered `YYYY.N`: the year, then the release number within

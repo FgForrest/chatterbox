@@ -13,14 +13,12 @@ import {
 /**
  * POST /api/plaud/auth/verify
  *
- * Verifies the OTP code against Plaud's API, obtains a long-lived access
- * token, encrypts it, and stores the connection.
+ * Verifies the OTP code with Plaud and stores the encrypted tokens and expiries.
  *
  * Errors are unified via `apiHandler` — Plaud helpers throw structured
  * `AppError`s, so a Plaud 5xx after retries surfaces as 502
  * `PLAUD_UPSTREAM_ERROR` (not 400 "fix your token"), and a Plaud 4xx
- * surfaces as 400 `PLAUD_API_ERROR` / `PLAUD_OTP_INVALID` with the
- * upstream `msg` preserved.
+ * can surface as `PLAUD_OTP_INVALID`.
  *
  * Source: https://github.com/riffado/riffado/blob/main/src/app/api/plaud/auth/verify/route.ts
  */
@@ -69,13 +67,9 @@ export const POST = apiHandler(async (request: Request) => {
             ? email.trim().toLowerCase()
             : null;
 
-    // Verify OTP with Plaud → get the (long-lived) user token (UT)
-    const { accessToken } = await plaudVerifyOtp(code, otpToken, apiBase);
+    const tokens = await plaudVerifyOtp(code, otpToken, apiBase);
 
-    // Defensive: OTP login returns a long-lived UT today. If Plaud ever
-    // starts handing back a short-lived workspace token here, fail loud
-    // rather than silently storing a token that dies within a day. (issue #203)
-    if (isPlaudWorkspaceToken(accessToken)) {
+    if (isPlaudWorkspaceToken(tokens.accessToken)) {
         throw new AppError(
             ErrorCode.PLAUD_WORKSPACE_TOKEN_PASTED,
             "Plaud returned a short-lived workspace token instead of an account token. This is unexpected — please report it.",
@@ -88,7 +82,7 @@ export const POST = apiHandler(async (request: Request) => {
     // Same gauntlet the paste-token connect flow runs through.
     const { devices } = await persistPlaudConnection({
         userId: session.user.id,
-        accessToken,
+        tokens,
         apiBase,
         plaudEmail,
         method: "otp",

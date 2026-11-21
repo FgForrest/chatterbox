@@ -349,11 +349,11 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
                             model: "test",
                         },
                         {
-                            id: "preferred-transcript",
+                            id: "plaud-transcript",
                             recordingId: ITEM,
                             userId: "owner",
-                            source: "mixed",
-                            text: encryptText("Edited transcript"),
+                            source: "plaud",
+                            text: encryptText("Imported transcript"),
                             provider: "test",
                             model: "test",
                         },
@@ -1687,7 +1687,7 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
             it("records the shift of a model that numbers speakers from one", async () => {
                 await db()
                     .delete(transcriptions)
-                    .where(eq(transcriptions.id, "preferred-transcript"));
+                    .where(eq(transcriptions.id, "plaud-transcript"));
                 await db()
                     .update(transcriptions)
                     .set({
@@ -1934,7 +1934,7 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
                 ).toBe(-1);
                 await db()
                     .delete(transcriptions)
-                    .where(eq(transcriptions.id, "preferred-transcript"));
+                    .where(eq(transcriptions.id, "plaud-transcript"));
                 await db()
                     .update(transcriptions)
                     .set({
@@ -2153,22 +2153,11 @@ withDatabase("#299 summary edits and remarks (PostgreSQL)", () => {
 
             it("shows the older-transcript note when a new preferred source replaces the edited summary's input", async () => {
                 await db()
-                    .insert(transcriptions)
-                    .values({
-                        id: "plaud-input",
-                        recordingId: ITEM,
-                        userId: "owner",
-                        source: "plaud",
-                        text: encryptText("Earlier input"),
-                        provider: "plaud",
-                        model: "plaud",
-                    });
-                await db()
                     .update(aiEnhancements)
                     .set({
-                        transcriptionId: "plaud-input",
+                        transcriptionId: "plaud-transcript",
                         inputs: {
-                            contentId: "plaud-input",
+                            contentId: "plaud-transcript",
                             contentSourceId: "plaud",
                             contentRevision: 0,
                         },
@@ -2237,6 +2226,10 @@ class ArchiveStorage implements StorageProvider {
         throw new Error("not found");
     }
     async downloadStream(): Promise<Readable> {
+        throw new Error("not found");
+    }
+    openRead = vi.fn<StorageProvider["openRead"]>();
+    async getObjectSize(): Promise<number> {
         throw new Error("not found");
     }
     async uploadStream(key: string, stream: Readable): Promise<string> {

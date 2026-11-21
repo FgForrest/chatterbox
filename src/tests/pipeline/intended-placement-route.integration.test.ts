@@ -259,7 +259,18 @@ describeWithDatabase("DELETE intended placement route", () => {
 
         const response = await POST(confirmRequest(), confirmContext());
         expect(response.status).toBe(200);
-        await expect(response.json()).resolves.toEqual({ confirmed: 1 });
+        await expect(response.json()).resolves.toEqual({
+            confirmed: 1,
+            placement: "confirmed",
+            processing: expect.objectContaining({
+                access: {
+                    role: "owner",
+                    shared: true,
+                    contentView: "org",
+                },
+                intents: [expect.objectContaining({ confirmed: true })],
+            }),
+        });
         const [intent] = await db()
             .select({ confirmedAt: mailPendingShares.confirmedAt })
             .from(mailPendingShares)

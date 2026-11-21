@@ -281,7 +281,7 @@ describe("issue #122 — OpenRouter transcription uses chat-completions", () => 
         expect(audioCreate).not.toHaveBeenCalled();
         expect(chatCreate).toHaveBeenCalledTimes(1);
         expect(OpenAI).toHaveBeenCalledWith(
-            expect.objectContaining({ timeout: 60 * 60 * 1000 }),
+            expect.objectContaining({ timeout: 60 * 60 * 1000, maxRetries: 0 }),
         );
         expect(chatCreate.mock.calls[0]?.[1]).toEqual({
             timeout: 60 * 60 * 1000,

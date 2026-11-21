@@ -1246,9 +1246,10 @@ suite("restricted folders review 2 (PostgreSQL)", () => {
         const spy = vi
             .spyOn(intendedPlacements, "recordIntendedPlacementInTx")
             .mockImplementationOnce(async (...args) => {
-                await record(...args);
+                const placement = await record(...args);
                 read.release();
                 await resume.promise;
+                return placement;
             });
         const incoming = saveUploadedAudio({
             userId: "member",
@@ -1383,6 +1384,10 @@ class RestrictedArchiveStorage implements StorageProvider {
         throw new Error("not found");
     }
     async downloadStream(): Promise<Readable> {
+        throw new Error("not found");
+    }
+    openRead = vi.fn<StorageProvider["openRead"]>();
+    async getObjectSize(): Promise<number> {
         throw new Error("not found");
     }
     async uploadStream(key: string, stream: Readable): Promise<string> {

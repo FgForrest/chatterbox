@@ -279,10 +279,7 @@ describe("reminder lifecycle", () => {
             expect.objectContaining({
                 title: expect.stringContaining(meeting.title),
                 message: "agendaCounts:3|2",
-                buttons: [
-                    { title: "agendaShow" },
-                    { title: "meetingPromptDismiss" },
-                ],
+                buttons: [{ title: "agendaShow" }, { title: "dismiss" }],
             }),
         );
     });

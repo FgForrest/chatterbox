@@ -414,6 +414,40 @@ ${reply}`,
         );
         expect(mocks.complete).not.toHaveBeenCalled();
     });
+
+    it("rejects non-http(s) base URLs before fetch", async () => {
+        const [credential] = await db()
+            .update(apiCredentials)
+            .set({ baseUrl: "file:" })
+            .where(
+                and(
+                    eq(apiCredentials.id, "chat"),
+                    eq(apiCredentials.userId, "owner"),
+                ),
+            )
+            .returning();
+        mocks.provider.mockResolvedValueOnce({
+            kind: "credential",
+            credential,
+            payerUserId: "owner",
+            reserveCall: vi.fn(),
+            organizationCredential: false,
+        });
+        const fetch = vi.fn();
+        vi.stubGlobal("fetch", fetch);
+        try {
+            const error = await run().catch((error: unknown) => error);
+            expect(error).toBeInstanceOf(AppError);
+            expect(error).toMatchObject({
+                code: ErrorCode.INVALID_INPUT,
+                statusCode: 400,
+            });
+            expect(mocks.complete).not.toHaveBeenCalled();
+            expect(fetch).not.toHaveBeenCalled();
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
     it("continues on empty and malformed output without creating a proposal", async () => {
         mocks.complete.mockResolvedValue({
             choices: [

@@ -721,7 +721,7 @@ describe("exportRecordingSidecars", () => {
             "user-1/legacy.summary.md",
             "user-1/Board_meeting.summary.md",
         );
-        expect(deleteFile).toHaveBeenCalledTimes(9);
+        expect(deleteFile).toHaveBeenCalledTimes(7);
         expect(uploadFile.mock.calls[0]?.[0]).toBe(
             "user-1/Board_meeting.custom.transcript.md",
         );

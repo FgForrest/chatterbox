@@ -4,6 +4,11 @@ import { GraduationCap, Loader2 } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useItemDetail } from "@/components/items/item-detail-store";
+import {
+    type ItemOperationResult,
+    itemOperationResult,
+} from "@/components/items/item-operation-queue";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import { FolderCombobox } from "@/components/recordings/folder-combobox";
 import type { FolderSearchEntry } from "@/components/recordings/folder-search-list";
@@ -60,7 +65,12 @@ interface CategorizePanelProps {
     onFolderCreated?: (folder: CreatedFolder) => void;
     onCategorized?: (folderIds: string[]) => void;
     onStale?: () => void;
-    onOptimisticCategorize?: (submission: CategorizeSubmission) => () => void;
+    onSubmit?: (
+        submission: CategorizeSubmission,
+        write: (
+            override?: CategorizeSubmission,
+        ) => Promise<ItemOperationResult>,
+    ) => Promise<void>;
     onTranscribe?: () => void;
 }
 
@@ -143,7 +153,7 @@ export function CategorizePanel({
     onFolderCreated,
     onCategorized,
     onStale,
-    onOptimisticCategorize,
+    onSubmit,
     onTranscribe,
 }: CategorizePanelProps) {
     const i18n = useExtracted();
@@ -153,20 +163,24 @@ export function CategorizePanel({
     const shareRefusal = useShareRefusal();
     const [restricted, setRestricted] = useState(false);
     const [audience, setAudience] = useState<AudiencePerson[]>([]);
+    const profileTrigger = useRef<HTMLButtonElement>(null);
+    const [folders, setFolders] = useState(data.folders);
+    const detail = useItemDetail();
+    const projectedFolderIds = () => {
+        const base =
+            detail?.projection?.placements.map((folder) => folder.id) ??
+            data.selectedFolderIds;
+        return detail?.folderIdsForGate(base) ?? base;
+    };
     const confirmFiling = useConfirmOrganizationFiling(
-        data.folders.map((folder) => ({
+        folders.map((folder) => ({
             ...folder,
             kind: "custom",
             sortOrder: 0,
             version: 0,
         })),
-        data.selectedFolderIds.map((folderId) => ({
-            recordingId: data.itemId,
-            folderId,
-        })),
+        projectedFolderIds,
     );
-    const profileTrigger = useRef<HTMLButtonElement>(null);
-    const [folders, setFolders] = useState(data.folders);
     const previousServerFolders = useRef(data.folders);
     useEffect(() => {
         const previousIds = new Set(
@@ -419,7 +433,7 @@ export function CategorizePanel({
                     folderIds = [
                         ...new Set([
                             ...folderIds,
-                            ...data.selectedFolderIds.filter((id) =>
+                            ...projectedFolderIds().filter((id) =>
                                 folders.some(
                                     (folder) =>
                                         folder.id === id &&
@@ -446,19 +460,27 @@ export function CategorizePanel({
                 submission.profileId = profileChoice;
             }
         }
-        const rollback = onOptimisticCategorize?.(submission);
         setSubmitting(true);
-        try {
-            const response = await fetch(
+        let response: Response | undefined;
+        const write = async (body = submission) => {
+            response = await fetch(
                 `/api/recordings/${encodeURIComponent(data.itemId)}/categorize`,
                 {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(submission),
+                    body: JSON.stringify(body),
                 },
             );
-            if (!response.ok) {
-                rollback?.();
+            if (!response.ok) throw new Error(String(response.status));
+            return itemOperationResult(response);
+        };
+        try {
+            if (onSubmit) await onSubmit(submission, write);
+            else await write();
+            onCategorized?.(folderIds);
+            toast.success(i18n("Item filed."));
+        } catch {
+            if (response && !response.ok) {
                 if (response.status === 403 || response.status === 409)
                     onStale?.();
                 const error = await parseApiError(response);
@@ -469,13 +491,9 @@ export function CategorizePanel({
                         i18n("The item could not be filed."),
                     { action: share?.action },
                 );
-                return;
+            } else {
+                toast.error(i18n("The item could not be filed."));
             }
-            onCategorized?.(folderIds);
-            toast.success(i18n("Item filed."));
-        } catch {
-            rollback?.();
-            toast.error(i18n("The item could not be filed."));
         } finally {
             setSubmitting(false);
         }

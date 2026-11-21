@@ -1,5 +1,7 @@
 import { providerFetch } from "@/lib/ai/provider-fetch";
+import { providerBaseUrl } from "@/lib/ai/validate-base-url";
 import { env } from "@/lib/env";
+import { fetchTranscription } from "@/lib/transcription/fetch";
 import {
     renderTurnsAsText,
     type TimedTextUnit,
@@ -159,7 +161,9 @@ function isMeliaModel(modelId: string): boolean {
  * accepted with or without a trailing `/v2`.
  */
 export function resolveSpeechmaticsBase(baseUrl?: string | null): string {
-    const base = (baseUrl || DEFAULT_API_BASE).trim().replace(/\/+$/, "");
+    const base = (providerBaseUrl(baseUrl) ?? DEFAULT_API_BASE)
+        .trim()
+        .replace(/\/+$/, "");
     const root = base.replace(/\/v2$/, "");
     return `${root || DEFAULT_API_BASE}/v2`;
 }
@@ -236,11 +240,10 @@ export async function speechmaticsTranscribe({
         buildSpeechmaticsConfig({ modelId, diarize, language, vocabulary }),
     );
 
-    const created = await providerFetch(`${base}/jobs`, {
+    const created = await fetchTranscription(`${base}/jobs`, {
         method: "POST",
         headers: auth,
         body: form,
-        signal: AbortSignal.timeout(env.WHISPER_REQUEST_TIMEOUT_MS),
     });
     if (!created.ok) {
         throw new SpeechmaticsTranscribeError(

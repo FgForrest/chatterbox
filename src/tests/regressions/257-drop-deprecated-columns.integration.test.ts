@@ -218,6 +218,8 @@ describeWithDatabase("#257 deprecated recording column removal", () => {
             uploadFile: vi.fn(),
             downloadFile: vi.fn(),
             downloadStream: vi.fn(),
+            openRead: vi.fn(),
+            getObjectSize: vi.fn(),
             getSignedUrl: vi.fn(),
             deleteFile: vi.fn(),
             testConnection: vi.fn(),

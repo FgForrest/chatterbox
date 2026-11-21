@@ -10,6 +10,7 @@ export interface RecordingQueryResult {
     agendaCandidateCount?: number;
     id: string;
     filename: string;
+    titleVersion?: string;
     duration: number;
     startTime: Date;
     filesize: number;

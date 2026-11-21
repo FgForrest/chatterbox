@@ -74,7 +74,6 @@ describe("transcript footer provenance", () => {
     it.each([
         ["riffado", null],
         ["plaud", "Plaud"],
-        ["mixed", "Mix"],
     ] as const)("renders ordered plain-text facts for %s", (source, label) => {
         const { line } = panel({ source });
         const expected = [

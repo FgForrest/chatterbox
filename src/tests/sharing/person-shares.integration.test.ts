@@ -174,6 +174,11 @@ vi.mock("@/lib/auth-server", () => ({
 vi.mock("@/lib/storage/factory", () => ({
     createUserStorageProvider: vi.fn().mockResolvedValue({
         downloadFile: vi.fn().mockResolvedValue(Buffer.from("audio")),
+        openRead: vi.fn(() => ({
+            body: new Response("audio").body,
+            totalSize: 5,
+            range: null,
+        })),
         exists: vi.fn().mockResolvedValue(false),
         deleteFile: vi.fn(),
     }),

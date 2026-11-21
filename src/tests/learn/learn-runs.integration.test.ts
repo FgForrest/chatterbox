@@ -2555,6 +2555,14 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 expect(await shared.json()).toEqual({
                     assigned: true,
                     summaryStale: false,
+                    placement: "shared",
+                    processing: expect.objectContaining({
+                        access: {
+                            role: "owner",
+                            shared: true,
+                            contentView: "org",
+                        },
+                    }),
                 });
                 const orgSummary = async () =>
                     (
@@ -2831,6 +2839,10 @@ class ArchiveStorage implements StorageProvider {
         throw new Error("not found");
     }
     async downloadStream(): Promise<Readable> {
+        throw new Error("not found");
+    }
+    openRead = vi.fn<StorageProvider["openRead"]>();
+    async getObjectSize(): Promise<number> {
         throw new Error("not found");
     }
     async uploadStream(key: string, stream: Readable): Promise<string> {

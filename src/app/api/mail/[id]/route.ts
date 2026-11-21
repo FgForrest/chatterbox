@@ -24,8 +24,11 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         requestedRecordingView(request),
         { kinds: ["mail"] },
     );
+    const query = new URL(request.url).searchParams;
+    const processingOnly = query.get("processing") === "1";
+    const includeProcessing = processingOnly || query.get("content") !== "1";
     const processingRequest =
-        access.view === "received"
+        !includeProcessing || access.view === "received"
             ? Promise.resolve(null)
             : loadPrivateItemProcessing(
                   access.ownerUserId,
@@ -36,7 +39,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
                   ),
                   access.view,
               );
-    if (new URL(request.url).searchParams.get("processing") === "1")
+    if (processingOnly)
         return NextResponse.json(
             { processing: await processingRequest },
             noStore,
@@ -50,7 +53,10 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     if (!detail) {
         throw new AppError(ErrorCode.NOT_FOUND, "Mail not found", 404);
     }
-    return NextResponse.json({ ...detail, processing }, noStore);
+    return NextResponse.json(
+        includeProcessing ? { ...detail, processing } : detail,
+        noStore,
+    );
 });
 
 /** Deletes the caller's mail for good. */

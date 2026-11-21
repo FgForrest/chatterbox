@@ -138,7 +138,7 @@ describe("meeting prompt options and setup switches", () => {
         expect(Object.keys(english).sort()).toEqual(Object.keys(czech).sort());
         for (const messages of [english, czech]) {
             expect(messages.autoIntro.message).toContain(
-                messages.meetingPromptDialog.message,
+                messages.recordAnotherSource.message,
             );
         }
     });

@@ -1,5 +1,5 @@
-import { providerFetch } from "@/lib/ai/provider-fetch";
-import { env } from "@/lib/env";
+import { providerBaseUrl } from "@/lib/ai/validate-base-url";
+import { fetchTranscription } from "@/lib/transcription/fetch";
 import {
     renderTurnsAsText,
     type TimedTextUnit,
@@ -87,7 +87,9 @@ export function elevenLabsTakesKeyterms(model: string): boolean {
  * is accepted with or without a trailing `/v1`.
  */
 export function resolveElevenLabsUrl(baseUrl?: string | null): string {
-    const base = (baseUrl || DEFAULT_API_BASE).trim().replace(/\/+$/, "");
+    const base = (providerBaseUrl(baseUrl) ?? DEFAULT_API_BASE)
+        .trim()
+        .replace(/\/+$/, "");
     const root = base.replace(/\/v1$/, "");
     return `${root || DEFAULT_API_BASE}/v1/speech-to-text`;
 }
@@ -126,11 +128,10 @@ export async function elevenLabsTranscribe({
         }
     }
 
-    const response = await providerFetch(resolveElevenLabsUrl(baseUrl), {
+    const response = await fetchTranscription(resolveElevenLabsUrl(baseUrl), {
         method: "POST",
         headers: { "xi-api-key": apiKey },
         body: form,
-        signal: AbortSignal.timeout(env.WHISPER_REQUEST_TIMEOUT_MS),
     });
 
     if (!response.ok) {
