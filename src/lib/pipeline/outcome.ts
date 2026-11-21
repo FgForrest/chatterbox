@@ -37,7 +37,12 @@ export function waitForReason(reason?: string): PipelineWait {
 
 export type StepOutcome =
     | { kind: "done"; reason?: string; inputFingerprint?: string | null }
-    | { kind: "skipped"; reason: string }
+    | {
+          kind: "skipped";
+          reason: string;
+          /** The Plaud action ran with normalized action-item comparison. */
+          usesNormalizedPlaudItems?: true;
+      }
     | {
           kind: "waiting";
           waitingFor: PipelineWait;

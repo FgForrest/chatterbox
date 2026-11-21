@@ -1,5 +1,20 @@
 import { sql } from "drizzle-orm";
-import type { db } from "@/db";
+import { db } from "@/db";
+
+/** Whether an item still has untouched Plaud proposals owned by this user. */
+export async function hasUntouchedPlaudProposals(
+    itemId: string,
+    userId: string,
+): Promise<boolean> {
+    const [row] = await db.execute<{ present: boolean }>(sql`
+        select exists (
+            select 1 from recording_tasks
+            where recording_id = ${itemId} and user_id = ${userId}
+                and source = 'plaud' and status = 'proposed' and version = 0
+        ) as present
+    `);
+    return row?.present ?? false;
+}
 
 /** Upsert a review marker only while its item still belongs to the supplied owner. */
 export async function writeTaskReviewMarkerInTx(

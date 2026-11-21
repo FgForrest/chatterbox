@@ -1,5 +1,6 @@
 import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { hasUntouchedPlaudProposals } from "@/db/queries/task-review";
 import {
     aiEnhancements,
     asyncJobs,
@@ -81,6 +82,24 @@ async function readShared(itemId: string, userId: string): Promise<boolean> {
         )
         .limit(1);
     return !!row;
+}
+
+async function readPlaudTasks(
+    itemId: string,
+    userId: string,
+): Promise<PipelineFacts["plaudTasks"]> {
+    const source = await readPlaudTaskSource(userId, itemId);
+    if (
+        !source ||
+        (source.actionItems.length === 0 &&
+            !(await hasUntouchedPlaudProposals(itemId, userId)))
+    ) {
+        return undefined;
+    }
+    return {
+        fingerprint: plaudActionItemsFingerprint(source.actionItems),
+        hasUnnormalizedItems: source.hasUnnormalizedItems,
+    };
 }
 
 /** Read the durable, owner-scoped facts consumed by the Stage 1 planner. */
@@ -251,10 +270,10 @@ export async function gatherFacts(
                           : null,
                   )
             : Promise.resolve(null);
-    const plaudTaskSourcePromise =
+    const plaudTasksPromise =
         item.kind === "audio"
-            ? readPlaudTaskSource(userId, itemId)
-            : Promise.resolve(null);
+            ? readPlaudTasks(itemId, userId)
+            : Promise.resolve(undefined);
     const [
         content,
         [mail],
@@ -273,7 +292,7 @@ export async function gatherFacts(
         recentLearnRuns,
         activeCorrectionPasses,
         [completedTranscriptionJob],
-        plaudTaskSource,
+        plaudTasks,
     ] = await Promise.all([
         contentPromise,
         mailPromise,
@@ -502,7 +521,7 @@ export async function gatherFacts(
                   .orderBy(desc(asyncJobs.createdAt))
                   .limit(1)
             : Promise.resolve([]),
-        plaudTaskSourcePromise,
+        plaudTasksPromise,
     ]);
     const placementFolderIds = placements.map((row) => row.folderId);
     const intendedFolderIds = intents.map((row) => row.folderId);
@@ -886,14 +905,7 @@ export async function gatherFacts(
                 pass.transcriptionId === learnContent?.id &&
                 pass.transcriptRevision === learnContent.revision,
         ),
-        plaudTasks:
-            plaudTaskSource && plaudTaskSource.actionItems.length > 0
-                ? {
-                      fingerprint: plaudActionItemsFingerprint(
-                          plaudTaskSource.actionItems,
-                      ),
-                  }
-                : undefined,
+        plaudTasks,
         storedTopics,
         mail: item.kind === "mail" && mail ? { ...mail, shared } : null,
         summary: {

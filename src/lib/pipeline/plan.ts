@@ -243,20 +243,24 @@ function plaudTasksPending(
         return false;
     }
     const step = facts.phases.summary?.steps?.summary;
+    if (step?.sourceFingerprint !== source.fingerprint) return true;
     if (
-        minimumGeneration === undefined &&
-        step?.sourceFingerprint === source.fingerprint
+        source.hasUnnormalizedItems &&
+        step.state === "skipped" &&
+        step.reason === "outdated" &&
+        step.outcome?.kind === "skipped" &&
+        !step.outcome.usesNormalizedPlaudItems
     )
-        return false;
+        return true;
     return (
-        !stepRequested(
+        minimumGeneration !== undefined &&
+        (!stepRequested(
             facts.phases.summary,
             "summary",
             input,
             minimumGeneration,
         ) ||
-        step?.reason !== "plaud_tasks" ||
-        step.sourceFingerprint !== source.fingerprint
+            (step.state !== "skipped" && step.reason !== "plaud_tasks"))
     );
 }
 
@@ -306,6 +310,9 @@ function plaudTasksAction(
             staleFingerprint: facts.phases.summary?.staleFingerprint,
             profileRevisionId: facts.profile?.revisionId,
         },
+        ...(facts.plaudTasks?.hasUnnormalizedItems && {
+            hasUnnormalizedItems: true,
+        }),
     };
 }
 

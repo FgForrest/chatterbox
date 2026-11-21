@@ -9,7 +9,10 @@ import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import type { PhaseRecord, PipelineView } from "@/lib/pipeline/types";
 import { trimHolds } from "@/lib/recordings/trim-proposal";
 import { contentWriterScope, sharingOrgUserId } from "@/lib/sharing/writer";
-import { readPlaudTaskSource } from "@/lib/summary/read-summary";
+import {
+    normalizePlaudActionItems,
+    readPlaudTaskSource,
+} from "@/lib/summary/read-summary";
 import { mayAutomaticallyReplaceSummary } from "@/lib/summary/replacement";
 import { taskViewerById } from "@/lib/tasks/access";
 import { resolveTaskProposals } from "@/lib/tasks/proposals";
@@ -35,7 +38,6 @@ export async function applyPlaudActionItemProposals(input: {
     const source = await readPlaudTaskSource(input.userId, input.itemId);
     if (
         !source ||
-        source.actionItems.length === 0 ||
         plaudActionItemsFingerprint(source.actionItems) !==
             input.expectedFingerprint
     ) {
@@ -141,9 +143,10 @@ export async function applyPlaudActionItemProposals(input: {
             )
             .for("update")
             .limit(1);
-        const currentItems = current
-            ? (decryptJsonField<string[]>(current.actionItems) ?? [])
-            : [];
+        if (!current) return false;
+        const currentItems = normalizePlaudActionItems(
+            decryptJsonField<unknown[]>(current.actionItems) ?? [],
+        );
         if (
             plaudActionItemsFingerprint(currentItems) !==
             input.expectedFingerprint

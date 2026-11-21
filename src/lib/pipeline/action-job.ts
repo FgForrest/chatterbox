@@ -100,7 +100,13 @@ export const pipelineActionJobHandler: JobHandler<ActionPayload> = {
             return {
                 outcome: applied
                     ? { kind: "done", reason: "plaud_tasks" }
-                    : { kind: "skipped", reason: "outdated" },
+                    : {
+                          kind: "skipped",
+                          reason: "outdated",
+                          ...(payload.action.hasUnnormalizedItems && {
+                              usesNormalizedPlaudItems: true,
+                          }),
+                      },
             };
         }
         if (!claimToken)
