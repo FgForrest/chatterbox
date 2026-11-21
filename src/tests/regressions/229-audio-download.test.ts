@@ -132,6 +132,7 @@ describe("GET /api/recordings/[id]/audio?download=1", () => {
         );
 
         expect(response.status).toBe(200);
+        expect(response.headers.get("Cache-Control")).toBe("private, no-store");
         expect(response.headers.get("Content-Type")).toBe("audio/mpeg");
         expect(response.headers.get("Content-Disposition")).toContain(
             "attachment",
@@ -187,6 +188,9 @@ describe("GET /api/recordings/[id]/audio?download=1", () => {
         expect(response.status).toBe(200);
         expect(response.headers.get("Content-Disposition")).toBeNull();
         expect(response.headers.get("Accept-Ranges")).toBe("bytes");
+        expect(response.headers.get("Cache-Control")).toBe(
+            "private, max-age=31536000, immutable",
+        );
     });
 
     it("ignores Range on download so the saved file is complete", async () => {

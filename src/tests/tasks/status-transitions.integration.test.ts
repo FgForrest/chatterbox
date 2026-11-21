@@ -478,6 +478,10 @@ describe.skipIf(!url)("task status history (PostgreSQL)", () => {
             downloadStream: async () => {
                 throw new Error("No file");
             },
+            downloadRange: vi.fn(),
+            getObjectSize: async () => {
+                throw new Error("No file");
+            },
             uploadStream: async (key: string, stream: Readable) => {
                 const chunks: Buffer[] = [];
                 for await (const chunk of stream)

@@ -12,10 +12,53 @@ import {
     isAudioDownloadRequest,
 } from "@/lib/recordings/filename";
 import { requireRecordingAccess } from "@/lib/sharing/access";
+import {
+    StorageObjectMissingError,
+    StorageRangeNotSatisfiableError,
+} from "@/lib/storage/errors";
 import { createUserStorageProvider } from "@/lib/storage/factory";
+import type { ByteRange } from "@/lib/storage/types";
 import { getAudioMimeType } from "@/lib/utils";
 
 type IdContext = { params: Promise<{ id: string }> };
+
+const SINGLE_BYTE_RANGE = /^bytes=(\d*)-(\d*)$/i;
+
+type RequestedRange =
+    | { start: bigint; end: bigint | null }
+    | { suffixLength: number };
+
+function parseRange(header: string | null): RequestedRange | null {
+    const match = header?.match(SINGLE_BYTE_RANGE);
+    if (!match) return null;
+
+    const [, startText, endText] = match;
+    if (startText === "") {
+        return endText === "" ? null : { suffixLength: Number(endText) };
+    }
+
+    const start = BigInt(startText);
+    const end = endText === "" ? null : BigInt(endText);
+    return end !== null && end < start ? null : { start, end };
+}
+
+function resolveRange(range: RequestedRange, size: number): ByteRange | null {
+    if ("suffixLength" in range) {
+        if (range.suffixLength === 0)
+            throw new StorageRangeNotSatisfiableError(size);
+        if (size === 0) return null;
+        const length = Math.min(range.suffixLength, size);
+        return { start: size - length, end: size - 1 };
+    }
+
+    if (range.start >= size) throw new StorageRangeNotSatisfiableError(size);
+    const start = Number(range.start);
+    const requestedEnd = range.end === null ? size - 1 : Number(range.end);
+    return {
+        start,
+        end: Math.min(requestedEnd, size - 1),
+    };
+}
 
 export const GET = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
@@ -44,10 +87,6 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         );
     }
 
-    // Retention removed the blob but kept the row. Without this the
-    // download below throws a generic storage error and the player gets a
-    // 500, which reads as "Riffado is broken" rather than "you asked for
-    // this audio to be deleted after N days, and it was".
     if (recording.audioReapedAt) {
         throw new AppError(
             ErrorCode.RECORDING_DATA_REAPED,
@@ -57,80 +96,83 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     }
 
     const storage = await createUserStorageProvider(ownerUserId);
-    const audioBuffer = await storage.downloadFile(recording.storagePath);
-    const contentType = getAudioMimeType(recording.storagePath);
-    const fileSize = audioBuffer.length;
+    const { storagePath } = recording;
     const wantsDownload = isAudioDownloadRequest(request);
 
-    const downloadHeaders: Record<string, string> = wantsDownload
-        ? {
-              "Content-Disposition": contentDispositionAttachment(
-                  recording.storageFilename ??
-                      buildDownloadFilename(
-                          decryptText(recording.title),
-                          recording.storagePath,
-                      ),
-              ),
-              "Cache-Control": "private, no-store",
-          }
-        : {
-              "Cache-Control": "public, max-age=31536000, immutable",
-          };
-
-    // Attachment downloads always return the full file so the saved
-    // copy is complete. Range is still honored for in-app playback.
-    const rangeHeader = wantsDownload ? null : request.headers.get("range");
-
-    if (rangeHeader) {
-        const rangeMatch = rangeHeader.match(/bytes=(\d+)-(\d*)/);
-
-        if (rangeMatch) {
-            const start = Number.parseInt(rangeMatch[1], 10);
-            const end = rangeMatch[2]
-                ? Number.parseInt(rangeMatch[2], 10)
-                : fileSize - 1;
-
-            if (
-                start < 0 ||
-                start >= fileSize ||
-                end < 0 ||
-                end >= fileSize ||
-                start > end
-            ) {
-                return new NextResponse(null, {
-                    status: 416,
-                    headers: {
-                        "Content-Range": `bytes */${fileSize}`,
-                    },
-                });
-            }
-
-            const chunkSize = end - start + 1;
-            const chunk = audioBuffer.slice(start, end + 1);
-
-            return new NextResponse(new Uint8Array(chunk), {
-                status: 206,
-                headers: {
-                    "Content-Type": contentType,
-                    "Content-Length": chunkSize.toString(),
-                    "Content-Range": `bytes ${start}-${end}/${fileSize}`,
-                    "Accept-Ranges": "bytes",
-                    "X-Audio-Md5": recording.fileMd5,
-                    "X-Recording-Cut-At": recording.cutAt?.toISOString() ?? "",
-                    ...downloadHeaders,
-                },
-            });
-        }
-    }
-
-    return new NextResponse(new Uint8Array(audioBuffer), {
-        headers: {
-            "Content-Type": contentType,
-            "Content-Length": fileSize.toString(),
+    try {
+        const headers = new Headers({
+            "Content-Type": getAudioMimeType(storagePath),
             "Accept-Ranges": "bytes",
             "X-Audio-Md5": recording.fileMd5,
             "X-Recording-Cut-At": recording.cutAt?.toISOString() ?? "",
-            ...downloadHeaders,
-        },
-    });
+            "Cache-Control": wantsDownload
+                ? "private, no-store"
+                : "private, max-age=31536000, immutable",
+        });
+        if (wantsDownload) {
+            const filename =
+                recording.storageFilename ??
+                buildDownloadFilename(
+                    decryptText(recording.title),
+                    storagePath,
+                );
+            headers.set(
+                "Content-Disposition",
+                contentDispositionAttachment(filename),
+            );
+        }
+        if (request.method === "HEAD") {
+            const size = await storage.getObjectSize(storagePath);
+            headers.set("Content-Length", String(size));
+            return new NextResponse(null, { headers });
+        }
+
+        // The route has no HTTP validator to match against If-Range.
+        const requestedRange =
+            wantsDownload || request.headers.has("if-range")
+                ? null
+                : parseRange(request.headers.get("range"));
+        if (requestedRange) {
+            const size = await storage.getObjectSize(storagePath);
+            const range = resolveRange(requestedRange, size);
+            if (range) {
+                const { data, totalSize } = await storage.downloadRange(
+                    storagePath,
+                    range,
+                );
+                const end = range.start + data.length - 1;
+                headers.set("Content-Length", String(data.length));
+                headers.set(
+                    "Content-Range",
+                    `bytes ${range.start}-${end}/${totalSize}`,
+                );
+                return new NextResponse(data, {
+                    status: 206,
+                    headers,
+                });
+            }
+        }
+
+        const data = await storage.downloadFile(storagePath);
+        headers.set("Content-Length", String(data.length));
+        return new NextResponse(new Uint8Array(data), { headers });
+    } catch (error) {
+        if (error instanceof StorageRangeNotSatisfiableError) {
+            return new NextResponse(null, {
+                status: 416,
+                headers: {
+                    "Content-Range": `bytes */${error.totalSize}`,
+                    "Cache-Control": "private, no-store",
+                },
+            });
+        }
+        if (error instanceof StorageObjectMissingError) {
+            throw new AppError(
+                ErrorCode.RECORDING_NOT_FOUND,
+                "Recording audio not found",
+                404,
+            );
+        }
+        throw error;
+    }
 });

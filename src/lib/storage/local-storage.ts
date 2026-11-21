@@ -3,7 +3,9 @@ import {
     access,
     copyFile,
     mkdir,
+    open,
     readFile,
+    stat,
     unlink,
     writeFile,
 } from "node:fs/promises";
@@ -11,7 +13,17 @@ import { dirname, join, relative, resolve } from "node:path";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { env } from "../env";
-import type { StorageProvider } from "./types";
+import {
+    StorageObjectMissingError,
+    StorageRangeNotSatisfiableError,
+} from "./errors";
+import type { ByteRange, RangedDownload, StorageProvider } from "./types";
+
+function readError(error: unknown): unknown {
+    return (error as NodeJS.ErrnoException | null)?.code === "ENOENT"
+        ? new StorageObjectMissingError(error)
+        : error;
+}
 
 /**
  * Local filesystem storage provider
@@ -95,6 +107,9 @@ export class LocalStorage implements StorageProvider {
             const filePath = this.getFilePath(key);
             return await readFile(filePath);
         } catch (error) {
+            if ((error as NodeJS.ErrnoException | null)?.code === "ENOENT") {
+                throw new StorageObjectMissingError(error);
+            }
             throw new Error(
                 `Failed to download file from local storage: ${error instanceof Error ? error.message : String(error)}`,
             );
@@ -108,6 +123,61 @@ export class LocalStorage implements StorageProvider {
         const filePath = this.getFilePath(key);
         await access(filePath);
         return createReadStream(filePath);
+    }
+
+    async downloadRange(
+        key: string,
+        range: ByteRange,
+    ): Promise<RangedDownload> {
+        const filePath = this.getFilePath(key);
+        try {
+            const file = await open(filePath, "r");
+            try {
+                const stats = await file.stat();
+                if (!stats.isFile())
+                    throw new Error("Storage path is not a file");
+                const { size } = stats;
+                if (range.start >= size) {
+                    throw new StorageRangeNotSatisfiableError(size);
+                }
+
+                const length = Math.min(range.end, size - 1) - range.start + 1;
+                const data = Buffer.alloc(length);
+                let offset = 0;
+                while (offset < length) {
+                    const { bytesRead } = await file.read(
+                        data,
+                        offset,
+                        length - offset,
+                        range.start + offset,
+                    );
+                    if (bytesRead === 0) break;
+                    offset += bytesRead;
+                }
+                const totalSize =
+                    offset === length ? size : (await file.stat()).size;
+                const bytesRead = Math.min(offset, totalSize - range.start);
+                if (bytesRead <= 0) {
+                    throw new StorageRangeNotSatisfiableError(totalSize);
+                }
+                return { data: data.subarray(0, bytesRead), totalSize };
+            } finally {
+                await file.close();
+            }
+        } catch (error) {
+            throw readError(error);
+        }
+    }
+
+    async getObjectSize(key: string): Promise<number> {
+        const filePath = this.getFilePath(key);
+        try {
+            const file = await stat(filePath);
+            if (!file.isFile()) throw new Error("Storage path is not a file");
+            return file.size;
+        } catch (error) {
+            throw readError(error);
+        }
     }
 
     async uploadStream(
