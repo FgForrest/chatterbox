@@ -167,6 +167,7 @@ export interface PipelineFacts {
     learnCorrectionInFlight?: boolean;
     plaudTasks?: {
         fingerprint: string;
+        hasUnnormalizedItems?: boolean;
     };
     storedTopics?: readonly ContentRevisionInput[];
     mail: {
@@ -233,6 +234,7 @@ export type PipelineAction =
           keepMatchingProposals?: true;
           content: ContentRevisionInput;
           record: PhaseRecord;
+          hasUnnormalizedItems?: true;
       }
     | {
           type: "completeCategorization";

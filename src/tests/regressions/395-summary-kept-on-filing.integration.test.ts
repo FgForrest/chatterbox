@@ -2182,7 +2182,7 @@ async function mutate(
                             expectedFingerprint: fingerprint,
                             record,
                         }),
-                    ).resolves.toBe(false);
+                    ).resolves.toBe("refused");
                     expect(
                         await db()
                             .select()
@@ -2233,7 +2233,7 @@ async function mutate(
                             expectedFingerprint: fingerprint,
                             record,
                         }),
-                    ).resolves.toBe(true);
+                    ).resolves.toBe("applied");
                     const tasks = await db()
                         .select()
                         .from(recordingTasks)
@@ -2288,7 +2288,7 @@ async function mutate(
                             expectedFingerprint: fingerprint,
                             record,
                         }),
-                    ).resolves.toBe(false);
+                    ).resolves.toBe("refused");
                     expect(
                         planAdvance(
                             await gatherFacts(ITEM, "private", OWNER),

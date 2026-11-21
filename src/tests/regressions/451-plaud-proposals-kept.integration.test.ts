@@ -903,14 +903,14 @@ async function mutate(
             await setActionItems(CHANGED_ITEMS);
             const skipped = await runNext(pipelineActionJobHandler);
             expect(skipped?.result).toEqual({
-                outcome: { kind: "skipped", reason: "outdated" },
+                outcome: { kind: "skipped", reason: "source_changed" },
             });
             expect(await proposals()).toEqual([]);
             expect(
                 (await processing()).phases.summary?.steps?.summary,
             ).toMatchObject({
                 state: "skipped",
-                reason: "outdated",
+                reason: "source_changed",
                 sourceFingerprint: FINGERPRINT,
             });
             await runAdvance();

@@ -246,8 +246,16 @@ function plaudTasksPending(
     if (
         minimumGeneration === undefined &&
         step?.sourceFingerprint === source.fingerprint
-    )
-        return false;
+    ) {
+        return (
+            step.state === "skipped" &&
+            (step.reason === "source_changed" ||
+                (source.hasUnnormalizedItems === true &&
+                    step.reason === "outdated" &&
+                    step.outcome?.kind === "skipped" &&
+                    !step.outcome.usesNormalizedPlaudItems))
+        );
+    }
     return (
         !stepRequested(
             facts.phases.summary,
@@ -311,6 +319,9 @@ function plaudTasksAction(
             staleFingerprint: facts.phases.summary?.staleFingerprint,
             profileRevisionId: facts.profile?.revisionId,
         },
+        ...(facts.plaudTasks?.hasUnnormalizedItems && {
+            hasUnnormalizedItems: true,
+        }),
     };
 }
 

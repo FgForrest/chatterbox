@@ -15,7 +15,10 @@ import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import type { PhaseRecord, PipelineView } from "@/lib/pipeline/types";
 import { trimHolds } from "@/lib/recordings/trim-proposal";
 import { contentWriterScope, sharingOrgUserId } from "@/lib/sharing/writer";
-import { readPlaudTaskSource } from "@/lib/summary/read-summary";
+import {
+    normalizePlaudActionItems,
+    readPlaudTaskSource,
+} from "@/lib/summary/read-summary";
 import { mayAutomaticallyReplaceSummary } from "@/lib/summary/replacement";
 import { taskViewerById } from "@/lib/tasks/access";
 import { resolveTaskProposals } from "@/lib/tasks/proposals";
@@ -34,6 +37,7 @@ export function plaudActionItemsFingerprint(
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type PlaudProposalResult = "applied" | "source_changed" | "refused";
 
 async function matchesPlaudProposalsInTx(
     tx: Tx,
@@ -132,15 +136,14 @@ export async function applyPlaudActionItemProposals(input: {
     record: PhaseRecord;
     settle?: boolean;
     keepMatchingProposals?: true;
-}): Promise<boolean> {
+}): Promise<PlaudProposalResult> {
     const source = await readPlaudTaskSource(input.userId, input.itemId);
     if (
         !source ||
-        source.actionItems.length === 0 ||
         plaudActionItemsFingerprint(source.actionItems) !==
             input.expectedFingerprint
     ) {
-        return false;
+        return "source_changed";
     }
     const items = readTaskItems(source.actionItems).map((item) => ({
         ...item,
@@ -163,7 +166,7 @@ export async function applyPlaudActionItemProposals(input: {
     proposals.updates = [];
     const orgUserId = await sharingOrgUserId();
 
-    return db.transaction(async (tx) => {
+    return db.transaction<PlaudProposalResult>(async (tx) => {
         await tx
             .select({ id: recordings.id })
             .from(recordings)
@@ -202,7 +205,7 @@ export async function applyPlaudActionItemProposals(input: {
             previous.contentRevision === input.record.inputs?.contentRevision &&
             refreshGeneration <= previous.generation
         )
-            return false;
+            return "refused";
         const [custom] = await tx
             .select({ id: aiEnhancements.id })
             .from(aiEnhancements)
@@ -223,7 +226,7 @@ export async function applyPlaudActionItemProposals(input: {
                 tx,
             ))
         )
-            return false;
+            return "refused";
         const { scopeUserId } = await contentWriterScope(tx, {
             recordingId: input.itemId,
             ownerUserId: input.userId,
@@ -242,14 +245,15 @@ export async function applyPlaudActionItemProposals(input: {
             )
             .for("update")
             .limit(1);
-        const currentItems = current
-            ? (decryptJsonField<string[]>(current.actionItems) ?? [])
-            : [];
+        if (!current) return "source_changed";
+        const currentItems = normalizePlaudActionItems(
+            decryptJsonField<unknown>(current.actionItems),
+        );
         if (
             plaudActionItemsFingerprint(currentItems) !==
             input.expectedFingerprint
         ) {
-            return false;
+            return "source_changed";
         }
         const alreadyApplied =
             input.keepMatchingProposals === true &&
@@ -287,6 +291,6 @@ export async function applyPlaudActionItemProposals(input: {
             view: input.view,
             reason: "summary",
         });
-        return true;
+        return "applied";
     });
 }
