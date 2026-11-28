@@ -205,6 +205,10 @@ vi.mock("../../../extensions/recorder/lib/chunk-store.js", () => ({
     readChunk: vi.fn(),
     readLocalMeta: vi.fn(async (id) => h.metas.get(id)),
     totalBufferedBytes: vi.fn(async () => 0),
+    writeCaptureStop: vi.fn(async (id, patch) => {
+        h.metas.set(id, { ...h.metas.get(id), ...patch });
+        return patch;
+    }),
 }));
 vi.mock("../../../extensions/recorder/lib/api.js", () => ({
     abortSession: vi.fn(async () => {}),
@@ -306,11 +310,17 @@ async function start() {
     await settle();
 }
 
+const captureId = () => h.session.recordingState.captureId;
+const offscreen = {
+    ...extension,
+    url: "chrome-extension://test/offscreen/offscreen.html",
+};
+
 async function finish() {
     h.session.recordingState.uploaded = [0];
     h.listeners.message(
-        { type: "recording-stopped", sessionId: "session-1", chunkCount: 1 },
-        extension,
+        { type: "recording-stopped", captureId: captureId(), chunkCount: 1 },
+        offscreen,
         () => {},
     );
     await vi.waitFor(() => expect(completeSession).toHaveBeenCalled());
@@ -482,7 +492,7 @@ describe("reviewed agenda decisions", () => {
             { type: "select-agenda", agendaId: null, sessionId: "session-1" },
             extension,
         );
-        expect(h.metas.get("session-1")).toMatchObject({
+        expect(h.metas.get(captureId())).toMatchObject({
             agendaId: null,
             agendaExplicit: true,
             folderId: "private-default",
@@ -585,8 +595,8 @@ describe("reviewed agenda decisions", () => {
             agendaUnavailable: true,
             error: null,
         });
-        expect(h.metas.get("session-1").agendaUnavailable).toBe(true);
-        expect(deleteLocalSession).toHaveBeenCalledExactlyOnceWith("session-1");
+        expect(h.metas.get(captureId()).agendaUnavailable).toBe(true);
+        expect(deleteLocalSession).toHaveBeenCalledExactlyOnceWith(captureId());
         expect(chrome.notifications.create).toHaveBeenCalledWith(
             expect.stringContaining("completed:"),
             expect.objectContaining({
@@ -616,8 +626,8 @@ describe("agenda worker integration", () => {
         await start();
         expect(h.createSession.mock.calls[0][1].folderId).toBe("agenda-folder");
         expect(h.session.recordingState.agendaId).toBe("agenda-one");
-        expect(h.metas.get("session-1").agendaId).toBe("agenda-one");
-        expect(h.metas.get("session-1").agendaExplicit).toBe(true);
+        expect(h.metas.get(captureId()).agendaId).toBe("agenda-one");
+        expect(h.metas.get(captureId()).agendaExplicit).toBe(true);
         expect(h.local).toMatchObject({
             folderId: "my-default",
             folderLabel: "Private / Default",
@@ -641,10 +651,10 @@ describe("agenda worker integration", () => {
         h.listeners.message(
             {
                 type: "recording-stopped",
-                sessionId: "session-1",
+                captureId: captureId(),
                 chunkCount: 1,
             },
-            extension,
+            offscreen,
             () => {},
         );
         await vi.waitFor(() => expect(completeSession).toHaveBeenCalled());
@@ -951,7 +961,7 @@ describe("agenda worker integration", () => {
             ),
         ).toMatchObject({ ok: true });
         expect(h.session.recordingState.agendaId).toBeNull();
-        expect(h.metas.get("session-1").agendaId).toBeNull();
+        expect(h.metas.get(captureId()).agendaId).toBeNull();
         expect(
             await message(
                 {
@@ -966,7 +976,7 @@ describe("agenda worker integration", () => {
 });
 
 describe("agenda recovery", () => {
-    it("restores the chosen agenda after a browser restart before retrying the buffer", async () => {
+    it("restores the agenda ID after a browser restart without an agenda title", async () => {
         h.local.serverDefaults.agendas = true;
         h.metas.set("buffer-one", {
             serverUrl: h.local.serverUrl,
@@ -987,7 +997,7 @@ describe("agenda recovery", () => {
             expect(h.session.recordingState?.agendaId).toBe("agenda-one"),
         );
         expect(h.session.recordingState).toMatchObject({
-            agendaTitle: "Acme review",
+            agendaTitle: null,
             agendaExplicit: true,
             stopped: true,
             stopReason: "browser-closed",
@@ -1027,14 +1037,14 @@ describe("agenda selection and stop ordering", () => {
             expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
                 target: "offscreen",
                 type: "stop",
-                payload: undefined,
+                payload: { captureId: captureId() },
             });
         } finally {
             release();
         }
         expect(await selection).toMatchObject({ ok: true });
         expect(await stop).toMatchObject({ ok: true });
-        expect(h.metas.get("session-1").agendaId).toBe("agenda-two");
+        expect(h.metas.get(captureId()).agendaId).toBe("agenda-two");
     });
 });
 
@@ -1057,7 +1067,7 @@ describe("refused agenda completion recovery", () => {
                 extension,
             ),
         ).toMatchObject({ ok: true });
-        expect(h.metas.get("session-1").agendaId).toBeNull();
+        expect(h.metas.get(captureId()).agendaId).toBeNull();
     });
 });
 
@@ -1125,7 +1135,7 @@ describe("banner selection regressions", () => {
             folderId,
         );
         expect(h.session.recordingState.folderId).toBe(folderId);
-        expect(h.metas.get("session-1")).not.toHaveProperty("agendaTitle");
+        expect(h.metas.get(captureId())).not.toHaveProperty("agendaTitle");
     });
 });
 
@@ -1169,7 +1179,7 @@ describe("0.9 agenda toolbar and session linking", () => {
             ),
         ).toMatchObject({ ok: true });
         expect(h.session.recordingState.agendaId).toBeNull();
-        expect(h.metas.get("session-1").agendaId).toBeNull();
+        expect(h.metas.get(captureId()).agendaId).toBeNull();
         expect(setSessionAgenda).not.toHaveBeenCalled();
         expect(
             await message(
@@ -1212,7 +1222,7 @@ describe("0.9 agenda toolbar and session linking", () => {
             ),
         ).toMatchObject({ ok: true });
         expect(h.session.recordingState.agendaId).toBe("agenda-two");
-        expect(h.metas.get("session-1").agendaId).toBe("agenda-two");
+        expect(h.metas.get(captureId()).agendaId).toBe("agenda-two");
     });
     it.each([
         "prompt",

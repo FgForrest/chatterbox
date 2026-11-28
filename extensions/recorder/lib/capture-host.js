@@ -1,11 +1,14 @@
 import {
     AUDIO_BITS_PER_SECOND,
     CHUNK_INTERVAL_MS,
+    MAX_SESSION_BYTES,
     RECORDER_MIME_TYPE,
     SAMPLE_RATE,
 } from "./constants.js";
-import { writeChunk } from "./chunk-store.js";
-import { encryptChunk, importCaptureKey } from "./chunk-crypto.js";
+import { readLocalMeta, writeCaptureSealing, writeCaptureStop, writeChunk } from "./chunk-store.js";
+import { CHUNK_ENVELOPE_OVERHEAD, encryptChunk, importCaptureKey } from "./chunk-crypto.js";
+import { exceedsCaptureLimits, rememberCapturePersistence } from "./capture-storage.js";
+import { sealCapture } from "./sealed-recording.js";
 
 const MAX_PENDING_WRITES = 3;
 
@@ -126,7 +129,14 @@ async function start(input) {
     if (active || pendingCapture) {
         throw new Error("A recording is already in progress");
     }
-    const pending = { streams: [], context: null, stopRequested: false };
+    const owner = input.captureId ? { captureId: input.captureId } : { sessionId: input.sessionId };
+    const pending = {
+        captureId: input.captureId ?? input.sessionId,
+        owner,
+        streams: input.systemStream ? [input.systemStream] : [],
+        context: null,
+        stopRequested: false,
+    };
     pendingCapture = pending;
     try {
         await startCapture(input, pending);
@@ -134,21 +144,23 @@ async function start(input) {
         if (active) {
             stop();
         } else {
-            for (const stream of pending.streams) {
-                for (const track of stream.getTracks()) track.stop();
-            }
+            releasePendingStreams(pending);
             await pending.context?.close().catch(() => {});
         }
+        if (pending.stopRequested) return false;
         throw error;
     } finally {
         pendingCapture = null;
     }
+    return true;
 }
 
 async function startCapture({
-    sessionId,
+    captureId,
     clientRecordingId,
     captureKey,
+    recipient,
+    maxSessionBytes = MAX_SESSION_BYTES,
     captureMode,
     channelMode,
     streamId,
@@ -156,10 +168,16 @@ async function startCapture({
     microphoneId,
     withoutMicrophone = false,
 }, pending) {
+    const { owner } = pending;
     if (captureMode !== "tab" && !providedSystemStream) {
         throw new Error("Desktop audio must be opened in the picker window");
     }
-    const key = await importCaptureKey(captureKey);
+    if (captureId && !recipient) {
+        const meta = await readLocalMeta(captureId);
+        if (!meta || meta.stopRequestedAt || meta.stoppedAt) throw new Error("Capture stopped before start");
+    }
+    let key = recipient ? null : await importCaptureKey(captureKey);
+    if (pending.stopRequested) throw new Error("Capture stopped before start");
 
     const isTab = captureMode === "tab";
     const isSplit = channelMode === "split";
@@ -168,15 +186,27 @@ async function startCapture({
     try {
         if (!systemStream) {
             systemStream = await openTabAudio(streamId);
+            pending.streams.push(systemStream);
         }
     } catch (error) {
         throw new Error(
             `Could not capture the meeting audio (${captureMode}): ${error?.name ?? ""} ${error?.message ?? error}`,
         );
     }
-    pending.streams.push(systemStream);
+    if (pending.stopRequested) throw new Error("Capture stopped before start");
     if (systemStream.getAudioTracks().every((track) => track.readyState === "ended")) {
         throw new Error("The selected audio source has stopped");
+    }
+
+    void rememberCapturePersistence().catch(() => {});
+    if (recipient) {
+        const meta = await readLocalMeta(captureId);
+        if (pending.stopRequested || meta?.protocol !== 2 || meta.sealing || meta.stopRequestedAt || meta.stoppedAt) {
+            throw new Error("Capture stopped before sealing");
+        }
+        const sealed = await sealCapture(recipient, clientRecordingId);
+        await writeCaptureSealing(captureId, sealed.sealing);
+        key = sealed.key;
     }
 
     let micStream = null;
@@ -190,6 +220,7 @@ async function startCapture({
         }
     }
 
+    if (pending.stopRequested) throw new Error("Capture stopped before start");
     const context = new AudioContext({ sampleRate: SAMPLE_RATE });
     pending.context = context;
     const systemSource = context.createMediaStreamSource(systemStream);
@@ -239,84 +270,100 @@ async function startCapture({
         audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
     });
 
-    if (pending.stopRequested) throw new Error("Capture stopped before start");
-
     // Do not await before recorder.start(), so stop() cannot see active with an unstarted recorder.
     active = {
         recorder,
         context,
         streams: [systemStream, micStream].filter(Boolean),
-        sessionId,
+        captureId: pending.captureId,
         clientRecordingId,
         key,
         nextIndex: 0,
         meterTimer: undefined,
         analysers: { mic: micAnalyser, system: systemAnalyser },
-        pendingWrites: new Set(),
+        pendingWrites: 0,
+        writer: Promise.resolve(),
+        emittedBytes: 0,
+        committedCount: 0,
+        committedBytes: 0,
+        limitReached: false,
         writeFailed: false,
     };
 
     recorder.ondataavailable = (event) => {
-        if (!active || event.data.size === 0 || active.writeFailed) return;
+        if (!active || event.data.size === 0 || active.writeFailed || active.limitReached || active.writerOverflow) return;
         const current = active;
-        if (current.pendingWrites.size >= MAX_PENDING_WRITES) {
-            current.writeFailed = true;
-            send({
-                type: "capture-error",
-                sessionId,
-                message: "Encrypted buffer could not keep up with capture",
-            });
+        const bytes = event.data.size + CHUNK_ENVELOPE_OVERHEAD;
+        if (exceedsCaptureLimits(current.nextIndex, current.emittedBytes + bytes, maxSessionBytes)) {
+            current.limitReached = true;
             stop();
             return;
         }
-        // Assign the index synchronously so the final blob flushed by
-        // stop() is counted before onstop reads the total; buffer the write
-        // so onstop can wait for it to land in OPFS before completing.
+        if (current.pendingWrites >= MAX_PENDING_WRITES) {
+            send({ type: "capture-error", ...owner, message: "Encrypted buffer could not keep up with capture" });
+            stop();
+            current.writerOverflow = true;
+            return;
+        }
         const index = current.nextIndex++;
-        const write = encryptChunk(key, clientRecordingId, index, event.data)
-            .then((encrypted) => writeChunk(sessionId, index, encrypted))
-            .then(() => send({ type: "chunk-ready", sessionId, index }))
-            .catch((error) => {
-                current.writeFailed = true;
-                send({
-                    type: "capture-error",
-                    sessionId,
-                    message: `Could not buffer chunk ${index}: ${error?.message ?? error}`,
-                });
-                stop();
-            })
-            .finally(() => current.pendingWrites.delete(write));
-        current.pendingWrites.add(write);
+        current.emittedBytes += bytes;
+        current.pendingWrites++;
+        current.writer = current.writer.then(async () => {
+            if (current.writeFailed) return;
+            const encrypted = await encryptChunk(key, clientRecordingId, index, event.data);
+            await writeChunk(pending.captureId, index, encrypted);
+            current.committedCount++;
+            current.committedBytes += encrypted.size;
+            send({ type: "chunk-ready", ...owner, index, ...(captureId ? { bytes: current.committedBytes } : {}) });
+        }).catch((error) => {
+            current.writeFailed = true;
+            send({ type: "capture-error", ...owner, message: `Could not buffer chunk ${index}: ${error?.message ?? error}` });
+            stop();
+        }).finally(() => { current.pendingWrites--; });
     };
 
     recorder.onstop = async () => {
         const current = active;
         if (current?.recorder !== recorder) return;
-        // Wait for the last slices to finish writing so the server sees every
-        // chunk the count promises, then tear the graph down.
-        await Promise.allSettled([...current.pendingWrites]);
+        const stoppedAt = current.stoppedAt ?? new Date().toISOString();
+        await current.writer;
         if (active !== current) return;
-        const chunkCount = current.nextIndex;
+        const chunkCount = current.committedCount;
+        const limited = current.limitReached && !current.writeFailed;
+        const interrupted = current.writerOverflow || (chunkCount < current.nextIndex && !limited);
+        if (captureId) {
+            const stopRecord = { stoppedAt, chunkCount };
+            if (recipient) stopRecord.bufferedBytes = current.committedBytes;
+            if (limited) stopRecord.limitReached = true;
+            if (interrupted) stopRecord.interrupted = true;
+            await writeCaptureStop(captureId, stopRecord).catch((error) =>
+                send({ type: "capture-error", ...owner, message: error.message }));
+        }
         cleanup(current);
         active = null;
-        send({ type: "recording-stopped", sessionId, chunkCount });
+        send({
+            type: "recording-stopped", ...owner, chunkCount,
+            ...(limited ? { limitReached: true } : {}),
+            ...(interrupted ? { interrupted: true } : {}),
+            ...(captureId ? { stoppedAt } : {}),
+        });
     };
 
     recorder.onerror = (event) => {
         send({
             type: "capture-error",
-            sessionId,
+            ...owner,
             message: `Recorder error: ${event?.error?.message ?? "unknown"}`,
         });
     };
 
     // The user pressing Chrome's own "Stop sharing" ends the system track.
     systemStream.getAudioTracks()[0]?.addEventListener("ended", () => {
-        send({ type: "stream-ended", sessionId });
+        send({ type: "stream-ended", ...owner });
     });
     micStream?.getAudioTracks()[0]?.addEventListener("ended", () => {
-        if (active?.sessionId === sessionId) {
-            send({ type: "mic-unavailable", sessionId, errorName: "TrackEnded" });
+        if (active?.captureId === pending.captureId) {
+            send({ type: "mic-unavailable", ...owner, errorName: "TrackEnded" });
         }
     });
 
@@ -334,7 +381,7 @@ async function startCapture({
     active.meterTimer = setInterval(() => {
         send({
             type: "levels",
-            sessionId,
+            ...owner,
             micDb: rmsToDb(micAnalyser, micBuffer),
             systemDb: rmsToDb(systemAnalyser, systemBuffer),
             micBands: measureMicBands(),
@@ -342,10 +389,9 @@ async function startCapture({
         });
     }, 200);
 
-    send({ type: "recording-started", sessionId });
+    send({ type: "recording-started", ...owner });
     if (micErrorName)
-        send({ type: "mic-unavailable", sessionId, errorName: micErrorName });
-    if (pending.stopRequested) stop();
+        send({ type: "mic-unavailable", ...owner, errorName: micErrorName });
 }
 
 /** Tear down capture resources. Called from onstop, after the final flush. */
@@ -360,18 +406,42 @@ function cleanup(session) {
     session.context.close().catch(() => {});
 }
 
-function stop() {
+function releasePendingStreams(pending) {
+    for (const stream of pending.streams.splice(0)) {
+        for (const track of stream.getTracks()) track.stop();
+    }
+}
+
+function stop(captureId) {
+    if (captureId && captureId !== (active ?? pendingCapture)?.captureId) return false;
     if (!active) {
-        if (pendingCapture) pendingCapture.stopRequested = true;
-        return;
+        if (pendingCapture && !pendingCapture.stopRequested) {
+            pendingCapture.stopRequested = true;
+            releasePendingStreams(pendingCapture);
+            send({
+                type: "recording-stopped", ...pendingCapture.owner, chunkCount: 0,
+                ...(pendingCapture.owner.captureId ? { stoppedAt: new Date().toISOString() } : {}),
+            });
+        }
+        return Boolean(pendingCapture);
     }
     // An inactive recorder can still be flushing its final chunk in onstop.
     if (active.meterTimer) {
         clearInterval(active.meterTimer);
         active.meterTimer = undefined;
     }
-    if (active.recorder.state !== "inactive") active.recorder.stop();
+    if (active.recorder.state !== "inactive") {
+        active.stoppedAt = new Date().toISOString();
+        active.recorder.stop();
+    }
+    return true;
 }
 
-return { start, stop, isRecording: () => Boolean(active) };
+return {
+    start,
+    stop,
+    isRecording: () => Boolean(active),
+    isCapturing: () => active?.recorder.state === "recording",
+    captureId: () => active?.captureId ?? (pendingCapture?.stopRequested ? null : pendingCapture?.captureId ?? null),
+};
 }

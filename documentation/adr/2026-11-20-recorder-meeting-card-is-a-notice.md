@@ -1,14 +1,14 @@
 ---
 title: The meeting card is a notice and manual recording starts in the extension
 date: 2026-11-20
-updated: 2026-11-20 10:33
-status: accepted
+updated: 2026-11-28 09:40
+status: superseded
 kind: feature
 issues: [429]
 prs: [431]
 areas: [extensions/recorder/content-meeting.js, extensions/recorder/service-worker.js, extensions/recorder/lib/prompt-icon.js, extensions/recorder/lib/recording-controls.js]
 supersedes: [2026-10-22-meeting-recorder-banner, 2026-11-19-recorder-prompt-points-at-icon]
-superseded-by: []
+superseded-by: [2026-11-28-recorder-sealed-offline]
 relates: []
 ---
 
@@ -18,6 +18,10 @@ Recorder 0.9.11 puts manual start controls in the popup or agenda panel. The
 meeting card points people to those controls and displays the participant
 notice. During capture, the card gives way to the recording pill with two
 miniature four-band equalizers.
+
+**Superseded in part for the outage state.** A supported pairing can Start while the server is
+unreachable, and the card can point to the usual controls. The participant notice, consent and
+in-extension start controls still apply. [Sealed offline recording](2026-11-28-recorder-sealed-offline.md)
 
 ## Why
 

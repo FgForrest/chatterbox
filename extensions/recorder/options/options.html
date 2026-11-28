@@ -123,10 +123,12 @@
             </details>
             <p id="setup-later" class="hint later" data-i18n="setupLater"></p>
             <div id="recorder-settings" hidden>
+            <p id="pending-discard-status" class="status" role="status"></p>
             <section id="pending-buffers" hidden>
-                <h2 data-i18n="pendingBuffers">Pending encrypted recordings</h2>
-                <p id="pending-buffers-hint" class="hint" data-i18n="pendingBuffersHint">Finish uploading or discard these recordings before changing the connection. Discarding permanently deletes the encrypted browser buffer.</p>
+                <h2 data-i18n="pendingBuffers">Recordings waiting to be sent</h2>
+                <p id="pending-buffers-hint" class="hint" data-i18n="pendingBuffersHint">Encrypted recordings stay here until they are sent or discarded.</p>
                 <ul id="pending-buffer-list" aria-describedby="pending-buffers-hint"></ul>
+                <p id="pending-buffer-space" class="hint"></p>
             </section>
 
             <section id="meeting-prompt" tabindex="-1" aria-labelledby="meeting-prompt-heading">

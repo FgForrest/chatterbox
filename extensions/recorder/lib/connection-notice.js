@@ -61,6 +61,8 @@ export function mountConnectionNotice(anchor, options = {}) {
     function render() {
         const copy = connectionNotice(connection, context);
         box.hidden = !copy;
+        box.classList.toggle("local-notice", copy?.local === true);
+        box.classList.toggle("offline-capable-notice", copy?.offlineCapable === true);
         if (!copy) return;
         if (message.textContent !== copy.message) message.textContent = copy.message;
         if (detail.textContent !== copy.detail) detail.textContent = copy.detail;

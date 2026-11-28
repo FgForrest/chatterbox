@@ -4,6 +4,7 @@ import { AppError, ErrorCode } from "@/lib/errors";
 const mocks = vi.hoisted(() => ({
     assertFolder: vi.fn(),
     getSession: vi.fn(),
+    isSealed: vi.fn(),
     complete: vi.fn(),
     enqueue: vi.fn(),
     setJob: vi.fn(),
@@ -19,6 +20,7 @@ vi.mock("@/lib/folders/folders", () => ({
 }));
 vi.mock("@/lib/recording-sessions/store", () => ({
     getRecordingSessionForUser: mocks.getSession,
+    isSealedRecordingSession: mocks.isSealed,
     listRecordingSessionChunks: vi.fn(async () => [{ index: 0 }]),
     markRecordingSessionCompleting: mocks.complete,
     setRecordingSessionJob: mocks.setJob,
@@ -56,6 +58,7 @@ function complete(body: Record<string, unknown> = {}) {
 
 beforeEach(() => {
     vi.clearAllMocks();
+    mocks.isSealed.mockResolvedValue(false);
     mocks.getSession.mockResolvedValue({
         id: "session",
         userId: "owner",
@@ -149,6 +152,21 @@ describe("complete session folder override", () => {
         });
         expect(mocks.complete).not.toHaveBeenCalled();
         expect(mocks.enqueue).not.toHaveBeenCalled();
+    });
+
+    it("completes a sealed session when its offline folder choice was revoked", async () => {
+        mocks.isSealed.mockResolvedValueOnce(true);
+        mocks.assertFolder.mockRejectedValueOnce(
+            new AppError(
+                ErrorCode.RESTRICTED_FOLDER_NO_ACCESS,
+                "Folder unavailable",
+                403,
+            ),
+        );
+        const response = await complete({ folderId: "unavailable" });
+        expect(response.status).toBe(202);
+        expect((await response.json()).folderId).toBeNull();
+        expect(mocks.enqueue).toHaveBeenCalled();
     });
 
     it.each([

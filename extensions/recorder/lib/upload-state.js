@@ -8,7 +8,7 @@ export function isWaitingForUpload(state) {
 export function canPumpUploads(state) {
     return Boolean(
         state.sessionId &&
-            !state.blocked &&
+            !state.blocked && !state.reconcilePending &&
             (state.state === STATE.recording ||
                  (state.state === STATE.finalizing && !state.serverCompleting && !state.jobId) ||
                 (state.state === STATE.error && state.stopped)),

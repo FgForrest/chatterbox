@@ -741,9 +741,16 @@ async function resolvePlacementSource(
 export async function assertCategorizableFolderInput(
     ownerUserId: string,
     folderId: string,
+    executor: Pick<typeof db, "select"> = db,
+    canCurate?: boolean,
 ) {
     try {
-        return await assertCategorizableFolder(ownerUserId, folderId);
+        return await assertCategorizableFolder(
+            ownerUserId,
+            folderId,
+            executor,
+            canCurate,
+        );
     } catch (error) {
         if (
             error instanceof AppError &&

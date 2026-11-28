@@ -37,6 +37,19 @@ Pořizujete záznam schůzky v prohlížeči na Linuxu? Váš administrátor Vá
 
 <span id="the-recording-page" />
 
+### Nahrávání schůzek v prohlížeči offline
+
+Jakmile se rozšíření pro nahrávání schůzek připojí k aktualizované Klepně,
+můžete nahrávání spustit a zastavit i během výpadku. Rozšíření zašifruje zvuk
+pro váš účet a odešle ho, až bude server dostupný. Pokud během nahrávání
+vypadne spojení, nahrávání pokračuje.
+
+V rozšíření otevřete **Možnosti → Nahrávky čekající na odeslání**. Uvidíte
+průběh odesílání a využití úložiště. Odesílání můžete zopakovat nebo nahrávku
+zahodit. Čekající nahrávky zůstanou v prohlížeči, dokud se neodešlou nebo je
+nezahodíte. Pokud jste změnili připojení, pro odeslání nahrávky rozšíření znovu
+propojte s původním serverem a účtem.
+
 ## Stránka nahrávky
 
 Klikněte na konkrétní nahrávku a otevře se napravo.

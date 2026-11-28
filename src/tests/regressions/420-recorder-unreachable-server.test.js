@@ -143,6 +143,10 @@ vi.mock(
         listChunkIndices: async (id) => h.chunks.get(id) ?? [],
         readChunk: async () => new Blob(["encrypted"]),
         totalBufferedBytes: async () => 0,
+        writeCaptureStop: async (id, patch) => {
+            h.meta.set(id, { ...h.meta.get(id), ...patch });
+            return patch;
+        },
     }),
 );
 vi.mock("../../../extensions/recorder/lib/meeting-prompt.js", () => ({
@@ -209,6 +213,7 @@ beforeEach(() => {
     });
     vi.stubGlobal("navigator", {
         onLine: true,
+        locks: { request: (_name, work) => Promise.resolve().then(work) },
         permissions: { query: async () => ({ state: "granted" }) },
         storage: {
             getDirectory: async () => ({
@@ -341,6 +346,23 @@ describe("recorder request outcomes", () => {
             kind: "unreachable",
             detail: { kind: "foreign-response", httpStatus: 200 },
         });
+    });
+
+    it.each([
+        "discarded",
+        "completed",
+        undefined,
+    ])("returns the capture cancellation outcome %s", async (outcome) => {
+        fetchMock.mockResolvedValueOnce(
+            Response.json({
+                success: true,
+                capture_discarded: true,
+                capture_outcome: outcome,
+            }),
+        );
+        await expect(
+            abortSession(auth, "session-one", undefined, { capture: true }),
+        ).resolves.toBe(outcome);
     });
 
     it.each([
@@ -528,7 +550,11 @@ describe("recorder worker outage recovery", () => {
                 return new Promise(() => {});
             });
         } else fetchMock.mockImplementation(async () => foreign(403));
-        h.listeners.message({ type: "chunk-ready" }, {}, vi.fn());
+        h.listeners.message(
+            { type: "chunk-ready", sessionId: "session-one" },
+            {},
+            vi.fn(),
+        );
         if (failure === "timeout") {
             await uploadStarted.promise;
             await vi.advanceTimersByTimeAsync(120_000);
@@ -576,7 +602,11 @@ describe("recorder worker outage recovery", () => {
         chrome.runtime.getContexts.mockResolvedValue([
             { documentUrl: "chrome-extension://test/offscreen/offscreen.html" },
         ]);
-        h.listeners.message({ type: "chunk-ready" }, {}, vi.fn());
+        h.listeners.message(
+            { type: "chunk-ready", sessionId: "session-one" },
+            {},
+            vi.fn(),
+        );
         await vi.waitFor(() =>
             expect(h.session.recordingState.blocked).toBe(true),
         );
@@ -727,11 +757,10 @@ describe("recorder worker outage recovery", () => {
         expect(probe).toHaveBeenCalledTimes(2);
     });
 
-    it("drains an in-flight first text edit and a queued folder after shortcut Stop", async () => {
+    it("completes with the persisted agenda and queued folder while the first draft is still syncing", async () => {
         buffer();
         Object.assign(h.session.recordingState, {
             recordingFolderOverride: true,
-            uploaded: [0],
         });
         Object.assign(h.local.serverDefaults, {
             agendas: true,
@@ -747,6 +776,7 @@ describe("recorder worker outage recovery", () => {
         };
         const posted = Promise.withResolvers();
         const reply = Promise.withResolvers();
+        const upload = vi.fn(() => Response.json({ index: 0 }));
         const complete = vi.fn(() =>
             Response.json({
                 id: "session-one",
@@ -756,6 +786,10 @@ describe("recorder worker outage recovery", () => {
         );
         fetchMock.mockImplementation(async (url, init) => {
             if (url.endsWith("/text")) {
+                expect(h.meta.get("buffer-one")).toMatchObject({
+                    agendaId: "agenda-one",
+                    agendaExplicit: true,
+                });
                 posted.resolve(JSON.parse(init.body));
                 await reply.promise;
                 return Response.json(text);
@@ -769,6 +803,7 @@ describe("recorder worker outage recovery", () => {
                 });
             if (url.endsWith("/complete"))
                 return complete(JSON.parse(init.body));
+            if (url.endsWith("/chunks/0")) return upload();
             return Response.json({
                 id: "session-one",
                 status: "completing",
@@ -801,12 +836,6 @@ describe("recorder worker outage recovery", () => {
             await vi.waitFor(() =>
                 expect(h.session.recordingState.stopped).toBe(true),
             );
-            expect(complete).not.toHaveBeenCalled();
-            reply.resolve();
-            await expect(edit).resolves.toMatchObject({
-                ok: true,
-                saved: text,
-            });
             await expect(folder).resolves.toEqual({ ok: true });
             await vi.waitFor(() =>
                 expect(complete).toHaveBeenCalledWith(
@@ -816,6 +845,15 @@ describe("recorder worker outage recovery", () => {
                     }),
                 ),
             );
+            expect(upload).toHaveBeenCalledOnce();
+            expect(upload.mock.invocationCallOrder[0]).toBeLessThan(
+                complete.mock.invocationCallOrder[0],
+            );
+            reply.resolve();
+            await expect(edit).resolves.toMatchObject({
+                ok: true,
+                saved: text,
+            });
             await send("check-finalization");
             expect(complete).toHaveBeenCalledOnce();
         } finally {
@@ -869,7 +907,7 @@ describe("recorder worker outage recovery", () => {
     it.each([
         "lookup",
         "presence",
-    ])("signals Stop while agenda %s waits and finalizes after its metadata", async (pendingStep) => {
+    ])("signals Stop during agenda %s and waits only for attachment metadata before Complete", async (pendingStep) => {
         buffer();
         h.local.serverDefaults = {
             ...h.local.serverDefaults,
@@ -919,7 +957,10 @@ describe("recorder worker outage recovery", () => {
             await vi.waitFor(() =>
                 expect(h.session.recordingState.stopped).toBe(true),
             );
-            expect(complete).not.toHaveBeenCalled();
+            if (pendingStep === "lookup")
+                expect(complete).not.toHaveBeenCalled();
+            else
+                await vi.waitFor(() => expect(complete).toHaveBeenCalledOnce());
         } finally {
             editResponse.resolve();
             await Promise.all([stop, edit]);
@@ -1343,14 +1384,16 @@ describe("recorder worker outage recovery", () => {
             consentShown: false,
         });
         expect(h.session.serverConnection.state).toBe("unreachable");
-        fetchMock.mockImplementation(async (url) =>
-            url.endsWith("/config")
-                ? config()
-                : Response.json({
-                      id: "session-new",
-                      encryption: { protocol: 1, key: "test-key" },
-                  }),
-        );
+        fetchMock.mockImplementation(async (url, init) => {
+            if (url.endsWith("/config")) return config();
+            if (url.endsWith("?limit=100")) return Response.json({ data: [] });
+            if (init.method === "DELETE")
+                return Response.json({ success: true });
+            return Response.json({
+                id: "session-new",
+                encryption: { protocol: 1, key: "test-key" },
+            });
+        });
         await send("recorder-connection-retry");
         await vi.waitFor(() =>
             expect(h.session.armedTabs[tab.id].consentShown).toBe(true),

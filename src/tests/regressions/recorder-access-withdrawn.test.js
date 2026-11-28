@@ -40,7 +40,11 @@ const harness = vi.hoisted(() => {
             setBadgeBackgroundColor: vi.fn(async () => {}),
         },
         commands: { onCommand: event("command") },
-        alarms: { onAlarm: event("alarm"), create: vi.fn(async () => {}) },
+        alarms: {
+            onAlarm: event("alarm"),
+            get: vi.fn(async () => null),
+            create: vi.fn(async () => {}),
+        },
         permissions: {
             onAdded: event("permissionsAdded"),
             onRemoved: event("permissionsRemoved"),
@@ -208,6 +212,7 @@ describe("recorder when the holder's access is withdrawn", () => {
         expect(harness.createLocalSession).toHaveBeenCalledWith(
             "session-1",
             expect.objectContaining({ retryAttempt: 1 }),
+            { create: false },
         );
         expect(harness.deleteLocalSession).not.toHaveBeenCalled();
     });

@@ -9,6 +9,14 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/auth-server", () => ({ requireApiSession: vi.fn() }));
 vi.mock("@/lib/posthog-server", () => ({ captureServerException: vi.fn() }));
+vi.mock("@/lib/recording-sessions/offline-key", () => ({
+    getOrCreateRecorderOfflineKey: async () => ({
+        kid: "test-kid",
+        alg: "ECDH-P256-HKDF-SHA256-A256GCM",
+        publicKey: "test-public-key",
+    }),
+}));
+vi.mock("@/lib/org/config", () => ({ isOrgScopeVisible: () => true }));
 vi.mock("@/lib/recording-sessions/route-gate", () => ({
     gateRecordingSessionRequest: mocks.gate,
 }));
@@ -62,6 +70,12 @@ describe("recorder agenda API", () => {
             ).json(),
         ).toEqual({
             noticeText: "Recording notice",
+            account: { id: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) },
+            offlineKey: {
+                kid: "test-kid",
+                alg: "ECDH-P256-HKDF-SHA256-A256GCM",
+                publicKey: "test-public-key",
+            },
             features: {
                 agendas: true,
                 nextMeeting: true,
@@ -69,6 +83,8 @@ describe("recorder agenda API", () => {
                 agendaText: 1,
                 sessionAgenda: true,
                 agendaRooms: 1,
+                roomRecorders: 1,
+                offlineRecording: 1,
             },
         });
     });

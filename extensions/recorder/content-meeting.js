@@ -57,6 +57,9 @@
         button.close { border:0; padding:0; border-radius:6px; width:26px; height:26px; font-size:20px; color:var(--muted-foreground); }
         kbd { font:500 12px/1.5 ui-monospace,monospace; border:1px solid var(--border); border-bottom-width:2px; border-radius:5px; background:var(--muted); padding:1px 6px; white-space:nowrap; }
         .pill { display:flex; align-items:center; justify-content:center; flex-wrap:nowrap; gap:8px; border-radius:24px; padding:6px; width:fit-content; max-width:100%; min-width:0; font-size:13px; }
+        :host { --local: #805315; }
+        @media (prefers-color-scheme: dark) { :host { --local: #e5b567; } }
+        .local-badge { color:var(--local); border:1px solid currentColor; border-radius:999px; padding:1px 6px; white-space:nowrap; font-size:11px; }
         .pill-row { display:flex; align-items:center; gap:8px; min-width:0; max-width:100%; }
         .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--primary); animation:pulse 1.8s ease-in-out infinite; }
         @keyframes pulse { 50% { opacity:.4; } }
@@ -123,7 +126,7 @@
     let blinkCopyTimer;
     let timer;
     let hideTimer;
-    let stoppedSession = null;
+    let stoppedCapture = null;
     let collapsed = false;
     let folderOpen = false;
     let recordingFolder;
@@ -489,6 +492,7 @@
                     node("span", { id: "pill-details", style: "display:contents" }, [
                         node("span", { id: "recording-label", class: "label" }),
                         node("span", { id: "elapsed", class: "elapsed" }),
+                        node("span", { id: "offline-badge", class: "local-badge", hidden: "" }, [t("offlineBadge")]),
                         node("span", { id: "folder-target", class: "folder-target" }, [
                             button("folder-toggle", "folder-button", [], { "aria-controls": "pill-folder", "aria-expanded": "false", "aria-haspopup": "listbox" }),
                             button("folder-remove", "folder-remove", [folderIcon("x")]),
@@ -558,6 +562,7 @@
                     const response = await send({
                         type: "stop-recording",
                         sessionId: currentState.sessionId,
+                        ...(currentState.captureId ? { captureId: currentState.captureId } : {}),
                     });
                     if (!response?.ok)
                         throw new Error(response?.error || t("somethingWrong"));
@@ -571,6 +576,7 @@
             });
         }
         el("pill-agenda").hidden = !state.agendas?.length;
+        el("offline-badge").hidden = !state.offline;
         renderFolderTarget(state);
         recordingFolder.render({ ...state, state: "recording" }, { refresh: !connection });
         text("action-error", state.uploadNotice || state.error || "");
@@ -605,7 +611,7 @@
         }
         if (
             message.view === "stopped" &&
-            !message.connection && !message.state?.uploadNotice && stoppedSession === message.state?.sessionId
+            !message.connection && !message.state?.uploadNotice && stoppedCapture === (message.state?.captureId ?? message.state?.sessionId)
         )
             return;
         clearTimeout(hideTimer);
@@ -652,7 +658,7 @@
                 surface.append(close);
             }
             if (message.view === "stopped" && !message.connection && !message.state?.uploadNotice) {
-                stoppedSession = message.state?.sessionId;
+                stoppedCapture = message.state?.captureId ?? message.state?.sessionId;
                 hideTimer = setTimeout(hide, 3500);
             }
         }

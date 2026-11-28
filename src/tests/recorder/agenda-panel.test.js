@@ -31,6 +31,7 @@ const messages = JSON.parse(
 let data;
 let tab;
 let controlOptions;
+let refreshRoomRecorders;
 let session;
 let settings;
 let request;
@@ -53,6 +54,7 @@ function saveAgendaEdit(id, path, body) {
 
 beforeEach(async () => {
     vi.useFakeTimers();
+    refreshRoomRecorders = vi.fn();
     onChanges = [];
     subscription = undefined;
     disconnect = vi.fn();
@@ -251,6 +253,7 @@ async function start(doc = document, tabId = 7) {
                 destroy: vi.fn(),
                 refreshMeeting: vi.fn(),
                 refreshTab: vi.fn(),
+                refreshRoomRecorders,
             };
         },
         () => ({}),
@@ -467,6 +470,30 @@ describe("#369 manual agenda panel choices", () => {
 });
 
 describe("agenda side panel", () => {
+    it("polls room recorder names and suppresses only the agenda names already shown", async () => {
+        data.recordingBy = [
+            { name: "Jitka Dvořáková", self: false },
+            { name: "Robin Harper", self: false },
+            { name: "Viewer", self: true },
+        ];
+        await start();
+        expect(el("recording-by").textContent).toContain(
+            "Jitka Dvořáková, Robin Harper",
+        );
+        controlOptions.onRoomRecorders(["Jitka Dvořáková"]);
+        expect(el("recording-by").textContent).toBe(
+            "Robin Harper is recording this meeting",
+        );
+        expect(el("colleague-recording").hidden).toBe(false);
+        controlOptions.onRoomRecorders(["Jitka Dvořáková", "Robin Harper"]);
+        expect(el("colleague-recording").hidden).toBe(true);
+        controlOptions.onRoomRecorders([]);
+        expect(el("colleague-recording").hidden).toBe(false);
+        expect(refreshRoomRecorders).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(refreshRoomRecorders).toHaveBeenCalledOnce();
+    });
+
     it("counts top-level points and keeps parent and child ticks independent", async () => {
         data.points[0].discussedAt = "2026-10-27T09:00:00Z";
         data.points[1].discussedAt = "2026-10-27T09:00:00Z";

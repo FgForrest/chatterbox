@@ -279,7 +279,7 @@ curl -L -H "Authorization: Bearer op_..." \
 - Pro nahrávky v **S3 úložišti** je odpovědí přesměrování `302`
   na předem podepsané URL platné 5 minut. Řiďte se přesměrováním (`curl -L`);
   Váš HTTP klient následně stáhne audio přímo ze S3 – bez dalšího
-  přenášení přes Klepna.
+  přenášení přes Klepnu.
 
 `416` s hlavičkou `Content-Range: bytes */<size>` je vrácen pouze
 pro nesplnitelné začátky (za koncem souboru nebo `start > end`). Nadměrné hodnoty
@@ -361,6 +361,67 @@ v aplikaci, až ji vlastník zařadí.
 Webhooky `transcription.completed` a `summary.completed` se proto u takové
 nahrávky odešlou až poté, co ji vlastník zařadí a zpracování dosáhne příslušné
 fáze.
+
+### Zapečetěné nahrávky
+
+Pokud konfigurace rekordéru obsahuje `features.offlineRecording: 1`, vrací
+interní identifikátor spárovaného účtu `account.id` a `offlineKey` s poli
+`kid`, `alg: "ECDH-P256-HKDF-SHA256-A256GCM"` a `publicKey` (P-256 SPKI
+v base64url bez doplnění). Identifikátor účtu se při změně klíče rekordéru nemění.
+
+`POST /api/v1/recording-sessions/sealed` přijímá běžná pole pro vytvoření
+relace a navíc `encryption: { protocol: 2, kid, ephemeralPublicKey, salt }`.
+Dočasný klíč je 65bajtový nekomprimovaný bod P-256 a sůl má 16 bajtů. Obě
+hodnoty se kódují v base64url bez doplnění. Klíč pro šifrování částí se odvodí
+pomocí P-256 ECDH a HKDF-SHA256. Parametr info pro HKDF je řetězec
+`chatterbox-recorder-offline-v1:<kid>:<clientRecordingId>` v UTF-8.
+Odpověď obsahuje `encryption: { protocol: 2, kid }` a běžné limity. Formát
+šifrovaných částí a přidružených dat zůstává ve verzi 1.
+
+Vytvoření vrátí `201`. Přesné opakování vrátí `200` s aktuální relací včetně
+případné náhradní nebo ukončené relace. Změna parametrů šifrování, času zahájení, potvrzení upozornění, typu
+MIME nebo rozložení kanálů u stejného `clientRecordingId` vrátí `409`. Změna
+složky, živé agendy či místnosti konflikt nezpůsobí. Nedostupná složka ani živá
+agenda se při vytvoření nepoužije. Nedostupný klíč účtu vrátí
+`410 OFFLINE_KEY_UNAVAILABLE`.
+`POST /api/v1/recording-sessions/{id}/recover` může nahradit zrušenou nebo
+neúspěšnou zapečetěnou relaci a po vypršení znovu odvodit klíč k jejím částem.
+Pokud opakovaný požadavek na vytvoření nebo obnovení vrátí otevřenou náhradní
+relaci, obnoví také její klíč a nastaví ji jako aktivní.
+`DELETE /api/v1/recording-sessions/{id}?capture=1` podle libovolného ID relace
+vyhledá aktuální relaci zapečetěné nahrávky. Úspěšná odpověď obsahuje
+`capture_discarded: true` a pole `capture_outcome` s hodnotou `"discarded"`
+při zrušení nebo `"completed"`, pokud už byla nahrávka uložena.
+Požadavek lze opakovat a během dokončování relace vrací `409`.
+Opakovaný požadavek na vytvoření zapečetěné relace i zrušení nahrávky vyžadují
+původní klíč rekordéru. Jiný klíč téhož účtu vrátí `403 RECORDER_KEY_MISMATCH`.
+Pokud je při dokončení vybraná složka nedostupná, Klepna uloží nahrávku k
+pozdějšímu zařazení. Dokončené nahrávky jsou součástí běžných archivů.
+Obnovení nedokončeného přenosu po obnově serveru vyžaduje původní databázi
+a šifrovací klíč serveru.
+
+### Kdo právě nahrává v místnosti
+
+`features.roomRecorders: 1` je k dispozici ve vlastním nasazení v režimu
+Organizace. Vlastník může pomocí
+`POST /api/v1/recording-sessions/{id}/lease` s tělem `{revision, room}`
+oznámit probíhající nahrávání na 60 sekund. Používá se kanonický identifikátor
+místnosti, například `meet:abc-defg-hij` nebo `zoom:12345678901`. Vyšší
+revize umožňuje změnit nebo vymazat místnost (`room: null`). Stejná revize
+může prodloužit platnost pro stejnou místnost. Vyšší revize odeslaná na
+`POST /api/v1/recording-sessions/{id}/lease/end` oznámení trvale ukončí.
+Odmítnutá změna vrátí `409 RECORDING_LEASE_REFUSED`.
+
+`POST /api/v1/recorder/rooms/recorders` přijímá jednu místnost v `{room}`
+a vrací `{data: [{name}], live_until, freshForMs}`. Uvede ostatní oprávněné členy Organizace,
+kteří právě nahrávají v dané místnosti, každého právě jednou. `live_until` obsahuje
+nejbližší konec platnosti ze zahrnutých nahrávání ve formátu ISO 8601.
+`freshForMs` udává zbývající dobu do tohoto okamžiku v milisekundách podle hodin
+serveru. Rozšíření do ní započítá dobu dotazu a omezí ji na nejvýše 30 sekund.
+Dotaz může poslat člen se znalostí přesného identifikátoru místnosti. Prázdný
+výsledek má podobu `{data: [], live_until: null, freshForMs: 0}`.
+Vedle obecných limitů API platí limit 48 požadavků
+za minutu na účet a 480 požadavků za minutu na IP adresu.
 
 Jiné veřejné koncové body pro zápis nejsou k dispozici. Hotový zvuk můžete místo
 toho nahrát tlačítkem v uživatelském rozhraní.

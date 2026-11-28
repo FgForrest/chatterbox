@@ -37,7 +37,7 @@ export const PLATFORMS = [
         name: "Zoom (web)",
         // Web client rooms live under /wc/<meetingId>/... on any zoom.us host.
         inMeeting: (url) =>
-            hostIs(url, "zoom.us") && /^\/wc\/\d+/.test(url.pathname),
+            hostIs(url, "zoom.us") && /^\/wc\/\d+(?:\/|$)/.test(url.pathname),
     },
     {
         id: "teams",

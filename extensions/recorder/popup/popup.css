@@ -197,6 +197,31 @@ input[type="checkbox"] {
     }
 }
 
+.room-recorder-notice {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--meeting);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--meeting) 8%, var(--surface));
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+.room-recorder-notice .dot {
+    flex: 0 0 8px;
+    height: 8px;
+    background: var(--error);
+    animation-name: room-recorder-pulse;
+}
+
+@keyframes room-recorder-pulse {
+    50% {
+        opacity: 0.85;
+    }
+}
+
 .meter {
     display: flex;
     align-items: center;
@@ -324,6 +349,10 @@ input[type="checkbox"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
+    .room-recorder-notice .dot {
+        animation: none;
+    }
+
     .processing-spinner {
         animation: none;
         border-color: var(--primary);
@@ -495,3 +524,20 @@ input[type="checkbox"] {
 .connection-notice button {
     margin-top: 8px;
 }
+
+
+:root { --local: #805315; }
+@media (prefers-color-scheme: dark) {
+    :root { --local: #e5b567; }
+}
+.local-badge, .local-audio { color: var(--local); }
+.local-badge {
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    padding: 1px 6px;
+    font-size: 0.8em;
+    font-weight: 600;
+}
+.connection-notice.local-notice strong { color: var(--local); }
+
+.connection-notice.offline-capable-notice strong { color: inherit; }

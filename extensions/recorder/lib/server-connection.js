@@ -58,12 +58,17 @@ export async function reportConnection(auth, error, { config = false } = {}) {
     } catch {}
 }
 
-export function connectionNotice(connection, { recording = false, starting = false } = {}) {
+/** Pick the connection notice: `null` for none; `local` marks audio held in this browser, `offlineCapable` an idle start that works offline. */
+export function connectionNotice(connection, { recording = false, starting = false, sealed = false, stopped = false } = {}) {
     if (!connection) return null;
     if (connection.state === "ok")
         return connection.configError ? { message: connection.configError, detail: "" } : null;
     const { state, detail } = connection;
     const app = t("appName");
+    if (sealed && (stopped || !recording)) return {
+        message: t(stopped ? "offlineStopped" : "offlineIdle"), detail: "", context: null, local: stopped, offlineCapable: !stopped,
+    };
+    if (recording) return { message: t("connectionRecording", app), detail: "", context: null, local: sealed };
     return {
         message: state === "offline" ? t("connectionOffline") : t("connectionUnavailable", app),
         detail: detail?.kind === "timeout"
@@ -73,7 +78,6 @@ export function connectionNotice(connection, { recording = false, starting = fal
                   ? t("connectionHttpDetail", [String(detail.httpStatus), t("appNameGenitive", app)])
                   : t("connectionForeignDetail")
               : t("connectionNetworkDetail"),
-        context: recording ? t("connectionRecording", app) :
-            starting ? t("connectionStart", t("appNameInstrumental", app)) : null,
+        context: starting ? t("connectionStart", t("appNameInstrumental", app)) : null,
     };
 }

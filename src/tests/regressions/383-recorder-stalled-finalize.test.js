@@ -2,8 +2,18 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../../extensions/recorder/lib/api.js";
+import {
+    captureAgendaTitleKey,
+    captureHasGap,
+    serverSessionFor,
+    verifiedPrefix,
+    withCapture,
+} from "../../../extensions/recorder/lib/capture-state.js";
 import { ALARMS, STATE } from "../../../extensions/recorder/lib/constants.js";
-import { isConnectionError } from "../../../extensions/recorder/lib/server-connection.js";
+import {
+    isConnectionError,
+    sameConnection,
+} from "../../../extensions/recorder/lib/server-connection.js";
 import { canPumpUploads } from "../../../extensions/recorder/lib/upload-state.js";
 
 const source = readFileSync("extensions/recorder/service-worker.js", "utf8");
@@ -35,6 +45,7 @@ function deferred() {
 }
 
 function worker(initial = { state: "idle" }, overrides = {}) {
+    const scope = crypto.randomUUID();
     const listeners = {};
     const values = { recordingState: initial };
     const metas = new Map([
@@ -127,7 +138,14 @@ function worker(initial = { state: "idle" }, overrides = {}) {
         ALARMS,
         MESSAGES: {},
         canPumpUploads,
+        createCaptureLeases: () => ({ end: noop }),
+        createRoomRecorderLookup: () => ({
+            invalidate: noop,
+            invalidatePairing: noop,
+        }),
+        roomPairingChanged: () => false,
         isConnectionError,
+        sameConnection,
         t: (key) => key,
         getSettings: vi.fn(async () => ({
             dataUseAcknowledgedAt: "yes",
@@ -158,10 +176,47 @@ function worker(initial = { state: "idle" }, overrides = {}) {
         })),
         ...overrides,
     });
+    Object.assign(deps, {
+        captureAgendaTitleKey,
+        captureHasGap,
+        serverSessionFor,
+        verifiedPrefix,
+        markStopped: async (id, { chunkCount }) => {
+            const meta = {
+                ...metas.get(id),
+                chunkCount,
+                verifiedPrefix: chunkCount - 1,
+                highestCommittedIndex: chunkCount - 1,
+            };
+            metas.set(id, meta);
+            return meta;
+        },
+        deleteCapture: (id) => deps.deleteLocalSession(id),
+        withCapture: (id, change) => withCapture(`${scope}:${id}`, change),
+        listPendingCaptures: async () =>
+            (await deps.listLocalSessions()).map((id) => ({
+                id,
+                meta: metas.get(id),
+            })),
+        updateCapture: async (id, patch, isCurrent = () => true) => {
+            const meta = await deps.readLocalMeta(id);
+            if (!meta || !(await isCurrent())) return null;
+            const changes =
+                typeof patch === "function" ? await patch(meta) : patch;
+            if (!changes) return meta;
+            const next = { ...meta, ...changes };
+            await deps.createLocalSession(id, next, { create: false });
+            return next;
+        },
+    });
+    deps.attachSession = (id, serverSessionId) =>
+        deps.updateCapture(id, { serverSessionId, createOutcome: "attached" });
     const ctx = vm.createContext({
         ...deps,
         chrome,
+        crypto,
         URL,
+        AbortSignal,
         Date,
         console,
         setTimeout,
@@ -480,7 +535,10 @@ describe("#383 recovery and buffer ownership", () => {
         expect(h.deps.uploadChunk.mock.calls.map((call) => call[2])).toEqual([
             0,
         ]);
-        expect(h.deps.completeSession).toHaveBeenCalledOnce();
+        await vi.waitFor(() =>
+            expect(h.deps.completeSession).toHaveBeenCalledOnce(),
+        );
+        await h.ctx.pumpUploads();
         h.values.recordingState = stopped({ state, jobId: null, uploaded: [] });
         h.deps.uploadChunk.mockClear();
         await h.message({ type: "check-finalization" });
@@ -601,7 +659,8 @@ describe("#383 recovery and buffer ownership", () => {
         expect(h.deps.deleteLocalSession).not.toHaveBeenCalled();
         h.deps.getSession.mockResolvedValue({ status: "open" });
         pending.resolve({ job_id: "job-one" });
-        await discard;
+        expect(await discard).toEqual({ ok: true });
+        expect(h.deps.abortSession).toHaveBeenCalledOnce();
         expect(h.deps.deleteLocalSession).toHaveBeenCalledWith("buffer-one");
     });
 
@@ -1034,7 +1093,9 @@ describe("#383 retry-buffer", () => {
     });
 
     it("allows an explicit discard of a stopped current buffer whose key expired", async () => {
-        const h = worker(stopped({ uploaded: [0] }));
+        const h = worker(
+            stopped({ state: "error", blocked: true, uploaded: [0] }),
+        );
         await drain();
         h.deps.getSession.mockRejectedValue(httpError(404));
         expect(
@@ -1045,6 +1106,19 @@ describe("#383 retry-buffer", () => {
             await h.message({ type: "discard-buffer", bufferId: "buffer-one" }),
         ).toEqual({ ok: true });
         expect(h.deps.deleteLocalSession).toHaveBeenCalledWith("buffer-one");
+    });
+
+    it("retains a stopped buffer when the server cannot confirm cancellation after Complete", async () => {
+        const h = worker(
+            stopped({ state: "error", blocked: true, uploaded: [0] }),
+        );
+        h.metas.get("buffer-one").completeDispatched = true;
+        await drain();
+        h.deps.getSession.mockRejectedValue(httpError(404));
+        expect(
+            await h.message({ type: "discard-buffer", bufferId: "buffer-one" }),
+        ).toEqual({ ok: false, error: "recordingKeyExpired" });
+        expect(h.deps.deleteLocalSession).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -1268,9 +1342,10 @@ describe("#383 request timeouts", () => {
         });
         await vi.advanceTimersByTimeAsync(when - Date.now());
         const alarm = h.listeners.alarm({ name: ALARMS.uploadRetry });
-        await drain();
+        await vi.waitFor(() =>
+            expect(h.values.recordingState.state).toBe("completed"),
+        );
         expect(fetch).toHaveBeenCalledTimes(2);
-        expect(h.values.recordingState.state).toBe("completed");
         expect(h.deps.deleteLocalSession).toHaveBeenCalledExactlyOnceWith(
             "buffer-one",
         );

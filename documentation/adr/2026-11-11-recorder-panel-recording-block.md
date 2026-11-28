@@ -1,14 +1,14 @@
 ---
 title: Recorder panels keep capture first and share agendas through short-lived room presence
 date: 2026-11-11
-updated: 2026-11-12 06:50
-status: accepted
+updated: 2026-11-28 06:24
+status: superseded
 kind: fix
 issues: [403]
 prs: [406]
 areas: [extensions/recorder, src/lib/meetings/rooms.ts, src/db/queries/recorder-rooms.ts, src/lib/recording-sessions, src/app/api/v1/recorder, src/db/schema.ts]
 supersedes: [2026-11-10-recorder-meeting-companion]
-superseded-by: []
+superseded-by: [2026-11-28-recorder-room-names]
 relates: [2026-11-08-recorder-live-agendas, 2026-10-27-meeting-agendas, 2026-11-08-meeting-agendas-shared-with-people]
 ---
 
@@ -19,6 +19,9 @@ The Agenda section below owns the title, checklist, chooser and agenda errors. A
 recording adds a notice inside the idle block without replacing its controls. On supporting servers,
 Meet rooms also discover visible manually selected agendas, expose a restricted marker without
 content, and let the author invite eligible people whose panels are open in that room.
+
+**Superseded in part for live recorder names.** [Recorder room names](2026-11-28-recorder-room-names.md)
+defines their room-based audience. This record governs panel layout, agenda visibility and invitations.
 
 ## Why
 

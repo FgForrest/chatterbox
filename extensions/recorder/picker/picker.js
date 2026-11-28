@@ -3,6 +3,7 @@ import { mountConnectionNotice } from "../lib/connection-notice.js";
 import { RECORDER_WINDOW_WIDTH, STATE } from "../lib/constants.js";
 import { fitWindowToContent } from "../lib/fit-window.js";
 import { localizeDocument, t } from "../lib/i18n.js";
+import { formatBufferedBytes } from "../lib/pending-recordings.js";
 import { isWaitingForUpload } from "../lib/upload-state.js";
 
 import { createRecordingFolder } from "../generated/folders.js";
@@ -43,7 +44,7 @@ const connectionNotice = mountConnectionNotice(status, {
         const next = Boolean(connection && connection.state !== "ok");
         if (unavailable === next) return;
         unavailable = next;
-        renderFolder();
+        if (currentState) renderState(currentState);
     },
 });
 window.addEventListener("pagehide", connectionNotice.destroy, { once: true });
@@ -89,7 +90,21 @@ function renderState(state) {
     }
     if (state.pickerRequestId !== requestId) return;
     currentState = state;
-    connectionNotice.update({ recording: recording && !state.stopped, starting: state.startConnectionError || state.connecting });
+    const live = state.state === STATE.recording && !state.stopped;
+    const sealed = state.protocol === 2;
+    const local = sealed && unavailable;
+    connectionNotice.update({ recording: live, starting: state.startConnectionError || state.connecting,
+        sealed, stopped: state.stopped && state.state !== STATE.completed });
+    const warning = document.getElementById("picker-storage-warning");
+    if (warning) warning.hidden = !live || !state.localStorageWarning;
+    const saved = document.getElementById("picker-local-audio");
+    if (saved) {
+        const uploaded = state.uploaded?.length ?? 0;
+        const catchingUp = sealed && state.bufferedOffline && uploaded < (state.storedParts ?? 0);
+        saved.hidden = !live || !(local || catchingUp);
+        saved.textContent = local ? t("offlineSavedBytes", formatBufferedBytes(state.bufferedBytes ?? 0)) :
+            catchingUp ? t("offlineSendingLive", [String(uploaded), String(state.storedParts)]) : "";
+    }
     renderFolder();
     if (state.connecting) status.textContent = t("connectionConnecting", t("appNameInstrumental", t("appName")));
     else if (recording && !state.stopped) status.textContent = state.uploadNotice ?? t("recording");
@@ -99,7 +114,7 @@ function renderState(state) {
     const waitingForUpload = isWaitingForUpload(state);
     if (waitingForUpload && !finalizationTimer) {
         finalizationTimer = setInterval(() => {
-            void chrome.runtime.sendMessage({ type: "check-finalization" }).catch(() => {});
+            void chrome.runtime.sendMessage({ type: "check-finalization", captureId: currentState.captureId }).catch(() => {});
         }, 5000);
     } else if (!waitingForUpload && finalizationTimer) {
         clearInterval(finalizationTimer);
@@ -128,7 +143,7 @@ function renderState(state) {
         status.hidden = true;
         meters.hidden = true;
         controls.hidden = true;
-        progress.hidden = false;
+        progress.hidden = local && !processing;
         completedView.hidden = true;
         document.getElementById("picker-progress-stage").textContent = t(
             processing ? "processingRecording" : "uploadingRecording",
@@ -252,7 +267,8 @@ cancel.addEventListener("click", async () => {
 stop.addEventListener("click", async () => {
     stop.disabled = true;
     status.textContent = t("finishing");
-    const response = await chrome.runtime.sendMessage({ type: "stop-recording" });
+    const captureId = currentState?.captureId;
+    const response = await chrome.runtime.sendMessage({ type: "stop-recording", ...(captureId ? { captureId } : {}) });
     if (!response?.ok) {
         stop.disabled = false;
         showError(new Error(response?.error ?? t("couldNotStart")));
@@ -274,7 +290,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     if (message.type === "start") {
         capture.start({ ...message.payload, systemStream })
-            .then(() => {
+            .then((started) => {
+                if (!started) {
+                    releaseSystemStream();
+                    sendResponse({ ok: false });
+                    return;
+                }
                 recording = true;
                 cancel.hidden = true;
                 stop.hidden = false;
@@ -292,10 +313,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         return true;
     }
     if (message.type === "stop") {
-        capture.stop();
-        sendResponse({ ok: true });
+        sendResponse({ ok: capture.stop(message.payload?.captureId) });
         return false;
     }
+    if (message.type === "ping") sendResponse({ ok: true, captureId: capture.captureId() });
     return false;
 });
 
@@ -311,6 +332,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         await fitToRecorder();
         status.textContent = t("startingCapture");
         const response = await report("desktop-capture-ready");
+        if (response?.cancelled) {
+            releaseSystemStream();
+            window.close();
+            return;
+        }
         if (response?.connection) {
             releaseSystemStream();
             await fitToRecorder();
