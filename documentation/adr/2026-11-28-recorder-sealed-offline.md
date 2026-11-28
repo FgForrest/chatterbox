@@ -5,7 +5,7 @@ updated: 2026-11-28 20:13
 status: accepted
 kind: feature
 issues: [463]
-prs: []
+prs: [464]
 areas: [extensions/recorder, src/app/api/v1/recorder/config, src/app/api/v1/recording-sessions, src/lib/recording-sessions, src/db/schema.ts]
 supersedes: [2026-11-19-recorder-unreachable-server, 2026-11-20-recorder-meeting-card-is-a-notice, 2026-10-21-meeting-recorder-extension]
 superseded-by: []

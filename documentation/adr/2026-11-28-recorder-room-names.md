@@ -5,7 +5,7 @@ updated: 2026-11-28 20:13
 status: accepted
 kind: feature
 issues: [462]
-prs: []
+prs: [464]
 areas: [extensions/recorder, src/lib/meetings/room-key.ts, src/db/queries/recorder-rooms.ts, src/db/queries/recording-session-leases.ts, src/app/api/v1/recorder]
 supersedes: [2026-11-08-recorder-live-agendas, 2026-11-11-recorder-panel-recording-block]
 superseded-by: []
