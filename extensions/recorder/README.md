@@ -21,8 +21,8 @@ pinned icon blinks for up to 20 seconds, and the **REC?** badge remains afterwar
 If the icon is unpinned, open Chrome's puzzle-piece menu and click **Chatterbox**.
 Use the pin beside its name to keep it in the toolbar. An assigned shortcut starts
 capture directly. Close the notice with **×** to dismiss it for this meeting.
-When Chatterbox is unreachable, the notice shows the connection failure and the
-start instructions return on recovery.
+When Chatterbox is unreachable, the notice tells you whether you can start
+recording offline.
 
 On agenda tabs the icon opens the agenda panel with the same recording controls.
 Unconfirmed Auto policy opens Options. Once the policy is confirmed, Auto keeps
@@ -40,9 +40,10 @@ its direct toolbar start and stop action.
    cannot share screen audio, use the meeting's browser version. Starting from a
    notification or the microphone permission window also uses the picker. If
    Chrome refuses direct capture of a tab, the picker opens instead.
-3. Audio is encoded in 5-second slices, encrypted with a server-issued
-   per-recording key before it is written to browser storage, and uploaded to
-   Chatterbox as it is captured.
+3. The extension encrypts five-second chunks before writing them to browser
+   storage. On upgraded servers, it uses your account’s public key, so capture
+   can start even when your server is unreachable. Upload starts when the server
+   is reachable.
 4. On stop, the server assembles the slices, remuxes them to Ogg/Opus, and
    creates a recording. The popup shows upload progress, then confirms when
    Chatterbox has saved the recording. It returns to the ready screen and opens

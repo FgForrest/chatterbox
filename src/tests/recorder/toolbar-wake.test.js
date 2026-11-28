@@ -50,6 +50,8 @@ function panelWorker(stored, hydration = Promise.resolve({ ...stored })) {
         openAgendaPanelNow: open,
         openAgendaPanel: open,
         startFromInvocation: capture,
+        getSettings: async () => ({}),
+        recordingStartPath: () => ({}),
         agendaPanelKey: (id) => `panel:${id}`,
     };
     vm.runInNewContext(init + action, ctx);
@@ -159,6 +161,8 @@ it.each([
         },
         openAgendaPanel: open,
         startFromInvocation: capture,
+        getSettings: async () => ({}),
+        recordingStartPath: () => ({}),
         agendaPanelKey: (id) => `panel:${id}`,
         closeAgendaPanel: async () => {},
     };
@@ -192,7 +196,7 @@ it.each(
         source.indexOf("chrome.runtime.onConnect?"),
     );
     const invocation = source.slice(
-        source.indexOf("async function startFromInvocation(tab)"),
+        source.indexOf("async function startFromInvocation("),
         source.indexOf("chrome.commands.onCommand.addListener"),
     );
     let deliver;
@@ -227,10 +231,12 @@ it.each(
             awaitingPicker: "picker",
             finalizing: "finalizing",
         },
-        getState: async () => ({ state, tabId: 7 }),
+        getState: async () => ({ state, tabId: 7, captureId: "capture-one" }),
+        captureIdOf: (value) => value.captureId,
         isLiveCapture: (value) => value.state === "recording",
         stopRecording: stop,
         startRecording: start,
+        recordingStartPath: () => ({}),
         getSettings: async () => ({
             dataUseAcknowledgedAt: "yes",
             autoModeAcknowledgedAt: "yes",
@@ -248,4 +254,6 @@ it.each(
     expect(close).toHaveBeenCalledOnce();
     expect(state === "idle" ? start : stop).toHaveBeenCalledOnce();
     expect(state === "idle" ? stop : start).not.toHaveBeenCalled();
+    if (state === "recording")
+        expect(stop).toHaveBeenCalledWith("user", { captureId: "capture-one" });
 });

@@ -1,6 +1,6 @@
 # Zásady ochrany soukromí rozšíření Klepna – nahrávání schůzek
 
-Aktualizováno: 11. listopadu 2026
+Aktualizováno: 28. listopadu 2026 (verze 0.10.0)
 
 Tyto zásady popisují **rozšíření prohlížeče Klepna – nahrávání schůzek**. Nenahrazují zásady ochrany soukromí serveru Klepny ani jiných služeb, které si zvolíte.
 
@@ -11,7 +11,7 @@ Při nastavení rozšíření požádá o přístup k mikrofonu a krátce otevř
 - Když spustíte nahrávání, rozšíření zachytává zvuk mikrofonu a zvuk vybrané karty se schůzkou nebo systémový zvuk zvolený v dialogu Chromu. Obraz obrazovky neukládá.
 - Pokud zapnete rozpoznávání schůzek, kontroluje adresy a stav zvuku karet prohlížeče, aby rozpoznalo podporované služby a nabídlo nahrávání. Historii prohlížení ani adresy karet neodesílá.
 - Do úložiště rozšíření ukládá adresu serveru, nastavení, náhodný identifikátor instalace a stav nahrávání. Identifikátor instalace sdílí po souhlasu s nakládáním s daty pouze s právě nastavovaným nebo propojeným serverem, mimo jiné pro zneplatnění starších klíčů této instalace; stránky pro místní vývoj na localhostu mohou používat také deklarovaný přímý kanál pro nastavení. Nejde o otisk zařízení ani o tajný údaj. Klíč pro nahrávání může vytvářet nahrávky a vyhledávat názvy složek pro jejich zařazení, a na podporovaných serverech číst a upravovat viditelné agendy, ale nemůže číst nahrávky. Před uložením do `chrome.storage.local` ho šifruje. Neexportovatelný klíč Web Crypto ukládá do IndexedDB rozšíření. Toto opatření brání běžnému čtení místního úložiště, ale kód spuštěný v rozšíření nebo osoba s kopií celého profilu prohlížeče může klíč stále použít.
-- Každou přibližně pětisekundovou zvukovou část šifruje klíčem vydaným vaším serverem ještě před zápisem do soukromého souborového systému Chromu. Šifrované části odesílá na zvolený server přes HTTPS. Server je dešifruje pro běžné uložení, přepis a export. V prohlížeči zůstanou do potvrzení dokončení serverem nebo do vašeho výslovného zahození. Pád prohlížeče či plný disk může nahrávání přerušit; obnovitelný může být jen ověřený začátek. Samotný prohlížeč může při práci se zvukem dočasně ukládat data mimo šifrované úložiště rozšíření.
+- Každou přibližně pětisekundovou zvukovou část šifruje před zápisem do soukromého souborového systému Chromu. Aktualizovaný server poskytuje veřejný klíč pro váš účet. Každou nahrávku při tomto propojení rozšíření zašifruje tak, aby ji mohl dešifrovat jen váš server, i když je nedostupný. Starší servery vydávají klíč při spuštění nahrávání. Šifrované části odesílá na zvolený server přes HTTPS. Server je dešifruje pro běžné uložení, přepis a export. Metadata pro obnovení obsahují čas začátku a konce nahrávky, vybranou složku a identifikátor vybrané agendy. Název agendy zůstává jen v úložišti relace prohlížeče. Pokud server poskytne neprůhledný identifikátor účtu, rozšíření jej uloží s metadaty, aby části zůstaly přiřazené k vašemu účtu. Šifrované části zabírají místo v prohlížeči, dokud server nepotvrdí dokončení nebo je výslovně nezahodíte. Při zahození neodeslané nahrávky může rozšíření požádat server o zrušení relace, aniž by odeslalo zvuk. Rozšíření je po uplynutí času nemaže. V Možnostech vidíte, kolik místa zabírají. Pád prohlížeče či plný disk může nahrávání přerušit; obnovitelný může být jen ověřený začátek. Samotný prohlížeč může při práci se zvukem dočasně ukládat data mimo šifrované úložiště rozšíření.
 - Přehratelná místní kopie se automaticky nestahuje. Po dokončení záznamu na serveru ji můžete stáhnout na stránce nahrávky po přihlášení do Klepny. Stažený soubor zůstane v počítači, dokud jej nesmažete.
 
 ## Volitelná výzva přímo ve schůzce
@@ -86,19 +86,34 @@ kterou načítá přes připojený účet Google vlastníka agendy. Nahrávací 
 v panelu ani jiný kód místnosti zadaný klientem nestačí. Bez této události a její místnosti
 Meet je seznam lidí prázdný a karta sdílení se neukáže. Samotná otevřená karta Meetu nestačí.
 Seznam dostává jen vlastník a jen on z panelu posílá pozvánky. Člověk bez přístupu
-zjistí jen to, že existuje nesdílená agenda, bez jejího názvu, ID, vlastníka či jmen
-nahrávajících. Pozvánka svému příjemci zpřístupní název agendy, plánovaný čas a jméno
+zjistí jen to, že existuje nesdílená agenda, bez jejího názvu, ID, vlastníka či seznamu lidí,
+kteří ji nahrávají. Pozvánka svému příjemci zpřístupní název agendy, plánovaný čas a jméno
 sdílejícího. Přijetí použije vybranou vlastní soukromou složku a stejná pravidla
 přístupu a zařazení jako web; odmítnutí přístup neudělí. Údaje pozvánek a lidí zůstávají
 v paměti panelu nebo v dočasném úložišti relace rozšíření. Starším serverům se kódy
 s nahrávkou ani přítomnost panelu neposílají a nové sdílení se nezobrazí. Dosavadní
 párování s Kalendářem může kód místnosti nadále odesílat, jak je popsáno výše.
 
+## Kdo nahrává tuto schůzku
+
+Když na podporovaném vlastním serveru Klepny s Organizací nahráváte kartu se
+schůzkou, rozšíření každých 20 sekund hlásí propojenému serveru, že nahrávání
+probíhá a ve které místnosti. Posílá identifikátor místnosti odvozený z adresy
+karty. Server jej ukládá jako jednosměrný otisk s tajným klíčem. Když má jiný
+člen Organizace otevřenou stejnou adresu schůzky a otevře okno nebo boční panel
+rozšíření, jeho rozšíření pošle identifikátor místnosti a zjistí, kdo nahrává.
+Po dobu nahrávání mu upozornění ukáže pouze vaše zobrazované jméno. Výsledek
+si rozšíření pamatuje nejvýše 30 sekund. Dobu dotazu započítá do nejkratší zbývající
+platnosti oznámení, kterou uvedl server. Pokud hlášení přestanou přicházet,
+platnost oznámení vyprší do jedné minuty od posledního hlášení.
+Při nahrávání přes výběr zdroje v Chromu
+se přítomnost v místnosti nesdílí.
+
 ## Schůzky z Kalendáře a živá spolupráce
 
 Na podporovaných serverech rozšíření získá název, čas začátku a konce, ověřený odkaz na Meet a e-mail připojeného účtu Google pro vaši nejbližší vlastní schůzku v hlavním kalendáři (pořadatel nebo pozvaný, který neodmítl). Odkaz vybere tento účet pomocí `authuser`. Údaje zůstávají v dočasném úložišti relace rozšíření a při změně propojení či souhlasu se smažou. Na pozadí se Kalendář kontroluje nejvýš každých pět minut; při otevření okna či panelu pouze po uplynutí jedné minuty od posledního načtení. Připojení otevře Meet a nikdy nespustí nahrávání. Nová karta je v dočasném úložišti relace přiřazená k ID agendy, konci schůzky a ověřenému kódu místnosti s identitou aktuálního propojení. Přiřazení se odstraní při opuštění místnosti, zavření karty, konci události nebo změně propojení či souhlasu. Volitelné systémové oznámení může zobrazit název schůzky. Jeho předstih a vypnutí najdete v Možnostech. Pokud už máte místnost otevřenou, oznámení nepřijde.
 
-Po dobu otevření panelu agendy přicházejí změny přes ověřený kanál událostí. Společné textové úpravy i jména kolegů, kteří schůzku nahrávají, se vyměňují pouze s propojeným serverem podle stávajících oprávnění. Textové dokumenty jsou jen v paměti panelu, nikoli v trvalém úložišti rozšíření. Výběr agendy při spuštění nebo její úprava během nahrávání může oznámit agendu ostatním oprávněným čtenářům a připojit ji k nahrávce; Změnit agendu nabízí i volbu Bez agendy. Místně se pamatují ID nedávných složek a připomenutých výskytů schůzek, nikoli názvy z Kalendáře nebo text agendy. Rozšíření nenačítá vzdálený kód.
+Po dobu otevření panelu agendy přicházejí změny přes ověřený kanál událostí. Společné textové úpravy i jména kolegů, kteří schůzku nahrávají, se vyměňují pouze s propojeným serverem podle stávajících oprávnění. Textové dokumenty jsou jen v paměti panelu, nikoli v trvalém úložišti rozšíření. Výběr agendy při spuštění nebo její úprava během nahrávání může oznámit agendu ostatním oprávněným čtenářům a připojit ji k nahrávce; Změnit agendu nabízí i volbu Bez agendy. Rozšíření si místně pamatuje ID nedávných složek a připomenutých výskytů schůzek. Rozšíření nenačítá vzdálený kód.
 
 ## Kam se data odesílají
 

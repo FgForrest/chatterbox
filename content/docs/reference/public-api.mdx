@@ -340,6 +340,64 @@ it. Consequently, `transcription.completed` and `summary.completed` webhooks for
 such a recording are not sent until the owner files it and processing reaches
 those phases.
 
+### Sealed recordings
+
+When recorder config includes `features.offlineRecording: 1`, it returns the
+paired user's opaque `account.id` and an `offlineKey` with `kid`,
+`alg: "ECDH-P256-HKDF-SHA256-A256GCM"`, and `publicKey` (P-256 SPKI as
+unpadded base64url). The account ID stays the same across recorder key changes.
+
+`POST /api/v1/recording-sessions/sealed` accepts the normal creation fields
+plus `encryption: { protocol: 2, kid, ephemeralPublicKey, salt }`. The
+ephemeral key is a 65-byte uncompressed P-256 point and the salt is 16 bytes,
+both in unpadded base64url. Derive the chunk key with P-256 ECDH and HKDF-SHA256,
+using the UTF-8 string `chatterbox-recorder-offline-v1:<kid>:<clientRecordingId>`
+as HKDF info. The response includes `encryption: { protocol: 2, kid }` and
+the usual limits. The chunk envelope and its associated data stay at version 1.
+
+Creation returns `201`. An exact retry returns `200` with the current session,
+including a replacement or terminal session. Changing the encryption descriptor, start time, notice
+acknowledgement, MIME type, or channel layout for the same `clientRecordingId`
+returns `409`. Folder, live agenda and room changes do not cause conflicts.
+Unavailable folder and live agenda choices at creation are skipped.
+An unavailable account key returns `410 OFFLINE_KEY_UNAVAILABLE`.
+`POST /api/v1/recording-sessions/{id}/recover` can replace a swept or failed
+sealed session and re-derive its chunk key after expiry. A replay or recovery
+that returns an open replacement restores its chunk key and active binding.
+`DELETE /api/v1/recording-sessions/{id}?capture=1` resolves the current sealed
+session from any of its session IDs. A successful response includes
+`capture_discarded: true` and a `capture_outcome` of `"discarded"` for a
+cancellation or `"completed"` if the recording was already saved. The request
+can be retried and returns `409` while the session is finalizing. Sealed replay
+and capture cancellation require the original recorder key. A different key
+for the same account returns `403 RECORDER_KEY_MISMATCH`. When a selected
+folder is unavailable at completion, Chatterbox saves the sealed recording
+for filing later. Finalized recordings appear in archives as usual. Resuming
+an unfinished upload after a restore requires the original database and
+encryption secret.
+
+### Live room recorders
+
+`features.roomRecorders: 1` is available in self-hosted Organization mode.
+The owner can send `POST /api/v1/recording-sessions/{id}/lease` with
+`{revision, room}` to advertise a live capture for 60 seconds. Use a canonical
+room string such as `meet:abc-defg-hij` or `zoom:12345678901`. A higher revision
+moves or clears the room (`room: null`). The same revision can refresh the
+same room. Send a higher revision to
+`POST /api/v1/recording-sessions/{id}/lease/end` to end the lease permanently.
+A refused transition returns `409 RECORDING_LEASE_REFUSED`.
+
+`POST /api/v1/recorder/rooms/recorders` accepts one room in `{room}` and returns
+`{data: [{name}], live_until, freshForMs}`. It lists other eligible Organization members
+currently recording in that room, once per member. `live_until` is the earliest
+lease expiry across the listed captures as an ISO 8601 timestamp. `freshForMs`
+is the remaining time until that expiry in milliseconds, measured by the server.
+The extension counts elapsed lookup time against that lifetime and caps it at
+30 seconds. A member who knows the exact room identifier can make this lookup.
+An empty result returns `{data: [], live_until: null, freshForMs: 0}`.
+The lookup allows 48 requests per minute per account and 480 per minute per IP,
+subject to the general API limits.
+
 There are no other public write endpoints. To push finished audio in through
 the UI instead, use the upload button in the dashboard.
 

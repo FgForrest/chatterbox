@@ -35,6 +35,7 @@ function setupPopup(tabUrl, folderId = null, folderLabel = null) {
                 value: "",
                 children: [],
                 style: {},
+                classList: { add: vi.fn(), remove: vi.fn() },
                 attributes: new Map(),
                 setAttribute(name, value) {
                     this.attributes.set(name, value);

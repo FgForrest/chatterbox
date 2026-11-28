@@ -103,10 +103,17 @@ describe("meeting prompt toolbar icon", () => {
             tabId,
             state: "error",
             startConnectionError: true,
+            sessionId: "legacy-session",
+            captureMode: "tab",
         };
         chrome.action.setBadgeText.mockClear();
         h.listeners.message(
-            { type: "levels", micDb: -30, systemDb: -20 },
+            {
+                type: "levels",
+                sessionId: "legacy-session",
+                micDb: -30,
+                systemDb: -20,
+            },
             offscreen,
         );
         await vi.advanceTimersByTimeAsync(0);
@@ -140,7 +147,12 @@ describe("meeting prompt toolbar icon", () => {
 
         chrome.action.setBadgeText.mockClear();
         h.listeners.message(
-            { type: "levels", micDb: -40, systemDb: -20 },
+            {
+                type: "levels",
+                sessionId: "legacy-session",
+                micDb: -40,
+                systemDb: -20,
+            },
             offscreen,
         );
         await vi.advanceTimersByTimeAsync(0);
@@ -171,7 +183,7 @@ describe("meeting prompt toolbar icon", () => {
         h.listeners.message(
             {
                 type: "recording-stopped",
-                sessionId: "session-1",
+                captureId: h.session.recordingState.captureId,
                 chunkCount: 1,
             },
             offscreen,
@@ -881,7 +893,9 @@ describe("meeting banner senders and recording controls", () => {
                 folderLabel: "Private / Aurora",
             }),
         ).toEqual({ ok: true });
-        expect(h.metas.get("session-1").folderId).toBe("new");
+        expect(h.metas.get(h.session.recordingState.captureId).folderId).toBe(
+            "new",
+        );
         expect(h.local.folderId).toBe("new");
         expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
             7,
@@ -926,7 +940,7 @@ describe("meeting banner senders and recording controls", () => {
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
             target: "offscreen",
             type: "stop",
-            payload: undefined,
+            payload: { captureId: h.session.recordingState.captureId },
         });
         h.session.recordingState.stopped = true;
         expect(await message({ type: "meeting-banner-ready" })).toEqual({

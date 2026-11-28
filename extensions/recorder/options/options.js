@@ -1,5 +1,7 @@
+import { formatBufferedBytes, pendingRecordingBytes, pendingRecordingStatus } from "../lib/pending-recordings.js";
+import { serverUnavailable } from "../lib/server-connection.js";
 import { supportsAgendas } from "../lib/agendas.js";
-import { listLocalSessions, readLocalMeta } from "../lib/chunk-store.js";
+import { captureAgendaTitleKey, captureHasGap, listPendingCaptures, serverSessionFor } from "../lib/capture-state.js";
 import { mountConnectionNotice } from "../lib/connection-notice.js";
 import { localizeDocument, t } from "../lib/i18n.js";
 import { bindMeetingPromptSwitches } from "../lib/meeting-prompt-ui.js";
@@ -379,6 +381,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
             recording.oldValue?.bufferId !== recording.newValue?.bufferId)) {
         void renderPendingBuffers();
     }
+    if ((area === "session" && (changes.recorderPendingRevision ||
+        (recording?.newValue?.stopped && recording.newValue.uploaded?.length !== recording.oldValue?.uploaded?.length))) ||
+        (area === "local" && changes.serverDefaults)) schedulePendingBuffers();
     if (area === "session" && changes[PENDING_PAIR_KEY])
         void renderPendingPair();
     if (area === "session" && changes[SETUP_FLOW_KEY] && setupFlow) {
@@ -454,52 +459,97 @@ el("disconnect").addEventListener("click", async () => {
 const pendingBufferRetries = new Set();
 const pendingBufferMessages = new Map();
 let pendingBufferRender = 0;
+let pendingBufferTimer;
+
+function schedulePendingBuffers() {
+    pendingBufferTimer ??= setTimeout(() => {
+        pendingBufferTimer = null;
+        void renderPendingBuffers().catch(() => {});
+    }, 500);
+}
 
 
 async function renderPendingBuffers() {
     const version = ++pendingBufferRender;
-    const ids = await listLocalSessions();
-    const metas = await Promise.all(ids.map(readLocalMeta));
+    const [all, settings, unavailable, stored] = await Promise.all([
+        listPendingCaptures(), getSettings(), serverUnavailable(), chrome.storage.session.get("recordingState"),
+    ]);
+    const active = stored.recordingState;
+    const pending = all.filter(({ id, meta }) => !meta?.cleanupPending && !(active?.captureId === id && !active.stopped));
+    const [captures, titles] = await Promise.all([
+        Promise.all(pending.map(async (entry) => ({
+            ...entry,
+            bytes: await pendingRecordingBytes(entry.id, entry.meta ?? {}).catch(() => 0),
+        }))),
+        chrome.storage.session.get(pending.map(({ id }) => captureAgendaTitleKey(id))),
+    ]);
     if (version !== pendingBufferRender) return;
     const list = el("pending-buffer-list");
     list.replaceChildren();
-    el("pending-buffers").hidden = ids.length === 0;
-    el("manual-recovery-label").hidden = ids.length === 0;
-    for (const [index, id] of ids.entries()) {
-        const meta = metas[index];
+    el("pending-buffers").hidden = captures.length === 0;
+    el("manual-recovery-label").hidden = captures.length === 0;
+    el("pending-buffer-space").textContent = t("offlineBrowserSpace",
+        formatBufferedBytes(captures.reduce((total, { bytes }) => total + bytes, 0)));
+    for (const { id, meta, bytes } of captures) {
         const item = document.createElement("li");
-        const label = document.createElement("span");
-        label.textContent = `${meta?.serverUrl ?? t("unknown")} · ${meta?.startedAt ?? id} · ${meta?.clientRecordingId ?? ""} · ${meta?.keyExpiresAt ?? ""}`;
+        const model = pendingRecordingStatus(meta ?? {}, settings, unavailable);
+        const gap = captureHasGap(meta ?? {});
+        const title = titles[captureAgendaTitleKey(id)];
+        const agendaTitle = !model.other && title?.agendaId === meta?.agendaId ? title?.title : null;
+        const localOnly = meta?.protocol === 2 && !serverSessionFor(meta, id);
+        const started = Date.parse(meta?.startedAt);
+        const ended = Date.parse(meta?.stoppedAt);
+        const timestamp = Number.isFinite(started) ? new Date(started).toLocaleString() : t("unknown");
+        const seconds = Number.isFinite(ended - started) ? Math.max(0, Math.floor((ended - started) / 1000)) : null;
+        const duration = seconds === null ? t("unknown") :
+            `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+        const label = document.createElement("strong");
+        label.textContent = agendaTitle || timestamp;
+        const info = document.createElement("p");
+        info.className = "hint pending-buffer-info";
+        info.textContent = [agendaTitle ? timestamp : null, duration, formatBufferedBytes(bytes),
+            meta?.folderLabel ?? t("pendingDefaultFolder")].filter(Boolean).join(" · ");
+        const summary = document.createElement("p");
+        summary.className = model.local ? "pending-local" : "";
+        summary.textContent = [gap ? t("recordingBufferGap") : model.title, model.reason, model.days && t("offlineWaitingDays", String(model.days))]
+            .filter(Boolean).join(" ");
         const check = document.createElement("input");
         check.type = "checkbox";
         check.setAttribute("aria-label", t("discard"));
         const retry = document.createElement("button");
         retry.type = "button";
         retry.textContent = t("retryUpload");
+        const save = document.createElement("button");
+        save.type = "button";
+        save.textContent = t("savePlayablePrefix");
         const status = document.createElement("p");
         status.setAttribute("aria-live", "polite");
         status.setAttribute("role", "status");
         const busy = pendingBufferRetries.has(id);
         retry.disabled = busy;
+        retry.hidden = model.other;
+        save.disabled = busy;
         check.disabled = busy;
+        check.hidden = localOnly;
         const message = pendingBufferMessages.get(id);
         setStatus(status, busy ? t("retryBufferRunning") : message?.text ?? "", busy || !message?.error);
         const button = document.createElement("button");
         button.type = "button";
         button.textContent = t("discard");
-        button.disabled = true;
+        button.disabled = busy || !localOnly;
         check.addEventListener("change", () => {
             button.disabled = pendingBufferRetries.has(id) || !check.checked;
         });
-        retry.addEventListener("click", async () => {
+        async function resume(type) {
             if (pendingBufferRetries.has(id)) return;
             pendingBufferRetries.add(id);
             retry.disabled = true;
+            save.disabled = true;
             button.disabled = true;
             check.disabled = true;
             setStatus(status, t("retryBufferRunning"), true);
             try {
-                const result = await chrome.runtime.sendMessage({ type: "retry-buffer", bufferId: id });
+                const result = await chrome.runtime.sendMessage({ type, bufferId: id });
                 pendingBufferMessages.set(id, {
                     text: result?.ok ? t("retryBufferResumed") : result?.error ?? t("somethingWrong"),
                     error: !result?.ok,
@@ -511,24 +561,28 @@ async function renderPendingBuffers() {
                 pendingBufferRetries.delete(id);
                 await renderPendingBuffers();
             }
+        }
+        retry.addEventListener("click", () => resume("retry-buffer"));
+        save.addEventListener("click", () => {
+            if (window.confirm(t("savePlayablePrefixConfirm"))) return resume("save-buffer-prefix");
         });
         button.addEventListener("click", async () => {
-            const result = await chrome.runtime.sendMessage({
-                type: "discard-buffer",
-                bufferId: id,
-            });
-            if (result?.ok) await renderPendingBuffers();
-            else
-                setStatus(
-                    result?.connection ? status : el("connection-status"),
-                    result?.error ?? t("somethingWrong"),
-                    false,
-                );
+            if (localOnly && !window.confirm(t("discardOfflineConfirm"))) return;
+            const discardStatus = el("pending-discard-status");
+            setStatus(discardStatus, "", true);
+            try {
+                const result = await chrome.runtime.sendMessage({ type: "discard-buffer", bufferId: id });
+                if (result?.ok) await renderPendingBuffers();
+                else setStatus(discardStatus, result?.error ?? t("somethingWrong"), false);
+            } catch (error) {
+                setStatus(discardStatus, error?.message ?? t("somethingWrong"), false);
+            }
         });
         const actions = document.createElement("div");
         actions.className = "row";
         actions.append(retry, check, button);
-        item.append(label, actions, status);
+        if (gap && !model.other && meta.verifiedPrefix >= 0) actions.append(save);
+        item.append(label, info, summary, actions, status);
         list.append(item);
     }
 }

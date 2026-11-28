@@ -7,6 +7,7 @@ import { writeChunk } from "../../../extensions/recorder/lib/chunk-store.js";
 import { microphoneError } from "../../../extensions/recorder/lib/microphone.js";
 
 vi.mock("../../../extensions/recorder/lib/chunk-crypto.js", () => ({
+    CHUNK_ENVELOPE_OVERHEAD: 29,
     importCaptureKey: vi.fn(async () => ({})),
     encryptChunk: vi.fn(),
 }));

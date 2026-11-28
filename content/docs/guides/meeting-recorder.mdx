@@ -123,9 +123,8 @@ you can press it to confirm consent and start directly.
 On agenda tabs the icon opens the side panel with the same recording button.
 If automatic recording still needs your approval, the icon opens **Options**.
 Use **Record another screen or app** in the popup for a different audio source.
-When Chatterbox is unreachable, the notice shows the connection failure.
-The start instructions return once Chatterbox is reachable. Use **×** to dismiss
-the notice for that meeting.
+When Chatterbox is unreachable, the notice tells you whether you can start
+recording offline. Use **×** to dismiss the notice for that meeting.
 
 The prompt is optional. Turn it on from the one-time card in the popup, in
 **Options**, or on the ready screen after setup. Chrome then asks for access
@@ -176,6 +175,11 @@ When you stop, the extension finishes uploading the audio, then the server
 assembles and saves the recording. The extension opens your dashboard with the
 new recording selected after the server confirms it is saved. You can download
 a playable copy from that recording's page.
+
+On a supporting self-hosted Chatterbox server with an Organization, the popup
+and side panel show who is recording the meeting tab before you start your own
+recording. The notice shows only names and uses the meeting address, so it
+also works without an agenda. It applies to direct tab capture.
 
 ## Agendas
 
@@ -250,7 +254,7 @@ chooser automatically, it keeps checking and shows the agenda when only one rema
 A chooser you open yourself and your explicit selections stay under your control.
 
 If an agenda is private, the icon opens the panel with **Agenda is not shared with you**.
-Its title, owner and recorder are hidden. You can record without an agenda or choose your own.
+Its title, owner and list of agenda recorders are hidden. You can record without an agenda or choose your own.
 The owner sees eligible people from the same Chatterbox server who have the panel open
 in that meeting and cannot see the agenda, only when the agenda is tied to that meeting's
 own Google Calendar event. The Calendar link read through the owner's connected Google
@@ -318,8 +322,8 @@ If an upload does not finish, open the extension's **Options** and choose
 
 **Chatterbox is unreachable.** Check your network or VPN, or ask whether the server
 is running. Choose **Retry now** to check the connection immediately. An active
-recording continues and encrypted audio uploads when the connection returns. Starting
-a new recording requires the server to issue its encryption key. The panel keeps its
+recording continues and encrypted audio uploads when the connection returns. Once the extension has received your account’s public key from an upgraded
+server, you can also start a new recording during an outage. The panel keeps its
 last loaded agenda available for reading.
 
 ## A note on consent

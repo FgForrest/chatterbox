@@ -5,6 +5,7 @@ import { parseSessionAgendaBody } from "@/lib/recording-sessions/metadata";
 import { gateRecordingSessionRequest } from "@/lib/recording-sessions/route-gate";
 import { serializeRecordingSession } from "@/lib/recording-sessions/serialize";
 import {
+    discardSealedRecordingCapture,
     getRecordingSessionForUser,
     listRecordingSessionChunks,
     markRecordingSessionAborted,
@@ -79,6 +80,27 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
     const { authn } = gate;
     const { id } = await (context as IdContext).params;
 
+    if (new URL(request.url).searchParams.get("capture") === "1") {
+        const discarded = await discardSealedRecordingCapture({
+            sessionId: id,
+            userId: authn.user.id,
+            apiKeyId: authn.apiKeyId,
+        });
+        if (discarded.purge) {
+            const storage = await createUserStorageProvider(authn.user.id);
+            await purgeRecordingSessionChunks(
+                storage,
+                discarded.sessionId,
+                authn.user.id,
+            );
+        }
+        return NextResponse.json({
+            success: true,
+            capture_discarded: true,
+            capture_outcome: discarded.purge ? "discarded" : "completed",
+        });
+    }
+
     const session = await getRecordingSessionForUser(id, authn.user.id);
     if (!session) {
         throw new AppError(
@@ -110,6 +132,7 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
     await retireRecordingCaptureKey({
         userId: authn.user.id,
         captureKeyId: session.captureKeyId,
+        sessionId: session.id,
     });
 
     return NextResponse.json({ success: true });

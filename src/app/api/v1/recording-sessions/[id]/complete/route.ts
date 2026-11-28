@@ -8,6 +8,7 @@ import { gateRecordingSessionRequest } from "@/lib/recording-sessions/route-gate
 import { serializeRecordingSession } from "@/lib/recording-sessions/serialize";
 import {
     getRecordingSessionForUser,
+    isSealedRecordingSession,
     listRecordingSessionChunks,
     markRecordingSessionCompleting,
     setRecordingSessionJob,
@@ -68,13 +69,18 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             );
             if (folder) input.folderId = folder.folderId;
         } catch (error) {
-            if (error instanceof AppError && error.statusCode === 400) {
+            if (
+                error instanceof AppError &&
+                [400, 403, 404].includes(error.statusCode) &&
+                (await isSealedRecordingSession(session))
+            ) {
+                input.folderId = null;
+            } else if (error instanceof AppError && error.statusCode === 400) {
                 throw new AppError(error.code, error.message, 400, {
                     ...error.details,
                     field: "folderId",
                 });
-            }
-            throw error;
+            } else throw error;
         }
     }
 

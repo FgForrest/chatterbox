@@ -7,19 +7,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || message.target !== "offscreen") return false;
     if (message.type === "start") {
         capture.start(message.payload)
-            .then(() => sendResponse({ ok: true }))
+            .then((started) => sendResponse({ ok: started }))
             .catch((error) =>
                 sendResponse({ ok: false, error: error?.message ?? String(error) }),
             );
         return true;
     }
     if (message.type === "stop") {
-        capture.stop();
-        sendResponse({ ok: true });
+        sendResponse({ ok: capture.stop(message.payload?.captureId) });
         return false;
     }
     if (message.type === "ping") {
-        sendResponse({ ok: true, recording: capture.isRecording() });
+        sendResponse({ ok: true, captureId: capture.captureId(), recording: capture.isCapturing() });
         return false;
     }
     return false;

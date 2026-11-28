@@ -55,6 +55,7 @@ let closed = false;
 let portRetry;
 let room = { data: [], restricted: false, invitations: [] };
 let roomPeople = [];
+let visibleRoomRecorders = [];
 const heartbeat = panelRoomHeartbeat(async message => {
     const response = await chrome.runtime.sendMessage(message);
     if (response?.ok && !response.retryAfterMs && !closed) void restore(true);
@@ -731,7 +732,7 @@ function hasAgendaChoice() {
 
 function renderRecording() {
     const colleagues = (detail?.recordingBy ?? []).filter(
-        (person) => !person.self,
+        (person) => !person.self && !visibleRoomRecorders.includes(person.name?.trim()),
     );
     el("colleague-recording").hidden =
         !colleagues.length || recording() || afterStop();
@@ -1103,6 +1104,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     }
 });
 setInterval(() => {
+    void controls?.refreshRoomRecorders();
     if (
         unavailable ||
         saving ||
@@ -1152,6 +1154,10 @@ controls = await mountRecordingControls(el("recorder-controls"), {
         if (changedRoom) void restore(true);
     },
     onState: updateRecordingState,
+    onRoomRecorders: (names) => {
+        visibleRoomRecorders = names;
+        renderRecording();
+    },
     onConnection: (disconnected) => {
         if (unavailable === disconnected) return;
         unavailable = disconnected;

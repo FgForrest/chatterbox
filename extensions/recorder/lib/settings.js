@@ -18,6 +18,8 @@ import { t } from "./i18n.js";
  * @property {number} encryptedRecordingProtocol
  * @property {boolean} agendas
  * @property {boolean} nextMeeting
+ * @property {0|1} [roomRecorders]
+ * @property {string} [accountId]
  * @property {boolean} recordingFolderOverride
  * @property {string[]} autoRecordPlatforms
  * @property {number} autoStopQuietSeconds

@@ -24,6 +24,10 @@ const session: RecordingSessionRow = {
     jobId: "job",
     lastError: null,
     terminalCode: null,
+    liveUntil: null,
+    liveRoomKey: null,
+    leaseRevision: -1,
+    leaseEndedAt: null,
     createdAt: now,
     updatedAt: now,
 };

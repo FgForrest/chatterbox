@@ -1,6 +1,10 @@
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { describe, expect, it, vi } from "vitest";
+import {
+    captureAgendaTitleKey,
+    captureHasGap,
+} from "../../../extensions/recorder/lib/capture-state.js";
 
 const source = readFileSync("extensions/recorder/options/options.js", "utf8");
 const catalog = (locale) =>
@@ -11,7 +15,15 @@ const catalog = (locale) =>
         ),
     );
 
-function options(locale = "en") {
+function options(
+    locale = "en",
+    {
+        meta: metaPatch = {},
+        other = false,
+        confirm = () => true,
+        session = {},
+    } = {},
+) {
     const messages = catalog(locale);
     const t = (key) => messages[key]?.message ?? key;
     const nodes = new Map();
@@ -43,14 +55,34 @@ function options(locale = "en") {
     const sendMessage = vi.fn(async () => ({ ok: true }));
     const ctx = {
         el,
+        captureAgendaTitleKey,
+        captureHasGap,
         t,
         document: { createElement: node },
-        chrome: { runtime: { sendMessage } },
-        listLocalSessions: async () => ids,
-        readLocalMeta: async () => ({
-            serverUrl: "https://recorder.example",
-            startedAt: "2026-11-10T10:00:00Z",
+        chrome: {
+            runtime: { sendMessage },
+            storage: { session: { get: async () => ({ ...session }) } },
+        },
+        getSettings: async () => ({ hasApiKey: true }),
+        serverUnavailable: async () => false,
+        pendingRecordingBytes: async () => 12_000_000,
+        formatBufferedBytes: () => "12 MB",
+        pendingRecordingStatus: () => ({
+            title: t("offlineWaiting"),
+            local: !other,
+            other,
         }),
+        window: { confirm },
+        serverSessionFor: (meta) => meta.serverSessionId,
+        listPendingCaptures: async () =>
+            ids.map((id) => ({
+                id,
+                meta: {
+                    serverUrl: "https://recorder.example",
+                    startedAt: "2026-11-10T10:00:00Z",
+                    ...metaPatch,
+                },
+            })),
         setStatus: (node, message, ok) => {
             node.textContent = message;
             node.className = `status ${ok ? "ok" : "err"}`;
@@ -65,8 +97,8 @@ function options(locale = "en") {
     );
     function row() {
         const item = el("pending-buffer-list").children[0];
-        const [retry, check, discard] = item.children[1].children;
-        return { retry, check, discard, status: item.children[2] };
+        const [retry, check, discard] = item.children[3].children;
+        return { retry, check, discard, status: item.children[4] };
     }
     return {
         render: ctx.renderPendingBuffers,
@@ -81,6 +113,64 @@ function options(locale = "en") {
 }
 
 describe("pending recording retry controls", () => {
+    it.each([
+        ["en", "Part of the recording is missing."],
+        ["cs", "Část nahrávky chybí."],
+    ])("shows the gap and offers a confirmed playable beginning in %s", async (locale, missing) => {
+        const confirm = vi
+            .fn()
+            .mockReturnValueOnce(false)
+            .mockReturnValueOnce(true);
+        const h = options(locale, {
+            meta: {
+                verifiedPrefix: 0,
+                highestCommittedIndex: 2,
+                chunkCount: 3,
+            },
+            confirm,
+        });
+        await h.render();
+        const item = h.el("pending-buffer-list").children[0];
+        expect(item.children[2].textContent).toContain(missing);
+        const save = item.children[3].children.find(
+            (child) => child.textContent === h.t("savePlayablePrefix"),
+        );
+        expect(save.hidden).toBeFalsy();
+        await save.events.click();
+        expect(h.sendMessage).not.toHaveBeenCalled();
+        await save.events.click();
+        expect(confirm).toHaveBeenCalledWith(h.t("savePlayablePrefixConfirm"));
+        expect(h.sendMessage).toHaveBeenCalledExactlyOnceWith({
+            type: "save-buffer-prefix",
+            bufferId: "buffer-one",
+        });
+    });
+
+    it("shows the session agenda title, then falls back to the start time when it is cleared", async () => {
+        const key = captureAgendaTitleKey("buffer-one");
+        const session = {
+            [key]: { agendaId: "agenda-one", title: "Planning" },
+        };
+        const h = options("en", {
+            session,
+            meta: { agendaId: "agenda-one", agendaTitle: "Old disk title" },
+        });
+        const label = () =>
+            h.el("pending-buffer-list").children[0].children[0].textContent;
+        await h.render();
+        expect(label()).toBe("Planning");
+        delete session[key];
+        await h.render();
+        expect(label()).toBe(new Date("2026-11-10T10:00:00Z").toLocaleString());
+    });
+
+    it("uses Chatterbox for English offline copy and Klepna for Czech", () => {
+        const en = catalog("en");
+        const cs = catalog("cs");
+        expect(en.offlineIdle.message).toContain("Chatterbox");
+        expect(en.offlineOtherConnection.message).not.toContain("Klepna");
+        expect(cs.offlineOtherConnection.message).toContain("Klepny");
+    });
     it("refreshes on lifecycle changes without rebuilding rows for audio levels or chunk progress", () => {
         let changed;
         const refresh = vi.fn();
@@ -100,6 +190,7 @@ describe("pending recording retry controls", () => {
                     },
                 },
                 renderPendingBuffers: refresh,
+                schedulePendingBuffers: vi.fn(),
                 PENDING_PAIR_KEY: "pair",
                 SETUP_FLOW_KEY: "setup",
             },
@@ -243,7 +334,7 @@ describe("pending recording retry controls", () => {
         expect(h.el("manual-recovery-label").hidden).toBe(true);
     });
 
-    it("keeps the row and shows the connection status error when discard fails", async () => {
+    it("keeps the row and shows the error near the list when discard fails", async () => {
         const h = options();
         const error = h.t("somethingWrong");
         h.sendMessage.mockResolvedValueOnce({ ok: false, error });
@@ -260,8 +351,51 @@ describe("pending recording retry controls", () => {
         });
         expect(h.el("pending-buffer-list").children).toEqual([item]);
         expect(h.el("pending-buffers").hidden).toBe(false);
-        expect(h.el("connection-status").textContent).toBe(error);
-        expect(h.el("connection-status").className).toBe("status err");
+        expect(h.el("pending-discard-status").textContent).toBe(error);
+        expect(h.el("pending-discard-status").className).toBe("status err");
+    });
+
+    it.each([
+        ["en", "The recording was already saved in Chatterbox."],
+        ["cs", "Nahrávka už byla uložena v Klepně."],
+    ])("shows that finalization won after the last row is removed in %s", async (locale, text) => {
+        const h = options(locale);
+        h.sendMessage.mockImplementationOnce(async () => {
+            h.remove();
+            await h.render();
+            return { ok: false, error: h.t("discardAlreadySaved") };
+        });
+        await h.render();
+        const { check, discard } = h.row();
+        check.checked = true;
+        check.events.change();
+        await discard.events.click();
+        expect(h.el("pending-buffers").hidden).toBe(true);
+        expect(h.el("pending-discard-status").textContent).toBe(text);
+    });
+
+    it("shows only Discard for another account, with confirmation before removing a local-only buffer", async () => {
+        const confirm = vi
+            .fn()
+            .mockReturnValueOnce(false)
+            .mockReturnValueOnce(true);
+        const h = options("en", {
+            meta: { protocol: 2, serverSessionId: null },
+            other: true,
+            confirm,
+        });
+        await h.render();
+        const { retry, check, discard } = h.row();
+        expect(retry.hidden).toBe(true);
+        expect(check.hidden).toBe(true);
+        expect(discard.disabled).toBe(false);
+        await discard.events.click();
+        expect(h.sendMessage).not.toHaveBeenCalled();
+        await discard.events.click();
+        expect(h.sendMessage).toHaveBeenCalledWith({
+            type: "discard-buffer",
+            bufferId: "buffer-one",
+        });
     });
 
     it("refreshes the list when completion removes the buffer", async () => {

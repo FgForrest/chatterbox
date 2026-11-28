@@ -1,0 +1,21 @@
+{
+    "recipient": {
+        "publicKey": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE9Yanu1eBeCO4NPXpHz4xaYwX0J4WtQtRLvriewzobJ8sdmdKZ4W7et0f5c4HtwBjENOgC5xN4IB9aVptkHBOAQ",
+        "privateKey": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgRJLDR2UuH2z5iIe_7BiV4o3HKhTWrbFF_v0LK4_06yChRANCAAT1hqe7V4F4I7g09ekfPjFpjBfQnha1C1Eu-uJ7DOhsnyx2Z0pnhbt63R_lzge3AGMQ06ALnE3ggH1pWm2QcE4B"
+    },
+    "ephemeral": {
+        "publicKey": "BCpapvkR-KZeAtSaVg0RzjQljxA8D7skDfYVLMI9bZkMZTWBovAbdjc8X6GaQp1aCP-HKWjVqTbqaN2XGehO9Pk",
+        "privateKey": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg_MZRDwkbPgUQTqzKm1egMdNFRq5ZGRJtFdgiJzCr396hRANCAAQqWqb5EfimXgLUmlYNEc40JY8QPA-7JA32FSzCPW2ZDGU1gaLwG3Y3PF-hmkKdWgj_hylo1ak26mjdlxnoTvT5"
+    },
+    "salt": "AAECAwQFBgcICQoLDA0ODw",
+    "kid": "vector-key",
+    "clientRecordingId": "ec51af65-a7ac-486d-8c7a-8d90af3326dc",
+    "derivedKey": "FfLaYMjabbkReeABf3HXa2B0tYkt7tS_-7640mCUU8s",
+    "hkdfInfo": "Y2hhdHRlcmJveC1yZWNvcmRlci1vZmZsaW5lLXYxOnZlY3Rvci1rZXk6ZWM1MWFmNjUtYTdhYy00ODZkLThjN2EtOGQ5MGFmMzMyNmRj",
+    "chunk": {
+        "index": 7,
+        "aad": "Y2hhdHRlcmJveC1yZWNvcmRlci12MTplYzUxYWY2NS1hN2FjLTQ4NmQtOGM3YS04ZDkwYWYzMzI2ZGM6Nw",
+        "plaintext": "cmVjb3JkZXIgdmVjdG9yIGF1ZGlvIGJ5dGVz",
+        "envelope": "ARESExQVFhcYGRobHMbLkEjMsBiTc1uL2bcwMBAY0LQPaJenQ5jJ8YWdahDU2ZJuNoYGu6auch0"
+    }
+}

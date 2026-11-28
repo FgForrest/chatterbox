@@ -58,10 +58,10 @@ function isSessionResponse(body, sessionId) {
  * @param {string} path
  * @param {RequestInit} [init]
  * @param {number} [timeoutMs]
- * @param {{connectTimeoutOnly?: boolean, allowEmpty?: boolean, timeoutMs?: number, validate?: (body: unknown) => boolean}} [options]
+ * @param {{connectTimeoutOnly?: boolean, allowEmpty?: boolean, timeoutMs?: number, validate?: (body: unknown) => boolean, observe?: boolean, unavailableStatuses?: number[]}} [options]
  */
 export async function request(auth, path, init = {}, timeoutMs = 30_000, options = {}) {
-    const { connectTimeoutOnly = false, allowEmpty = false, validate } = options;
+    const { connectTimeoutOnly = false, allowEmpty = false, validate, observe = true, unavailableStatuses = [] } = options;
     timeoutMs = options.timeoutMs ?? timeoutMs;
     const headers = new Headers(init.headers ?? {});
     headers.set("Authorization", `Bearer ${auth.apiKey}`);
@@ -78,6 +78,9 @@ export async function request(auth, path, init = {}, timeoutMs = 30_000, options
             signal,
         });
         signal.throwIfAborted();
+        if (unavailableStatuses.includes(response.status)) {
+            throw Object.assign(new Error("Sealed recording endpoint unavailable"), { kind: "capability", status: response.status });
+        }
         if (response.ok && connectTimeoutOnly) {
             if (!response.body || !response.headers.get("content-type")?.includes("text/event-stream")) {
                 throw responseError(response);
@@ -103,7 +106,7 @@ export async function request(auth, path, init = {}, timeoutMs = 30_000, options
             fetchResponse().then(resolve, reject);
         });
         clearTimeout(timer);
-        await reportConnection(auth, null, { config: path === "/api/v1/recorder/config" });
+        if (observe) await reportConnection(auth, null, { config: path === "/api/v1/recorder/config" });
         return response;
     } catch (error) {
         if (signal.aborted) {
@@ -115,7 +118,7 @@ export async function request(auth, path, init = {}, timeoutMs = 30_000, options
         } else if (error instanceof TypeError || error?.name === "AbortError") {
             error = connectionError("network");
         }
-        await reportConnection(auth, error, { config: path === "/api/v1/recorder/config" });
+        if (observe) await reportConnection(auth, error, { config: path === "/api/v1/recorder/config" });
         throw error;
     } finally {
         clearTimeout(timer);
@@ -137,6 +140,31 @@ export async function createSession(auth, body) {
     return response.json();
 }
 
+/** Open or replay a session for an already-sealed capture. */
+export async function createSealedSession(auth, body, signal) {
+    const response = await request(auth, "/api/v1/recording-sessions/sealed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal,
+    }, undefined, {
+        unavailableStatuses: [404, 405],
+        validate: (result) => typeof result?.id === "string" && Boolean(result.id.trim()) &&
+            isSessionResponse(result, result.id) &&
+            result.encryption?.protocol === 2 && result.encryption.kid === body.encryption.kid,
+    });
+    return response.json();
+}
+
+/** Read recent sessions owned by the recorder credential. */
+export async function listRecordingSessions(auth) {
+    const response = await request(auth, "/api/v1/recording-sessions?limit=100", undefined, undefined, {
+        validate: (body) => Array.isArray(body?.data) && body.data.every((row) =>
+            typeof row?.id === "string" && hasSessionStatus(row)),
+    });
+    return (await response.json()).data;
+}
+
 /**
  * Upload one chunk. Idempotent server-side by (session, index, hash).
  * @param {{serverUrl: string, apiKey: string}} auth
@@ -144,8 +172,9 @@ export async function createSession(auth, body) {
  * @param {number} index
  * @param {Blob} blob
  * @param {string} sha256 hex digest of the blob bytes
+ * @param {AbortSignal} [signal]
  */
-export async function uploadChunk(auth, sessionId, index, blob, sha256) {
+export async function uploadChunk(auth, sessionId, index, blob, sha256, signal) {
     await request(
         auth,
         `/api/v1/recording-sessions/${sessionId}/chunks/${index}`,
@@ -156,6 +185,7 @@ export async function uploadChunk(auth, sessionId, index, blob, sha256) {
                 "X-Chunk-SHA256": sha256,
             },
             body: blob,
+            signal,
         },
         120_000,
         { allowEmpty: true, validate: (body) => body?.index === index },
@@ -166,11 +196,11 @@ export async function uploadChunk(auth, sessionId, index, blob, sha256) {
  * @param {{serverUrl: string, apiKey: string}} auth
  * @param {string} sessionId
  */
-export async function getSession(auth, sessionId) {
+export async function getSession(auth, sessionId, signal) {
     const response = await request(
         auth,
         `/api/v1/recording-sessions/${sessionId}`,
-        undefined,
+        signal ? { signal } : undefined,
         undefined,
         { validate: (body) => isSessionResponse(body, sessionId) },
     );
@@ -217,19 +247,27 @@ export async function completeSession(auth, sessionId, body) {
  * @param {{serverUrl: string, apiKey: string}} auth
  * @param {string} sessionId
  */
-export async function abortSession(auth, sessionId) {
-    await request(auth, `/api/v1/recording-sessions/${sessionId}`, {
+export async function abortSession(auth, sessionId, signal, { capture = false } = {}) {
+    const response = await request(auth, `/api/v1/recording-sessions/${sessionId}${capture ? "?capture=1" : ""}`, {
         method: "DELETE",
+        signal,
     }, undefined, { validate: (body) => body?.success === true &&
         (body.id === undefined || body.id === sessionId) });
+    if (!capture) return;
+    const body = await response.json();
+    if (body.capture_discarded !== true) {
+        throw Object.assign(new Error("Sealed capture cancellation unavailable"), { kind: "capability" });
+    }
+    return body.capture_outcome;
 }
 
 /**
  * Server-pushed recorder defaults (auto platforms, quiet period, notice).
  * @param {{serverUrl: string, apiKey: string}} auth
  */
-export async function getRecorderConfig(auth) {
+export async function getRecorderConfig(auth, { observe = true } = {}) {
     const response = await request(auth, "/api/v1/recorder/config", undefined, undefined, {
+        observe,
         validate: (body) => typeof body?.encrypted_recording_protocol === "number" &&
             (!("features" in body) || isObject(body.features)) &&
             (!("defaults" in body) || isObject(body.defaults)),
@@ -318,4 +356,30 @@ export async function setSessionAgenda(auth, sessionId, agendaId) {
     return (await request(auth, `/api/v1/recording-sessions/${encodeURIComponent(sessionId)}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agendaId }),
     }, undefined, { validate: hasSessionStatus })).json();
+}
+
+/** Read the display names and their shared lease expiry for one canonical meeting room. */
+export async function lookupRoomRecorders(auth, room) {
+    const response = await postRoomPresence(auth, "/api/v1/recorder/rooms/recorders", { room },
+        body => Array.isArray(body?.data) && body.data.every(row => typeof row?.name === "string"));
+    const { data, freshForMs } = await response.json();
+    const fresh = Number.isFinite(freshForMs) && freshForMs > 0;
+    return { names: fresh ? data.map(({ name }) => name) : [], freshForMs: fresh ? freshForMs : 0 };
+}
+
+/** Renew, clear, or end a capture's lease without affecting connection notices. */
+export async function postRecordingLease(auth, sessionId, revision, room) {
+    const path = `/api/v1/recording-sessions/${encodeURIComponent(sessionId)}/lease`;
+    const ending = room === undefined;
+    await postRoomPresence(auth, ending ? `${path}/end` : path,
+        ending ? { revision } : { revision, room }, body => body?.success === true);
+}
+
+function postRoomPresence(auth, path, body, validate) {
+    return request(auth, path, {
+        method: "POST",
+        redirect: "error",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    }, 5_000, { validate, observe: false });
 }

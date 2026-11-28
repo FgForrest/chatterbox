@@ -4481,6 +4481,30 @@ export const recordingSessionStatusEnum = pgEnum("recording_session_status", [
     "aborted",
 ]);
 
+export const recorderOfflineKeys = pgTable(
+    "recorder_offline_keys",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        publicKey: text("public_key").notNull(),
+        privateKey: text("private_key").notNull(),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        retiredAt: timestamp("retired_at"),
+    },
+    (table) => ({
+        activeUserUnique: uniqueIndex(
+            "recorder_offline_keys_active_user_unique",
+        )
+            .on(table.userId)
+            .where(sql`${table.retiredAt} is null`),
+        userIdx: index("recorder_offline_keys_user_idx").on(table.userId),
+    }),
+);
+
 export const recordingCaptureKeys = pgTable(
     "recording_capture_keys",
     {
@@ -4495,6 +4519,9 @@ export const recordingCaptureKeys = pgTable(
             .notNull()
             .references(() => apiKeys.id, { onDelete: "cascade" }),
         encryptedKey: text("encrypted_key"),
+        offlineKid: text("offline_kid"),
+        ephemeralPublicKey: text("ephemeral_public_key"),
+        offlineSalt: text("offline_salt"),
         activeSessionId: text("active_session_id"),
         status: varchar("status", { length: 16 })
             .$type<"active" | "completed" | "discarded" | "expired">()
@@ -4574,6 +4601,10 @@ export const recordingSessions = pgTable(
         // Mapped, user-safe message (same rule as `async_jobs.last_error`).
         lastError: text("last_error"),
         terminalCode: varchar("terminal_code", { length: 32 }),
+        liveUntil: timestamp("live_until", { withTimezone: true }),
+        liveRoomKey: text("live_room_key"),
+        leaseRevision: integer("lease_revision").notNull().default(-1),
+        leaseEndedAt: timestamp("lease_ended_at", { withTimezone: true }),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
@@ -4590,6 +4621,11 @@ export const recordingSessions = pgTable(
         folderIdIdx: index("recording_sessions_folder_id_idx")
             .on(table.folderId)
             .where(sql`${table.folderId} is not null`),
+        liveRoomIdx: index("recording_sessions_live_room_idx")
+            .on(table.liveRoomKey, table.liveUntil, table.userId)
+            .where(
+                sql`${table.status} = 'open' and ${table.leaseEndedAt} is null and ${table.liveRoomKey} is not null`,
+            ),
     }),
 );
 

@@ -5,10 +5,14 @@ import { mountConnectionNotice } from "../lib/connection-notice.js";
 import { STATE } from "../lib/constants.js";
 import { localizeDocument, t } from "../lib/i18n.js";
 import { bindMeetingPromptOffer } from "../lib/meeting-prompt-ui.js";
+import { meetingRoom } from "../lib/meeting-room.js";
 import { meetingTarget } from "../lib/meeting-target.js";
 import { microphonePermission } from "../lib/microphone.js";
 import { originOf } from "../lib/pairing.js";
 import { detectMeetingPlatform } from "../lib/platforms.js";
+import { roomPairingChanged, roomRecorderClock, supportsRoomRecorders } from "../lib/room-recorders.js";
+import { recordingStartPath, sealedRecipient } from "../lib/sealed-recording.js";
+import { formatBufferedBytes } from "../lib/pending-recordings.js";
 import { isWaitingForUpload } from "../lib/upload-state.js";
 import {
     customNoticeText,
@@ -35,6 +39,7 @@ export async function mountRecordingControls(
         agendaChoice = () => ({}),
         onState = () => {},
         onTab = () => {},
+        onRoomRecorders = () => {},
         idleNotice,
         beforeAction = async () => {},
         onConnection = () => {},
@@ -64,7 +69,7 @@ export async function mountRecordingControls(
         error: root.querySelector("#" + "view-error"),
     };
 
-    if (idleNotice) views.idle.prepend(idleNotice);
+    if (idleNotice) views.idle.querySelector("#idle-hint").before(idleNotice);
 
     localizeDocument();
 
@@ -73,13 +78,20 @@ export async function mountRecordingControls(
     let elapsedTimer;
     let finalizationTimer;
     let renderVersion = 0;
+    let tabVersion = 0;
     let currentSessionId = null;
+    let currentCaptureId = null;
     let currentRecoverablePrefix = null;
     let currentTab = null;
     let currentPlatform = null;
     let currentState = { state: STATE.idle };
     let meetingCard;
     let unavailable = false;
+    let canRecordOffline = false;
+    let roomContext;
+    let roomPoll;
+    let namesExpire;
+    let visibleRoomNames = "[]";
     const notice = mountConnectionNotice(views.connect, {
         onConnection(connection) {
             const previous = unavailable;
@@ -101,7 +113,7 @@ export async function mountRecordingControls(
             !settings.micReminderDismissed &&
             permission !== "granted";
         el("mic-warning").hidden =
-            !settings.dataUseAcknowledgedAt || !(state.micWarning || reminder);
+            !settings.dataUseAcknowledgedAt || state.stopped || !(state.micWarning || reminder);
         el("mic-warning-text").textContent =
             state.micWarning || t("micWarning");
         el("dismiss-mic").hidden =
@@ -112,12 +124,19 @@ export async function mountRecordingControls(
         for (const [key, node] of Object.entries(views)) {
             node.hidden = key !== name;
         }
-        if (name !== "idle") folderCombobox.close();
+        if (name !== "idle") {
+            folderCombobox.close();
+            clearRoomRecorders();
+        }
         if (name !== "recording") recordingFolder.close();
     }
 
     function sendMessage(message) {
         return chrome.runtime.sendMessage(message);
+    }
+
+    function captureMessage(type, fields = {}) {
+        return sendMessage({ type, ...fields, ...(currentCaptureId ? { captureId: currentCaptureId } : {}) });
     }
 
     async function activeTab() {
@@ -128,6 +147,65 @@ export async function mountRecordingControls(
             currentWindow: true,
         });
         return tab ?? null;
+    }
+
+    function showRoomRecorders(names) {
+        const visible = names.slice(0, 3);
+        const list = visible.map(name => name || t("roomRecorderColleague")).join(", ");
+        const overflow = names.length > visible.length ? ` +${names.length - visible.length}` : "";
+        const label = names.length ? t(names.length === 1 ? "roomRecorderOne" : "roomRecorderSeveral", list + overflow) : "";
+        if (label !== el("room-recorder-names").textContent) el("room-recorder-names").textContent = label;
+        el("room-recorder-notice").hidden = !label;
+        const named = visible.filter(Boolean);
+        const signature = JSON.stringify(named);
+        if (signature !== visibleRoomNames) {
+            visibleRoomNames = signature;
+            onRoomRecorders(named);
+        }
+    }
+
+    function clearRoomRecorders() {
+        if (!roomContext) return;
+        roomContext = null;
+        clearInterval(roomPoll);
+        clearTimeout(namesExpire);
+        showRoomRecorders([]);
+    }
+
+    async function refreshRoomRecorders(recheck = true) {
+        const target = roomContext;
+        if (!target || target.pending) return;
+        target.pending = true;
+        const result = await sendMessage({ type: "room-recorders", tabId: target.tabId }).catch(() => null);
+        target.pending = false;
+        if (roomContext !== target) return;
+        clearTimeout(namesExpire);
+        const remaining = (result?.expiresAt ?? 0) - roomRecorderClock();
+        const names = remaining > 0 && Array.isArray(result?.names)
+            ? result.names.map(name => name.trim())
+            : [];
+        showRoomRecorders(names);
+        if (recheck && remaining <= 0 && result?.names?.length && Number.isFinite(result.expiresAt)) {
+            void refreshRoomRecorders(false);
+        } else if (names.length) namesExpire = setTimeout(() => {
+            showRoomRecorders([]);
+            void refreshRoomRecorders();
+        }, remaining);
+    }
+
+    function watchRoomRecorders(settings) {
+        const eligible = currentState.state === STATE.idle && supportsRoomRecorders(settings) &&
+            currentTab?.id != null && currentTab.active !== false;
+        const room = eligible ? meetingRoom(currentTab.url) : null;
+        if (!room) {
+            clearRoomRecorders();
+            return;
+        }
+        if (roomContext?.tabId === currentTab.id && roomContext.room === room) return;
+        clearRoomRecorders();
+        roomContext = { tabId: currentTab.id, room };
+        void refreshRoomRecorders();
+        if (variant === "popup") roomPoll = setInterval(refreshRoomRecorders, 15_000);
     }
 
     function formatElapsed(startedAt) {
@@ -221,6 +299,8 @@ export async function mountRecordingControls(
     async function renderIdle(version = renderVersion) {
         const settings = await getSettings();
         if (version !== renderVersion) return;
+        canRecordOffline = Boolean(sealedRecipient(settings));
+        notice.update({ sealed: canRecordOffline });
         const hint = el("idle-hint");
         hint.hidden = false;
         el("start").hidden = false;
@@ -244,10 +324,12 @@ export async function mountRecordingControls(
             hint.textContent = t("noMeeting");
         }
         show("idle");
+        watchRoomRecorders(settings);
         void renderAgendaCard(settings, currentState);
     }
 
     async function startRecording(forceDesktop = false) {
+        const settings = getSettings();
         const tabId = currentTab?.id;
         const target = meetingTarget(currentTab?.url);
         const platformHint = currentPlatform?.id;
@@ -258,12 +340,15 @@ export async function mountRecordingControls(
         el("start").disabled = true;
         el("start-desktop").disabled = true;
         button.textContent = t(
-            unavailable ? "connectionConnecting" : forceDesktop ? "openingPicker" : "startingCapture",
+            unavailable && !canRecordOffline ? "connectionConnecting" : forceDesktop ? "openingPicker" : "startingCapture",
             t("appNameInstrumental", t("appName")),
         );
         try {
-            await beforeAction();
-            await folderCombobox.saved();
+            const startPath = recordingStartPath(await settings);
+            if (!startPath.recipient) {
+                await beforeAction();
+                await folderCombobox.saved();
+            }
             const response = await sendMessage({
                 type: "start-recording",
                 payload: {
@@ -272,6 +357,7 @@ export async function mountRecordingControls(
                     ...(target ? { meetingTarget: target } : {}),
                     platformHint,
                     noticeAcknowledgedAt,
+                    startPath,
                     ...choice,
                     ...(popupFolderChoice ?? {}),
                 },
@@ -301,6 +387,17 @@ export async function mountRecordingControls(
         const node = el(elementId);
         if (!node) return;
         const uploaded = state.uploaded?.length ?? 0;
+        const total = state.storedParts ?? 0;
+        if (!state.stopped && state.protocol === 2 && unavailable) {
+            node.classList.add("local-audio");
+            node.textContent = t("offlineSavedBytes", formatBufferedBytes(state.bufferedBytes ?? 0));
+            return;
+        }
+        node.classList.remove("local-audio");
+        if (!state.stopped && state.protocol === 2 && state.bufferedOffline && uploaded < total && !state.uploadNotice) {
+            node.textContent = t("offlineSendingLive", [String(uploaded), String(total)]);
+            return;
+        }
         const progress = state.stopped
             ? t("uploadedOf", [String(uploaded), String(state.chunkCount)])
             : t("segmentsUploaded", String(uploaded));
@@ -314,10 +411,14 @@ export async function mountRecordingControls(
         const uploaded = Math.min(total, state.uploaded?.length ?? 0);
         const percent = total > 0 ? Math.round((uploaded / total) * 100) : 0;
         const processing = state.state === STATE.finalizing;
+        const local = state.protocol === 2 && unavailable && !processing;
+        const nextRecording = el("record-next");
+        if (nextRecording) nextRecording.hidden = state.protocol !== 2;
+        el("finalizing-stage").hidden = local;
         el("finalizing-stage").textContent = t(
             processing ? "processingRecording" : "uploadingRecording",
         );
-        el("finalizing-upload").hidden = processing;
+        el("finalizing-upload").hidden = processing || local;
         el("finalizing-processing").hidden = !processing;
         el("finalizing-progress").setAttribute(
             "aria-valuenow",
@@ -350,9 +451,17 @@ export async function mountRecordingControls(
     async function render(state) {
         const version = ++renderVersion;
         currentState = state;
+        if (state.state !== STATE.idle) clearRoomRecorders();
         const live = !state.stopped && (state.state === STATE.recording ||
-            (state.sessionId && state.captureMode && state.state === STATE.error));
-        notice.update({ recording: live, starting: state.startConnectionError || state.connecting });
+            ((state.captureId || state.sessionId) && state.captureMode && state.state === STATE.error));
+        notice.update({
+            recording: live, starting: state.startConnectionError || state.connecting,
+            sealed: state.protocol === 2 || (state.state === STATE.idle && canRecordOffline), stopped: state.stopped && state.state !== STATE.completed,
+        });
+        const badge = el("offline-badge");
+        if (badge) badge.hidden = !live || !unavailable;
+        const storageWarning = el("local-storage-warning");
+        if (storageWarning) storageWarning.hidden = !live || !state.localStorageWarning;
         onState(state);
         void meetingCard?.render();
         if (state.state !== STATE.idle)
@@ -362,6 +471,7 @@ export async function mountRecordingControls(
         await renderMicrophoneWarning(state);
         if (version !== renderVersion) return;
         currentSessionId = state.sessionId;
+        currentCaptureId = state.captureId;
         currentRecoverablePrefix = state.recoverablePrefix;
         if (elapsedTimer) {
             clearInterval(elapsedTimer);
@@ -379,7 +489,7 @@ export async function mountRecordingControls(
         const waitingForUpload = isWaitingForUpload(state);
         if (waitingForUpload && !finalizationTimer) {
             finalizationTimer = setInterval(() => {
-                void sendMessage({ type: "check-finalization" }).catch(
+                void captureMessage("check-finalization").catch(
                     () => {},
                 );
             }, 5000);
@@ -396,7 +506,7 @@ export async function mountRecordingControls(
                     break;
                 }
                 show("recording");
-                recordingFolder.render(state, unavailable ? { refresh: false } : undefined);
+                recordingFolder.render(state, unavailable || (state.protocol === 2 && !state.sessionId) ? { refresh: false } : undefined);
                 el("mic-bar").style.width = dbToWidth(state.levels?.micDb ?? -100);
                 el("sys-bar").style.width = dbToWidth(state.levels?.systemDb ?? -100);
                 const tick = () => {
@@ -431,8 +541,8 @@ export async function mountRecordingControls(
                     break;
                 }
                 show("error");
-                el("retry").hidden = !state.sessionId;
-                el("discard").textContent = t(state.sessionId ? "discard" : "dismiss");
+                el("retry").hidden = !(state.sessionId || (state.protocol === 2 && state.captureId));
+                el("discard").textContent = t(state.sessionId || state.captureId ? "discard" : "dismiss");
                 el("error-text").textContent =
                     state.error ?? t("somethingWrong");
                 el("partial-recovery").hidden = !(state.recoverablePrefix > 0);
@@ -456,11 +566,11 @@ export async function mountRecordingControls(
 
     el("stop").addEventListener("click", async () => {
         if (!unavailable) void beforeAction().catch(() => {});
-        await sendMessage({ type: "stop-recording", reason: "user" });
+        await captureMessage("stop-recording", { reason: "user" });
     });
 
     el("retry").addEventListener("click", async () => {
-        const result = await sendMessage({ type: "retry-upload" });
+        const result = await captureMessage("retry-upload");
         if (result?.ok === false) {
             el("error-text").textContent =
                 result.error ?? t("recoveryUnavailable");
@@ -474,17 +584,17 @@ export async function mountRecordingControls(
     el("save-prefix").addEventListener("click", async () => {
         if (!el("partial-recovery-check").checked || !currentRecoverablePrefix)
             return;
-        const response = await sendMessage({
-            type: "save-prefix",
+        const response = await captureMessage("save-prefix", {
             chunkCount: currentRecoverablePrefix,
         });
         if (response?.ok === false)
             el("error-text").textContent = response.error;
     });
 
+    el("record-next")?.addEventListener("click", () => void captureMessage("dismiss-pending-capture"));
     el("discard").addEventListener("click", async () => {
-        const result = await sendMessage({
-            type: "discard-session",
+        if (currentCaptureId && !currentSessionId && !window.confirm(t("discardOfflineConfirm"))) return;
+        const result = await captureMessage("discard-session", {
             sessionId: currentSessionId,
         });
         if (result?.ok === false) el("error-text").textContent = result.error;
@@ -521,7 +631,8 @@ export async function mountRecordingControls(
     const listener = (message) => {
         if (message?.type === "state") {
             void render(message.state);
-        } else if (message?.type === "levels") {
+        } else if (message?.type === "levels" &&
+            (!message.captureId || message.captureId === currentState.captureId)) {
             el("mic-bar").style.width = dbToWidth(message.micDb);
             el("sys-bar").style.width = dbToWidth(message.systemDb);
         }
@@ -548,23 +659,42 @@ export async function mountRecordingControls(
     );
     if (variant === "panel") el("view-idle").prepend(el("next-meeting-card"));
     const tabUpdated = (id, change, tab) => {
-        if (id !== currentTab?.id || !change.url) return;
+        if (id !== currentTab?.id) return;
+        if (change.status === "loading") clearRoomRecorders();
+        if (!change.url && change.status !== "complete") return;
+        tabVersion++;
+        if (change.url) clearRoomRecorders();
         currentTab = tab;
         currentPlatform = detectMeetingPlatform(tab.url);
-        onTab(currentTab);
+        if (change.url) onTab(currentTab);
         if (currentState.state === STATE.idle) void render(currentState);
         void meetingCard.render();
     };
     chrome.tabs.onUpdated?.addListener(tabUpdated);
-    const tabActivated = async () => {
-        currentTab = await activeTab();
+    const tabActivated = async (info) => {
+        if (info && info.windowId === currentTab?.windowId && info.tabId !== currentTab?.id) clearRoomRecorders();
+        const version = ++tabVersion;
+        const tab = await activeTab();
+        if (version !== tabVersion) return;
+        if (currentTab?.id !== tab?.id || currentTab?.url !== tab?.url || currentTab?.active !== tab?.active) {
+            clearRoomRecorders();
+        }
+        currentTab = tab;
         currentPlatform = detectMeetingPlatform(currentTab?.url);
         onTab(currentTab);
         if (currentState.state === STATE.idle) await render(currentState);
         void meetingCard.render();
     };
     chrome.tabs.onActivated?.addListener(tabActivated);
+    const tabRemoved = (id) => {
+        if (id === currentTab?.id) {
+            clearRoomRecorders();
+            void tabActivated();
+        }
+    };
+    chrome.tabs.onRemoved?.addListener(tabRemoved);
     const settingsChanged = (changes, area) => {
+        if (area === "local" && roomPairingChanged(changes)) clearRoomRecorders();
         if (
             area !== "local" ||
             !(
@@ -583,6 +713,7 @@ export async function mountRecordingControls(
         render,
         refreshTab: tabActivated,
         refreshMeeting: () => meetingCard.render(),
+        refreshRoomRecorders,
         folder: (folder) => {
             agendaFolderChoice = folder;
             if (!popupFolderChoice)
@@ -591,9 +722,12 @@ export async function mountRecordingControls(
         destroy: () => {
             clearInterval(elapsedTimer);
             clearInterval(finalizationTimer);
+            clearRoomRecorders();
+            tabVersion++;
             chrome.runtime.onMessage.removeListener?.(listener);
             chrome.tabs.onUpdated?.removeListener(tabUpdated);
             chrome.tabs.onActivated?.removeListener(tabActivated);
+            chrome.tabs.onRemoved?.removeListener(tabRemoved);
             chrome.storage.onChanged.removeListener?.(settingsChanged);
             notice.destroy();
             meetingCard.destroy();

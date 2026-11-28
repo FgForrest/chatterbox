@@ -1,0 +1,101 @@
+{
+    "positive": [
+        ["https://meet.google.com/abc-defg-hij", "meet:abc-defg-hij"],
+        [
+            "https://meet.google.com/meet/ABC-DEFG-HIJ/?authuser=2",
+            "meet:abc-defg-hij"
+        ],
+        ["https://zoom.us/j/01234567890?pwd=example", "zoom:01234567890"],
+        [
+            "https://acme.zoom.us/wc/01234567890/join?pwd=example",
+            "zoom:01234567890"
+        ],
+        ["https://zoom.us/wc/987654321/", "zoom:987654321"],
+        [
+            "https://teams.microsoft.com/l/meetup-join/19%3ameeting_AcMe_01%40thread.v2/0?context=example",
+            "teams:19:meeting_AcMe_01@thread.v2"
+        ],
+        [
+            "https://teams.microsoft.com/v2/#/l/meetup-join/19%3Ameeting_AcMe_01%40thread.v2/0?context=example",
+            "teams:19:meeting_AcMe_01@thread.v2"
+        ],
+        [
+            "https://teams.cloud.microsoft/meet/12345678901?p=example",
+            "teams:12345678901"
+        ],
+        ["https://teams.live.com/meet/000123/#settings", "teams:000123"],
+        [
+            "https://acme.webex.com/meet/Team.Room/?token=example",
+            "webex:acme/team.room"
+        ],
+        ["https://other.webex.com/meet/Team.Room", "webex:other/team.room"],
+        [
+            "https://app.slack.com/huddle/T01234/C56789?from=example",
+            "slack:T01234/C56789"
+        ],
+        ["https://app.slack.com/huddle/T01234/D01234/", "slack:T01234/D01234"],
+        ["https://app.slack.com/huddle/T01234/G01234", "slack:T01234/G01234"],
+        [
+            "https://whereby.com/team-room?roomKey=example",
+            "whereby:whereby.com/team-room"
+        ],
+        [
+            "https://acme.whereby.com/team-room/?roomKey=example#example",
+            "whereby:acme.whereby.com/team-room"
+        ],
+        [
+            "https://meet.jit.si/Team_Room#config.prejoinPageEnabled=false",
+            "jitsi:team_room"
+        ]
+    ],
+    "negative": [
+        "",
+        "/abc-defg-hij",
+        "http://meet.google.com/abc-defg-hij",
+        "https://meet.google.com:444/abc-defg-hij",
+        "https://name:secret@meet.google.com/abc-defg-hij",
+        "https://meet.google.com/abc-defg-hij/extra",
+        "https://meet.google.com/lookup/abc-defg-hij",
+        "https://fake.meet.google.com/abc-defg-hij",
+        "https://zoom.us.example.com/wc/123/join",
+        "https://notzoom.us/j/123",
+        "https://zoom.us/wc/123abc/join",
+        "https://zoom.us/wc/123%2Fjoin",
+        "https://zoom.us/wc/123//join",
+        "https://zoom.us/j/123abc",
+        "https://zoom.us/j/123/extra",
+        "https://zoom.us/j/",
+        "https://zoom.us/join?meeting=123",
+        "https://teams.microsoft.com/meet/123abc",
+        "https://teams.live.com/meet/123/extra",
+        "https://teams.microsoft.com/l/meet/123",
+        "https://teams.microsoft.com/v2/#/call/123",
+        "https://teams.microsoft.com/l/meetup-join/?context=example",
+        "https://teams.microsoft.com/l/meetup-join/19%253ameeting_AcMe_01%2540thread.v2/0",
+        "https://teams.microsoft.com/l/meetup-join/19%3ameeting_AcMe_01%40thread.v2%0A/0",
+        "https://teams.microsoft.com/l/meetup-join/19%3ameeting_AcMe%2F01%40thread.v2/0",
+        "https://teams.microsoft.com/l/meetup-join/19%3ameeting_AcMe_01%40thread.v1/0",
+        "https://teams.microsoft.com/meet/123#/meet/456",
+        "https://teams.microsoft.com.example.com/meet/123",
+        "https://acme.webex.com/meet/",
+        "https://webex.com/meet/team-room",
+        "https://help.webex.com/meet/team-room",
+        "https://acme.webex.com/meet/team-room/extra",
+        "https://acme.webex.com/wbxmjs/",
+        "https://acme.webex.com/webappng/",
+        "https://app.slack.com/huddle/T01234",
+        "https://app.slack.com/huddle/T01234/U56789",
+        "https://app.slack.com/huddle/T01234/C56789/extra",
+        "https://app.slack.com/huddle/t01234/c56789",
+        "https://app.slack.com/client/T01234/C56789",
+        "https://whereby.com/pricing",
+        "https://whereby.com/team-room/extra",
+        "https://name:secret@acme.whereby.com/team-room",
+        "https://docs.whereby.com/overview",
+        "https://nested.acme.whereby.com/team-room",
+        "https://acme.meet.jit.si/team-room",
+        "https://meet.jit.si/config.js",
+        "https://meet.jit.si/static/",
+        "https://meet.jit.si/team-room/extra"
+    ]
+}

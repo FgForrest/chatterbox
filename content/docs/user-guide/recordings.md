@@ -30,6 +30,18 @@ An account with no items of its own starts at **Organization** when colleagues h
 
 Recording a meeting held in the browser on Linux? Your administrator can give you **meetrec**, a small command-line recorder that captures both your microphone and the other participants into one file, ready to upload. See [For administrators](administrators.md#meeting-recorder-meetrec).
 
+### Recording browser meetings offline
+
+After the Meeting Recorder connects to an upgraded Chatterbox server, you can
+start and stop recording as usual during an outage. The extension encrypts the
+audio for your account and sends it when your server is reachable again. A
+recording in progress also continues if the connection drops.
+
+Open the extension’s **Options → Recordings waiting to be sent** to check
+upload progress and browser storage use, retry an upload, or discard a recording.
+Waiting recordings remain in the browser until sent or discarded. To upload
+after switching connections, pair the extension with the original server and account.
+
 ## The recording page
 
 Click a recording to open it on the right.

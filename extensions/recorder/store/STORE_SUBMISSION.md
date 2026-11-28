@@ -8,7 +8,7 @@ Record meeting audio at the user's request and upload it to the self-hosted inst
 
 ## Prominent data disclosure
 
-> When you record, Chatterbox Meeting Recorder captures your microphone and the meeting tab's or selected system audio. It encrypts short audio chunks before buffering them in this browser and sends them over HTTPS to the Chatterbox server you pair. That server decrypts them for storage and processing. It does not automatically download a playable copy; you can download one from your account after upload. The recorder token is encrypted in this browser. The server operator controls data after upload. You must inform participants and obtain any consent required to record them.
+> When you record, Chatterbox Meeting Recorder captures your microphone and the meeting tab's or selected system audio. It encrypts short audio chunks before buffering them in this browser and sends them over HTTPS to the Chatterbox server you pair. With a public key for your account from an upgraded server, the extension can encrypt new recordings while that server is unreachable. Waiting recordings use browser storage until sent or discarded. That server decrypts them for storage and processing. It does not automatically download a playable copy; you can download one from your account after upload. The recorder token is encrypted in this browser. The server operator controls data after upload. You must inform participants and obtain any consent required to record them.
 
 ## In-extension consent and setup
 
@@ -66,7 +66,7 @@ The privacy policy, store listing, permission explanations, and in-extension con
 
 ## Remaining submission risks
 
-- The recorder token is encrypted under a non-exportable Web Crypto key in extension IndexedDB, and the OPFS recovery chunks are encrypted under a server-issued per-capture key. These measures do not protect against malicious code running in the extension or every browser-profile compromise. Describe that boundary accurately in the dashboard.
+- The recorder token is encrypted under a non-exportable Web Crypto key in extension IndexedDB, and the OPFS recovery chunks are encrypted with a separate key per capture. On upgraded servers, the extension derives that key using the paired account’s public key. These measures do not protect against malicious code running in the extension or every browser-profile compromise. Describe that boundary accurately in the dashboard.
 - The Store assigns the extension ID when the ZIP is uploaded. If it differs from the unpacked development ID, set `NEXT_PUBLIC_RECORDER_EXTENSION_ID` for the Chatterbox web app before using site-based pairing.
 - Verify the consent, pairing, microphone, manual recording, confirmed Auto recording, failed-upload recovery, and authenticated web-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
 
@@ -78,9 +78,8 @@ The privacy policy, store listing, permission explanations, and in-extension con
   Extensions menu. Open the popup and choose **Consent confirmed · Record this tab**.
   On agenda tabs, use the same button in the side panel. **Record another screen or
   app** stays in the popup. Use **×** to dismiss the notice for the meeting.
-- When Chatterbox is unreachable, the notice shows the connection failure.
-  The pinned icon's 20-second blink and the **REC?** badge guide you when
-  recording can start.
+- When Chatterbox is unreachable, the notice tells you whether you can start
+  recording offline. The pinned icon and **REC?** badge guide you to Start.
 - During recording, four-bar equalizers show microphone and selected source
   activity next to the timer, target folder and **Stop**. The isolated script
   receives numeric levels only while the tab that started the recording is
@@ -93,8 +92,8 @@ The privacy policy, store listing, permission explanations, and in-extension con
   kartu**. Na kartě s agendou použijte stejné tlačítko v bočním panelu. Volba
   **Nahrávat jinou obrazovku nebo aplikaci** zůstává v okně rozšíření. Tlačítkem
   **×** zavřete výzvu pro tuto schůzku.
-- Pokud je Klepna nedostupná, výzva ukazuje chybu připojení. Když je možné začít
-  nahrávat, pomůže vám najít ikonu odznak **REC?** a až 20 sekund blikání.
+- Pokud je Klepna nedostupná, výzva vám řekne, zda můžete začít nahrávat offline.
+  Odznak **REC?** a blikání vám pomohou najít ikonu.
 - Štítek při nahrávání ukazuje kromě času, cílové složky a tlačítka **Zastavit**
   také čtyřpásmové ukazatele úrovně mikrofonu a zvoleného zdroje. Izolovaný
   skript dostává číselné úrovně pouze tehdy, když je karta, ze které jste

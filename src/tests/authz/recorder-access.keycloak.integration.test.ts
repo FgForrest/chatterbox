@@ -24,6 +24,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { recordingSessionChunks, userAccessStates, users } from "@/db/schema";
 import { adminPath } from "@/lib/identity/providers/keycloak/http";
 import { keycloakLogin } from "@/tests/authz/keycloak-login";
+import vector from "@/tests/fixtures/recorder-sealed-vectors.json";
 import {
     keycloakTestBase,
     provisionTestRealm,
@@ -131,10 +132,15 @@ import {
 } from "@/app/api/access/subjects/[subject]/route";
 import { POST as pairRoute } from "@/app/api/settings/recorder/pair/route";
 import { POST as rebindRoute } from "@/app/api/settings/recorder/rebind/route";
+import { GET as configRoute } from "@/app/api/v1/recorder/config/route";
+import { POST as roomRecordersRoute } from "@/app/api/v1/recorder/rooms/recorders/route";
 import { PUT as chunkRoute } from "@/app/api/v1/recording-sessions/[id]/chunks/[index]/route";
 import { POST as completeRoute } from "@/app/api/v1/recording-sessions/[id]/complete/route";
+import { POST as endLeaseRoute } from "@/app/api/v1/recording-sessions/[id]/lease/end/route";
+import { POST as leaseRoute } from "@/app/api/v1/recording-sessions/[id]/lease/route";
 import { GET as sessionRoute } from "@/app/api/v1/recording-sessions/[id]/route";
 import { POST as createSessionRoute } from "@/app/api/v1/recording-sessions/route";
+import { POST as sealedRoute } from "@/app/api/v1/recording-sessions/sealed/route";
 import { auth } from "@/lib/auth";
 import { ensureOrgAccount } from "@/lib/org/account";
 
@@ -352,6 +358,7 @@ describeWithKeycloak(
                     del: ["use"],
                     vic: ["use"],
                     race: ["use"],
+                    seal: ["use"],
                 },
                 {
                     realmName: REALM,
@@ -386,6 +393,102 @@ describeWithKeycloak(
             if (storageRoot)
                 await rm(storageRoot, { recursive: true, force: true });
         }, 60_000);
+
+        it("applies active recorder authorization to sealed creation and live room leases", async () => {
+            const { key } = await pair("seal");
+            const { key: viewerKey } = await pair("boss");
+            function request(path: string, bearer: string, body?: object) {
+                return new Request(`${TEST_APP_URL}/api/v1/${path}`, {
+                    method: body ? "POST" : "GET",
+                    headers: {
+                        authorization: `Bearer ${bearer}`,
+                        "content-type": "application/json",
+                    },
+                    body: body ? JSON.stringify(body) : undefined,
+                });
+            }
+            const config = await configRoute(request("recorder/config", key));
+            expect(config.status).toBe(200);
+            const configBody = (await config.json()) as {
+                offlineKey: { kid: string };
+            };
+            expect(configBody).toMatchObject({
+                features: { roomRecorders: 1, offlineRecording: 1 },
+                account: { id: expect.any(String) },
+                offlineKey: {
+                    kid: expect.any(String),
+                    publicKey: expect.any(String),
+                },
+            });
+            const sealedBody = {
+                clientRecordingId: randomUUID(),
+                mimeType: "audio/webm",
+                channelLayout: ["mic"],
+                startedAt: new Date().toISOString(),
+                encryption: {
+                    protocol: 2,
+                    kid: configBody.offlineKey.kid,
+                    ephemeralPublicKey: vector.ephemeral.publicKey,
+                    salt: vector.salt,
+                },
+            };
+            const create = () =>
+                sealedRoute(
+                    request("recording-sessions/sealed", key, sealedBody),
+                );
+            const created = await create();
+            expect(created.status).toBe(201);
+            const { id } = (await created.json()) as { id: string };
+            const context = { params: Promise.resolve({ id }) };
+            const room = "meet:abc-defg-hij";
+            const leasePath = `recording-sessions/${id}/lease`;
+            const lookup = (bearer: string) =>
+                roomRecordersRoute(
+                    request("recorder/rooms/recorders", bearer, { room }),
+                );
+            const renew = (bearer: string) =>
+                leaseRoute(
+                    request(leasePath, bearer, { room, revision: 1 }),
+                    context,
+                );
+            const end = () =>
+                endLeaseRoute(
+                    request(`${leasePath}/end`, key, { revision: 2 }),
+                    context,
+                );
+            expect((await renew(viewerKey)).status).toBe(404);
+            expect((await renew(key)).status).toBe(200);
+            const [listed] = await db()
+                .select({ name: users.name })
+                .from(users)
+                .where(eq(users.id, await userId("seal")));
+            const none = { data: [], live_until: null, freshForMs: 0 };
+            expect(await (await lookup(viewerKey)).json()).toEqual({
+                data: [{ name: listed.name }],
+                live_until: expect.any(String),
+                freshForMs: expect.any(Number),
+            });
+            expect(await (await lookup(key)).json()).toEqual(none);
+
+            await changeAccess("seal", { remove: ["use"] });
+            for (const response of [
+                await create(),
+                await renew(key),
+                await end(),
+                await lookup(key),
+            ]) {
+                expect(response.status).toBe(403);
+                expect(await response.json()).toMatchObject({
+                    code: "ACCESS_NOT_GRANTED",
+                });
+            }
+            expect(await (await lookup(viewerKey)).json()).toEqual(none);
+
+            await changeAccess("seal", { add: ["use"] });
+            expect((await create()).status).toBe(200);
+            expect((await end()).status).toBe(200);
+            expect(await (await lookup(viewerKey)).json()).toEqual(none);
+        });
 
         it("pairs, streams, survives an interruption, blocks on withdrawal and finishes after restoration", async () => {
             const { key } = await pair("rita");

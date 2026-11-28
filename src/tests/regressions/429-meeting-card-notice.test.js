@@ -401,7 +401,7 @@ describe("meeting tab worker", () => {
             expect.anything(),
             "session-1",
         );
-        expect(h.metas.has("session-1")).toBe(false);
+        expect(h.metas.size).toBe(0);
         expect(chrome.tabCapture.getMediaStreamId).not.toHaveBeenCalled();
     });
 
@@ -450,7 +450,7 @@ describe("meeting tab worker", () => {
         h.listeners.message(
             {
                 type: "levels",
-                sessionId: "session-1",
+                captureId: h.session.recordingState.captureId,
                 micDb: -35,
                 systemDb: -12,
             },
@@ -722,15 +722,16 @@ describe("meeting tab worker", () => {
         expect(otherFrame.disconnect).toHaveBeenCalledOnce();
         const micBands = [-40, -10, -65, -25];
         const systemBands = [-42, -32, -23, -62];
+        const currentCaptureId = h.session.recordingState.captureId;
         const levels = (
             micDb,
-            sessionId = "session-1",
+            captureId = currentCaptureId,
             bands = { micBands, systemBands },
         ) =>
             h.listeners.message(
                 {
                     type: "levels",
-                    sessionId,
+                    captureId,
                     micDb,
                     systemDb: -15,
                     ...bands,
@@ -739,7 +740,7 @@ describe("meeting tab worker", () => {
                 offscreen,
                 () => {},
             );
-        levels(-30, "old-session");
+        levels(-30, "old-capture");
         levels(-20);
         levels(-10);
         await settle();
@@ -750,7 +751,10 @@ describe("meeting tab worker", () => {
         expect(otherFrame.postMessage).not.toHaveBeenCalled();
         const now = Date.now();
         const clock = vi.spyOn(Date, "now").mockReturnValue(now + 126);
-        levels(-5, "session-1", { micBands: [0, 0, 0, "bad"], systemBands });
+        levels(-5, currentCaptureId, {
+            micBands: [0, 0, 0, "bad"],
+            systemBands,
+        });
         await settle();
         expect(good.postMessage).toHaveBeenLastCalledWith({
             micDb: -5,

@@ -48,6 +48,7 @@
 
         <!-- Idle -->
         <section id="view-idle" hidden>
+            <p id="room-recorder-notice" class="room-recorder-notice" role="status" hidden><span class="dot" aria-hidden="true"></span><span id="room-recorder-names"></span></p>
             <p id="idle-hint" data-i18n="ready">Ready to record the meeting in the active tab.</p>
             <p id="notice-text" data-i18n="noticeDefault">Inform participants and obtain any required consent before recording.</p>
             <div id="folder-row" class="field"></div>
@@ -61,7 +62,8 @@
 
         <!-- Recording -->
         <section id="view-recording" hidden>
-            <div class="status"><span class="dot"></span> <span data-i18n="recording">Recording</span> <span id="elapsed">0:00</span></div>
+            <div class="status"><span class="dot"></span> <span data-i18n="recording">Recording</span> <span id="elapsed">0:00</span> <span id="offline-badge" class="local-badge" data-i18n="offlineBadge" hidden>Offline</span></div>
+            <p id="local-storage-warning" class="hint" data-i18n="offlineStorageWarning" hidden></p>
             <div class="meter"><label data-i18n="you">You</label><div class="bar"><div id="mic-bar"></div></div></div>
             <div class="meter"><label data-i18n="others">Others</label><div class="bar"><div id="sys-bar"></div></div></div>
             <div id="recording-folder-row" class="field"></div>
@@ -78,6 +80,7 @@
                 </div>
                 <p id="finalizing-status" class="hint"></p>
             </div>
+            <button id="record-next" type="button" data-i18n="recordNext" hidden>Record another meeting</button>
             <div id="finalizing-processing" class="processing-status" hidden role="status">
                 <span class="processing-spinner" aria-hidden="true"></span>
                 <div>

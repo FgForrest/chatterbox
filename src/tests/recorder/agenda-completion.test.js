@@ -9,8 +9,17 @@ import {
 } from "../../../extensions/recorder/lib/agendas.js";
 import { STATE } from "../../../extensions/recorder/lib/constants.js";
 import { localizeDocument, t } from "../../../extensions/recorder/lib/i18n.js";
+import { meetingRoom } from "../../../extensions/recorder/lib/meeting-room.js";
 import { meetingTarget } from "../../../extensions/recorder/lib/meeting-target.js";
 import "../../../extensions/recorder/lib/recording-levels.js";
+import {
+    roomPairingChanged,
+    supportsRoomRecorders,
+} from "../../../extensions/recorder/lib/room-recorders.js";
+import {
+    recordingStartPath,
+    sealedRecipient,
+} from "../../../extensions/recorder/lib/sealed-recording.js";
 import { isWaitingForUpload } from "../../../extensions/recorder/lib/upload-state.js";
 import {
     createFolderField,
@@ -64,13 +73,18 @@ async function popup() {
         supportsAgendas,
         STATE,
         isWaitingForUpload,
+        recordingStartPath,
+        sealedRecipient,
         localizeDocument,
         t,
         bindMeetingPromptOffer: () => async () => {},
         microphonePermission: async () => "granted",
         originOf: (url) => new URL(url).origin,
         detectMeetingPlatform: () => null,
+        meetingRoom,
         meetingTarget,
+        roomPairingChanged,
+        supportsRoomRecorders,
         customNoticeText: () => "",
         effectivePlatformModes: () => ({}),
         getSettings: async () => settings,
@@ -276,6 +290,7 @@ describe.each(["en", "cs"])("localized agenda completion in %s", (locale) => {
             openSystemAudio: vi.fn(),
             STATE,
             isWaitingForUpload,
+            sealedRecipient,
             RECORDER_WINDOW_WIDTH: 360,
             fitWindowToContent: vi.fn(),
             localizeDocument,

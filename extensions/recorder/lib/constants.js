@@ -7,6 +7,8 @@ export const CHUNK_INTERVAL_MS = 5000;
 
 /** Server's per-chunk ceiling. */
 export const MAX_CHUNK_BYTES = 8 * 1024 * 1024;
+export const MAX_SESSION_BYTES = 500 * 1024 * 1024;
+export const MAX_CAPTURE_CHUNKS = 10_000;
 
 /** Recorder output container and codec. */
 export const RECORDER_MIME_TYPE = "audio/webm;codecs=opus";

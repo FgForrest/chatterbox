@@ -1,14 +1,14 @@
 ---
 title: Meeting Recorder as a Chromium extension with encrypted buffering, released ahead of the servers it talks to
 date: 2026-10-21
-updated: 2026-11-19 14:49
-status: accepted
+updated: 2026-11-28 09:40
+status: superseded
 kind: feature
 issues: []
 prs: [108, 123, 124, 125, 130, 132, 163, 180, 188, 193, 195, 198, 207, 213]
 areas: [extensions/recorder, src/app/api/v1/recording-sessions, src/app/api/v1/recorder, src/lib/recording-sessions, src/lib/recorder, content/docs/guides/meeting-recorder.mdx]
 supersedes: []
-superseded-by: []
+superseded-by: [2026-11-28-recorder-sealed-offline]
 relates: [2026-10-19-employee-first-onboarding, 2026-10-22-meeting-recorder-banner, 2026-11-19-recorder-unreachable-server]
 ---
 
@@ -23,6 +23,11 @@ installs before most servers upgrade, so every new server call must degrade on r
 The line ran from the first extension PR (from an external contributor, encryption folded in before
 merge) through Store packaging, one-pass and then three-step setup, the microphone and meeting-prompt
 rules, and version 0.6.0, which repaired Chrome's share dialog and records the current tab directly.
+
+**Superseded in part for capture keys and release order.** Offline Start triggers the key-pair
+revisit. Protocol 2 uses a per-user key stored on the server and ships in the server and extension
+together. The encrypted-only buffer, protocol 1 and compatibility with released servers still apply.
+[Sealed offline recording](../2026-11-28-recorder-sealed-offline.md)
 
 ## Why
 

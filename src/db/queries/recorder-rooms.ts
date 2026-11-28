@@ -16,6 +16,47 @@ import type { MeetingViewer } from "@/lib/meetings/access";
 export const ROOM_PRESENCE_TTL_MS = 180_000;
 export const ROOM_WRITE_INTERVAL_MS = 20_000;
 
+/** List bounded names once per other eligible member with a live capture in the exact room. */
+export async function queryRoomRecorders(userId: string, roomKey: string) {
+    const rows = await db.execute<{
+        name: string;
+        live_until_ms: number;
+        fresh_for_ms: number;
+    }>(sql`
+        select left(coalesce(${users.name}, ''), 120) as name,
+            floor(extract(epoch from live.live_until) * 1000)::double precision as live_until_ms,
+            floor(extract(epoch from (live.live_until - now())) * 1000)::double precision as fresh_for_ms
+        from (
+            select ${recordingSessions.userId}, min(${recordingSessions.liveUntil}) as live_until
+            from ${recordingSessions}
+            where ${recordingSessions.liveRoomKey} = ${roomKey}
+                and ${recordingSessions.status} = 'open'
+                and ${recordingSessions.leaseEndedAt} is null
+                and ${recordingSessions.liveUntil} > now()
+                and ${recordingSessions.userId} <> ${userId}
+            group by ${recordingSessions.userId}
+        ) live
+        join ${users} on ${users.id} = live.user_id
+        where ${activeShareRecipientCondition()}
+        order by name, ${users.id}
+    `);
+    const earliest = rows.reduce(
+        (value, row) => Math.min(value, row.live_until_ms),
+        Infinity,
+    );
+    const freshForMs = rows.reduce(
+        (value, row) => Math.min(value, row.fresh_for_ms),
+        Infinity,
+    );
+    return {
+        data: rows.map(({ name }) => ({ name })),
+        live_until: Number.isFinite(earliest)
+            ? new Date(earliest).toISOString()
+            : null,
+        freshForMs: Number.isFinite(freshForMs) ? freshForMs : 0,
+    };
+}
+
 function freshSession(at: Date) {
     return and(
         inArray(recordingSessions.status, ["open", "completing"]),

@@ -155,7 +155,12 @@ async function start() {
         mountRecordingControls: async (_root, options) => {
             controls = options;
             options.onTab(tab);
-            return { folder() {}, refreshMeeting() {}, destroy() {} };
+            return {
+                folder() {},
+                refreshMeeting() {},
+                refreshRoomRecorders() {},
+                destroy() {},
+            };
         },
         agendaFolder: () => ({}),
         bindAgendaTextInput,

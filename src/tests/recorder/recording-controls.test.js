@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mountRecordingControls } from "../../../extensions/recorder/lib/recording-controls.js";
+import { roomRecorderClock } from "../../../extensions/recorder/lib/room-recorders.js";
 
 const h = vi.hoisted(() => ({
     wait: Promise.resolve(),
@@ -34,7 +35,16 @@ let local;
 let close;
 const el = (id) => document.getElementById(id);
 beforeEach(() => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({
+        toFake: [
+            "Date",
+            "performance",
+            "setTimeout",
+            "clearTimeout",
+            "setInterval",
+            "clearInterval",
+        ],
+    });
     h.wait = Promise.resolve();
     h.reset.mockClear();
     h.closeIdle.mockClear();
@@ -97,6 +107,162 @@ afterEach(() => {
 });
 const settle = () => vi.advanceTimersByTimeAsync(0);
 
+describe("room recorder notice", () => {
+    const names = [
+        "Robin Harper",
+        "Jitka Dvořáková",
+        "Alex Rowan",
+        "Morgan Hill",
+        "Jamie Lane",
+    ];
+
+    function configure(
+        locale,
+        recorders,
+        variant,
+        answer = () => ({
+            names: recorders,
+            expiresAt: roomRecorderClock() + 30_000,
+        }),
+    ) {
+        const catalog = JSON.parse(
+            readFileSync(
+                `extensions/recorder/_locales/${locale}/messages.json`,
+                "utf8",
+            ),
+        );
+        chrome.i18n.getUILanguage = () => locale;
+        chrome.i18n.getMessage = (key, replacement) =>
+            catalog[key]?.message.replace("$1", () => replacement) ?? key;
+        local.serverDefaults = { roomRecorders: 1 };
+        chrome.tabs.query.mockResolvedValue([
+            { id: 8, active: true, url: "https://zoom.us/j/123456789" },
+        ]);
+        const regular = chrome.runtime.sendMessage.getMockImplementation();
+        chrome.runtime.sendMessage.mockImplementation((message) =>
+            message.type === "room-recorders"
+                ? Promise.resolve(answer())
+                : regular(message),
+        );
+        return mountRecordingControls(document.body, {
+            variant,
+            ...(variant === "panel" ? { tabId: 7 } : {}),
+        });
+    }
+
+    it.each([
+        ["en", "popup", [names[0]], "Recording this meeting: Robin Harper"],
+        [
+            "en",
+            "panel",
+            names.slice(0, 2),
+            "Recording this meeting: Robin Harper, Jitka Dvořáková",
+        ],
+        [
+            "en",
+            "popup",
+            names,
+            "Recording this meeting: Robin Harper, Jitka Dvořáková, Alex Rowan +2",
+        ],
+        ["en", "panel", [""], "Recording this meeting: A colleague"],
+        ["cs", "panel", [names[0]], "Tuto schůzku nahrává: Robin Harper"],
+        [
+            "cs",
+            "popup",
+            names.slice(0, 2),
+            "Tuto schůzku nahrávají: Robin Harper, Jitka Dvořáková",
+        ],
+        [
+            "cs",
+            "panel",
+            names,
+            "Tuto schůzku nahrávají: Robin Harper, Jitka Dvořáková, Alex Rowan +2",
+        ],
+        ["cs", "popup", [" "], "Tuto schůzku nahrává: Kolega"],
+    ])("renders %s in the %s for %j", async (locale, variant, recorders, expected) => {
+        widget = await configure(locale, recorders, variant);
+        const notice = el("room-recorder-notice");
+        expect(notice.hidden).toBe(false);
+        expect(notice.textContent).toBe(expected);
+        expect(notice.getAttribute("role")).toBe("status");
+        expect(notice.querySelector("button")).toBeNull();
+        expect(notice.nextElementSibling).toBe(el("idle-hint"));
+        listener({ type: "state", state: { state: "awaiting-picker" } });
+        await settle();
+        expect(notice.hidden).toBe(true);
+    });
+
+    it("polls the popup every 15 seconds and expires names when the next lookup is pending", async () => {
+        widget = await configure("en", [names[0]], "popup");
+        const calls = () =>
+            chrome.runtime.sendMessage.mock.calls.filter(
+                ([message]) => message.type === "room-recorders",
+            );
+        expect(calls()).toHaveLength(1);
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(calls()).toHaveLength(2);
+        const regular = chrome.runtime.sendMessage.getMockImplementation();
+        const pending = Promise.withResolvers();
+        chrome.runtime.sendMessage.mockImplementation((message) =>
+            message.type === "room-recorders"
+                ? pending.promise
+                : regular(message),
+        );
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(el("room-recorder-notice").hidden).toBe(true);
+        listener({
+            type: "state",
+            state: { state: "recording", sessionId: "mine" },
+        });
+        pending.resolve({ names, expiresAt: roomRecorderClock() + 30_000 });
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(el("room-recorder-notice").hidden).toBe(true);
+        expect(calls()).toHaveLength(3);
+    });
+
+    it.each([
+        7_000, 14_000,
+    ])("keeps naming a recording colleague when the shared worker entry expires %i ms after the first poll", async (remaining) => {
+        let expiresAt = roomRecorderClock() + remaining;
+        widget = await configure("en", [names[0]], "popup", () => {
+            if (expiresAt <= roomRecorderClock())
+                expiresAt = roomRecorderClock() + 30_000;
+            return { names: [names[0]], expiresAt };
+        });
+        const notice = el("room-recorder-notice");
+        expect(notice.hidden).toBe(false);
+
+        await vi.advanceTimersByTimeAsync(remaining + 500);
+
+        expect(notice.hidden).toBe(false);
+        expect(notice.textContent).toBe("Recording this meeting: Robin Harper");
+    });
+
+    it("immediately re-asks when a positive answer arrives just after its expiry", async () => {
+        const answer = vi
+            .fn()
+            .mockImplementationOnce(() => ({
+                names: ["Expired"],
+                expiresAt: roomRecorderClock() - 1,
+            }))
+            .mockImplementation(() => ({
+                names: [names[0]],
+                expiresAt: roomRecorderClock() + 30_000,
+            }));
+        widget = await configure("en", names, "popup", answer);
+        await settle();
+        expect(answer).toHaveBeenCalledTimes(2);
+        expect(el("room-recorder-notice").textContent).toBe(
+            "Recording this meeting: Robin Harper",
+        );
+    });
+
+    it("leaves the notice empty when the room has nobody recording", async () => {
+        widget = await configure("en", [], "panel");
+        expect(el("room-recorder-notice").hidden).toBe(true);
+    });
+});
+
 describe.each([
     "popup",
     "panel",
@@ -133,6 +299,40 @@ describe.each([
         });
         expect(close).toHaveBeenCalledTimes(variant === "popup" ? 1 : 0);
     });
+    it("keeps the click's protocol while a draft flush is pending", async () => {
+        local.serverDefaults = { encryptedRecordingProtocol: 1 };
+        const saving = Promise.withResolvers();
+        const beforeAction = vi.fn(() => saving.promise);
+        widget = await mountRecordingControls(document.body, {
+            variant,
+            beforeAction,
+            tabId: 7,
+        });
+        el("start").click();
+        await settle();
+        expect(beforeAction).toHaveBeenCalledOnce();
+        local.serverDefaults = {
+            ...local.serverDefaults,
+            offlineRecording: true,
+            accountId: "account",
+            offlineRecipient: {
+                serverOrigin: local.serverUrl,
+                accountId: "account",
+            },
+        };
+        saving.resolve();
+        await settle();
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+            type: "start-recording",
+            payload: expect.objectContaining({
+                startPath: expect.objectContaining({
+                    recipient: null,
+                    legacySupported: true,
+                }),
+            }),
+        });
+    });
+
     it("passes saved folder scope to the idle chip, start payload and recording chip", async () => {
         Object.assign(local, {
             folderId: "work",

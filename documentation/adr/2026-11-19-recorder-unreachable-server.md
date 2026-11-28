@@ -1,14 +1,14 @@
 ---
 title: The recorder preserves encrypted buffers when its server is unreachable
 date: 2026-11-19
-updated: 2026-11-19 17:33
-status: accepted
+updated: 2026-11-28 09:40
+status: superseded
 kind: fix
 issues: [420]
 prs: [423]
 areas: [extensions/recorder, src/app/api/v1/recorder, src/app/api/v1/recording-sessions]
 supersedes: []
-superseded-by: []
+superseded-by: [2026-11-28-recorder-sealed-offline]
 relates: [2026-10-21-meeting-recorder-extension]
 ---
 
@@ -17,6 +17,11 @@ relates: [2026-10-21-meeting-recorder-extension]
 The extension treats a failed HTTP request as the paired application's answer only when its JSON
 body contains string `error` and `code` fields. Transport failures and foreign responses leave
 capture, encrypted upload buffers and cached agendas recoverable.
+
+**Superseded in part for Start and Discard.** A supported pairing can start during an outage
+using a cached public key. Sealed Discard can remove local audio before server cancellation
+when Complete has yet to be dispatched. The outage detection, retry and cache rules still apply.
+[Sealed offline recording](2026-11-28-recorder-sealed-offline.md)
 
 ## Why
 

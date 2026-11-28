@@ -49,6 +49,7 @@ const harness = vi.hoisted(() => {
             sendMessage: vi.fn(async () => {}),
             getContexts: vi.fn(async () => []),
             getManifest: vi.fn(() => ({ version: "0.2.0" })),
+            id: "test",
             getURL: vi.fn((path) => `chrome-extension://test/${path}`),
         },
         action: {
@@ -160,6 +161,10 @@ vi.mock("../../../extensions/recorder/lib/chunk-store.js", () => ({
     readChunk: vi.fn(),
     readLocalMeta: harness.readLocalMeta,
     totalBufferedBytes: vi.fn(async () => 0),
+    writeCaptureStop: async (id, patch) => {
+        harness.localMetas.set(id, { ...harness.localMetas.get(id), ...patch });
+        return patch;
+    },
 }));
 vi.mock("../../../extensions/recorder/lib/api.js", () => ({
     abortSession: vi.fn(async () => {}),
@@ -170,6 +175,7 @@ vi.mock("../../../extensions/recorder/lib/api.js", () => ({
     recoverSession: harness.recoverSession,
     sha256Hex: vi.fn(),
     uploadChunk: vi.fn(),
+    listRecordingSessions: vi.fn(async () => []),
 }));
 
 import "../../../extensions/recorder/service-worker.js";
@@ -229,7 +235,9 @@ beforeEach(() => {
             harness.localMetas.set(id, meta),
         );
     harness.getSession.mockReset();
-    harness.deleteLocalSession.mockReset();
+    harness.deleteLocalSession
+        .mockReset()
+        .mockImplementation(async (id) => harness.localMetas.delete(id));
     chrome.offscreen.createDocument.mockReset().mockResolvedValue(undefined);
     chrome.windows.create.mockReset();
     chrome.windows.create.mockResolvedValue({ id: 77 });
@@ -365,6 +373,9 @@ describe("recorder token-vault failures", () => {
             blocked: false,
             stopReason: "user",
         };
+        harness.localMetas.set("session-1", {
+            serverUrl: defaultSettings.serverUrl,
+        });
         harness.readToken
             .mockResolvedValueOnce("recorder-token")
             .mockRejectedValueOnce(new Error("Re-pair recorder"));
@@ -547,7 +558,7 @@ describe("recorder token-vault failures", () => {
                 target: "desktop-recorder",
                 type: "start",
                 payload: expect.objectContaining({
-                    sessionId: "desktop-session",
+                    captureId: harness.sessionValues.recordingState.captureId,
                     captureMode: "desktop",
                 }),
             }),
@@ -574,6 +585,9 @@ describe("recorder token-vault failures", () => {
             blocked: false,
             stopReason: "user",
         };
+        harness.localMetas.set("desktop-session", {
+            serverUrl: defaultSettings.serverUrl,
+        });
         harness.listChunkIndices.mockResolvedValue([0]);
         harness.readToken.mockResolvedValue("recorder-token");
         harness.completeSession.mockResolvedValue({ job_id: "job-1" });
@@ -752,6 +766,9 @@ describe("recorder token-vault failures", () => {
                 blocked: false,
                 jobId: "job-4",
             };
+            harness.localMetas.set("session-4", {
+                serverUrl: defaultSettings.serverUrl,
+            });
             harness.readToken.mockResolvedValue("recorder-token");
             harness.getSession
                 .mockResolvedValueOnce({ status: "completing" })
@@ -821,6 +838,9 @@ describe("recorder token-vault failures", () => {
             uploaded: [0],
             blocked: false,
         };
+        harness.localMetas.set("session-5", {
+            serverUrl: defaultSettings.serverUrl,
+        });
         harness.readToken.mockResolvedValue("recorder-token");
         harness.getSession.mockResolvedValue({
             status: "completed",
@@ -1517,6 +1537,8 @@ describe("recorder 0.6.0 tab and folder targets", () => {
         });
     }
 
+    const captureId = () => harness.sessionValues.recordingState.captureId;
+
     async function finish() {
         harness.listChunkIndices.mockResolvedValue([0]);
         harness.completeSession.mockResolvedValue({ job_id: "job-1" });
@@ -1525,10 +1547,17 @@ describe("recorder 0.6.0 tab and folder targets", () => {
         harness.listeners.message(
             {
                 type: "recording-stopped",
-                sessionId: harness.sessionValues.recordingState.sessionId,
+                captureId: captureId(),
                 chunkCount: 1,
             },
-            {},
+            {
+                id: chrome.runtime.id,
+                url:
+                    harness.sessionValues.recordingState.captureMode ===
+                    "desktop"
+                        ? chrome.windows.create.mock.calls.at(-1)[0].url
+                        : chrome.runtime.getURL("offscreen/offscreen.html"),
+            },
             () => {},
         );
         await vi.waitFor(() =>
@@ -1565,7 +1594,7 @@ describe("recorder 0.6.0 tab and folder targets", () => {
         expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
             target: "offscreen",
             type: "stop",
-            payload: undefined,
+            payload: { captureId: captureId() },
         });
         expect(harness.sessionValues.recordingState.stopReason).toBe(
             "tab-closed",
@@ -1606,9 +1635,10 @@ describe("recorder 0.6.0 tab and folder targets", () => {
                 },
             }),
         ).toEqual({ ok: true, pending: true });
-        expect(harness.deleteLocalSession).toHaveBeenCalledWith(
-            "fallback-session",
-        );
+        const localId = harness.createLocalSession.mock.calls.find(
+            ([, meta]) => meta.serverSessionId === "fallback-session",
+        )[0];
+        expect(harness.deleteLocalSession).toHaveBeenCalledWith(localId);
         expect(harness.sessionValues.recordingState.captureMode).toBe(
             "desktop",
         );
@@ -1628,7 +1658,7 @@ describe("recorder 0.6.0 tab and folder targets", () => {
                 tab: { windowId: 77 },
             };
         }
-        expect(harness.localMetas.get("target-session")).toMatchObject({
+        expect(harness.localMetas.get(captureId())).toMatchObject({
             folderId: "start",
             folderScope: "personal",
             startFolderScope: "personal",
@@ -1652,7 +1682,7 @@ describe("recorder 0.6.0 tab and folder targets", () => {
             startFolderScope: "personal",
             startFolderId: "start",
         });
-        expect(harness.localMetas.get("target-session")).toMatchObject({
+        expect(harness.localMetas.get(captureId())).toMatchObject({
             folderId: "changed",
             folderScope: "org",
             startFolderScope: "personal",
@@ -1696,7 +1726,7 @@ describe("recorder 0.6.0 tab and folder targets", () => {
             folderScope,
         });
         expect(harness.sessionValues.recordingState.folderScope).toBeNull();
-        expect(harness.localMetas.get("target-session").folderScope).toBeNull();
+        expect(harness.localMetas.get(captureId()).folderScope).toBeNull();
         await finish();
         expect(harness.completeSession.mock.calls[0][2]).not.toHaveProperty(
             "folderScope",
@@ -1714,7 +1744,7 @@ describe("recorder 0.6.0 tab and folder targets", () => {
             folderScope: null,
         });
         expect(harness.sessionValues.recordingState.folderScope).toBeNull();
-        expect(harness.localMetas.get("target-session").folderScope).toBeNull();
+        expect(harness.localMetas.get(captureId()).folderScope).toBeNull();
         await finish();
         expect(harness.completeSession.mock.calls[0][2].folderId).toBeNull();
     });
@@ -1759,7 +1789,7 @@ describe("recorder 0.6.0 tab and folder targets", () => {
         expect(harness.completeSession.mock.calls[1][2]).not.toHaveProperty(
             "folderId",
         );
-        expect(harness.localMetas.get("target-session")).toMatchObject({
+        expect(harness.localMetas.get(captureId())).toMatchObject({
             folderId: "start",
             folderScope: "personal",
         });

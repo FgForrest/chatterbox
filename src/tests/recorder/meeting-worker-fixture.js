@@ -28,16 +28,33 @@ const h = vi.hoisted(() => {
         tabs,
         scripts,
         metas,
+        deleteLocalSession: vi.fn(async (id) => {
+            metas.delete(id);
+        }),
         granted: true,
         visible: true,
         search: vi.fn(async () => [{ id: "new", label: "Private / Aurora" }]),
         lookup: vi.fn(async () => []),
+        lookupRoomRecorders: vi.fn(async () => []),
+        postRecordingLease: vi.fn(async () => {}),
         abortSession: vi.fn(async () => {}),
         completeSession: vi.fn(),
         getSession: vi.fn(),
+        recoverSession: vi.fn(),
+        listRecordingSessions: vi.fn(async () => []),
+        uploadChunk: vi.fn(async () => {}),
+        readChunk: vi.fn(async () => new Blob(["encrypted"])),
         listChunkIndices: vi.fn(async () => []),
         listLocalSessions: vi.fn(async () => []),
         readToken: vi.fn(async () => "private-recorder-token"),
+        createSealedSession: vi.fn(async (_auth, body) => ({
+            id: "sealed-session",
+            status: "open",
+            encryption: { protocol: 2, kid: body.encryption.kid },
+        })),
+        getRecorderConfig: vi.fn(async () => ({
+            encrypted_recording_protocol: 1,
+        })),
         createSession: vi.fn(async () => ({
             id: "session-1",
             encryption: { protocol: 1, key: "secret-capture-key" },
@@ -142,6 +159,7 @@ const h = vi.hoisted(() => {
             get: vi.fn(async (id) => ({ id })),
             getLastFocused: vi.fn(async () => null),
             create: vi.fn(async () => ({ id: 77 })),
+            remove: vi.fn(async () => {}),
             update: vi.fn(async () => ({})),
         },
         tabCapture: {
@@ -165,23 +183,35 @@ vi.mock("../../../extensions/recorder/lib/token-vault.js", () => ({
 }));
 vi.mock("../../../extensions/recorder/lib/chunk-store.js", () => ({
     createLocalSession: vi.fn(async (id, meta) => h.metas.set(id, meta)),
-    deleteLocalSession: vi.fn(async () => {}),
+    deleteLocalSession: h.deleteLocalSession,
+    discardLocalAudio: vi.fn(async (id, cleanup) => {
+        h.metas.set(id, cleanup);
+    }),
     listChunkIndices: h.listChunkIndices,
     listLocalSessions: h.listLocalSessions,
-    readChunk: vi.fn(),
+    readChunk: h.readChunk,
     readLocalMeta: vi.fn(async (id) => h.metas.get(id)),
     totalBufferedBytes: vi.fn(async () => 0),
+    writeCaptureStop: vi.fn(async (id, patch) => {
+        h.metas.set(id, { ...h.metas.get(id), ...patch });
+        return patch;
+    }),
 }));
 vi.mock("../../../extensions/recorder/lib/api.js", () => ({
     abortSession: h.abortSession,
     completeSession: h.completeSession,
     createSession: h.createSession,
+    createSealedSession: h.createSealedSession,
+    getRecorderConfig: h.getRecorderConfig,
     getSession: h.getSession,
     getRecorderFolder: h.lookup,
-    recoverSession: vi.fn(),
+    lookupRoomRecorders: h.lookupRoomRecorders,
+    postRecordingLease: h.postRecordingLease,
+    recoverSession: h.recoverSession,
     searchRecorderFolders: h.search,
     sha256Hex: vi.fn(),
-    uploadChunk: vi.fn(),
+    uploadChunk: h.uploadChunk,
+    listRecordingSessions: h.listRecordingSessions,
 }));
 import "../../../extensions/recorder/service-worker.js";
 export { h };

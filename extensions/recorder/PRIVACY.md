@@ -1,6 +1,6 @@
 # Chatterbox Meeting Recorder privacy policy
 
-Last updated: 11 November 2026
+Last updated: 28 November 2026 (version 0.10.0)
 
 This policy describes the **Chatterbox Meeting Recorder browser extension**. It does not replace the privacy policy for a Chatterbox server or another service you choose to use.
 
@@ -11,7 +11,7 @@ Setup asks for microphone access and briefly opens then stops a test stream. Thi
 - When you choose to record, the extension captures microphone audio and either the selected meeting tab's audio or the system audio from Chrome's screen picker. It records audio, not the screen video.
 - When meeting detection is enabled, it checks browser tab URLs and audible status to identify supported meeting sites and show a recording prompt. It does not upload browsing history or tab URLs.
 - It stores the server address, recording preferences, a random installation identifier, and recording state in browser extension storage. The installation identifier is shared after data-use consent only with the current setup site or paired server, including to retire older recorder keys from this installation; localhost development pages can also use the declared direct setup channel. It is not a device fingerprint or a secret. The recorder API token can create recordings and look up folder names to file them, and read and edit visible agendas on supporting servers, but cannot read recordings. It is encrypted before it is stored in `chrome.storage.local`. A non-exportable Web Crypto key is stored in the extension's IndexedDB. This protects against casual reading of local extension storage, but code running in the extension or someone with a copy of the whole browser profile may still use the token.
-- It encrypts each five-second audio segment with a key issued by your server before writing that segment to Chrome's private file system. It sends the encrypted segments over HTTPS to your selected server. The server decrypts them for normal storage, transcription, and export. Encrypted segments remain on this device until the server confirms completion or you explicitly discard them. A browser crash or full disk can still interrupt capture; only the verified prefix may be recoverable. Browser media internals may temporarily store data outside the extension's encrypted buffer.
+- It encrypts each five-second audio segment before writing it to Chrome's private file system. An upgraded server supplies a public key for your account. Every recording on that pairing is encrypted so only your server can decrypt it, even when it is unreachable. Older servers issue a key when the recording starts. It sends the encrypted segments over HTTPS to your selected server. The server decrypts them for normal storage, transcription, and export. Recovery metadata includes the recording's start and stop times, its selected folder, and the selected agenda’s ID. Its title stays in browser session storage. An opaque identifier from your server keeps buffered audio bound to your account. Encrypted segments use space on this device until the server confirms completion or you explicitly discard them. Discarding an unsent recording may ask your server to cancel its session, without sending audio. The extension never expires waiting recordings. Options shows how much space they use. A browser crash or full disk can still interrupt capture; only the verified prefix may be recoverable. Browser media internals may temporarily store data outside the extension's encrypted buffer.
 - It does not automatically download a playable local copy. Once the server finishes the recording, you can download one from the authenticated Chatterbox recording page. A file you download remains until you delete it.
 
 ## Optional in-meeting banner
@@ -85,18 +85,32 @@ or any other caller-declared room code does not qualify. Without that Calendar e
 room, the people list is empty and no share card appears. An open Meet tab alone does not count.
 Only the owner receives that list and can send invitations
 from the panel. A caller without access learns only that a restricted agenda exists,
-without its title, ID, owner or recorder names. An invitation separately discloses its
+without its title, ID, owner or list of people recording that agenda. An invitation discloses its
 agenda title, planned time and sharer's name to its receiver. Accepting uses the chosen
 private folder and the same access and filing rules as the web app; declining grants
 no access. Invitation and people data stay in panel memory or extension session storage.
 Older servers receive neither session room codes nor panel presence and show no new
 sharing controls. Existing Calendar matching may still send the room code as described above.
 
+## Who is recording this meeting
+
+On a supporting self-hosted Chatterbox server with an Organization, while you
+record a supported meeting tab, the extension tells your paired server about
+the live capture and its room every 20 seconds. It sends the room identifier
+derived from the tab address. The server stores it as a one-way keyed hash.
+When another Organization member has the same meeting address open and opens
+the extension popup or panel, their extension sends the room identifier to look
+up who is recording. While the capture is live, this notice shares only your
+display name. The extension counts the lookup time against the shortest lease
+lifetime reported by the server and caps the cache at 30 seconds. If
+updates stop, the lease expires within one minute of the last update. Captures started through Chrome's source picker
+do not share room presence.
+
 ## Calendar meetings and live collaboration
 
 On supporting servers, the extension receives the title, start/end time, validated Meet join link and connected Google account email for your next own primary-calendar Meet event (organizer or invited, not declined). The link selects that account with `authuser`. This information stays in extension session storage and is cleared when pairing or consent changes. The extension checks Calendar at most every five minutes in the background, and on opening its popup or panel only when the cache is older than one minute. Join opens Meet; it never starts recording. The new tab is bound to its agenda ID, meeting end and validated room code in session storage with the current pairing identity. The binding is removed when that tab leaves the room, closes, the event ends or pairing/consent changes. The optional system notification may expose the meeting title. Its lead time and switch are in Options. A room already open suppresses the notification.
 
-While an agenda panel is open, an authenticated event stream refreshes visible edits. Collaborative text updates and the names of colleagues recording that agenda are exchanged only with your paired server under existing access rights. Text documents live in the panel's memory, not persistent extension storage. Choosing an agenda at recording start or editing it during capture can announce that agenda to other viewers and select it for the recording; Change agenda also offers No agenda. Recent folder IDs and notification occurrence IDs are remembered locally; no Calendar titles or agenda text are stored there. No remote code is loaded.
+While an agenda panel is open, an authenticated event stream refreshes visible edits. Collaborative text updates and the names of colleagues recording that agenda are exchanged only with your paired server under existing access rights. Text documents live in the panel's memory, not persistent extension storage. Choosing an agenda at recording start or editing it during capture can announce that agenda to other viewers and select it for the recording; Change agenda also offers No agenda. The extension remembers recent folder IDs and notification occurrence IDs locally. No remote code is loaded.
 
 ## Where data goes
 

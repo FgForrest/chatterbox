@@ -447,3 +447,13 @@ input[role="switch"]:disabled {
 .connection-notice button {
     margin-top: 8px;
 }
+
+
+:root { --local: #805315; }
+@media (prefers-color-scheme: dark) {
+    :root { --local: #e5b567; }
+}
+#pending-buffer-list { list-style: none; padding: 0; }
+#pending-buffer-list li { padding-block: 12px; border-bottom: 1px solid var(--border); }
+#pending-buffer-list p { margin-block: 4px 8px; }
+#pending-buffer-list .pending-local { color: var(--local); }
